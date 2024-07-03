@@ -1,0 +1,3 @@
+# ``Scribe``
+
+A model for building end user experiences.
