@@ -18,10 +18,11 @@ public enum Mode {
     case input
 }
 
-/// This is going to be the core of what makes ChromaShell actually work as it
-/// survive where the translation and updates to the given Block are processed
-/// and passed to the terminal. This may get moved out of rendering and into
-/// Controller or Engine.
+/// This is the Core engine or model of Scribe it is responsible for updating
+/// and maintaining all the state driven by either changes to the blocks or
+/// user input from the ``RenderObserver/command(_:)`` function. It is best to
+/// keep the expected output size updated before issuing commands with the
+/// ``RenderObserver/updateSize(width:height:)``.
 public actor RenderObserver {
     private let block: any Block
     // Holds the current state between render passes. Mostly updated via
@@ -29,11 +30,12 @@ public actor RenderObserver {
     private var graphState: SelectedStateNode? = nil
     /// Displays the current ``Mode`` that the RenderObserver is in.
     private(set) public var mode: Mode = .normal
-    private var renderer: any Renderer.Type
-    @available(*, deprecated, message: "Moving towards getVisible")
     private var x: Int
-    @available(*, deprecated, message: "Moving towards getVisible")
     private var y: Int
+    /// The current ``VisibleNode`` mostly used for testing as you have to
+    /// manually check when it changes.
+    private(set) public var current: VisibleNode
+    private let renderer: ((VisibleNode, Int, Int) -> Void)?
 
     /// The block provided will in a sense be the source of truth for the state
     /// of the system and will not we swapped out for other versions during
@@ -44,33 +46,29 @@ public actor RenderObserver {
     ///   - block: The Visual state of the system
     ///   - x: Initial x coordinate to render with.
     ///   - y: Initial y coordinate to render with.
-    ///   - renderer: A type that will be constructed with the current
-    /// ``VisibleNode`` then render called with the current x and y values.
-    /// Which if updated before the command call will not change between there
-    /// and when they are passed to render.
+    ///   - renderer: an optional function to be called upon each update. This
+    /// is needed if you would like to get updates for changes that are not
+    /// triggered by input. Like async network updates.
+    // Note I don't love passing in a function. I think some sort of Observation model would be better.
     public init(
-        _ block: some Block, _ x: Int, _ y: Int, _ renderer: any Renderer.Type
-    ) {
+        _ block: some Block, _ x: Int, _ y: Int,
+        _ renderer: ((VisibleNode, Int, Int) -> Void)? = nil
+    ) async {
         self.x = x
         self.y = y
-        self.renderer = renderer
         self.block = block
+        self.current = .text("#init")
+        self.renderer = renderer
+        startObservation()
     }
 
-    @available(*, deprecated, message: "Moving towards getVisible")
-    public func updateSize(_ x: Int, _ y: Int) {
+    /// Update the current visible region with the x and y
+    /// - Parameters:
+    ///   - width: The available width to draw in
+    ///   - height: The available height to draw in
+    public func updateSize(width x: Int, height y: Int) {
         self.x = x
         self.y = y
-    }
-
-    /// Signal the update to rerendered.
-    // Maybe this should go in init?
-    public func startObservation() {
-        withObservationTracking {
-            render()
-        } onChange: {
-            Task(priority: .userInitiated) { await self.startObservation() }
-        }
     }
 
     /// Used to interact with the graph.
@@ -85,23 +83,27 @@ public actor RenderObserver {
         default:
             self.mode = m
         }
-        render()
+        self.current = getVisible()
         self.graphState = r
     }
 
-    @available(*, deprecated, message: "Moving towards getVisible")
-    public func render() {
-        let (state, visible) = self.block.pipeline(
-            self.graphState, self.x, self.y)
-        self.graphState = state
-        renderer.init(visible).render(x, y)
+    /// Signal the update to rerendered.
+    private func startObservation() {
+        withObservationTracking {
+            self.current = getVisible()
+        } onChange: {
+            Task(priority: .userInitiated) { await self.startObservation() }
+        }
     }
 
     /// Returns a ``VisibleNode`` containing all the nodes that are visible with in the x and y coordinates given.
-    public func getVisible(_ x: Int, _ y: Int) -> VisibleNode {
+    private func getVisible() -> VisibleNode {
         let (state, visible) = self.block.pipeline(
-            self.graphState, x, y)
+            self.graphState, self.x, self.y)
         self.graphState = state
+        if let renderer {
+            renderer(visible, self.x, self.y)
+        }
         return visible
     }
 }

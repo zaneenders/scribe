@@ -1,4 +1,4 @@
-public indirect enum VisibleNode: Codable {
+public indirect enum VisibleNode: Codable, Equatable {
     // NOTE Maybe replace with .style rendering doesn't care whats selected
     // just what and where things go
     case selected(VisibleNode)
