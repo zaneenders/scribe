@@ -6,6 +6,9 @@ let package = Package(
     platforms: [
         .macOS("14.0")
     ],
+    products: [
+        .library(name: "ScribeCore", targets: ["ScribeCore"])
+    ],
     dependencies: [
         /*
         Below are Package dependencies but not for output. Comment out if not
@@ -15,17 +18,17 @@ let package = Package(
             url: "https://github.com/apple/swift-format.git",
             from: "510.1.0"),
         // View documentation locally with the following command
-        // swift package --disable-sandbox preview-documentation --target Scribe
+        // swift package --disable-sandbox preview-documentation --target ScribeCore
         .package(
             url: "https://github.com/apple/swift-docc-plugin.git",
             from: "1.3.0"),
     ],
     targets: [
         .target(
-            name: "Scribe"),
+            name: "ScribeCore"),
         .testTarget(
-            name: "ScribeTests",
-            dependencies: ["Scribe"]),
+            name: "ScribeCoreTests",
+            dependencies: ["ScribeCore"]),
         .plugin(
             name: "SwiftFormatPlugin",
             capability: .command(

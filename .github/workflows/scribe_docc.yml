@@ -28,7 +28,7 @@ jobs:
     - name: Build ChromaShell with SwiftPM using DocC
       run: |
         swift package --allow-writing-to-directory ./gh-pages/docs \
-        generate-documentation --target Scribe \
+        generate-documentation --target ScribeCore \
         --output-path ./gh-pages/docs \
         --disable-indexing \
         --transform-for-static-hosting \
