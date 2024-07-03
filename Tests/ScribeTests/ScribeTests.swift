@@ -1,8 +1,8 @@
-import XCTest
 import Scribe
+import XCTest
 
 final class ScribeTests: XCTestCase {
-    func testExample() throws { 
+    func testExample() throws {
         print(Hello.world)
     }
 }
