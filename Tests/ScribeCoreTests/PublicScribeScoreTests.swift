@@ -9,7 +9,7 @@ final class PublicScribeTests: XCTestCase {
             " "
             "World"
         }
-        let renderer = await RenderObserver(t, 80, 24)
+        let renderer = await Scribe(observing: t, width: 80, height: 24)
         await renderer.command(.out)
         let visible = await renderer.current
         let expected: VisibleNode = .selected(

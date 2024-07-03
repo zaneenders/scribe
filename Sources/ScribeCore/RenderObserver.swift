@@ -1,7 +1,7 @@
 import Observation
 
 /// The Commands that can be sent to update the state of the ``RenderObserver``.
-public enum Command {
+public enum Command: Codable {
     case `in`
     case `out`
     case up
@@ -13,7 +13,7 @@ public enum Command {
 
 /// The Modes in which RenderObserver can be in. This effects how input is
 /// interpreted
-public enum Mode {
+public enum Mode: Codable {
     case normal
     case input
 }
@@ -23,7 +23,7 @@ public enum Mode {
 /// user input from the ``RenderObserver/command(_:)`` function. It is best to
 /// keep the expected output size updated before issuing commands with the
 /// ``RenderObserver/updateSize(width:height:)``.
-public actor RenderObserver {
+public actor Scribe {
     private let block: any Block
     // Holds the current state between render passes. Mostly updated via
     // commands like up, down, left, right, in, out.
@@ -51,7 +51,7 @@ public actor RenderObserver {
     /// triggered by input. Like async network updates.
     // Note I don't love passing in a function. I think some sort of Observation model would be better.
     public init(
-        _ block: some Block, _ x: Int, _ y: Int,
+        observing block: some Block, width x: Int, height y: Int,
         _ renderer: ((VisibleNode, Int, Int) -> Void)? = nil
     ) async {
         self.x = x
