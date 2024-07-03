@@ -30,7 +30,9 @@ public actor RenderObserver {
     /// Displays the current ``Mode`` that the RenderObserver is in.
     private(set) public var mode: Mode = .normal
     private var renderer: any Renderer.Type
+    @available(*, deprecated, message: "Moving towards getVisible")
     private var x: Int
+    @available(*, deprecated, message: "Moving towards getVisible")
     private var y: Int
 
     /// The block provided will in a sense be the source of truth for the state
@@ -55,6 +57,7 @@ public actor RenderObserver {
         self.block = block
     }
 
+    @available(*, deprecated, message: "Moving towards getVisible")
     public func updateSize(_ x: Int, _ y: Int) {
         self.x = x
         self.y = y
@@ -86,11 +89,19 @@ public actor RenderObserver {
         self.graphState = r
     }
 
-    /// Draw to the screen, put the available data on the terminal.
+    @available(*, deprecated, message: "Moving towards getVisible")
     public func render() {
         let (state, visible) = self.block.pipeline(
             self.graphState, self.x, self.y)
         self.graphState = state
         renderer.init(visible).render(x, y)
+    }
+
+    /// Returns a ``VisibleNode`` containing all the nodes that are visible with in the x and y coordinates given.
+    public func getVisible(_ x: Int, _ y: Int) -> VisibleNode {
+        let (state, visible) = self.block.pipeline(
+            self.graphState, x, y)
+        self.graphState = state
+        return visible
     }
 }
