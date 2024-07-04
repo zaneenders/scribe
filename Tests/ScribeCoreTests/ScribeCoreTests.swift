@@ -4,7 +4,7 @@ import XCTest
 
 final class ScribeTests: XCTestCase {
 
-    func testIn1() async throws {
+    func testIn1() async {
         let start: SelectedStateNode = .selected(
             .group(
                 .entire, .horizontal,
@@ -22,7 +22,7 @@ final class ScribeTests: XCTestCase {
         XCTAssertEqual(expected, r)
     }
 
-    func testOut1() async throws {
+    func testOut1() async {
         let start: SelectedStateNode = .group(
             .index(0), .horizontal,
             [
@@ -40,7 +40,7 @@ final class ScribeTests: XCTestCase {
         XCTAssertEqual(expected, r)
     }
 
-    func testIn2() async throws {
+    func testIn2() async {
         let start: SelectedStateNode = .group(
             .index(0), .horizontal,
             [
@@ -66,7 +66,7 @@ final class ScribeTests: XCTestCase {
         XCTAssertEqual(expected, r)
     }
 
-    func testIn3() async throws {
+    func testIn3() async {
         let start: SelectedStateNode = .selected(
             .group(
                 .entire, .horizontal,
@@ -88,7 +88,7 @@ final class ScribeTests: XCTestCase {
         XCTAssertEqual(expected, r)
     }
 
-    func testOut3() async throws {
+    func testOut3() async {
         let start: SelectedStateNode = .group(
             .index(0), .horizontal,
             [
@@ -111,7 +111,7 @@ final class ScribeTests: XCTestCase {
         XCTAssertEqual(expected, r)
     }
 
-    func testSample1() async throws {
+    func testSample1() async {
         // This test is pulled from .computeVisible before the switch statement
         let test: SelectedStateNode = .selected(
             .group(
@@ -235,7 +235,7 @@ final class ScribeTests: XCTestCase {
         XCTAssertEqual(expected, r)
     }
 
-    func testSample2() async throws {
+    func testSample2() async {
         // This test is pulled from .computeVisible before the switch statement
         let test: SelectedStateNode = .selected(
             .group(

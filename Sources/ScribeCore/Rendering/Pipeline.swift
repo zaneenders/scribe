@@ -442,7 +442,8 @@ private func merge(lhs: SelectedStateNode, rhs: SelectedStateNode)
         return .text(l)
     case let (.selected(lNode), .selected(rNode)):
         return .selected(merge(lhs: lNode, rhs: rNode))
-    case let (.textEntry(_), .textEntry(rs)):
+    case let (.textEntry(ls), .textEntry(rs)):
+        ls.text = rs.text  // update left side to keep in sync
         return .textEntry(rs)  // correct state is in rhs
     case let (.group(_, _, lc), .group(rt, ro, rc)):
         var children: [SelectedStateNode] = []
