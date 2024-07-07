@@ -29,20 +29,5 @@ let package = Package(
         .testTarget(
             name: "ScribeCoreTests",
             dependencies: ["ScribeCore"]),
-        .plugin(
-            name: "SwiftFormatPlugin",
-            capability: .command(
-                intent: .custom(
-                    verb: "format",
-                    description: "format .scribe Swift Packages"),
-                permissions: [
-                    .writeToPackageDirectory(
-                        reason: "This command reformats swift source files")
-                ]
-            ),
-            dependencies: [
-                .product(name: "swift-format", package: "swift-format")
-            ]
-        ),
     ]
 )
