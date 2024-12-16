@@ -10,7 +10,3 @@ extension Scribe {
         print(scribe.config.hello)
     }
 }
-
-public protocol Config {
-    var hello: String { get }
-}
