@@ -1,3 +1,3 @@
 # Scribe
 
-Putting a compiler between you and your digital world.
+## [Documentation](https://zaneenders.github.io/scribe/documentation/scribe/)
