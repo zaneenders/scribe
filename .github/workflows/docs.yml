@@ -1,12 +1,14 @@
-name: Build, Test
+name: DOCC
 
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  build:
+  docc:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - uses: actions/checkout@v4
     - name: Checkout gh-pages
