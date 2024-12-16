@@ -8,32 +8,27 @@ public protocol Scribe {
 }
 
 extension Scribe {
-    public static func main() async {
-        let scribe = self.init()
-        print(scribe.config.hello)
-        var currenDir = FilePath(FileManager.default.currentDirectoryPath)
-        do {
-            for path in try await getDirectoryEntries(for: currenDir) {
-                print(path.path.string)
-            }
-        } catch {
-            print("Scribe ERROR: \(error.localizedDescription)")
-        }
+    mutating func run(_ view: inout Terminal) async throws {
+        System.Log.trace("\(config.hello))")
+        view.render(EntryView(config.hello))
+        try await Task.sleep(for: .seconds(1))
+        try await view.render(SystemView(FilePath(FileManager.default.currentDirectoryPath)))
+        try await Task.sleep(for: .seconds(1))
     }
 }
 
-func getDirectoryEntries(for dir: FilePath) async throws -> [DirectoryEntry] {
-    var paths: [DirectoryEntry] = []
-    let dir = try await FileSystem.shared.openDirectory(atPath: dir)
-    let entries = dir.listContents()
-    var i = entries.makeAsyncIterator()
-    var next = try await i.next()
-    repeat {
-        if let n = next {
-            paths.append(n)
+extension Scribe {
+    public static func main() async {
+        System.enableLogging(tracing: false, write_to_file: true)
+        System.clearLog()
+        var terminal = Terminal()
+        var scribe = self.init()
+        do {
+            try await scribe.run(&terminal)
+            terminal.goodbye()
+        } catch {
+            terminal.goodbye()
+            print("Scribe ERROR: \(error.localizedDescription)")
         }
-        next = try await i.next()
-    } while next != nil
-    try await dir.close()
-    return paths
+    }
 }

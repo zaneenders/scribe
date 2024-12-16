@@ -5,6 +5,10 @@ Welcome to the developer docs of Scribe
 ### Ship 0.1.0 (Don't feature creep, Ship!)
 - [ ] File system navigator
     - Be able to move about the file system and open files using the text editor
+    - [X] Display Current directory
+    - [ ] Navigate to another directory
+        - [ ] User input
+    - [ ] View file contents
 - [ ] Shell prompt
     - be able to run shell commands that just write the output to disk.
     - view output by open the output files in the text

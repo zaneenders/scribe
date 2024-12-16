@@ -8,3 +8,5 @@ Package.resolved
 /.swiftpm
 # Editor files
 /.vscode
+# Log files
+log.txt
