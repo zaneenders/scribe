@@ -13,6 +13,7 @@ jobs:
       run: |
         git fetch
         git worktree add --checkout gh-pages origin/gh-pages
+
     - name: Build Scribe with SwiftPM using DocC
       run: |
         swift package --allow-writing-to-directory ./gh-pages/docs \

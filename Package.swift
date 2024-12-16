@@ -22,9 +22,11 @@ let package = Package(
         .target(
             name: "MyConfig",
             dependencies: ["Scribe"]),
-        .testTarget(name: "ScribeTests", dependencies: [
-            "MyScribe",
-            "Scribe"
-        ])
+        .testTarget(
+            name: "ScribeTests",
+            dependencies: [
+                "MyScribe",
+                "Scribe",
+            ]),
     ]
 )

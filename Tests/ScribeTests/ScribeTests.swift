@@ -1,6 +1,6 @@
+import Scribe
 import Testing
 
-import Scribe
 @testable import MyScribe
 
 @Test func testOne() async throws {
