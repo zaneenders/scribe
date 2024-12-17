@@ -27,7 +27,7 @@ extension FileDescriptor {
 
             @available(*, deprecated, message: "Really bad, but works for now")
             public mutating func next() async throws -> UInt8? {
-                let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 1, alignment: 1)
+                let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 1, alignment: 0)
                 _ = try FileDescriptor.standardInput.read(into: buffer)
                 let copy: [UInt8] = Array(buffer[0..<1])
                 buffer.deallocate()
