@@ -1,10 +1,13 @@
 import Foundation
 import _NIOFileSystem
 
+public typealias Command = () async throws -> Void
+
 /// Define your environment
 public protocol Scribe {
     init()
     var config: Config { get }
+    var commands: [String: Command] { get }
 }
 
 extension Scribe {
@@ -19,10 +22,21 @@ extension Scribe {
 
 extension Scribe {
     public static func main() async {
+        var scribe = self.init()
+        if CommandLine.arguments.count > 1 {
+            if let command = scribe.commands[CommandLine.arguments[1].lowercased()] {
+                do {
+                    try await command()
+                } catch {
+                    print(error.localizedDescription)
+                }
+                return
+            }
+        }
+        // Allow commands to setup there own logging setup.
         System.enableLogging(tracing: false, write_to_file: true)
         System.clearLog()
         var terminal = Terminal()
-        var scribe = self.init()
         do {
             try await scribe.run(&terminal)
             terminal.goodbye()

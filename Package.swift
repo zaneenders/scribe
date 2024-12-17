@@ -6,6 +6,9 @@ let package = Package(
     platforms: [
         .macOS("15.0")
     ],
+    products: [
+        .executable(name: "scribe", targets: ["MyScribe"])
+    ],
     dependencies: [
         /*
         swift package --disable-sandbox preview-documentation --target Scribe
@@ -18,6 +21,11 @@ let package = Package(
             from: "2.77.0"
         ),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.2"),
+        .package(
+            url: "https://github.com/swiftlang/swift-format.git",
+            from: "600.0.0"
+        ),
+
     ],
     targets: [
         .target(
@@ -31,6 +39,7 @@ let package = Package(
             dependencies: [
                 "MyConfig",
                 "Scribe",
+                .product(name: "SwiftFormat", package: "swift-format"),
             ]),
         .target(
             name: "MyConfig",
