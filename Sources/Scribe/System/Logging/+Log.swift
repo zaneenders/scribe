@@ -12,12 +12,12 @@ extension System {
             System.ScribeLogging(logLevel: log_level, tracing: tracing, write_to_file: write_to_file)
         }
     }
-
 }
 
 extension System {
     // TODO document what the various log levels are to be used for.
     public enum Log {
+
         static let file_path = FilePath("\(FileManager.default.currentDirectoryPath)/log.txt")
         @TaskLocal
         static var id: UInt128 = UInt128.random(in: UInt128.min..<UInt128.max)

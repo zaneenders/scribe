@@ -8,7 +8,7 @@ extension System {
 
         var metadata: Logging.Logger.Metadata
         var logLevel: Logging.Logger.Level
-        var dateFormatter = DateFormatter()
+        let dateFormatter: DateFormatter
         private let tracing: Bool
         // TODO pass in name context to logger for file path or something.
         private let write_to_file: Bool
@@ -19,7 +19,9 @@ extension System {
             self.logLevel = logLevel
             self.tracing = tracing
             self.write_to_file = write_to_file
-            self.dateFormatter.dateFormat = "mm_ss_SSSS"
+            let df = DateFormatter()
+            df.dateFormat = "mm_ss_SSSS"
+            self.dateFormatter = df
         }
 
         subscript(metadataKey _: String) -> Logging.Logger.Metadata.Value? {
