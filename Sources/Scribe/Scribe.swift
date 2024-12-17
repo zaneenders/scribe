@@ -53,13 +53,17 @@ extension Scribe {
         // Allow commands to setup there own logging setup.
         System.enableLogging(tracing: false, write_to_file: true)
         System.clearLog()
-        var terminal = Terminal()
+        var terminal: Terminal!
+        do {
+            terminal = try Terminal()
+        } catch {
+            System.Log.error("Unable to correctly setup terminal.")
+            return
+        }
         do {
             try await scribe.run(&terminal)
-            terminal.goodbye()
         } catch {
-            terminal.goodbye()
-            print("Scribe ERROR: \(error.localizedDescription)")
+            System.Log.error("Scribe ERROR: \(error.localizedDescription)")
         }
     }
 }

@@ -5,7 +5,7 @@
 //  Created by Zane Enders on 2/19/22.
 //
 
-import Foundation
+import SystemPackage
 
 #if os(macOS)
 import Darwin
@@ -38,7 +38,11 @@ extension Terminal {
     mutating func render<W: TerminalViewable>(_ viewable: borrowing W) where W: ~Copyable {
         let before = System.clock.now
         self.window.render(viewable)
-        draw()
+        do {
+            try draw()
+        } catch {
+            System.Log.error("\(#function): Unable to draw frame.")
+        }
         let after = System.clock.now
         System.Log.trace("\(#function): \(before.duration(to: after))")
     }
@@ -49,6 +53,10 @@ struct TerminalSize: Hashable {
     let y: Int
 }
 
+enum TerminalError: Error {
+    case setupError  // Thrown if there is an error writing to standard out.
+}
+
 /// Sets up the Terminal to be in raw mode so we receive the key commands as
 /// they are pressed.
 struct Terminal: ~Copyable {
@@ -57,10 +65,15 @@ struct Terminal: ~Copyable {
     // interacted with through Terminal apis.
     private var window: Window
 
-    init() {
+    init() throws {
         self.prev = Terminal.enableRawMode()
-        System.Log.trace("Terminal: Raw Mode enabled.")
-        Terminal.setup()
+        do {
+            try Terminal.setup()
+        } catch {
+            System.Log.error("Error setting up Terminal: restoring.")
+            Terminal.restore(prev)
+            throw TerminalError.setupError
+        }
         let size = Terminal.size
         self.window = Window(size.x, size.y)
     }
@@ -68,15 +81,20 @@ struct Terminal: ~Copyable {
     /// Restore the original terminal config
     /// Clear the last frame from the screen
     deinit {
-        System.Log.trace("Terminal: restored.")
+        System.Log.trace("Terminal: deinit.")
         Terminal.restore(prev)
-        Terminal.reset()
+        do {
+            try Terminal.reset()
+        } catch {
+            System.Log.error("Unable to reset terminal")
+        }
     }
 
     private static func restore(_ originalConfig: termios) {
         var term = originalConfig
         // restores the original terminal state
-        tcsetattr(FileHandle.standardInput.fileDescriptor, TCSAFLUSH, &term)
+        tcsetattr(FileDescriptor.standardInput.rawValue, TCSAFLUSH, &term)
+        System.Log.trace("Terminal: restored.")
     }
 
     private static func enableRawMode() -> termios {
@@ -84,7 +102,7 @@ struct Terminal: ~Copyable {
         // init raw: termios variable
         var raw: termios = Terminal.initCStruct()
         // sets raw to a copy of the file handlers attributes
-        tcgetattr(FileHandle.standardInput.fileDescriptor, &raw)
+        tcgetattr(FileDescriptor.standardInput.rawValue, &raw)
         // saves a copy of the original standard output file descriptor to revert back to
         let originalConfig = raw
         // ??? is this fully correct?
@@ -96,7 +114,8 @@ struct Terminal: ~Copyable {
         raw.c_lflag &= UInt(~(UInt32(ECHO | ICANON | IEXTEN | ISIG)))
         #endif
         // changes the file descriptor to raw mode
-        tcsetattr(FileHandle.standardInput.fileDescriptor, TCSAFLUSH, &raw)
+        tcsetattr(FileDescriptor.standardInput.rawValue, TCSAFLUSH, &raw)
+        System.Log.trace("Terminal: Raw Mode enabled.")
         return originalConfig
     }
 
@@ -116,8 +135,8 @@ extension Terminal {
 
     /// Draws what ever is in the ``Window`` to the terminal using the
     /// ``Window/ascii``
-    private func draw() {
-        Terminal.write(frame: self.window.ascii)
+    private func draw() throws {
+        try Terminal.write(frame: self.window.ascii)
     }
 
     func goodbye() {
@@ -125,25 +144,33 @@ extension Terminal {
     }
 
     /// Should be called at the beginning of the program to setup the screen state correctly.
-    private static func setup() {
-        FileHandle.standardOutput.write(Data(setupCode.utf8))
+    private static func setup() throws {
+        _ = try setupCode.utf8CString.withUnsafeBytes { pointer in
+            try FileDescriptor.standardOutput.write(pointer)
+        }
     }
 
     /// Used to write the contents of of the frame to the screen.
-    private static func write(frame strFrame: String) {
-        clear()
-        FileHandle.standardOutput.write(Data(strFrame.utf8))
+    private static func write(frame strFrame: String) throws {
+        try clear()
+        _ = try strFrame.utf8CString.withUnsafeBytes { pointer in
+            try FileDescriptor.standardOutput.write(pointer)
+        }
     }
 
     /// clears the screen to setup, reset or write a new frame to the screen.
-    private static func clear() {
-        FileHandle.standardOutput.write(Data(Terminal.clearCode.utf8))
+    private static func clear() throws {
+        _ = try Terminal.clearCode.utf8CString.withUnsafeBytes { pointer in
+            try FileDescriptor.standardOutput.write(pointer)
+        }
     }
 
     /// Resets the terminal and cursor to the screen.
-    private static func reset() {
-        clear()
-        FileHandle.standardOutput.write(Data(Terminal.restCode.utf8))
+    private static func reset() throws {
+        try clear()
+        _ = try Terminal.restCode.utf8CString.withUnsafeBytes { pointer in
+            try FileDescriptor.standardOutput.write(pointer)
+        }
     }
 
     private static var restCode: String {

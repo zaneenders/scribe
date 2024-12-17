@@ -7,26 +7,23 @@ extension FileDescriptor {
     /// Return an iterator over the bytes in the file.
     ///
     /// - returns: An iterator for UInt8 elements.
-    public func asyncByteIterator() -> _FileHandleAsyncByteIterator {
-        _FileHandleAsyncByteIterator(fileHandle: self)
+    func asyncByteIterator() -> _FileHandleAsyncByteIterator {
+        _FileHandleAsyncByteIterator(fileDescriptor: self)
     }
 
-    public struct _FileHandleAsyncByteIterator: AsyncSequence {
+    struct _FileHandleAsyncByteIterator: AsyncSequence {
 
-        public typealias Element = UInt8
+        let fileDescriptor: FileDescriptor
 
-        let fileHandle: FileDescriptor
-
-        init(fileHandle: FileDescriptor) {
-            self.fileHandle = fileHandle
+        init(fileDescriptor: FileDescriptor) {
+            self.fileDescriptor = fileDescriptor
         }
 
-        public struct AsyncIterator: AsyncIteratorProtocol {
-            public typealias Element = UInt8
-            let fileHandle: FileDescriptor
+        struct AsyncIterator: AsyncIteratorProtocol {
+            let fileDescriptor: FileDescriptor
 
             @available(*, deprecated, message: "Really bad, but works for now")
-            public mutating func next() async throws -> UInt8? {
+            mutating func next() async throws -> UInt8? {
                 let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 1, alignment: 0)
                 _ = try FileDescriptor.standardInput.read(into: buffer)
                 let copy: [UInt8] = Array(buffer[0..<1])
@@ -35,8 +32,8 @@ extension FileDescriptor {
             }
         }
 
-        public func makeAsyncIterator() -> AsyncIterator {
-            AsyncIterator(fileHandle: fileHandle)
+        func makeAsyncIterator() -> AsyncIterator {
+            AsyncIterator(fileDescriptor: fileDescriptor)
         }
     }
 }
