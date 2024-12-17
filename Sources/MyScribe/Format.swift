@@ -67,18 +67,24 @@ func format() async throws {
 private func format(_ config: Configuration) async {
 
     let fs = FileSystem.shared
-
-    let cwd = FileManager.default.currentDirectoryPath
-    let package = "/Package.swift"
-    let path = cwd + package
-    let cwdFP = FilePath(cwd)
-    let packageFP = FilePath(path)
+    let cwd: FilePath!
+    do {
+        cwd = try await fs.currentWorkingDirectory
+    } catch {
+        System.Log.error("Unable to find currentWorkingDirectory.")
+        return
+    }
+    let packageFP = cwd.appending("/Package.swift")
     guard let _ = try? await fs.info(forFileAt: packageFP) else {
         System.Log.trace("Not a swift package not Package.swift found")
         return
     }
-    process(config, packageFP)
-    guard let cwd = try? await fs.openDirectory(atPath: cwdFP) else {
+    do {
+        try await process(config, packageFP)
+    } catch {
+        System.Log.error("Unable to format: \(packageFP.string)")
+    }
+    guard let cwd = try? await fs.openDirectory(atPath: cwd) else {
         return
     }
     var count: Int = 0
@@ -115,7 +121,7 @@ private func getSwift(
                 count += await getSwift(config, path.path)
             default:
                 if path.name.string.contains(".swift") {
-                    process(config, path.path)
+                    try await process(config, path.path)
                     count += 1
                 }
             }
@@ -127,21 +133,17 @@ private func getSwift(
     return count
 }
 
-private func process(_ config: Configuration, _ file: FilePath) {
-    var buffer = ""
+private func process(_ config: Configuration, _ file: FilePath) async throws {
     let formatter = SwiftFormatter(
         configuration: config, findingConsumer: nil)
     let url: URL = URL(fileURLWithPath: file.string)
-    guard let fh = try? FileHandle(forUpdating: url) else {
-        System.Log.error("failed to find: \(file)")
-        return
-    }
+    let fh = try await FileSystem.shared.openFile(
+        forReadingAndWritingAt: file, options: .modifyFile(createIfNecessary: true))
+    let info = try await fh.info()
+    var buffer = ""
+    let contents = try await fh.readToEnd(maximumSizeAllowed: .bytes(info.size))
     System.Log.trace("Formatting: \(file)")
-    let sourceData = fh.readDataToEndOfFile()
-    defer { fh.closeFile() }
-    guard let source = String(data: sourceData, encoding: .utf8) else {
-        return
-    }
+    let source = String(buffer: contents)
     do {
         try formatter.format(
             source: source,
@@ -157,4 +159,5 @@ private func process(_ config: Configuration, _ file: FilePath) {
     } catch {
         System.Log.error("\(error.localizedDescription)")
     }
+    try await fh.close()
 }
