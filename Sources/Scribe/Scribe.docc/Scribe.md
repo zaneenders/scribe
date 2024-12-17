@@ -6,8 +6,9 @@ Welcome to the developer docs of Scribe
 - [ ] File system navigator
     - Be able to move about the file system and open files using the text editor
     - [X] Display Current directory
-    - [ ] Navigate to another directory
-        - [ ] User input
+    - [X] Navigate to another directory
+        - [X] User input
+    - [ ] Scroll contents of large directories
     - [ ] View file contents
 - [ ] Shell prompt
     - be able to run shell commands that just write the output to disk.

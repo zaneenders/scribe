@@ -25,6 +25,10 @@ extension Scribe {
                 system_view.up()
             case .lowerCaseJ:
                 system_view.down()
+            case .lowerCaseL:  // Enter
+                try await system_view.open()
+            case .lowerCaseS:
+                try await system_view.close()
             default:
                 ()
             }
