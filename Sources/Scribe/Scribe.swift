@@ -15,12 +15,20 @@ extension Scribe {
     mutating func run(_ view: inout Terminal) async throws {
         System.Log.trace("\(config.hello))")
         view.render(EntryView(config.hello))
-        try await Task.sleep(for: .seconds(1))
+        var system_view = try await SystemView(FilePath(FileManager.default.currentDirectoryPath))
         for try await byte in FileDescriptor.standardInput.asyncByteIterator() {
-            if byte == 3 {
+            let code = AsciiKeyCode.decode(keyboard: byte)
+            switch code {
+            case .ctrlC:
                 return
+            case .lowerCaseF:
+                system_view.up()
+            case .lowerCaseJ:
+                system_view.down()
+            default:
+                ()
             }
-            try await view.render(SystemView(FilePath(FileManager.default.currentDirectoryPath)))
+            view.render(system_view)
         }
     }
 }
