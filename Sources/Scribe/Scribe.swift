@@ -1,4 +1,5 @@
 import Foundation
+import SystemPackage
 import _NIOFileSystem
 
 public typealias Command = () async throws -> Void
@@ -15,8 +16,12 @@ extension Scribe {
         System.Log.trace("\(config.hello))")
         view.render(EntryView(config.hello))
         try await Task.sleep(for: .seconds(1))
-        try await view.render(SystemView(FilePath(FileManager.default.currentDirectoryPath)))
-        try await Task.sleep(for: .seconds(1))
+        for try await byte in FileDescriptor.standardInput.asyncByteIterator() {
+            if byte == 3 {
+                return
+            }
+            try await view.render(SystemView(FilePath(FileManager.default.currentDirectoryPath)))
+        }
     }
 }
 
