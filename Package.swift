@@ -25,6 +25,7 @@ let package = Package(
             url: "https://github.com/swiftlang/swift-format.git",
             from: "600.0.0"
         ),
+        .package(url: "https://github.com/apple/swift-algorithms", from: "1.2.0"),
 
     ],
     targets: [
@@ -33,6 +34,7 @@ let package = Package(
             dependencies: [
                 .product(name: "_NIOFileSystem", package: "swift-nio"),
                 .product(name: "Logging", package: "swift-log"),
+                .product(name: "Algorithms", package: "swift-algorithms"),
             ]),
         .executableTarget(
             name: "MyScribe",

@@ -1,23 +1,32 @@
+import Algorithms
 import _NIOFileSystem
 
 struct SystemView: TerminalViewable {
 
-    var dirs: [DirectoryEntry]
     var index = 0
-
-    init(_ dir: FilePath) async throws {
-        self.dirs = try await getDirectoryEntries(for: dir)
-    }
-
-    mutating func up() {
-        if index - 1 >= 0 {
-            index -= 1
+    private var _dirs: [DirectoryEntry]
+    var dirs: [DirectoryEntry] {
+        get {
+            _dirs.sorted(by: { $0.path.string < $1.path.string })
+        }
+        set {
+            _dirs = newValue
         }
     }
 
-    mutating func down() {
-        if index + 1 < dirs.count {
-            index += 1
+    init(_ dir: FilePath) async throws {
+        self._dirs = try await getDirectoryEntries(for: dir)
+    }
+
+    mutating func up(_ num: Int = 1) {
+        if index - num >= 0 {
+            index -= num
+        }
+    }
+
+    mutating func down(_ num: Int = 1) {
+        if index + num < dirs.count {
+            index += num
         }
     }
 
@@ -25,7 +34,7 @@ struct SystemView: TerminalViewable {
         let entry: DirectoryEntry = dirs[index]
         switch entry.type {
         case .directory:
-            self.dirs = try await getDirectoryEntries(for: entry.path)
+            self._dirs = try await getDirectoryEntries(for: entry.path)
             index = 0
         default:
             ()
@@ -35,13 +44,29 @@ struct SystemView: TerminalViewable {
     mutating func close() async throws {
         let new_path = dirs[index].path.removingLastComponent().removingLastComponent()
         System.Log.trace("\(#function)\(new_path.string)")
-        self.dirs = try await getDirectoryEntries(for: new_path)
+        self._dirs = try await getDirectoryEntries(for: new_path)
         index = 0
+    }
+
+    func getDirsInRange(_ height: Int) -> [DirectoryEntry] {
+        // TODO still kinda broken but it moves for now
+        /*
+        - [ ] Movement is doubled
+        - [ ] Last window is kinda broken
+        */
+        let windows = dirs.windows(ofCount: height)
+        for (i, window) in windows.enumerated() {
+            if i >= index {
+                return Array(window)
+            }
+        }
+        // Not sure what to return here yet...
+        return dirs
     }
 
     func tiles(_ width: Int, _ height: Int) -> [[Window.Tile]] {
         var out = Window(width, height, "#", .pink, .blue).tiles
-        row_loop: for (y, entry) in dirs.enumerated() {
+        row_loop: for (y, entry) in getDirsInRange(height).enumerated() {
             if y >= height {
                 break row_loop
             }

@@ -9,6 +9,7 @@ Welcome to the developer docs of Scribe
     - [X] Navigate to another directory
         - [X] User input
     - [ ] Scroll contents of large directories
+        - [X] Buggy but kinda working
     - [ ] View file contents
 - [ ] Shell prompt
     - be able to run shell commands that just write the output to disk.
