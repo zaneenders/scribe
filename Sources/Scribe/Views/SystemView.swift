@@ -1,7 +1,7 @@
 import Algorithms
 import _NIOFileSystem
 
-struct SystemView: TerminalViewable {
+struct SystemView: TerminalViewable, Program {
 
     var index = 0
     private var _dirs: [DirectoryEntry]
@@ -15,6 +15,7 @@ struct SystemView: TerminalViewable {
     }
 
     init(_ dir: FilePath) async throws {
+        System.Log.notice("\(Self.self): \(#function)")
         self._dirs = try await getDirectoryEntries(for: dir)
     }
 
@@ -30,14 +31,22 @@ struct SystemView: TerminalViewable {
         }
     }
 
-    mutating func open() async throws {
+    mutating func open() async throws -> OpenResult {
         let entry: DirectoryEntry = dirs[index]
         switch entry.type {
         case .directory:
             self._dirs = try await getDirectoryEntries(for: entry.path)
             index = 0
+            return .dir
+        case .regular:
+            return .file(cwd: entry.path.removingLastComponent(), file: entry.path)
+        /*
+            Where should we open the file view in?
+            How do we save state when we return?
+                - Current directory and selected file index/ name?
+            */
         default:
-            ()
+            return .dir
         }
     }
 

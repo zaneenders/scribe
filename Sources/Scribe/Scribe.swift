@@ -12,27 +12,54 @@ public protocol Scribe {
 }
 
 extension Scribe {
-    mutating func run(_ view: inout Terminal) async throws {
-        System.Log.trace("\(config.hello))")
+    mutating func start(_ view: inout Terminal) async throws {
+        System.Log.trace("\(config.hello)")
+
         view.render(EntryView(config.hello))
-        var system_view = try await SystemView(FilePath(FileManager.default.currentDirectoryPath))
+        var current_program: any Program & TerminalViewable = try await SystemView(
+            FilePath(FileManager.default.currentDirectoryPath))
+        /*
+        I think we want some sort of program stack or something here to switch between.
+        We have a system view but that can trigger state changes to the file_view or something?
+        */
+        var stack: [() async throws -> SystemView] = []
         for try await byte in FileDescriptor.standardInput.asyncByteIterator() {
-            let code = AsciiKeyCode.decode(keyboard: byte)
-            switch code {
+            let key = AsciiKeyCode.decode(keyboard: byte)
+            /*
+            Kind think I should have some sort of keyboard mapping preferences here,
+            but I think that makes it to hard right now
+            */
+            switch key {
             case .ctrlC:
-                return
+                if current_program is FileView {  // Close file
+                    System.Log.notice("Closing file.")
+                    let system_view = stack.removeFirst()
+                    // This should never throw unless the directory doesn't exist anymore?
+                    current_program = try await system_view()
+                } else {
+                    return
+                }
             case .lowerCaseF:
-                system_view.up()
+                current_program.up()
             case .lowerCaseJ:
-                system_view.down()
-            case .lowerCaseL:  // Enter
-                try await system_view.open()
+                current_program.down()
+            case .lowerCaseL:
+                switch try await current_program.open() {
+                case .dir:
+                    ()
+                case let .file(cwd: cwd, file: file):
+                    System.Log.notice("Opening File: \(file.string)")
+                    stack.append({
+                        try await SystemView(cwd)
+                    })
+                    current_program = FileView()
+                }
             case .lowerCaseS:
-                try await system_view.close()
+                try await current_program.close()
             default:
                 ()
             }
-            view.render(system_view)
+            view.render(current_program)
         }
     }
 }
@@ -61,7 +88,7 @@ extension Scribe {
             return
         }
         do {
-            try await scribe.run(&terminal)
+            try await scribe.start(&terminal)
         } catch {
             System.Log.error("Scribe ERROR: \(error.localizedDescription)")
         }
