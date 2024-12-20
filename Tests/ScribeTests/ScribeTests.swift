@@ -5,6 +5,26 @@ import _NIOFileSystem
 @testable import MyScribe
 @testable import Scribe
 
+@Suite("File View Tests")
+struct FileViewTests {
+    @Test func testName() async throws {
+        let expected: [[Character]] = Array(
+            """
+            # Scri
+            $$$$$$
+            ## [Do
+            """
+        ).split(separator: "\n").map { Array($0) }
+        let file = try await FileView("README.md")
+        let tiles = file.tiles(6, 3)
+        for (y, row) in tiles.enumerated() {
+            for (x, tile) in row.enumerated() {
+                #expect(tile.symbol == expected[y][x])
+            }
+        }
+    }
+}
+
 @Test func testOne() async throws {
     let scribe = MyScribe()
     #expect(scribe.config.hello == "Hello My Name Is Scribe")

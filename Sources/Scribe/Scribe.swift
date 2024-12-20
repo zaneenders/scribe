@@ -52,7 +52,7 @@ extension Scribe {
                     stack.append({
                         try await SystemView(cwd)
                     })
-                    current_program = FileView()
+                    current_program = try await FileView(file)
                 }
             case .lowerCaseS:
                 try await current_program.close()
