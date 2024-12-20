@@ -25,8 +25,8 @@ let package = Package(
             url: "https://github.com/swiftlang/swift-format.git",
             from: "600.0.0"
         ),
-        .package(url: "https://github.com/apple/swift-algorithms", from: "1.2.0"),
-
+        .package(url: "https://github.com/apple/swift-algorithms.git", from: "1.2.0"),
+        .package(url: "https://github.com/apple/swift-collections.git", revision: "52a1f69"),
     ],
     targets: [
         .target(
@@ -35,6 +35,7 @@ let package = Package(
                 .product(name: "_NIOFileSystem", package: "swift-nio"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Algorithms", package: "swift-algorithms"),
+                .product(name: "Collections", package: "swift-collections"),
             ]),
         .executableTarget(
             name: "MyScribe",

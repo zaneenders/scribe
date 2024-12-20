@@ -1,23 +1,26 @@
 import _NIOFileSystem
+import _RopeModule
 
 /*
 Very unfinished.
 - [X] display viewable part of file.
+- [ ] Cursor
 - [ ] File Scrolling
     - Maybe we can reuse logic for ``SystemView`` as well.
 - [ ] Edit file
 - [ ] write changes to disk
 */
+
 struct FileView: TerminalViewable, Program {
 
-    var contents: String
+    var contents: BigString
 
     init(_ path: FilePath) async throws {
         let fh = try await FileSystem.shared.openFile(
             forReadingAndWritingAt: path, options: .modifyFile(createIfNecessary: true))
         let info = try await fh.info()
         let buffer = try await fh.readToEnd(maximumSizeAllowed: .bytes(info.size))
-        self.contents = String(buffer: buffer)
+        self.contents = BigString(String(buffer: buffer))
         try await fh.close()
     }
 
