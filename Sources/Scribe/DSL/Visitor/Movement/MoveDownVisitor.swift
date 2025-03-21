@@ -1,0 +1,198 @@
+struct MoveDownVisitor: RawVisitor {
+
+  private let startingSelection: Hash
+
+  init(state: BlockState) {
+    self.state = state
+    self.startingSelection = state.selected!
+    Log.debug("\(self.startingSelection)")
+  }
+
+  private(set) var state: BlockState
+  var currentHash: Hash = hash(contents: "0")
+
+  private var atSelected: Bool {
+    startingSelection == currentHash
+  }
+
+  private var currentSelected: Bool {
+    self.state.selected == currentHash
+  }
+
+  var mode: State = .findingSelected
+  var areChildNode = false
+
+  enum State {
+    case findingSelected
+    case breakOutOfChild
+    case foundSelected
+    case selectionUpdated
+  }
+
+  mutating func visitTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {
+    let ourHash = currentHash
+    beforeTuple(tuple)
+    areChildNode = true
+    var index = 0
+    for child in repeat (each tuple.children) {
+      switch mode {
+      case .breakOutOfChild:
+        mode = .foundSelected
+        currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
+        visit(child)
+      case .findingSelected:
+        currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
+        visit(child)
+      case .foundSelected, .selectionUpdated:
+        ()
+      }
+      index += 1
+    }
+    areChildNode = false
+    currentHash = ourHash
+    afterTuple(tuple)
+  }
+
+  mutating func visitArray<B: Block>(_ array: _ArrayBlock<B>) {
+    let ourHash = currentHash
+    beforeArray(array)
+    areChildNode = true
+    for (index, child) in array.children.enumerated() {
+      switch mode {
+      case .breakOutOfChild:
+        mode = .foundSelected
+        currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
+        visit(child)
+      case .findingSelected:
+        currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
+        visit(child)
+      case .foundSelected, .selectionUpdated:
+        ()
+      }
+    }
+    areChildNode = false
+    currentHash = ourHash
+    afterArray(array)
+  }
+
+  mutating func visitEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
+    let ourHash = currentHash
+    beforeEither(either)
+    switch either.either {
+    case let .first(first):
+      currentHash = hash(contents: "\(ourHash)\(#function)\(0)")
+      visit(first)
+    case let .second(second):
+      currentHash = hash(contents: "\(ourHash)\(#function)\(1)")
+      visit(second)
+    }
+    currentHash = ourHash
+    afterEither(either)
+  }
+
+  mutating func visitModified<W: Block>(_ modified: Modified<W>) {
+    let ourHash = currentHash
+    beforeModified(modified)
+    currentHash = hash(contents: "\(ourHash)\(#function)")
+    visit(modified.wrapped)
+    currentHash = ourHash
+    afterModified(modified)
+  }
+
+  mutating func visitBlock(_ block: some Block) {
+    let ourHash = currentHash
+    beforeBlock(block)
+    currentHash = hash(contents: "\(ourHash)\(#function)")
+    visit(block.component)
+    currentHash = ourHash
+    afterBlock(block)
+  }
+
+  //MARK: before after
+  mutating func runBefore() {
+    switch mode {
+    case .findingSelected:
+      if atSelected {
+        if areChildNode {
+          self.mode = .breakOutOfChild
+        } else {
+          self.mode = .foundSelected
+        }
+        Log.debug("\(stateString) Selection Found")
+      }
+    case .breakOutOfChild:
+      ()
+    case .foundSelected:
+      state.selected = currentHash
+      self.mode = .selectionUpdated
+      Log.debug("\(stateString) Selection changed")
+    case .selectionUpdated:
+      ()
+    }
+  }
+
+  private var stateString: String {
+    "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
+  }
+
+  mutating func runAfter() {
+
+  }
+
+  mutating func visitText(_ text: Text) {
+    runBefore()
+    Log.debug("\(stateString)")
+    runAfter()
+  }
+
+  mutating func beforeTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {
+    Log.debug("\(stateString) \(tuple)")
+    runBefore()
+  }
+
+  mutating func afterTuple<each Component>(_ tuple: _TupleBlock<repeat each Component>)
+  where repeat each Component: Block {
+    Log.debug("\(stateString) \(tuple)")
+    runAfter()
+  }
+
+  mutating func beforeEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
+    Log.debug("\(stateString) \(either)")
+    runBefore()
+  }
+
+  mutating func afterEither<A, B>(_ either: _EitherBlock<A, B>) where A: Block, B: Block {
+    Log.debug("\(stateString) \(either)")
+    runAfter()
+  }
+
+  mutating func beforeArray<B: Block>(_ array: _ArrayBlock<B>) {
+    Log.debug("\(stateString) \(array)")
+    runBefore()
+  }
+
+  mutating func afterArray<B>(_ array: _ArrayBlock<B>) where B: Block {
+    Log.debug("\(stateString) \(array)")
+    runAfter()
+  }
+
+  mutating func beforeModified<W: Block>(_ modified: Modified<W>) {
+    Log.debug("\(stateString) \(modified)")
+    runBefore()
+  }
+
+  mutating func afterModified<W>(_ modified: Modified<W>) where W: Block {
+    Log.debug("\(stateString) \(modified)")
+    runAfter()
+  }
+
+  mutating func beforeBlock(_ block: some Block) {
+    Log.debug("\(stateString) \(block)")
+    runBefore()
+  }
+
+  mutating func afterBlock(_ block: some Block) {
+    Log.debug("\(stateString) \(block)")
+    runAfter()
+  }
+}
