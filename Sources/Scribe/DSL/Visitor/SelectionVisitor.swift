@@ -44,14 +44,6 @@ extension SelectionVisitor {
     resetSelected()
   }
 
-  mutating func beforeEither<A, B>(_ either: _EitherBlock<A, B>) where A: Block, B: Block {
-    updateSelected(either)
-  }
-
-  mutating func afterEither<A, B>(_ either: _EitherBlock<A, B>) where A: Block, B: Block {
-    resetSelected()
-  }
-
   mutating func beforeModified<W>(_ modified: Modified<W>) where W: Block {
     updateSelected(modified)
   }

@@ -22,21 +22,6 @@ extension HashVisitor {
     afterTuple(tuple)
   }
 
-  mutating func visitEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    let ourHash = currentHash
-    beforeEither(either)
-    switch either.either {
-    case let .first(first):
-      currentHash = hash(contents: "\(ourHash)\(#function)\(0)")
-      visit(first)
-    case let .second(second):
-      currentHash = hash(contents: "\(ourHash)\(#function)\(1)")
-      visit(second)
-    }
-    currentHash = ourHash
-    afterEither(either)
-  }
-
   mutating func visitArray<B: Block>(_ array: _ArrayBlock<B>) {
     let ourHash = currentHash
     beforeArray(array)

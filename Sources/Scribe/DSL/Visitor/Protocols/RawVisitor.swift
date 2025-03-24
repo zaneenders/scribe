@@ -7,7 +7,6 @@ protocol RawVisitor {
   /// visitText is consider the leaf node of any Block graph.
   mutating func visitText(_ text: Text)
   mutating func visitTuple<each Component: Block>(_ tuple: Tuple<repeat each Component>)
-  mutating func visitEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>)
   mutating func visitArray<B: Block>(_ array: _ArrayBlock<B>)
   mutating func visitModified<W: Block>(_ modified: Modified<W>)
   mutating func visitBlock(_ block: some Block)

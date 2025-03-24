@@ -19,12 +19,6 @@ extension _TupleBlock: Visitable {
   }
 }
 
-extension _EitherBlock: Visitable {
-  func _allow(_ visitor: inout some RawVisitor) {
-    visitor.visitEither(self)
-  }
-}
-
 extension _ArrayBlock: Visitable {
   func _allow(_ visitor: inout some RawVisitor) {
     visitor.visitArray(self)

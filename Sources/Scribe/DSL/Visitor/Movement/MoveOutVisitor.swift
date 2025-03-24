@@ -61,21 +61,6 @@ struct MoveOutVisitor: RawVisitor {
     afterArray(array)
   }
 
-  mutating func visitEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    let ourHash = currentHash
-    beforeEither(either)
-    switch either.either {
-    case let .first(first):
-      currentHash = hash(contents: "\(ourHash)\(#function)\(0)")
-      visit(first)
-    case let .second(second):
-      currentHash = hash(contents: "\(ourHash)\(#function)\(1)")
-      visit(second)
-    }
-    currentHash = ourHash
-    afterEither(either)
-  }
-
   mutating func visitModified<W: Block>(_ modified: Modified<W>) {
     let ourHash = currentHash
     beforeModified(modified)
@@ -133,16 +118,6 @@ struct MoveOutVisitor: RawVisitor {
   mutating func afterTuple<each Component>(_ tuple: _TupleBlock<repeat each Component>)
   where repeat each Component: Block {
     Log.debug("\(stateString) \(tuple)")
-    runAfter()
-  }
-
-  mutating func beforeEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    Log.debug("\(stateString) \(either)")
-    runBefore()
-  }
-
-  mutating func afterEither<A, B>(_ either: _EitherBlock<A, B>) where A: Block, B: Block {
-    Log.debug("\(stateString) \(either)")
     runAfter()
   }
 

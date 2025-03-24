@@ -39,9 +39,8 @@ struct VisitorTests {
     visitor.visit(block)
     let expected = [
       "visitBlock(_:):All", "visitTuple(_:)", "visitModified(_:)", "visitBlock(_:):String",
-      "Button", "visitEither(_:)", "visitBlock(_:):String", "A", "visitArray(_:)",
-      "visitBlock(_:):String", "Zane", "visitBlock(_:):String", "Was", "visitBlock(_:):String",
-      "Here",
+      "Button", "visitBlock(_:):String", "A", "visitArray(_:)", "visitBlock(_:):String", "Zane",
+      "visitBlock(_:):String", "Was", "visitBlock(_:):String", "Here",
     ]
     #expect(expected == visitor.visited)
   }
@@ -52,10 +51,10 @@ struct VisitorTests {
     visitor.visit(block)
     let expected = [
       "beforeBlock(_:)", "beforeTuple(_:)", "beforeModified(_:)", "beforeBlock(_:)", "Button",
-      "afterBlock(_:)", "afterModified(_:)", "beforeEither(_:)", "beforeBlock(_:)", "A",
-      "afterBlock(_:)", "afterEither(_:)", "beforeArray(_:)", "beforeBlock(_:)", "Zane",
-      "afterBlock(_:)", "beforeBlock(_:)", "Was", "afterBlock(_:)", "beforeBlock(_:)", "Here",
-      "afterBlock(_:)", "afterArray(_:)", "afterTuple(_:)", "afterBlock(_:)",
+      "afterBlock(_:)", "afterModified(_:)", "beforeBlock(_:)", "A", "afterBlock(_:)",
+      "beforeArray(_:)", "beforeBlock(_:)", "Zane", "afterBlock(_:)", "beforeBlock(_:)", "Was",
+      "afterBlock(_:)", "beforeBlock(_:)", "Here", "afterBlock(_:)", "afterArray(_:)",
+      "afterTuple(_:)", "afterBlock(_:)",
     ]
     #expect(expected == visitor.visited)
   }
@@ -72,13 +71,6 @@ struct TestAllBeforeAfterVisitor: Visitor {
     visited.append("\(#function)")
   }
   mutating func afterTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {
-    visited.append("\(#function)")
-  }
-
-  mutating func beforeEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    visited.append("\(#function)")
-  }
-  mutating func afterEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
     visited.append("\(#function)")
   }
 
@@ -115,16 +107,6 @@ struct TestAllVisitor: RawVisitor {
     visited.append("\(#function)")
     for child in repeat (each tuple.children) {
       visit(child)
-    }
-  }
-
-  mutating func visitEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    visited.append("\(#function)")
-    switch either.either {
-    case let .first(first):
-      visit(first)
-    case let .second(second):
-      visit(second)
     }
   }
 

@@ -68,16 +68,6 @@ struct MoveInVisitor: HashVisitor {
     runAfter()
   }
 
-  mutating func beforeEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    Log.debug("\(stateString) \(either)")
-    runBefore()
-  }
-
-  mutating func afterEither<A, B>(_ either: _EitherBlock<A, B>) where A: Block, B: Block {
-    Log.debug("\(stateString) \(either)")
-    runAfter()
-  }
-
   mutating func beforeArray<B: Block>(_ array: _ArrayBlock<B>) {
     Log.debug("\(stateString) \(array)")
     runBefore()

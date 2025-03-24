@@ -21,10 +21,6 @@ extension InitialParser: HashVisitor {
     setFirstSelection(tuple)
   }
 
-  mutating func beforeEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    setFirstSelection(either)
-  }
-
   mutating func beforeArray<B: Block>(_ array: _ArrayBlock<B>) {
     setFirstSelection(array)
   }

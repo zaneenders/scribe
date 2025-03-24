@@ -9,7 +9,8 @@ public enum BlockParser {
   )
     -> Component
   {
-    block
+    Log.trace("\(block)")
+    return block
   }
 
   public static func buildExpression<Component: Block>(
@@ -17,7 +18,8 @@ public enum BlockParser {
   )
     -> Component
   {
-    block
+    Log.trace("\(block)")
+    return block
   }
 
   public static func buildBlock<each Component>(
@@ -25,19 +27,23 @@ public enum BlockParser {
   )
     -> _TupleBlock<repeat each Component>
   where repeat each Component: Block {
-    _TupleBlock(repeat each block)
+    let tuple = _TupleBlock(repeat each block)
+    Log.trace("\(tuple)")
+    return tuple
   }
 
-  public static func buildEither<First: Block, Second: Block>(
-    first component: First
-  ) -> _EitherBlock<First, Second> {
-    _EitherBlock<First, Second>(.first(component))
+  public static func buildEither<B: Block>(
+    first block: B
+  ) -> B {
+    Log.trace("\(block)")
+    return block
   }
 
-  public static func buildEither<First: Block, Second: Block>(
-    second component: Second
-  ) -> _EitherBlock<First, Second> {
-    _EitherBlock<First, Second>(.second(component))
+  public static func buildEither<B: Block>(
+    second block: B
+  ) -> B {
+    Log.trace("\(block)")
+    return block
   }
 
   public static func buildOptional<Component: Block>(
@@ -45,11 +51,14 @@ public enum BlockParser {
   )
     -> _ArrayBlock<Component>
   {
+    let array: _ArrayBlock<Component>
     if let component {
-      _ArrayBlock<Component>([component])
+      array = _ArrayBlock<Component>([component])
     } else {
-      _ArrayBlock<Component>([])
+      array = _ArrayBlock<Component>([])
     }
+    Log.trace("\(array)")
+    return array
   }
 
   public static func buildArray<Component: Block>(
@@ -57,6 +66,8 @@ public enum BlockParser {
   )
     -> _ArrayBlock<Component>
   {
-    _ArrayBlock<Component>(components)
+    let array = _ArrayBlock<Component>(components)
+    Log.trace("\(array)")
+    return array
   }
 }

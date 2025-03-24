@@ -4,9 +4,6 @@ protocol Visitor: RawVisitor {
   mutating func beforeTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>)
   mutating func afterTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>)
 
-  mutating func beforeEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>)
-  mutating func afterEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>)
-
   mutating func beforeArray<B: Block>(_ array: _ArrayBlock<B>)
   mutating func afterArray<B: Block>(_ array: _ArrayBlock<B>)
 
@@ -21,9 +18,6 @@ extension Visitor {
 
   mutating func beforeTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {}
   mutating func afterTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {}
-
-  mutating func beforeEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {}
-  mutating func afterEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {}
 
   mutating func beforeArray<B: Block>(_ array: _ArrayBlock<B>) {}
   mutating func afterArray<B: Block>(_ array: _ArrayBlock<B>) {}
@@ -43,17 +37,6 @@ extension Visitor {
       visit(child)
     }
     afterTuple(tuple)
-  }
-
-  mutating func visitEither<A: Block, B: Block>(_ either: _EitherBlock<A, B>) {
-    beforeEither(either)
-    switch either.either {
-    case let .first(first):
-      visit(first)
-    case let .second(second):
-      visit(second)
-    }
-    afterEither(either)
   }
 
   mutating func visitArray<B: Block>(_ array: _ArrayBlock<B>) {
