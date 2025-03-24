@@ -7,6 +7,44 @@ import Testing
 @Suite("Selection Tests")
 struct SelectionTests {
 
+  @Test func asyncTest() async throws {
+
+    let firstPause = AsyncUpdateStateUpdate.delay / 2
+    let secondPause = AsyncUpdateStateUpdate.delay
+
+    let block = AsyncUpdateStateUpdate()
+    var container = BlockContainer(block)
+    var renderer = TestRenderer()
+    container.observe(with: &renderer)
+    var output = renderer.previousVisitor.textObjects.map { $0.value }
+    var expected = ["[ready]"]
+    #expect(output.sorted() == expected.sorted())
+
+    container.action(.lowercaseL)
+    container.observe(with: &renderer)
+    output = renderer.previousVisitor.textObjects.map { $0.value }
+    expected = ["[ready]"]
+    #expect(output.sorted() == expected.sorted())
+
+    container.action(.lowercaseI)
+    container.observe(with: &renderer)
+    output = renderer.previousVisitor.textObjects.map { $0.value }
+    expected = ["[running]"]
+    #expect(output.sorted() == expected.sorted())
+
+    try await Task.sleep(for: .milliseconds(firstPause))
+    container.observe(with: &renderer)
+    output = renderer.previousVisitor.textObjects.map { $0.value }
+    expected = ["[running]"]
+    #expect(output.sorted() == expected.sorted())
+
+    try await Task.sleep(for: .milliseconds(secondPause))
+    container.observe(with: &renderer)
+    output = renderer.previousVisitor.textObjects.map { $0.value }
+    expected = ["[ready]"]
+    #expect(output.sorted() == expected.sorted())
+  }
+
   @Test func select() async throws {
     let block = SelectionBlock()
     var container = BlockContainer(block)
