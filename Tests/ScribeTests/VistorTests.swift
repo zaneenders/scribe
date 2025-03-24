@@ -8,6 +8,17 @@ import Testing
 @Suite("Visitor Tests")
 struct VisitorTests {
 
+  @Test func visitOptional() async throws {
+    let block = OptionalBlock()
+    var visitor = TestAllVisitor()
+    visitor.visit(block)
+    let expected = [
+      "visitBlock(_:):OptionalBlock", "visitTuple(_:)", "visitBlock(_:):String",
+      "OptionalBlock(idk: Optional(\"Hello\"))", "visitArray(_:)", "visitBlock(_:):String", "Hello",
+    ]
+    #expect(expected == visitor.visited)
+  }
+
   @Test func visitEntry() async throws {
     let block = Entry()
     var visitor = TestAllVisitor()

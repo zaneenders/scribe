@@ -25,6 +25,16 @@ struct All: Block {
   }
 }
 
+struct OptionalBlock: Block {
+  var idk: String? = "Hello"
+  var component: some Block {
+    "\(self)"
+    if let hello = idk {
+      hello
+    }
+  }
+}
+
 // Very simple block that would be a Tuple and String blocks.
 struct BasicText: Block {
   var component: some Block {
