@@ -6,8 +6,8 @@ import Testing
 @MainActor  // UI Block test run on main thread.
 @Suite("New Tree Tests")
 struct NewTreeTests {
-  @Test func newTree() async throws {
-    enableTestLogging(write_to_file: true)
+
+  @Test func treeEntry() async throws {
     let block = Entry()
     let tree = block.toElement()
     var parser = TreeParser(width: 80, height: 24)
@@ -17,6 +17,79 @@ struct NewTreeTests {
       Zane was here :0
       Job running: ready
       Nested[text: Hello]
+      """#
+    let window = Window(expectedText, width: 80, height: 24)
+    #expect(window.tiles == parser.tiles)
+  }
+
+  @Test func treeAll() async throws {
+    let block = All()
+    let tree = block.toElement()
+    var parser = TreeParser(width: 80, height: 24)
+    parser.render(tree)
+    let expectedText = #"""
+      Button
+      A
+      Zane
+      Was
+      Here
+      """#
+    let window = Window(expectedText, width: 80, height: 24)
+    #expect(window.tiles == parser.tiles)
+  }
+
+  @Test func treeOptionalBlock() async throws {
+    let block = OptionalBlock()
+    let tree = block.toElement()
+    var parser = TreeParser(width: 80, height: 24)
+    parser.render(tree)
+    let expectedText = #"""
+      OptionalBlock(idk: Optional("Hello"))
+      Hello
+      """#
+    // print(parser._raw)
+    let window = Window(expectedText, width: 80, height: 24)
+    #expect(window.tiles == parser.tiles)
+  }
+
+  @Test func treeBasicTupleText() async throws {
+    let block = BasicTupleText()
+    let tree = block.toElement()
+    var parser = TreeParser(width: 80, height: 24)
+    parser.render(tree)
+    let expectedText = #"""
+      Hello
+      Zane
+      """#
+    let window = Window(expectedText, width: 80, height: 24)
+    #expect(window.tiles == parser.tiles)
+  }
+
+  @Test func treeSelectionBlock() async throws {
+    let block = SelectionBlock()
+    let tree = block.toElement()
+    var parser = TreeParser(width: 80, height: 24)
+    parser.render(tree)
+    let expectedText = #"""
+      Hello
+      Zane
+      was
+      here
+      0
+      1
+      2
+      """#
+    let window = Window(expectedText, width: 80, height: 24)
+    #expect(window.tiles == parser.tiles)
+  }
+
+  @Test func treeAsyncUpdateStateUpdate() async throws {
+    let block = AsyncUpdateStateUpdate()
+    let tree = block.toElement()
+    var parser = TreeParser(width: 80, height: 24)
+    parser.render(tree)
+    let expectedText = #"""
+      ready
       """#
     let window = Window(expectedText, width: 80, height: 24)
     #expect(window.tiles == parser.tiles)

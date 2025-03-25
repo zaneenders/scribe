@@ -25,6 +25,22 @@ struct TreeParser {
     return out
   }
 
+  // Used for helping create test.
+  // Doesn't use .ascii
+  var _raw: String {
+    var out = ""
+    for row in tiles {
+      var line = ""
+      for rune in row {
+        line += "\(rune.symbol)"
+      }
+      line += "\n"
+      out += line
+    }
+    out.removeLast()  // remove last newline.
+    return out
+  }
+
   mutating func render(_ node: Element) {
     switch node {
     case let .composed(e):
