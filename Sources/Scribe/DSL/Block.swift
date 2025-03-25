@@ -24,26 +24,26 @@ extension Block {
   /// ergonomic movements over the tree.
   /// moves ArrayBlocks and TupleBlocks into the same group ``[Element]`` type.
   /// - Returns: A reshaped ``Block`` tree in the form of an Element tree.
-  func toElement() -> Element {
+  func toL1Element() -> L1Element {
     if let str = self as? String {
       return .text(str, nil)
     } else if let text = self as? Text {
       return .text(text.text, nil)
     } else if let actionBlock = self as? any ActionBlock {
-      return .wrapped(actionBlock.component.toElement(), actionBlock.action)
+      return .wrapped(actionBlock.component.toL1Element(), actionBlock.action)
     } else if let arrayBlock = self as? any ArrayBlocks {
       return makeGroup(from: arrayBlock._children)
     } else if let tupleArray = self as? any TupleBlocks {
       return makeGroup(from: tupleArray._children)
     } else {
-      return .composed(self.component.toElement())
+      return .composed(self.component.toL1Element())
     }
   }
 
-  private func makeGroup(from children: [any Block]) -> Element {
-    var group: [Element] = []
+  private func makeGroup(from children: [any Block]) -> L1Element {
+    var group: [L1Element] = []
     for child in children {
-      group.append(child.toElement())
+      group.append(child.toL1Element())
     }
     return .group(group)
   }

@@ -41,7 +41,7 @@ struct TreeParser {
     return out
   }
 
-  mutating func render(_ node: Element) {
+  mutating func render(_ node: L1Element) {
     switch node {
     case let .composed(e):
       render(e)

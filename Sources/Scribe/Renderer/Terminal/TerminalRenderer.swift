@@ -11,7 +11,7 @@ extension TerminalRenderer: Renderer {
     */
     let before = clock.now
     let size = Self.size
-    let tree = block.toElement()
+    let tree = block.toL1Element()
     var parser = TreeParser(width: size.x, height: size.y)
     parser.render(tree)
     Self.write(frame: parser.ascii)
