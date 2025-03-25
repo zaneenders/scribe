@@ -9,10 +9,9 @@ struct NewTreeTests {
   @Test func newTree() async throws {
     enableTestLogging(write_to_file: true)
     let block = Entry()
-    var renderer = NewTreeRenderer(width: 80, height: 24)
-    renderer.view(block, with: BlockState())
-
-    // 80 x 24 expected
+    let tree = block.toElement()
+    var parser = TreeParser(width: 80, height: 24)
+    parser.render(tree)
     let expectedText = #"""
       Hello, I am Scribe.
       Zane was here :0
@@ -20,7 +19,7 @@ struct NewTreeTests {
       Nested[text: Hello]
       """#
     let window = Window(expectedText, width: 80, height: 24)
-    #expect(window.tiles == renderer.tiles)
+    #expect(window.tiles == parser.tiles)
   }
 }
 
