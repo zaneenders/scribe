@@ -26,9 +26,9 @@ extension Block {
   /// - Returns: A reshaped ``Block`` tree in the form of an Element tree.
   func toL1Element() -> L1Element {
     if let str = self as? String {
-      return .text(str, nil)
+      return .text(str)
     } else if let text = self as? Text {
-      return .text(text.text, nil)
+      return .text(text.text)
     } else if let actionBlock = self as? any ActionBlock {
       return .wrapped(actionBlock.component.toL1Element(), actionBlock.action)
     } else if let arrayBlock = self as? any ArrayBlocks {

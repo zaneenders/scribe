@@ -51,7 +51,7 @@ struct TreeParser {
       for child in children {
         render(child)
       }
-    case let .text(text, action):
+    case let .text(text):
       place(text, count, selected: false)
       count += 1
     }
