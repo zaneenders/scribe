@@ -18,26 +18,72 @@ struct SelectionTests {
         "[Hello, I am Scribe.]", "[Job running: ready]", "[Nested[text: Hello]]",
         "[Zane was here :0]",
       ])
-    // Move in
-    container.testMoveIn(
+
+    container.moveIn()
+    container.expectState(
       &renderer,
       expected: [
         "[Nested[text: Hello]]", "[Zane was here :0]", "[Hello, I am Scribe.]",
         "[Job running: ready]",
       ])
 
-    container.testMoveIn(
+    container.moveIn()
+    container.expectState(
       &renderer,
       expected: [
         "[Hello, I am Scribe.]", "Job running: ready", "Nested[text: Hello]", "Zane was here :0",
       ])
     container.action(.lowercaseI)
-
     container.expectState(
       &renderer,
       expected: [
-        "Zane was here :0", "Job running: ready", "[Hello, I am Scribe.!]", "Nested[text: Hello#]",
+        "Zane was here :0", "Nested[text: Hello#]", "[Hello, I am Scribe.!]", "Job running: ready",
       ])
+    container.moveDown()
+    container.expectState(
+      &renderer,
+      expected: [
+        "[Zane was here :0]", "Nested[text: Hello#]", "Hello, I am Scribe.!", "Job running: ready",
+      ])
+    container.action(.lowercaseE)
+    container.expectState(
+      &renderer,
+      expected: [
+        "Job running: ready", "[Zane was here :1]", "Nested[text: Hello#]", "Hello, I am Scribe.!",
+      ])
+    container.moveDown()
+    container.expectState(
+      &renderer,
+      expected: [
+        "Zane was here :1", "[Job running: ready]", "Nested[text: Hello#]", "Hello, I am Scribe.!",
+      ])
+    container.action(.lowercaseI)
+    container.expectState(
+      &renderer,
+      expected: [
+        "Zane was here :1", "[Job running: running]", "Nested[text: running]",
+        "Hello, I am Scribe.!",
+      ])
+    try await Task.sleep(for: .seconds(0.5))
+    container.expectState(
+      &renderer,
+      expected: [
+        "Zane was here :1", "[Job running: running]", "Nested[text: running]",
+        "Hello, I am Scribe.!",
+      ])
+    try await Task.sleep(for: .seconds(1))
+    container.expectState(
+      &renderer,
+      expected: [
+        "Zane was here :1", "[Job running: ready]", "Nested[text: ready]", "Hello, I am Scribe.!",
+      ])
+    container.moveUp()
+    container.expectState(
+      &renderer,
+      expected: [
+        "[Zane was here :1]", "Job running: ready", "Nested[text: ready]", "Hello, I am Scribe.!",
+      ])
+
   }
 
   @Test func selectAll() async throws {
@@ -47,10 +93,11 @@ struct SelectionTests {
     container.expectState(&renderer, expected: ["[A]", "[Button]", "[Here]", "[Was]", "[Zane]"])
     // Move in
     container.moveIn()
-    container.testMoveIn(
-      &renderer,
-      expected: ["[Button]", "A", "Zane", "Was", "Here"])
-    container.printState(&renderer)
+
+    container.moveIn()
+    container.expectState(&renderer, expected: ["[Button]", "A", "Zane", "Was", "Here"])
+    container.action(.lowercaseI)
+    container.expectState(&renderer, expected: ["[Button]", "B", "Zane", "Was", "Here"])
   }
 
   @Test func selectOptionalBlock() async throws {
@@ -59,7 +106,6 @@ struct SelectionTests {
     var renderer = TestRenderer()
     container.expectState(
       &renderer, expected: ["[Hello]", "[OptionalBlock(idk: Optional(\"Hello\"))]"])
-    // TODO movements
   }
 
   @Test func selectBasicTupleText() async throws {
@@ -67,7 +113,6 @@ struct SelectionTests {
     var container = BlockContainer(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
-    // TODO movements
   }
 
   @Test func selectSelectionBlock() async throws {
@@ -78,66 +123,89 @@ struct SelectionTests {
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
 
     // Move in
-    container.testMoveIn(
+    container.moveIn()
+    container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
 
     // Move in
-    container.testMoveIn(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
+    container.moveIn()
+    container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
 
     // Move in
-    container.testMoveIn(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
+    container.moveIn()
+    container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
 
     // Move in
-    container.testMoveIn(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
+    container.moveIn()
+    container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "1", "2", "[Zane]", "Hello", "here", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "1", "2", "[Zane]", "Hello", "here", "was"])
 
     // Move Up
-    container.testMoveUp(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
+    container.moveUp()
+    container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "1", "2", "[Zane]", "Hello", "here", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "1", "2", "[Zane]", "Hello", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "1", "2", "Zane", "Hello", "here", "[was]"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "Hello", "here", "[was]"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "1", "2", "Zane", "Hello", "[here]", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "Hello", "[here]", "was"])
 
     // Move Down
-    container.testMoveDown(
+    container.moveDown()
+    container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "Zane", "Hello", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["[0]", "1", "2", "Zane", "Hello", "here", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["[0]", "1", "2", "Zane", "Hello", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "[1]", "2", "Zane", "Hello", "here", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "[1]", "2", "Zane", "Hello", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "1", "[2]", "Zane", "Hello", "here", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "1", "[2]", "Zane", "Hello", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "1", "[2]", "Zane", "Hello", "here", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "1", "[2]", "Zane", "Hello", "here", "was"])
 
     // Move Down
-    container.testMoveDown(&renderer, expected: ["0", "1", "[2]", "Zane", "Hello", "here", "was"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["0", "1", "[2]", "Zane", "Hello", "here", "was"])
+
+    // Move Up
+    container.moveUp()
+    container.expectState(&renderer, expected: ["0", "[1]", "2", "Zane", "Hello", "here", "was"])
 
     // Move out
-    container.testMoveOut(
+    container.moveOut()
+    container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "Zane", "Hello", "here", "was"])
 
     // Move out
-    container.testMoveOut(
+    container.moveOut()
+    container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
 
     // Move out
-    container.testMoveOut(
+    container.moveOut()
+    container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
 
     // Move out
-    container.testMoveOut(
+    container.moveOut()
+    container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
   }
 
@@ -152,7 +220,8 @@ struct SelectionTests {
     container.expectState(&renderer, expected: ["[ready]"])
 
     // Move in
-    container.testMoveIn(&renderer, expected: ["[ready]"])
+    container.moveIn()
+    container.expectState(&renderer, expected: ["[ready]"])
 
     // Action
     container.action(.lowercaseI)
@@ -179,26 +248,6 @@ extension BlockContainer {
   }
   mutating func moveIn() {
     self.action(.lowercaseL)
-  }
-
-  mutating func testMoveUp(_ renderer: inout TestRenderer, expected: [String]) {
-    moveUp()
-    expectState(&renderer, expected: expected)
-  }
-
-  mutating func testMoveDown(_ renderer: inout TestRenderer, expected: [String]) {
-    moveDown()
-    expectState(&renderer, expected: expected)
-  }
-
-  mutating func testMoveIn(_ renderer: inout TestRenderer, expected: [String]) {
-    moveIn()
-    expectState(&renderer, expected: expected)
-  }
-
-  mutating func testMoveOut(_ renderer: inout TestRenderer, expected: [String]) {
-    moveOut()
-    expectState(&renderer, expected: expected)
   }
 
   mutating func expectState(_ renderer: inout TestRenderer, expected: [String]) {
