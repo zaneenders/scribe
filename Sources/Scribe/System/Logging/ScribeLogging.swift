@@ -83,10 +83,7 @@ struct ScribeLogging: LogHandler {
     out += " \(message)\n"
     do {
       // I wonder if I should open this at the beginning of the program instead of each log call.
-      let fd = try FileDescriptor.open(
-        file_path, .readWrite, options: [.append], permissions: .ownerReadWrite)
-      try fd.writeAll(out.utf8)
-      try fd.close()
+      try file_path.appendAtEnd(out)
     } catch {
       fatalError("Unable to create log file: \(file_path.string)")
     }
@@ -115,5 +112,14 @@ struct ScribeLogging: LogHandler {
 
   private func tracing(_ level: Logger.Level, _ message: Logger.Message) {
     print("\(Log.id):[\("\(level)".uppercased())]\(message)")
+  }
+}
+
+extension FilePath {
+  func appendAtEnd(_ contents: String) throws {
+    let fd = try FileDescriptor.open(
+      self, .readWrite, options: [.append, .create], permissions: .ownerReadWrite)
+    try fd.writeAll(contents.utf8)
+    try fd.close()
   }
 }
