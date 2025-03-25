@@ -8,6 +8,18 @@ import Testing
 @Suite("Visitor Tests")
 struct VisitorTests {
 
+  @Test func visitAll() async throws {
+    let block = All()
+    var visitor = TestAllVisitor()
+    visitor.visit(block)
+    let expected = [
+      "visitBlock(_:):All", "visitTuple(_:)", "visitModified(_:)", "visitBlock(_:):String",
+      "Button", "visitBlock(_:):String", "A", "visitArray(_:)", "visitBlock(_:):String", "Zane",
+      "visitBlock(_:):String", "Was", "visitBlock(_:):String", "Here",
+    ]
+    #expect(expected == visitor.visited)
+  }
+
   @Test func visitOptional() async throws {
     let block = OptionalBlock()
     var visitor = TestAllVisitor()
@@ -15,6 +27,43 @@ struct VisitorTests {
     let expected = [
       "visitBlock(_:):OptionalBlock", "visitTuple(_:)", "visitBlock(_:):String",
       "OptionalBlock(idk: Optional(\"Hello\"))", "visitArray(_:)", "visitBlock(_:):String", "Hello",
+    ]
+    #expect(expected == visitor.visited)
+  }
+
+  // Visit all blocks of the ``All`` ``Block`` to verify that all paths are being reached.
+  @Test func visitBasicText() async throws {
+    let block = BasicTupleText()
+    var visitor = TestAllVisitor()
+    visitor.visit(block)
+    let expected = [
+      "visitBlock(_:):BasicTupleText", "visitTuple(_:)", "visitBlock(_:):String", "Hello",
+      "visitBlock(_:):String", "Zane",
+    ]
+    #expect(expected == visitor.visited)
+  }
+
+  // Visit all blocks of the ``All`` ``Block`` to verify that all paths are being reached.
+  @Test func visitSelectionBlock() async throws {
+    let block = SelectionBlock()
+    var visitor = TestAllVisitor()
+    visitor.visit(block)
+    let expected = [
+      "visitBlock(_:):SelectionBlock", "visitTuple(_:)", "visitBlock(_:):String", "Hello",
+      "visitBlock(_:):String", "Zane", "visitBlock(_:):String", "was", "visitBlock(_:):String",
+      "here", "visitArray(_:)", "visitBlock(_:):String", "0", "visitBlock(_:):String", "1",
+      "visitBlock(_:):String", "2",
+    ]
+    #expect(expected == visitor.visited)
+  }
+
+  @Test func visitAsyncUpdateStateUpdate() async throws {
+    let block = AsyncUpdateStateUpdate()
+    var visitor = TestAllVisitor()
+    visitor.visit(block)
+    let expected = [
+      "visitBlock(_:):AsyncUpdateStateUpdate", "visitModified(_:)", "visitBlock(_:):String",
+      "ready",
     ]
     #expect(expected == visitor.visited)
   }
@@ -28,19 +77,6 @@ struct VisitorTests {
       "Hello, I am Scribe.", "visitModified(_:)", "visitBlock(_:):String", "Zane was here :0",
       "visitModified(_:)", "visitBlock(_:):String", "Job running: ready", "visitBlock(_:):Nested",
       "visitBlock(_:):String", "Nested[text: Hello]",
-    ]
-    #expect(expected == visitor.visited)
-  }
-
-  // Visit all blocks of the ``All`` ``Block`` to verify that all paths are being reached.
-  @Test func visitAll() async throws {
-    let block = All()
-    var visitor = TestAllVisitor()
-    visitor.visit(block)
-    let expected = [
-      "visitBlock(_:):All", "visitTuple(_:)", "visitModified(_:)", "visitBlock(_:):String",
-      "Button", "visitBlock(_:):String", "A", "visitArray(_:)", "visitBlock(_:):String", "Zane",
-      "visitBlock(_:):String", "Was", "visitBlock(_:):String", "Here",
     ]
     #expect(expected == visitor.visited)
   }
