@@ -1,5 +1,5 @@
 /// Represents one monospaced unit of the screen.
-struct Tile {
+struct Tile: Equatable {
   let symbol: Character
   let fg: Chroma.Color
   let bg: Chroma.Color

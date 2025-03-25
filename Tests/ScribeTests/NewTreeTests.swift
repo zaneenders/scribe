@@ -7,86 +7,70 @@ import Testing
 @Suite("New Tree Tests")
 struct NewTreeTests {
   @Test func newTree() async throws {
-    enableTestLogging(write_to_file: false)
+    enableTestLogging(write_to_file: true)
     let block = Entry()
-    var renderer = NewTreeRenderer()
+    var renderer = NewTreeRenderer(width: 80, height: 24)
     renderer.view(block, with: BlockState())
-    let expected = [
-      "[Composed: start]", "[Group: start]", "[Wrapped, action:true]",
-      "[Hello, I am Scribe., action:false]", "[Wrapped: end]", "[Wrapped, action:true]",
-      "[Zane was here :0, action:false]", "[Wrapped: end]", "[Wrapped, action:true]",
-      "[Job running: ready, action:false]", "[Wrapped: end]", "[Composed: start]",
-      "[Nested[text: Hello], action:false]", "[Composed: end]", "[Group: end]", "[Composed: end]",
-    ]
-    #expect(renderer.result == expected)
+
+    // 80 x 24 expected
+    let expectedText = #"""
+      Hello, I am Scribe.
+      Zane was here :0
+      Job running: ready
+      Nested[text: Hello]
+      """#
+    let window = Window(expectedText, width: 80, height: 24)
+    #expect(window.tiles == renderer.tiles)
   }
 }
 
-struct TestTreeParser {
-  var nodes: [String] = []
-  mutating func view(_ node: Element) {
-    switch node {
-    case let .composed(e):
-      nodes.append("[Composed: start]")
-      view(e)
-      nodes.append("[Composed: end]")
-    case let .wrapped(e, action):
-      nodes.append("[Wrapped, action:\(action != nil)]")
-      view(e)
-      nodes.append("[Wrapped: end]")
-    case let .group(children):
-      nodes.append("[Group: start]")
-      for child in children {
-        view(child)
+struct Window {
+  let height: Int
+  let width: Int
+  var count = 0
+
+  var tiles: [[Tile]]
+
+  init(_ contents: String, width: Int, height: Int) {
+    self.tiles = Array(repeating: Array(repeating: Tile(), count: width), count: height)
+    self.height = height
+    self.width = width
+    let lines = contents.split(separator: "\n")
+    for (i, line) in lines.enumerated() {
+      count = i
+      place("\(line)", i, selected: false)
+    }
+  }
+
+  private mutating func place(_ text: String, _ index: Int, selected: Bool) {
+    // TODO why even take the index in if we aren't going to use it.
+    let fg: Chroma.Color
+    let bg: Chroma.Color
+    if selected {
+      fg = .yellow
+      bg = .purple
+    } else {
+      fg = .blue
+      bg = .green
+    }
+    var placed = 0
+    var x = 0
+    place_loop: for (i, char) in text.enumerated() {
+      guard x + i < width else {
+        Log.error("Frame width exceeded with \(text)")
+        break place_loop
       }
-      nodes.append("[Group: end]")
-    case let .text(text, action):
-      nodes.append("[\(text), action:\(action != nil)]")
+      guard char != "\n" else {
+        Log.error("Found newline in word \(text)")
+        break place_loop
+      }
+      guard count < height else {
+        Log.error("Too many rows \(text)")
+        break place_loop
+      }
+      tiles[count][x + i] = Tile(symbol: char, fg: fg, bg: bg)
+      placed += 1
     }
-  }
-}
-
-struct NewTreeRenderer: Renderer {
-  var result: [String] = []
-
-  mutating func view(_ block: borrowing some Block, with state: BlockState) {
-    let tree = convert(block)
-    var parser = TestTreeParser()
-    parser.view(tree)
-    result = parser.nodes
-  }
-}
-
-indirect enum Element {
-  case text(String, BlockAction?)
-  case wrapped(Element, BlockAction?)
-  case group([Element])
-  case composed(Element)
-}
-
-@MainActor
-func convert(_ block: some Block) -> Element {
-  if let str = block as? String {
-    return .text(str, nil)
-  } else if let text = block as? Text {
-    return .text(text.text, nil)
-  } else if let actionBlock = block as? any ActionBlock {
-    return .wrapped(convert(actionBlock.component), actionBlock.action)
-  } else if let arrayBlock = block as? any ArrayBlocks {
-    let children: [any Block] = arrayBlock._children
-    var group: [Element] = []
-    for child in children {
-      group.append(convert(child))
-    }
-    return .group(group)
-  } else if let tupleArray = block as? any TupleBlocks {
-    let children: [any Block] = tupleArray._children
-    var group: [Element] = []
-    for child in children {
-      group.append(convert(child))
-    }
-    return .group(group)
-  } else {
-    return .composed(convert(block.component))
+    x += placed
   }
 }

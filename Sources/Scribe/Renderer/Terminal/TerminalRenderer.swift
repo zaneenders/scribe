@@ -11,8 +11,10 @@ extension TerminalRenderer: Renderer {
     */
     let before = clock.now
     let size = Self.size
-    var parser = RenderParser(state: state, width: size.x, height: size.y)
-    parser.visit(block)
+    var parser = NewTreeRenderer(width: size.x, height: size.y)
+    // var parser = RenderParser(state: state, width: size.x, height: size.y)
+    // parser.visit(block)
+    parser.view(block, with: state)
     Self.write(frame: parser.ascii)
     let after = clock.now
     Log.trace("\(before.duration(to: after))")
