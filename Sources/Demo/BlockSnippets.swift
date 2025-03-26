@@ -36,7 +36,7 @@ struct OptionalBlock: Block {
 }
 
 // Very simple block that would be a Tuple and String blocks.
-struct BasicText: Block {
+struct BasicTupleText: Block {
   var component: some Block {
     "Hello"
     "Zane"

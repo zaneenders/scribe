@@ -1,6 +1,5 @@
-/*
-The parser for the constructed block tree from the user that is parsed and rendered to the screen.
-*/
+/// The parser for the constructed block tree from the user that is parsed and
+/// rendered to the screen.
 @resultBuilder
 @MainActor
 public enum BlockParser {

@@ -1,22 +1,20 @@
-/// Hold the state of the ``Block`` from the @State and @Tracked variables.
-@available(*, deprecated, message: "Moving towards TerminalRenderer.")
-struct RenderParser {
-  // TODO remove un accessed values from cache.
-  private(set) var state: BlockState
+struct L1ElementRender: L1SelectionWalker {
+
+  internal var isSelected: Bool = false
   var currentHash: Hash
-
-  init(state: BlockState, width: Int, height: Int) {
-    self.state = state
-    self.tiles = Array(repeating: Array(repeating: Tile(), count: width), count: height)
-    self.width = width
-    self.height = height
-    self.currentHash = hash(contents: "0")
-  }
-
   var width: Int
   var height: Int
   var tiles: [[Tile]]
   var count = 0
+  let state: BlockState
+
+  init(state: BlockState, width: Int, height: Int) {
+    self.state = state
+    self.height = height
+    self.width = width
+    self.tiles = Array(repeating: Array(repeating: Tile(), count: width), count: height)
+    currentHash = hash(contents: "\(0)")
+  }
 
   var ascii: String {
     var out = ""
@@ -32,13 +30,25 @@ struct RenderParser {
     return out
   }
 
-  var isSelected: Bool = false
+  // Used for helping create test.
+  // Doesn't use .ascii
+  var _raw: String {
+    var out = ""
+    for row in tiles {
+      var line = ""
+      for rune in row {
+        line += "\(rune.symbol)"
+      }
+      line += "\n"
+      out += line
+    }
+    out.removeLast()  // remove last newline.
+    return out
+  }
 
-  mutating func updateSize(width: Int, height: Int) {
-    self.count = 0
-    self.tiles = Array(repeating: Array(repeating: Tile(), count: width), count: height)
-    self.width = width
-    self.height = height
+  mutating func leafNode(_ text: String) {
+    place(text, count, selected: isSelected)
+    count += 1
   }
 
   private mutating func place(_ text: String, _ index: Int, selected: Bool) {
@@ -62,22 +72,13 @@ struct RenderParser {
         Log.error("Found newline in word \(text)")
         break place_loop
       }
-      guard count < height else {
+      guard index < height else {
         Log.error("Too many rows \(text)")
         break place_loop
       }
-      tiles[count][x + i] = Tile(symbol: char, fg: fg, bg: bg)
+      tiles[index][x + i] = Tile(symbol: char, fg: fg, bg: bg)
       placed += 1
     }
     x += placed
-  }
-}
-
-extension RenderParser: SelectionVisitor {
-
-  mutating func leafNode(_ text: Text) {
-    Log.trace("\(isSelected) \(text.text)")
-    place(text.text, count, selected: isSelected)
-    count += 1
   }
 }

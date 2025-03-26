@@ -7,9 +7,10 @@ struct BlockContainer: ~Copyable {
 
   init(_ block: consuming some Block) {
     self.block = block
-    var parser = InitialParser(state: state, first: true)
-    parser.visit(self.block)
-    self.state = parser.state
+    var l1Parser = InitialWalk(state: state, first: true)
+    let l1tree = self.block.toL1Element()
+    l1Parser.walk(l1tree)
+    self.state = l1Parser.state
   }
 
   /// This is called
@@ -24,29 +25,29 @@ struct BlockContainer: ~Copyable {
     switch code {
     case .lowercaseL:
       Log.debug("MoveIn")
-      var move = MoveInVisitor(state: state)
-      move.visit(block)
+      var move = MoveInWalker(state: state)
+      move.walk(block.toL1Element())
       self.state = move.state
     case .lowercaseS:
       Log.debug("MoveOut")
-      var move = MoveOutVisitor(state: state)
-      move.visit(block)
+      var move = MoveOutWalker(state: state)
+      move.walk(block.toL1Element())
       self.state = move.state
     case .lowercaseJ:
       Log.debug("MoveDown")
-      var move = MoveDownVisitor(state: state)
-      move.visit(block)
+      var move = MoveDownWalker(state: state)
+      move.walk(block.toL1Element())
       self.state = move.state
     case .lowercaseF:
       Log.debug("MoveUp")
-      var move = MoveUpVisitor(state: state)
-      move.visit(block)
+      var move = MoveUpWalker(state: state)
+      move.walk(block.toL1Element())
       self.state = move.state
     default:
       if let char = String(bytes: [code.rawValue], encoding: .utf8) {
         Log.debug("input:\(char)")
-        var action = ActionVisitor(state: state, input: char)
-        action.visit(block)
+        var action = ActionWalker(state: state, input: char)
+        action.walk(block.toL1Element())
         self.state = action.state
       }
     }

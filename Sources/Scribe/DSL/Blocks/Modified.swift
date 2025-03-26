@@ -16,11 +16,26 @@ extension Block {
   }
 }
 
-struct Modified<W: Block>: Block {
+struct Modified<W: Block>: Block, ActionBlock {
+  let type: ActionType = .modified
   let wrapped: W
   let key: String
   let action: BlockAction
   var component: some Block {
     wrapped.component
   }
+}
+
+@MainActor
+protocol ActionBlock {
+  var type: ActionType { get }
+  var key: String { get }
+  var action: BlockAction { get }
+  associatedtype Wrapped: Block
+  var component: Wrapped { get }
+}
+
+enum ActionType {
+  case modified
+  case text
 }
