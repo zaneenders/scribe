@@ -42,8 +42,8 @@ struct BlockContainer: ~Copyable {
       self.treeState = move.state
     case .lowercaseF:
       Log.debug("MoveUp")
-      var move = MoveUpVisitor(state: treeState)
-      move.visit(block)
+      var move = MoveUpWalker(state: treeState)
+      move.walk(block.toL1Element())
       self.treeState = move.state
     default:
       if let char = String(bytes: [code.rawValue], encoding: .utf8) {
