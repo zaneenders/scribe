@@ -27,8 +27,8 @@ struct BlockContainer: ~Copyable {
     switch code {
     case .lowercaseL:
       Log.debug("MoveIn")
-      var move = MoveInVisitor(state: treeState)
-      move.visit(block)
+      var move = MoveInWalker(state: treeState)
+      move.walk(block.toL1Element())
       self.treeState = move.state
     case .lowercaseS:
       Log.debug("MoveOut")
