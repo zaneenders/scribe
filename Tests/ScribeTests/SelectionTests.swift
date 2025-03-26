@@ -86,6 +86,28 @@ struct SelectionTests {
 
   }
 
+  @Test func selectEntryMoveToNested() async throws {
+    let block = Entry()
+    var container = BlockContainer(block)
+    var renderer = TestRenderer()
+    container.moveIn()
+    container.moveIn()
+    container.moveDown()
+    container.moveDown()
+    container.moveDown()
+    container.expectState(
+      &renderer,
+      expected: [
+        "Zane was here :0", "Job running: ready", "[Nested[text: Hello]]", "Hello, I am Scribe.",
+      ])
+    container.moveUp()
+    container.expectState(
+      &renderer,
+      expected: [
+        "Zane was here :0", "[Job running: ready]", "Nested[text: Hello]", "Hello, I am Scribe.",
+      ])
+  }
+
   @Test func selectAll() async throws {
     let block = All()
     var container = BlockContainer(block)

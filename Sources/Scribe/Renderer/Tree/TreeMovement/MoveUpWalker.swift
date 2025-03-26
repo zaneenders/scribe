@@ -63,10 +63,12 @@ struct MoveUpWalker: L1ElementWalker {
       walk(element)
       switch mode {
       case .breakOutOfChild:
-        mode = .foundSelected
         if let prevIndex {
+          mode = .foundSelected
           currentHash = hash(contents: "\(ourHash)\(#function)\(prevIndex)")
           walk(group[prevIndex])
+        } else {
+          // only one child.
         }
         return
       case .findingSelected, .foundSelected, .selectionUpdated:
