@@ -4,12 +4,19 @@
 struct BlockContainer: ~Copyable {
   private let block: any Block
   private var state = BlockState()
+  private var treeState = BlockState()
 
   init(_ block: consuming some Block) {
     self.block = block
     var parser = InitialParser(state: state, first: true)
     parser.visit(self.block)
     self.state = parser.state
+
+    // Moving towards Walking
+    var l1Parser = InitialWalk(state: treeState, first: true)
+    let l1tree = self.block.toL1Element()
+    l1Parser.walk(l1tree)
+    self.treeState = l1Parser.state
   }
 
   /// This is called
