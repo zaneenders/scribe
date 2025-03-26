@@ -8,8 +8,6 @@ protocol Walkable {
 extension L1Element: Walkable {
   func _walk(_ walker: inout some L1ElementWalker) {
     switch self {
-    case let .composed(e):
-      walker.walkComposed(e)
     case let .group(group):
       walker.walkGroup(group)
     case let .text(text):

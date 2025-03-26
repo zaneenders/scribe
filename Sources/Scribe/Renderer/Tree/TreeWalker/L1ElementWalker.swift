@@ -3,7 +3,6 @@ protocol L1ElementWalker {
   mutating func walkWrapped(_ element: L1Element, _ action: BlockAction?)
   mutating func walkText(_ text: String)
   mutating func walkGroup(_ group: [L1Element])
-  mutating func walkComposed(_ composed: L1Element)
 }
 
 /*

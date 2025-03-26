@@ -36,7 +36,7 @@ extension Block {
     } else if let tupleArray = self as? any TupleBlocks {
       return makeGroup(from: tupleArray._children)
     } else {
-      return .composed(self.component.toL1Element())
+      return .group([self.component.toL1Element()])
     }
   }
 

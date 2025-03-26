@@ -4,5 +4,4 @@ indirect enum L1Element {
   case text(String)
   case wrapped(L1Element, BlockAction?)
   case group([L1Element])
-  case composed(L1Element)
 }

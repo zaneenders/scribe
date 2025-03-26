@@ -93,45 +93,4 @@ struct MoveInWalker: L1HashWalker {
     self.mode = .selectionUpdated
     runAfter()
   }
-
-  mutating func beforeTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {
-    Log.debug("\(stateString) \(tuple)")
-    runBefore()
-  }
-
-  mutating func afterTuple<each Component>(_ tuple: _TupleBlock<repeat each Component>)
-  where repeat each Component: Block {
-    Log.debug("\(stateString) \(tuple)")
-    runAfter()
-  }
-
-  mutating func beforeArray<B: Block>(_ array: _ArrayBlock<B>) {
-    Log.debug("\(stateString) \(array)")
-    runBefore()
-  }
-
-  mutating func afterArray<B>(_ array: _ArrayBlock<B>) where B: Block {
-    Log.debug("\(stateString) \(array)")
-    runAfter()
-  }
-
-  mutating func beforeModified<W: Block>(_ modified: Modified<W>) {
-    Log.debug("\(stateString) \(modified)")
-    runBefore()
-  }
-
-  mutating func afterModified<W>(_ modified: Modified<W>) where W: Block {
-    Log.debug("\(stateString) \(modified)")
-    runAfter()
-  }
-
-  mutating func beforeBlock(_ block: some Block) {
-    Log.debug("\(stateString) \(block)")
-    runBefore()
-  }
-
-  mutating func afterBlock(_ block: some Block) {
-    Log.debug("\(stateString) \(block)")
-    runAfter()
-  }
 }

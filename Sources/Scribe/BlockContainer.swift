@@ -32,8 +32,8 @@ struct BlockContainer: ~Copyable {
       self.treeState = move.state
     case .lowercaseS:
       Log.debug("MoveOut")
-      var move = MoveOutVisitor(state: treeState)
-      move.visit(block)
+      var move = MoveOutWalker(state: treeState)
+      move.walk(block.toL1Element())
       self.treeState = move.state
     case .lowercaseJ:
       Log.debug("MoveDown")
