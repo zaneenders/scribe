@@ -12,9 +12,9 @@ extension TerminalRenderer: Renderer {
     let before = clock.now
     let size = Self.size
     let tree = block.toL1Element()
-    var parser = TreeParser(width: size.x, height: size.y)
-    parser.render(tree)
-    Self.write(frame: parser.ascii)
+    var walker = L1ElementRender(state: state, width: size.x, height: size.y)
+    walker.walk(tree)
+    Self.write(frame: walker.ascii)
     let after = clock.now
     Log.trace("\(before.duration(to: after))")
   }

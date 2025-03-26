@@ -252,14 +252,14 @@ extension BlockContainer {
 
   mutating func expectState(_ renderer: inout TestRenderer, expected: [String]) {
     self.observe(with: &renderer)
-    let output = renderer.previousVisitor.textObjects.map { $0.value }
+    let output = renderer.previousWalker.textObjects.map { $0.value }
     #expect(output.sorted() == expected.sorted())
   }
 
   // Helper for creating expected arrays
   mutating func printState(_ renderer: inout TestRenderer) {
     self.observe(with: &renderer)
-    let output = renderer.previousVisitor.textObjects.map { $0.value }
+    let output = renderer.previousWalker.textObjects.map { $0.value }
     print(output)
   }
 }

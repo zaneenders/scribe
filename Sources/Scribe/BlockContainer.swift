@@ -3,14 +3,10 @@
 /// and information about which block is selected.
 struct BlockContainer: ~Copyable {
   private let block: any Block
-  private var state = BlockState()
   private var treeState = BlockState()
 
   init(_ block: consuming some Block) {
     self.block = block
-    var parser = InitialParser(state: state, first: true)
-    parser.visit(self.block)
-    self.state = parser.state
 
     // Moving towards Walking
     var l1Parser = InitialWalk(state: treeState, first: true)
@@ -22,7 +18,7 @@ struct BlockContainer: ~Copyable {
   /// This is called
   /// - Parameter renderer: The renderer to draw the current state of the system with.
   func observe<R: Renderer>(with renderer: inout R) where R: ~Copyable {
-    renderer.view(block, with: state)
+    renderer.view(block, with: treeState)
   }
 
   /// Called to trigger a `.bind` function or a movement action.
@@ -31,30 +27,30 @@ struct BlockContainer: ~Copyable {
     switch code {
     case .lowercaseL:
       Log.debug("MoveIn")
-      var move = MoveInVisitor(state: state)
+      var move = MoveInVisitor(state: treeState)
       move.visit(block)
-      self.state = move.state
+      self.treeState = move.state
     case .lowercaseS:
       Log.debug("MoveOut")
-      var move = MoveOutVisitor(state: state)
+      var move = MoveOutVisitor(state: treeState)
       move.visit(block)
-      self.state = move.state
+      self.treeState = move.state
     case .lowercaseJ:
       Log.debug("MoveDown")
-      var move = MoveDownVisitor(state: state)
+      var move = MoveDownVisitor(state: treeState)
       move.visit(block)
-      self.state = move.state
+      self.treeState = move.state
     case .lowercaseF:
       Log.debug("MoveUp")
-      var move = MoveUpVisitor(state: state)
+      var move = MoveUpVisitor(state: treeState)
       move.visit(block)
-      self.state = move.state
+      self.treeState = move.state
     default:
       if let char = String(bytes: [code.rawValue], encoding: .utf8) {
         Log.debug("input:\(char)")
-        var action = ActionVisitor(state: state, input: char)
+        var action = ActionVisitor(state: treeState, input: char)
         action.visit(block)
-        self.state = action.state
+        self.treeState = action.state
       }
     }
   }
