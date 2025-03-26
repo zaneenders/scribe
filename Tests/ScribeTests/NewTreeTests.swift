@@ -10,8 +10,8 @@ struct NewTreeTests {
   @Test func treeEntry() async throws {
     let block = Entry()
     let tree = block.toL1Element()
-    var parser = TreeParser(width: 80, height: 24)
-    parser.render(tree)
+    var parser = L1ElementRender(state: BlockState(), width: 80, height: 24)
+    parser.walk(tree)
     let expectedText = #"""
       Hello, I am Scribe.
       Zane was here :0
@@ -25,8 +25,8 @@ struct NewTreeTests {
   @Test func treeAll() async throws {
     let block = All()
     let tree = block.toL1Element()
-    var parser = TreeParser(width: 80, height: 24)
-    parser.render(tree)
+    var parser = L1ElementRender(state: BlockState(), width: 80, height: 24)
+    parser.walk(tree)
     let expectedText = #"""
       Button
       A
@@ -41,8 +41,8 @@ struct NewTreeTests {
   @Test func treeOptionalBlock() async throws {
     let block = OptionalBlock()
     let tree = block.toL1Element()
-    var parser = TreeParser(width: 80, height: 24)
-    parser.render(tree)
+    var parser = L1ElementRender(state: BlockState(), width: 80, height: 24)
+    parser.walk(tree)
     let expectedText = #"""
       OptionalBlock(idk: Optional("Hello"))
       Hello
@@ -55,8 +55,8 @@ struct NewTreeTests {
   @Test func treeBasicTupleText() async throws {
     let block = BasicTupleText()
     let tree = block.toL1Element()
-    var parser = TreeParser(width: 80, height: 24)
-    parser.render(tree)
+    var parser = L1ElementRender(state: BlockState(), width: 80, height: 24)
+    parser.walk(tree)
     let expectedText = #"""
       Hello
       Zane
@@ -68,8 +68,8 @@ struct NewTreeTests {
   @Test func treeSelectionBlock() async throws {
     let block = SelectionBlock()
     let tree = block.toL1Element()
-    var parser = TreeParser(width: 80, height: 24)
-    parser.render(tree)
+    var parser = L1ElementRender(state: BlockState(), width: 80, height: 24)
+    parser.walk(tree)
     let expectedText = #"""
       Hello
       Zane
@@ -86,8 +86,8 @@ struct NewTreeTests {
   @Test func treeAsyncUpdateStateUpdate() async throws {
     let block = AsyncUpdateStateUpdate()
     let tree = block.toL1Element()
-    var parser = TreeParser(width: 80, height: 24)
-    parser.render(tree)
+    var parser = L1ElementRender(state: BlockState(), width: 80, height: 24)
+    parser.walk(tree)
     let expectedText = #"""
       ready
       """#
