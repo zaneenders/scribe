@@ -29,6 +29,7 @@ struct Modified<W: Block>: Block, ActionBlock {
 @MainActor
 protocol ActionBlock {
   var type: ActionType { get }
+  var key: String { get }
   var action: BlockAction { get }
   associatedtype Wrapped: Block
   var component: Wrapped { get }

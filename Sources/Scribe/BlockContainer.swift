@@ -48,8 +48,8 @@ struct BlockContainer: ~Copyable {
     default:
       if let char = String(bytes: [code.rawValue], encoding: .utf8) {
         Log.debug("input:\(char)")
-        var action = ActionVisitor(state: treeState, input: char)
-        action.visit(block)
+        var action = ActionWalker(state: treeState, input: char)
+        action.walk(block.toL1Element())
         self.treeState = action.state
       }
     }

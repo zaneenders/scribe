@@ -2,6 +2,6 @@
 /// flattened further.
 indirect enum L1Element {
   case text(String)
-  case wrapped(L1Element, BlockAction?)
+  case wrapped(L1Element, key: String, action: BlockAction?)
   case group([L1Element])
 }

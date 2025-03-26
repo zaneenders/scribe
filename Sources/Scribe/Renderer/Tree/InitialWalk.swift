@@ -14,11 +14,11 @@ struct InitialWalk: L1HashWalker {
     setFirstSelection()
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     setFirstSelection()
   }
 
-  mutating func afterWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     // ignored
   }
 

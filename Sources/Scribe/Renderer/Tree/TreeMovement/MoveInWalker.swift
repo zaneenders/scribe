@@ -46,12 +46,12 @@ struct MoveInWalker: L1HashWalker {
     "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     Log.debug("\(stateString) \(element), \(action != nil)")
     runBefore()
   }
 
-  mutating func afterWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     Log.debug("\(stateString) \(element), \(action != nil)")
     runAfter()
   }

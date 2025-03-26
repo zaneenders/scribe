@@ -31,21 +31,21 @@ struct MoveOutWalker: L1ElementWalker {
     "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     Log.debug("\(stateString) \(element), \(action != nil)")
     runBefore()
   }
 
-  mutating func walkWrapped(_ element: L1Element, _ action: BlockAction?) {
-    beforeWrapped(element, action)
+  mutating func walkWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
+    beforeWrapped(element, key, action)
     let ourHash = currentHash
     currentHash = hash(contents: "\(ourHash)\(#function)")
     walk(element)
     currentHash = ourHash
-    afterWrapped(element, action)
+    afterWrapped(element, key, action)
   }
 
-  mutating func afterWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     Log.debug("\(stateString) \(element), \(action != nil)")
     runAfter()
   }

@@ -5,8 +5,8 @@ import Crypto
 /// independent of the contains of the block IE it's mutations.
 protocol L1HashWalker: L1ElementWalker {
   var currentHash: Hash { get set }
-  mutating func beforeWrapped(_ element: L1Element, _ action: BlockAction?)
-  mutating func afterWrapped(_ element: L1Element, _ action: BlockAction?)
+  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?)
+  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?)
   mutating func beforeGroup(_ group: [L1Element])
   mutating func afterGroup(_ group: [L1Element])
   mutating func beforeComposed(_ composed: L1Element)
@@ -14,13 +14,13 @@ protocol L1HashWalker: L1ElementWalker {
 }
 
 extension L1HashWalker {
-  mutating func walkWrapped(_ element: L1Element, _ action: BlockAction?) {
-    beforeWrapped(element, action)
+  mutating func walkWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
+    beforeWrapped(element, key, action)
     let ourHash = currentHash
     currentHash = hash(contents: "\(ourHash)\(#function)")
     walk(element)
     currentHash = ourHash
-    afterWrapped(element, action)
+    afterWrapped(element, key, action)
   }
 
   mutating func walkGroup(_ group: [L1Element]) {

@@ -12,8 +12,8 @@ extension L1Element: Walkable {
       walker.walkGroup(group)
     case let .text(text):
       walker.walkText(text)
-    case let .wrapped(element, action):
-      walker.walkWrapped(element, action)
+    case let .wrapped(element, key, action):
+      walker.walkWrapped(element, key, action)
     }
   }
 }

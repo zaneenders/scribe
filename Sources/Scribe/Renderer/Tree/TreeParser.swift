@@ -43,7 +43,7 @@ struct TreeParser {
 
   mutating func render(_ node: L1Element) {
     switch node {
-    case let .wrapped(e, action):
+    case let .wrapped(e, key, action):
       render(e)
     case let .group(children):
       for child in children {

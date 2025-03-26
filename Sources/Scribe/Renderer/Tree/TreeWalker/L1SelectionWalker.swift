@@ -18,11 +18,11 @@ extension L1SelectionWalker {
     }
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     updateSelected()
   }
 
-  mutating func afterWrapped(_ element: L1Element, _ action: BlockAction?) {
+  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     resetSelected()
   }
 
