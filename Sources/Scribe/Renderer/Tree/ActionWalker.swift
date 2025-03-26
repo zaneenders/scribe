@@ -32,12 +32,4 @@ struct ActionWalker: L1HashWalker {
   mutating func walkText(_ text: String) {}
 
   mutating func visitText(_ text: Text) {}
-
-  mutating func beforeModified<W>(_ modified: Modified<W>) where W: Block {
-    Log.debug("\(#function): \(currentHash), \(state.selected)")
-    let selected = self.state.selected == currentHash
-    if selected && modified.key == input {
-      modified.action()
-    }
-  }
 }

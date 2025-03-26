@@ -10,156 +10,129 @@ struct VisitorTests {
 
   @Test func visitAll() async throws {
     let block = All()
-    var visitor = TestAllVisitor()
-    visitor.visit(block)
+    var walker = TestAllWalker()
+    walker.walk(block.toL1Element())
     let expected = [
-      "visitBlock(_:):All", "visitTuple(_:)", "visitModified(_:)", "visitBlock(_:):String",
-      "Button", "visitBlock(_:):String", "A", "visitArray(_:)", "visitBlock(_:):String", "Zane",
-      "visitBlock(_:):String", "Was", "visitBlock(_:):String", "Here",
+      "walkGroup(_:)", "walkGroup(_:)", "walkWrapped(_:_:_:), i true", "walkText(_:): A",
+      "walkGroup(_:)", "walkText(_:): Zane", "walkText(_:): Was", "walkText(_:): Here",
     ]
-    #expect(expected == visitor.visited)
+    #expect(expected == walker.visited)
   }
 
   @Test func visitOptional() async throws {
     let block = OptionalBlock()
-    var visitor = TestAllVisitor()
-    visitor.visit(block)
+    var walker = TestAllWalker()
+    walker.walk(block.toL1Element())
     let expected = [
-      "visitBlock(_:):OptionalBlock", "visitTuple(_:)", "visitBlock(_:):String",
-      "OptionalBlock(idk: Optional(\"Hello\"))", "visitArray(_:)", "visitBlock(_:):String", "Hello",
+      "walkGroup(_:)", "walkGroup(_:)", "walkText(_:): OptionalBlock(idk: Optional(\"Hello\"))",
+      "walkGroup(_:)", "walkText(_:): Hello",
     ]
-    #expect(expected == visitor.visited)
+    #expect(expected == walker.visited)
   }
 
   // Visit all blocks of the ``All`` ``Block`` to verify that all paths are being reached.
   @Test func visitBasicText() async throws {
     let block = BasicTupleText()
-    var visitor = TestAllVisitor()
-    visitor.visit(block)
-    let expected = [
-      "visitBlock(_:):BasicTupleText", "visitTuple(_:)", "visitBlock(_:):String", "Hello",
-      "visitBlock(_:):String", "Zane",
-    ]
-    #expect(expected == visitor.visited)
+    var walker = TestAllWalker()
+    walker.walk(block.toL1Element())
+    let expected = ["walkGroup(_:)", "walkGroup(_:)", "walkText(_:): Hello", "walkText(_:): Zane"]
+    #expect(expected == walker.visited)
   }
 
   // Visit all blocks of the ``All`` ``Block`` to verify that all paths are being reached.
   @Test func visitSelectionBlock() async throws {
     let block = SelectionBlock()
-    var visitor = TestAllVisitor()
-    visitor.visit(block)
+    var walker = TestAllWalker()
+    walker.walk(block.toL1Element())
     let expected = [
-      "visitBlock(_:):SelectionBlock", "visitTuple(_:)", "visitBlock(_:):String", "Hello",
-      "visitBlock(_:):String", "Zane", "visitBlock(_:):String", "was", "visitBlock(_:):String",
-      "here", "visitArray(_:)", "visitBlock(_:):String", "0", "visitBlock(_:):String", "1",
-      "visitBlock(_:):String", "2",
+      "walkGroup(_:)", "walkGroup(_:)", "walkText(_:): Hello", "walkText(_:): Zane",
+      "walkText(_:): was", "walkText(_:): here", "walkGroup(_:)", "walkText(_:): 0",
+      "walkText(_:): 1", "walkText(_:): 2",
     ]
-    #expect(expected == visitor.visited)
+    #expect(expected == walker.visited)
   }
 
   @Test func visitAsyncUpdateStateUpdate() async throws {
     let block = AsyncUpdateStateUpdate()
-    var visitor = TestAllVisitor()
-    visitor.visit(block)
-    let expected = [
-      "visitBlock(_:):AsyncUpdateStateUpdate", "visitModified(_:)", "visitBlock(_:):String",
-      "ready",
-    ]
-    #expect(expected == visitor.visited)
+    var walker = TestAllWalker()
+    walker.walk(block.toL1Element())
+    let expected = ["walkGroup(_:)", "walkWrapped(_:_:_:), i true"]
+    #expect(expected == walker.visited)
   }
 
   @Test func visitEntry() async throws {
     let block = Entry()
-    var visitor = TestAllVisitor()
-    visitor.visit(block)
+
+    var walker = TestAllWalker()
+    walker.walk(block.toL1Element())
     let expected = [
-      "visitBlock(_:):Entry", "visitTuple(_:)", "visitModified(_:)", "visitBlock(_:):String",
-      "Hello, I am Scribe.", "visitModified(_:)", "visitBlock(_:):String", "Zane was here :0",
-      "visitModified(_:)", "visitBlock(_:):String", "Job running: ready", "visitBlock(_:):Nested",
-      "visitBlock(_:):String", "Nested[text: Hello]",
+      "walkGroup(_:)", "walkGroup(_:)", "walkWrapped(_:_:_:), i true",
+      "walkWrapped(_:_:_:), e true", "walkWrapped(_:_:_:), i true", "walkGroup(_:)",
+      "walkText(_:): Nested[text: Hello]",
     ]
-    #expect(expected == visitor.visited)
+    #expect(expected == walker.visited)
   }
 
   @Test func visitAllBeforeAfter() async throws {
     let block = All()
-    var visitor = TestAllBeforeAfterVisitor()
-    visitor.visit(block)
+    var walker = TestAllBeforeAfterWalker()
+    walker.walk(block.toL1Element())
     let expected = [
-      "beforeBlock(_:)", "beforeTuple(_:)", "beforeModified(_:)", "beforeBlock(_:)", "Button",
-      "afterBlock(_:)", "afterModified(_:)", "beforeBlock(_:)", "A", "afterBlock(_:)",
-      "beforeArray(_:)", "beforeBlock(_:)", "Zane", "afterBlock(_:)", "beforeBlock(_:)", "Was",
-      "afterBlock(_:)", "beforeBlock(_:)", "Here", "afterBlock(_:)", "afterArray(_:)",
-      "afterTuple(_:)", "afterBlock(_:)",
+      "beforeGroup(_:)", "beforeGroup(_:)", "beforeWrapped(_:_:_:)", "walkText(_:)",
+      "afterWrapped(_:_:_:)", "walkText(_:)", "beforeGroup(_:)", "walkText(_:)", "walkText(_:)",
+      "walkText(_:)", "afterGroup(_:)", "afterGroup(_:)", "afterGroup(_:)",
     ]
-    #expect(expected == visitor.visited)
+    #expect(expected == walker.visited)
   }
 }
 
-struct TestAllBeforeAfterVisitor: Visitor {
+struct TestAllBeforeAfterWalker: L1HashWalker {
+  var currentHash: Hash = hash(contents: "0")
   var visited: [String] = []
 
-  mutating func visitText(_ text: Text) {
-    visited.append(text.text)
-  }
-
-  mutating func beforeTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {
-    visited.append("\(#function)")
-  }
-  mutating func afterTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {
+  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     visited.append("\(#function)")
   }
 
-  mutating func beforeArray<B: Block>(_ array: _ArrayBlock<B>) {
-    visited.append("\(#function)")
-  }
-  mutating func afterArray<B: Block>(_ array: _ArrayBlock<B>) {
+  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
     visited.append("\(#function)")
   }
 
-  mutating func beforeModified<W: Block>(_ modified: Modified<W>) {
-    visited.append("\(#function)")
-  }
-  mutating func afterModified<W: Block>(_ modified: Modified<W>) {
+  mutating func beforeGroup(_ group: [L1Element]) {
     visited.append("\(#function)")
   }
 
-  mutating func beforeBlock(_ block: some Block) {
+  mutating func afterGroup(_ group: [L1Element]) {
     visited.append("\(#function)")
   }
-  mutating func afterBlock(_ block: some Block) {
+
+  mutating func beforeComposed(_ composed: L1Element) {
+    visited.append("\(#function)")
+  }
+
+  mutating func afterComposed(_ composed: L1Element) {
+    visited.append("\(#function)")
+  }
+
+  mutating func walkText(_ text: String) {
     visited.append("\(#function)")
   }
 }
 
-struct TestAllVisitor: RawVisitor {
+struct TestAllWalker: L1ElementWalker {
   var visited: [String] = []
-
-  mutating func visitText(_ text: Text) {
-    visited.append(text.text)
+  mutating func walkWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
+    visited.append("\(#function), \(key) \(action != nil)")
   }
 
-  mutating func visitTuple<each Component: Block>(_ tuple: _TupleBlock<repeat each Component>) {
+  mutating func walkText(_ text: String) {
+    visited.append("\(#function): \(text)")
+  }
+
+  mutating func walkGroup(_ group: [L1Element]) {
     visited.append("\(#function)")
-    for child in repeat (each tuple.children) {
-      visit(child)
+    for child in group {
+      walk(child)
     }
-  }
-
-  mutating func visitArray<B: Block>(_ array: _ArrayBlock<B>) {
-    visited.append("\(#function)")
-    for child in array.children {
-      visit(child)
-    }
-  }
-
-  mutating func visitModified<W: Block>(_ modified: Modified<W>) {
-    visited.append("\(#function)")
-    visit(modified.wrapped)
-  }
-
-  mutating func visitBlock(_ block: some Block) {
-    visited.append("\(#function):\(type(of: block))")
-    visit(block.component)
   }
 }
