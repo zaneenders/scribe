@@ -72,11 +72,11 @@ struct L1ElementRender: L1SelectionWalker {
         Log.error("Found newline in word \(text)")
         break place_loop
       }
-      guard count < height else {
+      guard index < height else {
         Log.error("Too many rows \(text)")
         break place_loop
       }
-      tiles[count][x + i] = Tile(symbol: char, fg: fg, bg: bg)
+      tiles[index][x + i] = Tile(symbol: char, fg: fg, bg: bg)
       placed += 1
     }
     x += placed

@@ -6,7 +6,6 @@ struct TestRenderer: Renderer {
 
   mutating func view(_ block: borrowing some Block, with state: BlockState) {
     selected = state.selected ?? ""
-
     var walker = TestWalker(state: state)
     walker.textObjects = [:]
     walker.walk(block.toL1Element())

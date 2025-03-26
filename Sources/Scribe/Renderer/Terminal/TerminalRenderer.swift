@@ -4,11 +4,6 @@ import SystemPackage
 extension TerminalRenderer: Renderer {
   @MainActor
   func view(_ block: borrowing some Block, with state: BlockState) {
-    /*
-    TODO simplify and clean up these abstraction layers.
-
-    This is kinda a mess but i'm moving on to other things as it's all contained to this function now.
-    */
     let before = clock.now
     let size = Self.size
     let tree = block.toL1Element()

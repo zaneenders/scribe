@@ -3,22 +3,20 @@
 /// and information about which block is selected.
 struct BlockContainer: ~Copyable {
   private let block: any Block
-  private var treeState = BlockState()
+  private var state = BlockState()
 
   init(_ block: consuming some Block) {
     self.block = block
-
-    // Moving towards Walking
-    var l1Parser = InitialWalk(state: treeState, first: true)
+    var l1Parser = InitialWalk(state: state, first: true)
     let l1tree = self.block.toL1Element()
     l1Parser.walk(l1tree)
-    self.treeState = l1Parser.state
+    self.state = l1Parser.state
   }
 
   /// This is called
   /// - Parameter renderer: The renderer to draw the current state of the system with.
   func observe<R: Renderer>(with renderer: inout R) where R: ~Copyable {
-    renderer.view(block, with: treeState)
+    renderer.view(block, with: state)
   }
 
   /// Called to trigger a `.bind` function or a movement action.
@@ -27,30 +25,30 @@ struct BlockContainer: ~Copyable {
     switch code {
     case .lowercaseL:
       Log.debug("MoveIn")
-      var move = MoveInWalker(state: treeState)
+      var move = MoveInWalker(state: state)
       move.walk(block.toL1Element())
-      self.treeState = move.state
+      self.state = move.state
     case .lowercaseS:
       Log.debug("MoveOut")
-      var move = MoveOutWalker(state: treeState)
+      var move = MoveOutWalker(state: state)
       move.walk(block.toL1Element())
-      self.treeState = move.state
+      self.state = move.state
     case .lowercaseJ:
       Log.debug("MoveDown")
-      var move = MoveDownWalker(state: treeState)
+      var move = MoveDownWalker(state: state)
       move.walk(block.toL1Element())
-      self.treeState = move.state
+      self.state = move.state
     case .lowercaseF:
       Log.debug("MoveUp")
-      var move = MoveUpWalker(state: treeState)
+      var move = MoveUpWalker(state: state)
       move.walk(block.toL1Element())
-      self.treeState = move.state
+      self.state = move.state
     default:
       if let char = String(bytes: [code.rawValue], encoding: .utf8) {
         Log.debug("input:\(char)")
-        var action = ActionWalker(state: treeState, input: char)
+        var action = ActionWalker(state: state, input: char)
         action.walk(block.toL1Element())
-        self.treeState = action.state
+        self.state = action.state
       }
     }
   }

@@ -1,15 +1,22 @@
-struct MoveUpWalker: L1ElementWalker {
+struct MoveOutWalker: L1ElementWalker {
+
+  enum State {
+    case findingSelected
+    case foundSelected
+    case selectionUpdated
+  }
 
   private let startingSelection: Hash
+
+  private(set) var state: BlockState
+  var currentHash: Hash = hash(contents: "0")
+  var mode: State = .findingSelected
 
   init(state: BlockState) {
     self.state = state
     self.startingSelection = state.selected!
     Log.debug("\(self.startingSelection)")
   }
-
-  private(set) var state: BlockState
-  var currentHash: Hash = hash(contents: "0")
 
   private var atSelected: Bool {
     startingSelection == currentHash
@@ -19,14 +26,8 @@ struct MoveUpWalker: L1ElementWalker {
     self.state.selected == currentHash
   }
 
-  var mode: State = .findingSelected
-  var areChildNode = false
-
-  enum State {
-    case findingSelected
-    case breakOutOfChild
-    case foundSelected
-    case selectionUpdated
+  private var stateString: String {
+    "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
   }
 
   mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
@@ -56,27 +57,15 @@ struct MoveUpWalker: L1ElementWalker {
   mutating func walkGroup(_ group: [L1Element]) {
     let ourHash = currentHash
     beforeGroup(group)
-    areChildNode = true
-    var prevIndex: Int? = nil
     for (index, element) in group.enumerated() {
-      currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
-      walk(element)
       switch mode {
-      case .breakOutOfChild:
-        if let prevIndex {
-          mode = .foundSelected
-          currentHash = hash(contents: "\(ourHash)\(#function)\(prevIndex)")
-          walk(group[prevIndex])
-        } else {
-          // only one child.
-        }
-        return
-      case .findingSelected, .foundSelected, .selectionUpdated:
+      case .findingSelected:
+        currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
+        walk(element)
+      case .foundSelected, .selectionUpdated:
         ()
       }
-      prevIndex = index
     }
-    areChildNode = false
     currentHash = ourHash
     afterGroup(group)
   }
@@ -93,20 +82,15 @@ struct MoveUpWalker: L1ElementWalker {
     runAfter()
   }
 
-  //MARK: before after
-  mutating func runBefore() {
+  private mutating func runBefore() {}
+
+  private mutating func runAfter() {
     switch mode {
     case .findingSelected:
       if atSelected {
-        if areChildNode {
-          self.mode = .breakOutOfChild
-        } else {
-          self.mode = .foundSelected
-        }
+        self.mode = .foundSelected
         Log.debug("\(stateString) Selection Found")
       }
-    case .breakOutOfChild:
-      ()
     case .foundSelected:
       state.selected = currentHash
       self.mode = .selectionUpdated
@@ -114,13 +98,5 @@ struct MoveUpWalker: L1ElementWalker {
     case .selectionUpdated:
       ()
     }
-  }
-
-  private var stateString: String {
-    "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
-  }
-
-  mutating func runAfter() {
-
   }
 }

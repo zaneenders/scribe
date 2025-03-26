@@ -1,15 +1,23 @@
 struct MoveDownWalker: L1ElementWalker {
 
+  enum State {
+    case findingSelected
+    case breakOutOfChild
+    case foundSelected
+    case selectionUpdated
+  }
+
   private let startingSelection: Hash
+  private(set) var state: BlockState
+  var mode: State = .findingSelected
+  var areChildNode = false
+  var currentHash: Hash = hash(contents: "0")
 
   init(state: BlockState) {
     self.state = state
     self.startingSelection = state.selected!
     Log.debug("\(self.startingSelection)")
   }
-
-  private(set) var state: BlockState
-  var currentHash: Hash = hash(contents: "0")
 
   private var atSelected: Bool {
     startingSelection == currentHash
@@ -19,14 +27,8 @@ struct MoveDownWalker: L1ElementWalker {
     self.state.selected == currentHash
   }
 
-  var mode: State = .findingSelected
-  var areChildNode = false
-
-  enum State {
-    case findingSelected
-    case breakOutOfChild
-    case foundSelected
-    case selectionUpdated
+  private var stateString: String {
+    "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
   }
 
   mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
@@ -83,12 +85,12 @@ struct MoveDownWalker: L1ElementWalker {
   mutating func walkText(_ text: String) {
     runBefore()
     Log.debug("\(stateString)")
-    // self.mode = .selectionUpdated
     runAfter()
   }
 
-  //MARK: before after
-  mutating func runBefore() {
+  private mutating func runAfter() {}
+
+  private mutating func runBefore() {
     switch mode {
     case .findingSelected:
       if atSelected {
@@ -108,13 +110,5 @@ struct MoveDownWalker: L1ElementWalker {
     case .selectionUpdated:
       ()
     }
-  }
-
-  private var stateString: String {
-    "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
-  }
-
-  mutating func runAfter() {
-
   }
 }

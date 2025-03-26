@@ -1,37 +1,20 @@
 struct MoveInWalker: L1HashWalker {
 
-  private let startingSelection: Hash
-
-  init(state: BlockState) {
-    self.state = state
-    self.startingSelection = state.selected!
-    Log.debug("\(self.startingSelection)")
-  }
-
-  private(set) var state: BlockState
-  var currentHash: Hash = hash(contents: "0")
-
-  var mode: State = .findingSelected
-
   enum State {
     case findingSelected
     case foundSelected
     case selectionUpdated
   }
 
-  mutating func runBefore() {
-    // TODO check that move in is possible.
-    switch mode {
-    case .findingSelected:
-      if atSelected {
-        self.mode = .foundSelected
-      }
-    case .foundSelected:
-      state.selected = currentHash
-      self.mode = .selectionUpdated
-    case .selectionUpdated:
-      ()
-    }
+  private let startingSelection: Hash
+  private(set) var state: BlockState
+  var currentHash: Hash = hash(contents: "0")
+  var mode: State = .findingSelected
+
+  init(state: BlockState) {
+    self.state = state
+    self.startingSelection = state.selected!
+    Log.debug("\(self.startingSelection)")
   }
 
   private var atSelected: Bool {
@@ -83,14 +66,20 @@ struct MoveInWalker: L1HashWalker {
     runAfter()
   }
 
-  mutating func runAfter() {
-
+  private mutating func runBefore() {
+    // TODO check that move in is possible.
+    switch mode {
+    case .findingSelected:
+      if atSelected {
+        self.mode = .foundSelected
+      }
+    case .foundSelected:
+      state.selected = currentHash
+      self.mode = .selectionUpdated
+    case .selectionUpdated:
+      ()
+    }
   }
 
-  mutating func visitText(_ text: Text) {
-    runBefore()
-    Log.debug("\(stateString)")
-    self.mode = .selectionUpdated
-    runAfter()
-  }
+  mutating func runAfter() {}
 }
