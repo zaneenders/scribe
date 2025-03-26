@@ -137,6 +137,20 @@ struct SelectionTests {
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
   }
 
+  @Test func selectBasicTupleTextMoveInDownOut() async throws {
+    let block = BasicTupleText()
+    var container = BlockContainer(block)
+    var renderer = TestRenderer()
+    container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
+    container.moveIn()
+    container.moveIn()
+    container.expectState(&renderer, expected: ["[Hello]", "Zane"])
+    container.moveDown()
+    container.expectState(&renderer, expected: ["Hello", "[Zane]"])
+    container.moveOut()
+    container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
+  }
+
   @Test func selectSelectionBlock() async throws {
     let block = SelectionBlock()
     var container = BlockContainer(block)
