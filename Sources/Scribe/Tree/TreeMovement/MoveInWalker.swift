@@ -49,16 +49,6 @@ struct MoveInWalker: L1HashWalker {
     runAfter()
   }
 
-  mutating func beforeComposed(_ composed: L1Element) {
-    Log.debug("\(stateString) \(composed)")
-    runBefore()
-  }
-
-  mutating func afterComposed(_ composed: L1Element) {
-    Log.debug("\(stateString) \(composed)")
-    runAfter()
-  }
-
   mutating func walkText(_ text: String) {
     runBefore()
     Log.debug("\(stateString)")

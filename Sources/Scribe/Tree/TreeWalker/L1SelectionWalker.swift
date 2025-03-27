@@ -34,14 +34,6 @@ extension L1SelectionWalker {
     resetSelected()
   }
 
-  mutating func beforeComposed(_ composed: L1Element) {
-    updateSelected()
-  }
-
-  mutating func afterComposed(_ composed: L1Element) {
-    resetSelected()
-  }
-
   mutating func walkText(_ text: String) {
     updateSelected()
     leafNode(text)

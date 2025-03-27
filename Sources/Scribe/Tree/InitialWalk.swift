@@ -30,14 +30,6 @@ struct InitialWalk: L1HashWalker {
     // ignored
   }
 
-  mutating func beforeComposed(_ composed: L1Element) {
-    setFirstSelection()
-  }
-
-  mutating func afterComposed(_ composed: L1Element) {
-    // ignored
-  }
-
   private mutating func setFirstSelection() {
     if first {
       self.state.selected = currentHash

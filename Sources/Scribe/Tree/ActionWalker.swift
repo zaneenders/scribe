@@ -25,10 +25,6 @@ struct ActionWalker: L1HashWalker {
 
   mutating func afterGroup(_ group: [L1Element]) {}
 
-  mutating func beforeComposed(_ composed: L1Element) {}
-
-  mutating func afterComposed(_ composed: L1Element) {}
-
   mutating func walkText(_ text: String) {}
 
   mutating func visitText(_ text: Text) {}

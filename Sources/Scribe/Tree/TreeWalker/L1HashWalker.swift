@@ -9,8 +9,6 @@ protocol L1HashWalker: L1ElementWalker {
   mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?)
   mutating func beforeGroup(_ group: [L1Element])
   mutating func afterGroup(_ group: [L1Element])
-  mutating func beforeComposed(_ composed: L1Element)
-  mutating func afterComposed(_ composed: L1Element)
 }
 
 extension L1HashWalker {
@@ -32,15 +30,6 @@ extension L1HashWalker {
     }
     currentHash = ourHash
     afterGroup(group)
-  }
-
-  mutating func walkComposed(_ composed: L1Element) {
-    beforeComposed(composed)
-    let ourHash = currentHash
-    currentHash = hash(contents: "\(ourHash)\(#function)")
-    walk(composed)
-    currentHash = ourHash
-    afterComposed(composed)
   }
 }
 

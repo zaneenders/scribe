@@ -106,14 +106,6 @@ struct TestAllBeforeAfterWalker: L1HashWalker {
     visited.append("\(#function)")
   }
 
-  mutating func beforeComposed(_ composed: L1Element) {
-    visited.append("\(#function)")
-  }
-
-  mutating func afterComposed(_ composed: L1Element) {
-    visited.append("\(#function)")
-  }
-
   mutating func walkText(_ text: String) {
     visited.append("\(#function)")
   }
