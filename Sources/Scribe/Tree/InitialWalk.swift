@@ -1,33 +1,24 @@
-struct InitialWalk: L1HashWalker {
+struct InitialWalk: L2HashWalker {
 
-  private var first: Bool
+  private var first: Bool = true
   private(set) var state: BlockState
   var currentHash: Hash
 
-  init(state: BlockState, first: Bool) {
-    self.first = first
+  init(state: BlockState) {
     self.state = state
     self.currentHash = hash(contents: "0")
   }
 
-  mutating func walkText(_ text: String) {
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
     setFirstSelection()
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    setFirstSelection()
-  }
-
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
     // ignored
   }
 
-  mutating func beforeGroup(_ group: [L1Element]) {
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
     setFirstSelection()
-  }
-
-  mutating func afterGroup(_ group: [L1Element]) {
-    // ignored
   }
 
   private mutating func setFirstSelection() {

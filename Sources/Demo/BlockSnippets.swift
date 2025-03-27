@@ -35,6 +35,19 @@ struct OptionalBlock: Block {
   }
 }
 
+// Test case for moving down.
+struct BasicTupleBindedText: Block {
+  var component: some Block {
+    "Hello".bind(key: "l") {
+      // ignored
+    }
+    "Zane"
+    "Enders".bind(key: "l") {
+      // ignored
+    }
+  }
+}
+
 // Very simple block that would be a Tuple and String blocks.
 struct BasicTupleText: Block {
   var component: some Block {
