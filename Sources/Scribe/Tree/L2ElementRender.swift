@@ -1,4 +1,4 @@
-struct L1ElementRender: L1SelectionWalker {
+struct L2ElementRender: L2SelectionWalker {
 
   internal var isSelected: Bool = false
   var currentHash: Hash

@@ -1,4 +1,4 @@
-struct MoveInWalker: L1HashWalker {
+struct MoveInWalker: L2ElementWalker {
 
   enum State {
     case findingSelected
@@ -10,6 +10,8 @@ struct MoveInWalker: L1HashWalker {
   private(set) var state: BlockState
   var currentHash: Hash = hash(contents: "0")
   var mode: State = .findingSelected
+  private var path: [SelectedPathNode] = []
+  private var selectedDepth = 0
 
   init(state: BlockState) {
     self.state = state
@@ -17,59 +19,78 @@ struct MoveInWalker: L1HashWalker {
     Log.debug("\(self.startingSelection)")
   }
 
-  private var atSelected: Bool {
-    startingSelection == currentHash
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
+    appendPath(siblings: 0)
+    if atSelected {
+      // we are at the bottom and selected
+      mode = .selectionUpdated
+    } else {
+      if path.count > selectedDepth {
+        switch mode {
+        case .findingSelected:
+          ()
+        case .foundSelected:
+          // first child hash
+          state.selected = currentHash
+          self.mode = .selectionUpdated
+        case .selectionUpdated:
+          ()
+        }
+      }
+    }
+    path.removeLast()
   }
 
-  private var currentSelected: Bool {
-    self.state.selected == currentHash
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
+    appendPath(siblings: group.count - 1)
   }
 
-  private var stateString: String {
-    "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
-  }
-
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
-    runBefore()
-  }
-
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
-    runAfter()
-  }
-
-  mutating func beforeGroup(_ group: [L1Element]) {
-    Log.debug("\(stateString) \(group)")
-    runBefore()
-  }
-
-  mutating func afterGroup(_ group: [L1Element]) {
-    Log.debug("\(stateString) \(group)")
-    runAfter()
-  }
-
-  mutating func walkText(_ text: String) {
-    runBefore()
-    Log.debug("\(stateString)")
-    self.mode = .selectionUpdated
-    runAfter()
-  }
-
-  private mutating func runBefore() {
-    // TODO check that move in is possible.
+  mutating func walkGroup(_ group: [L2Element], _ binding: L2Binding?) {
+    let ourHash = currentHash
+    beforeGroup(group, binding)
     switch mode {
     case .findingSelected:
-      if atSelected {
-        self.mode = .foundSelected
-      }
+      ()
     case .foundSelected:
-      state.selected = currentHash
-      self.mode = .selectionUpdated
+      if path.count > selectedDepth {
+        // we are below the layer we were
+        state.selected = ourHash
+        self.mode = .selectionUpdated
+      }
     case .selectionUpdated:
       ()
     }
+    child_loop: for (index, element) in group.enumerated() {
+      currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
+      walk(element)
+      switch mode {
+      case .findingSelected:
+        ()
+      case .foundSelected:
+        ()
+      case .selectionUpdated:
+        break child_loop
+      }
+    }
+    currentHash = ourHash
+    afterGroup(group, binding)
   }
 
-  mutating func runAfter() {}
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
+    path.removeLast()
+  }
+
+  private mutating func appendPath(siblings: Int) {
+    if atSelected {
+      mode = .foundSelected
+      path.append(.selected)
+      selectedDepth = path.count
+    } else {
+      path.append(.layer(siblings: siblings))
+    }
+  }
+
+  private var atSelected: Bool {
+    startingSelection == currentHash
+  }
 }

@@ -1,10 +1,10 @@
-protocol L1SelectionWalker: L1HashWalker {
+protocol L2SelectionWalker: L2HashWalker {
   var state: BlockState { get }
   var isSelected: Bool { get set }
   mutating func leafNode(_ text: String)
 }
 
-extension L1SelectionWalker {
+extension L2SelectionWalker {
 
   private mutating func updateSelected() {
     if !isSelected {
@@ -17,24 +17,15 @@ extension L1SelectionWalker {
       isSelected = false
     }
   }
-
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
     updateSelected()
   }
 
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
     resetSelected()
   }
 
-  mutating func beforeGroup(_ group: [L1Element]) {
-    updateSelected()
-  }
-
-  mutating func afterGroup(_ group: [L1Element]) {
-    resetSelected()
-  }
-
-  mutating func walkText(_ text: String) {
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
     updateSelected()
     leafNode(text)
     resetSelected()
