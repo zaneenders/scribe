@@ -11,7 +11,7 @@ struct VisitorTests {
   @Test func visitAll() async throws {
     let block = All()
     var walker = TestAllWalker()
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     let expected = [
       "walkGroup(_:)", "walkGroup(_:)", "walkWrapped(_:_:_:), i true", "walkText(_:): A",
       "walkGroup(_:)", "walkText(_:): Zane", "walkText(_:): Was", "walkText(_:): Here",
@@ -22,7 +22,7 @@ struct VisitorTests {
   @Test func visitOptional() async throws {
     let block = OptionalBlock()
     var walker = TestAllWalker()
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     let expected = [
       "walkGroup(_:)", "walkGroup(_:)", "walkText(_:): OptionalBlock(idk: Optional(\"Hello\"))",
       "walkGroup(_:)", "walkText(_:): Hello",
@@ -34,7 +34,7 @@ struct VisitorTests {
   @Test func visitBasicText() async throws {
     let block = BasicTupleText()
     var walker = TestAllWalker()
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     let expected = ["walkGroup(_:)", "walkGroup(_:)", "walkText(_:): Hello", "walkText(_:): Zane"]
     #expect(expected == walker.visited)
   }
@@ -43,7 +43,7 @@ struct VisitorTests {
   @Test func visitSelectionBlock() async throws {
     let block = SelectionBlock()
     var walker = TestAllWalker()
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     let expected = [
       "walkGroup(_:)", "walkGroup(_:)", "walkText(_:): Hello", "walkText(_:): Zane",
       "walkText(_:): was", "walkText(_:): here", "walkGroup(_:)", "walkText(_:): 0",
@@ -55,7 +55,7 @@ struct VisitorTests {
   @Test func visitAsyncUpdateStateUpdate() async throws {
     let block = AsyncUpdateStateUpdate()
     var walker = TestAllWalker()
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     let expected = ["walkGroup(_:)", "walkWrapped(_:_:_:), i true"]
     #expect(expected == walker.visited)
   }
@@ -64,7 +64,7 @@ struct VisitorTests {
     let block = Entry()
 
     var walker = TestAllWalker()
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     let expected = [
       "walkGroup(_:)", "walkGroup(_:)", "walkWrapped(_:_:_:), i true",
       "walkWrapped(_:_:_:), e true", "walkWrapped(_:_:_:), i true", "walkGroup(_:)",
@@ -76,7 +76,7 @@ struct VisitorTests {
   @Test func visitAllBeforeAfter() async throws {
     let block = All()
     var walker = TestAllBeforeAfterWalker()
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     let expected = [
       "beforeGroup(_:)", "beforeGroup(_:)", "beforeWrapped(_:_:_:)", "walkText(_:)",
       "afterWrapped(_:_:_:)", "walkText(_:)", "beforeGroup(_:)", "walkText(_:)", "walkText(_:)",
@@ -86,53 +86,34 @@ struct VisitorTests {
   }
 }
 
-struct TestAllBeforeAfterWalker: L1HashWalker {
+struct TestAllBeforeAfterWalker: L2HashWalker {
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
+    visited.append("\(#function)")
+  }
+
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
+    visited.append("\(#function)")
+  }
+
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
+    visited.append("\(#function)")
+  }
+
   var currentHash: Hash = hash(contents: "0")
   var visited: [String] = []
-
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    visited.append("\(#function)")
-  }
-
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    visited.append("\(#function)")
-  }
-
-  mutating func beforeGroup(_ group: [L1Element]) {
-    visited.append("\(#function)")
-  }
-
-  mutating func afterGroup(_ group: [L1Element]) {
-    visited.append("\(#function)")
-  }
-
-  mutating func beforeComposed(_ composed: L1Element) {
-    visited.append("\(#function)")
-  }
-
-  mutating func afterComposed(_ composed: L1Element) {
-    visited.append("\(#function)")
-  }
-
-  mutating func walkText(_ text: String) {
-    visited.append("\(#function)")
-  }
 }
 
-struct TestAllWalker: L1ElementWalker {
-  var visited: [String] = []
-  mutating func walkWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    visited.append("\(#function), \(key) \(action != nil)")
+struct TestAllWalker: L2ElementWalker {
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
+    visited.append("\(#function): \(text), \(binding)")
   }
 
-  mutating func walkText(_ text: String) {
-    visited.append("\(#function): \(text)")
-  }
-
-  mutating func walkGroup(_ group: [L1Element]) {
-    visited.append("\(#function)")
+  mutating func walkGroup(_ group: [L2Element], _ binding: L2Binding?) {
+    visited.append("\(#function), \(binding)")
     for child in group {
       walk(child)
     }
   }
+
+  var visited: [String] = []
 }

@@ -19,6 +19,12 @@ extension Never: Block {
 }
 
 extension Block {
+  func optimizeTree() -> L2Element {
+    self.toL1Element().toL2Element()
+  }
+}
+
+extension Block {
   /// Convert a ``Block`` structure into an Element structure. This is to
   /// simplify the tree structure in order to flatten the tree for more
   /// ergonomic movements over the tree.

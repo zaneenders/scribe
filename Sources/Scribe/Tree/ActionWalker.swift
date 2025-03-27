@@ -1,4 +1,4 @@
-struct ActionWalker: L1HashWalker {
+struct ActionWalker: L2HashWalker {
 
   private(set) var state: BlockState
   private var input: String
@@ -9,27 +9,24 @@ struct ActionWalker: L1HashWalker {
     self.input = input
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
     Log.debug("\(#function): \(currentHash), \(state.selected)")
+    runBinding(binding)
+  }
+
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {}
+
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
+    Log.debug("\(#function): \(currentHash), \(state.selected)")
+    runBinding(binding)
+  }
+
+  private func runBinding(_ binding: L2Binding?) {
     let selected = self.state.selected == currentHash
-    if selected && key == input {
-      if let action {
-        action()
+    if let binding {
+      if selected && binding.key == input {
+        binding.action()
       }
     }
   }
-
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {}
-
-  mutating func beforeGroup(_ group: [L1Element]) {}
-
-  mutating func afterGroup(_ group: [L1Element]) {}
-
-  mutating func beforeComposed(_ composed: L1Element) {}
-
-  mutating func afterComposed(_ composed: L1Element) {}
-
-  mutating func walkText(_ text: String) {}
-
-  mutating func visitText(_ text: Text) {}
 }

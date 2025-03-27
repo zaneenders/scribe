@@ -1,4 +1,4 @@
-struct MoveInWalker: L1HashWalker {
+struct MoveInWalker: L2HashWalker {
 
   enum State {
     case findingSelected
@@ -29,37 +29,17 @@ struct MoveInWalker: L1HashWalker {
     "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
-    runBefore()
-  }
-
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
-    runAfter()
-  }
-
-  mutating func beforeGroup(_ group: [L1Element]) {
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
     Log.debug("\(stateString) \(group)")
     runBefore()
   }
 
-  mutating func afterGroup(_ group: [L1Element]) {
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
     Log.debug("\(stateString) \(group)")
     runAfter()
   }
 
-  mutating func beforeComposed(_ composed: L1Element) {
-    Log.debug("\(stateString) \(composed)")
-    runBefore()
-  }
-
-  mutating func afterComposed(_ composed: L1Element) {
-    Log.debug("\(stateString) \(composed)")
-    runAfter()
-  }
-
-  mutating func walkText(_ text: String) {
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
     runBefore()
     Log.debug("\(stateString)")
     self.mode = .selectionUpdated

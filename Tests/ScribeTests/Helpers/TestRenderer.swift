@@ -8,13 +8,13 @@ struct TestRenderer: Renderer {
     selected = state.selected ?? ""
     var walker = TestWalker(state: state)
     walker.textObjects = [:]
-    walker.walk(block.toL1Element())
+    walker.walk(block.optimizeTree())
     previousWalker = walker
   }
 }
 
 extension TestRenderer {
-  struct TestWalker: L1SelectionWalker {
+  struct TestWalker: L2SelectionWalker {
 
     // Set by the visitor
     var currentHash: Hash

@@ -1,4 +1,4 @@
-struct MoveOutWalker: L1ElementWalker {
+struct MoveOutWalker: L2ElementWalker {
 
   enum State {
     case findingSelected
@@ -30,33 +30,20 @@ struct MoveOutWalker: L1ElementWalker {
     "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
     runBefore()
-  }
-
-  mutating func walkWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    beforeWrapped(element, key, action)
-    let ourHash = currentHash
-    currentHash = hash(contents: "\(ourHash)\(#function)")
-    walk(element)
-    currentHash = ourHash
-    afterWrapped(element, key, action)
-  }
-
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
+    Log.debug("\(stateString)")
     runAfter()
   }
 
-  mutating func beforeGroup(_ group: [L1Element]) {
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
     Log.debug("\(stateString) \(group)")
     runBefore()
   }
 
-  mutating func walkGroup(_ group: [L1Element]) {
+  mutating func walkGroup(_ group: [L2Element], _ binding: L2Binding?) {
     let ourHash = currentHash
-    beforeGroup(group)
+    beforeGroup(group, binding)
     for (index, element) in group.enumerated() {
       switch mode {
       case .findingSelected:
@@ -67,18 +54,10 @@ struct MoveOutWalker: L1ElementWalker {
       }
     }
     currentHash = ourHash
-    afterGroup(group)
+    afterGroup(group, binding)
   }
 
-  mutating func afterGroup(_ group: [L1Element]) {
-    Log.debug("\(stateString) \(group)")
-    runAfter()
-  }
-
-  mutating func walkText(_ text: String) {
-    runBefore()
-    Log.debug("\(stateString)")
-    // self.mode = .selectionUpdated
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
     runAfter()
   }
 

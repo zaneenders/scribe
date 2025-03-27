@@ -1,4 +1,4 @@
-struct MoveDownWalker: L1ElementWalker {
+struct MoveDownWalker: L2ElementWalker {
 
   enum State {
     case findingSelected
@@ -31,38 +31,28 @@ struct MoveDownWalker: L1ElementWalker {
     "\(mode) starting:\(atSelected) current:\(currentSelected) \(currentHash)"
   }
 
-  mutating func beforeWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
+  mutating func walkText(_ text: String, _ binding: L2Binding?) {
     runBefore()
-  }
-
-  mutating func walkWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    beforeWrapped(element, key, action)
-    let ourHash = currentHash
-    currentHash = hash(contents: "\(ourHash)\(#function)")
-    walk(element)
-    currentHash = ourHash
-    afterWrapped(element, key, action)
-  }
-
-  mutating func afterWrapped(_ element: L1Element, _ key: String, _ action: BlockAction?) {
-    Log.debug("\(stateString) \(element), \(action != nil)")
+    Log.debug("\(stateString)")
     runAfter()
   }
 
-  mutating func beforeGroup(_ group: [L1Element]) {
-    Log.debug("\(stateString) \(group)")
+  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
     runBefore()
   }
 
-  mutating func walkGroup(_ group: [L1Element]) {
+  mutating func walkGroup(_ group: [L2Element], _ binding: L2Binding?) {
     let ourHash = currentHash
-    beforeGroup(group)
+    beforeGroup(group, binding)
     areChildNode = true
     for (index, element) in group.enumerated() {
       switch mode {
       case .breakOutOfChild:
-        mode = .foundSelected
+        if group.count > 1 {
+          mode = .foundSelected
+        } else {
+          return  // break into parent node.
+        }
         currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
         walk(element)
       case .findingSelected:
@@ -74,17 +64,10 @@ struct MoveDownWalker: L1ElementWalker {
     }
     areChildNode = false
     currentHash = ourHash
-    afterGroup(group)
+    afterGroup(group, binding)
   }
 
-  mutating func afterGroup(_ group: [L1Element]) {
-    Log.debug("\(stateString) \(group)")
-    runAfter()
-  }
-
-  mutating func walkText(_ text: String) {
-    runBefore()
-    Log.debug("\(stateString)")
+  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
     runAfter()
   }
 
