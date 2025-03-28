@@ -31,13 +31,13 @@ struct MoveDownWalker: L2ElementWalker {
     path.removeLast()
   }
 
-  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
+  mutating func beforeGroup(_ group: [L2Element]) {
     appendPath(siblings: group.count - 1)
   }
 
-  mutating func walkGroup(_ group: [L2Element], _ binding: L2Binding?) {
+  mutating func walkGroup(_ group: [L2Element]) {
     let ourHash = currentHash
-    beforeGroup(group, binding)
+    beforeGroup(group)
     child_loop: for (index, element) in group.enumerated() {
       switch mode {
       case .foundSelected:
@@ -75,10 +75,10 @@ struct MoveDownWalker: L2ElementWalker {
       }
     }
     currentHash = ourHash
-    afterGroup(group, binding)
+    afterGroup(group)
   }
 
-  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
+  mutating func afterGroup(_ group: [L2Element]) {
     path.removeLast()
   }
 

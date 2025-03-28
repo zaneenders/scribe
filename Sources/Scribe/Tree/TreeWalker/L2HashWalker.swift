@@ -5,21 +5,21 @@ import Crypto
 /// independent of the contains of the block IE it's mutations.
 protocol L2HashWalker: L2ElementWalker {
   var currentHash: Hash { get set }
-  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?)
-  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?)
+  mutating func beforeGroup(_ group: [L2Element])
+  mutating func afterGroup(_ group: [L2Element])
 }
 
 extension L2HashWalker {
 
-  mutating func walkGroup(_ group: [L2Element], _ binding: L2Binding?) {
-    beforeGroup(group, binding)
+  mutating func walkGroup(_ group: [L2Element]) {
+    beforeGroup(group)
     let ourHash = currentHash
     for (index, element) in group.enumerated() {
       currentHash = hash(contents: "\(ourHash)\(#function)\(index)")
       walk(element)
     }
     currentHash = ourHash
-    afterGroup(group, binding)
+    afterGroup(group)
   }
 }
 

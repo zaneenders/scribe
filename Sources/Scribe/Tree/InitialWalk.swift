@@ -9,11 +9,11 @@ struct InitialWalk: L2HashWalker {
     self.currentHash = hash(contents: "0")
   }
 
-  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
+  mutating func beforeGroup(_ group: [L2Element]) {
     setFirstSelection()
   }
 
-  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
+  mutating func afterGroup(_ group: [L2Element]) {
     // ignored
   }
 

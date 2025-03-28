@@ -8,8 +8,8 @@ protocol L2Walkable {
 extension L2Element: L2Walkable {
   func _walk(_ walker: inout some L2ElementWalker) {
     switch self {
-    case let .group(group, binding):
-      walker.walkGroup(group, binding)
+    case let .group(group):
+      walker.walkGroup(group)
     case let .text(text, binding):
       walker.walkText(text, binding)
     }

@@ -9,12 +9,9 @@ struct ActionWalker: L2HashWalker {
     self.input = input
   }
 
-  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
-    Log.debug("\(#function): \(currentHash), \(state.selected)")
-    runBinding(binding)
-  }
+  mutating func beforeGroup(_ group: [L2Element]) {}
 
-  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {}
+  mutating func afterGroup(_ group: [L2Element]) {}
 
   mutating func walkText(_ text: String, _ binding: L2Binding?) {
     Log.debug("\(#function): \(currentHash), \(state.selected)")

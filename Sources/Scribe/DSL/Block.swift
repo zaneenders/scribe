@@ -20,7 +20,8 @@ extension Never: Block {
 
 extension Block {
   func optimizeTree() -> L2Element {
-    self.toL1Element().toL2Element()
+    self.toL1Element()
+      .toL2Element()
   }
 }
 

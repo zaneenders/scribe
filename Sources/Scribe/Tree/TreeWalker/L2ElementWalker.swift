@@ -1,7 +1,7 @@
 @MainActor
 protocol L2ElementWalker {
   mutating func walkText(_ text: String, _ binding: L2Binding?)
-  mutating func walkGroup(_ group: [L2Element], _ binding: L2Binding?)
+  mutating func walkGroup(_ group: [L2Element])
 }
 
 /*

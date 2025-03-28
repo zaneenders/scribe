@@ -1,7 +1,7 @@
 /// Modified
 public typealias BlockAction = () -> Void
 
-extension Block {
+extension String {
   /// Bind a key to this ``Block`` allowing interaction and emulate the
   /// conventional button.
   /// - Parameters:
@@ -10,6 +10,7 @@ extension Block {
   /// the key is pressed
   /// - Returns: A wrapper around the block containing the information needed
   /// to execute the code.
+  @MainActor
   public func bind(key: String, action: @escaping BlockAction) -> some Block {
     // TODO update key to be a type to handle ctrl and shift combinations.
     Modified(wrapped: self, key: key, action: action)
