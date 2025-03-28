@@ -1,5 +1,5 @@
 /// Ascii Key Codes
-enum AsciiKeyCode: UInt8, Sendable {
+public enum AsciiKeyCode: UInt8, Sendable {
   /// Returns an Optional AsciiKeyCode form an Optional Int
   static func decode(keyboard code: UInt8?) -> AsciiKeyCode? {
     guard let unwrappedCode = code else {

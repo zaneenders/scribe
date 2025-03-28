@@ -17,6 +17,7 @@ extension L2SelectionWalker {
       isSelected = false
     }
   }
+
   mutating func beforeGroup(_ group: [L2Element]) {
     updateSelected()
   }
@@ -25,7 +26,7 @@ extension L2SelectionWalker {
     resetSelected()
   }
 
-  mutating func walkText(_ text: String, _ binding: L2Binding?) {
+  mutating func walkText(_ text: String, _ binding: L2Handler?) {
     updateSelected()
     leafNode(text)
     resetSelected()

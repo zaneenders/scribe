@@ -48,13 +48,10 @@ struct BlockContainer: ~Copyable {
       move.walk(l2Tree)
       self.state = move.state
     default:
-      if let char = String(bytes: [code.rawValue], encoding: .utf8) {
-        Log.debug("input:\(char)")
-        var action = ActionWalker(state: state, input: char)
-        let l2Tree = block.optimizeTree()
-        action.walk(l2Tree)
-        self.state = action.state
-      }
+      var action = ActionWalker(state: state, input: code)
+      let l2Tree = block.optimizeTree()
+      action.walk(l2Tree)
+      self.state = action.state
     }
   }
 }

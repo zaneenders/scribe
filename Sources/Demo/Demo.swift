@@ -37,17 +37,23 @@ struct Entry: Block {
   @State var count = 0
   @State var message: String = "Hello"
   var component: some Block {
-    storage.message.bind(key: "i") {
-      // Mutating an object.
-      storage.message += "!"
-      message += "#"
+    storage.message.bind { key in
+      if key == .lowercaseI {
+        // Mutating an object.
+        storage.message += "!"
+        message += "#"
+      }
     }
-    "Zane was here :\(count)".bind(key: "e") {
-      // Basic counter
-      count += 1
+    "Zane was here :\(count)".bind { key in
+      if key == .lowercaseE {
+        // Basic counter
+        count += 1
+      }
     }
-    "Job running: \(running)".bind(key: "i") {
-      self.longRunningTask()
+    "Job running: \(running)".bind { key in
+      if key == .lowercaseI {
+        self.longRunningTask()
+      }
     }
     Nested(text: $message)
   }

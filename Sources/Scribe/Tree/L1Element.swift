@@ -2,7 +2,7 @@
 /// flattened further.
 indirect enum L1Element {
   case text(String)
-  case wrapped(L1Element, key: String, action: BlockAction)
+  case input(L1Element, handler: InputHandler)
   case group([L1Element])
 }
 
@@ -13,10 +13,10 @@ extension L1Element {
       return .group(group.map { $0.toL2Element() })
     case let .text(text):
       return .text(text, nil)
-    case let .wrapped(element, key, action):
+    case let .input(element, handler):
       switch element.toL2Element() {
       case let .text(text, .none):
-        return .text(text, L2Binding(key: key, action: action))
+        return .text(text, L2Handler(handler: handler))
       default:
         fatalError("Bindings on Groups not aloud right now")
       }

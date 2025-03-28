@@ -48,13 +48,13 @@ The demo provides a basic exploration of Scribe’s current capabilities.
 To explore the demo, run it as described [above](/README.md#running-the-demo). Once it’s running, you’ll see a white text with a purple background displayed in your terminal. Here are some instructions to get started with:
 
 1. **Hand placement** Key your hands on the home row like you would for writing a document.
-1. **Move into the tree:** Press the `l` key twice. This moves your focus into the binding within the tree.
+1. **Move into the tree:** Press the `l` key once. This moves your focus into the binding within the tree.
 1. **Trigger a Binding:** Press the `i` key. This will trigger the associated action, which appends characters to two separate strings.
 1. **Move Down:** Press the `j` key twice to another binding.
 1. **Trigger a async Task:** Press the `i` key. This binding simulates calling an async function required to do a non-blocking load of file into memory or a network call to an API.
-1. **Move Up:** Press the `s` key to move back up the tree.
+1. **Move Up:** Press the `f` key to move back up the tree.
 1. **Trigger the last Binding:** Press the `e` key or hold it down to increment the counter.
-1. **Move Out:** Press the `s` key to move back up the tree.
+1. **Move Out:** Press the `f` key to move back up the tree.
 
 Try experimenting with these commands to explore the different bindings and actions in the demo.
 
@@ -63,8 +63,10 @@ For ideas on modifying the demo and exploring other tree structures, see the [De
 > Note: Drawing attention to the second binding we explored displayed below, is an example of triggering an async UI update. The UI is updated on the main thread via the `@MainActor` Swift API. But the work behind an async call like this could be on other threads allowing the UI to stay interactive. You can read more about how Swift handles concurrency [here](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/).
 
 ```swift
-"Job running: \(running)".bind(key: "i") {
-  self.longRunningTask()
+"Job running: \(running)".input { key in
+  if key == .lowercaseI {
+    self.longRunningTask()
+  }
 }
 ```
 

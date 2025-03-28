@@ -19,7 +19,7 @@ struct MoveOutWalker: L2ElementWalker {
     Log.debug("\(self.startingSelection)")
   }
 
-  mutating func walkText(_ text: String, _ binding: L2Binding?) {
+  mutating func walkText(_ text: String, _ binding: L2Handler?) {
     appendPath(siblings: 0)
     // No updates to be made here best case found selected.
     path.removeLast()
