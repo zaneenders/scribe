@@ -23,14 +23,6 @@ struct SelectionTests {
     container.expectState(
       &renderer,
       expected: [
-        "[Nested[text: Hello]]", "[Zane was here :0]", "[Hello, I am Scribe.]",
-        "[Job running: ready]",
-      ])
-
-    container.moveIn()
-    container.expectState(
-      &renderer,
-      expected: [
         "[Hello, I am Scribe.]", "Job running: ready", "Nested[text: Hello]", "Zane was here :0",
       ])
 
@@ -168,7 +160,7 @@ struct SelectionTests {
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
     container.moveIn()
-    container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
+    container.expectState(&renderer, expected: ["[Hello]", "Zane"])
     container.moveIn()
     container.expectState(&renderer, expected: ["[Hello]", "Zane"])
   }
@@ -238,10 +230,6 @@ struct SelectionTests {
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
 
     container.moveIn()
-    container.expectState(
-      &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
-
-    container.moveIn()
     container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "[Hello]", "here", "was"])
 
     container.moveIn()
@@ -266,10 +254,6 @@ struct SelectionTests {
     container.expectState(&renderer, expected: ["0", "1", "2", "Zane", "Hello", "[here]", "was"])
 
     container.moveDown()
-    container.expectState(
-      &renderer, expected: ["[0]", "[1]", "[2]", "Zane", "Hello", "here", "was"])
-
-    container.moveIn()
     container.expectState(&renderer, expected: ["[0]", "1", "2", "Zane", "Hello", "here", "was"])
 
     container.moveDown()
@@ -286,10 +270,6 @@ struct SelectionTests {
 
     container.moveUp()
     container.expectState(&renderer, expected: ["0", "[1]", "2", "Zane", "Hello", "here", "was"])
-
-    container.moveOut()
-    container.expectState(
-      &renderer, expected: ["[0]", "[1]", "[2]", "Zane", "Hello", "here", "was"])
 
     container.moveOut()
     container.expectState(
