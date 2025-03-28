@@ -21,9 +21,7 @@ struct ActionWalker: L2HashWalker {
   private func runBinding(_ handler: L2Handler?) {
     let selected = self.state.selected == currentHash
     if let handler {
-      if selected {
-        handler.handler(input)
-      }
+      handler.handler(input, selected)
     }
   }
 }

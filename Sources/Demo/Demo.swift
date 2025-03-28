@@ -37,21 +37,21 @@ struct Entry: Block {
   @State var count = 0
   @State var message: String = "Hello"
   var component: some Block {
-    storage.message.bind { key in
-      if key == .lowercaseI {
+    storage.message.bind { key, selected in
+      if selected && key == .lowercaseI {
         // Mutating an object.
         storage.message += "!"
         message += "#"
       }
     }
-    "Zane was here :\(count)".bind { key in
-      if key == .lowercaseE {
+    "Zane was here :\(count)".bind { key, selected in
+      if selected && key == .lowercaseE {
         // Basic counter
         count += 1
       }
     }
-    "Job running: \(running)".bind { key in
-      if key == .lowercaseI {
+    "Job running: \(running)".bind { key, selected in
+      if selected && key == .lowercaseI {
         self.longRunningTask()
       }
     }

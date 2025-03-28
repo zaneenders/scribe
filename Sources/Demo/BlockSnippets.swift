@@ -11,8 +11,8 @@ struct All: Block {
   let items = ["Zane", "Was", "Here"]
   @State var condition = true
   var component: some Block {
-    "Button".bind { key in
-      if key == .lowercaseI {
+    "Button".bind { key, selected in
+      if selected && key == .lowercaseI {
         condition.toggle()
       }
     }
@@ -40,11 +40,11 @@ struct OptionalBlock: Block {
 // Test case for moving down.
 struct BasicTupleBindedText: Block {
   var component: some Block {
-    "Hello".bind { _ in
+    "Hello".bind { _, _ in
       // ignored
     }
     "Zane"
-    "Enders".bind { _ in
+    "Enders".bind { _, _ in
       // ignored
     }
   }
@@ -76,8 +76,8 @@ struct AsyncUpdateStateUpdate: Block {
   static let delay = 100
   @State var state: RunningState = .ready
   var component: some Block {
-    "\(state)".bind { key in
-      if key == .lowercaseI {
+    "\(state)".bind { key, selected in
+      if selected && key == .lowercaseI {
         update()
       }
     }

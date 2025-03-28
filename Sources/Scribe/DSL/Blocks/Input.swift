@@ -1,5 +1,6 @@
 /// Modified
-public typealias InputHandler = (AsciiKeyCode) -> Void
+public typealias Selected = Bool
+public typealias InputHandler = (AsciiKeyCode, Selected) -> Void
 
 extension String {
   @MainActor
