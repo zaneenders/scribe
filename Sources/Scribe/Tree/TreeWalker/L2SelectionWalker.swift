@@ -17,11 +17,11 @@ extension L2SelectionWalker {
       isSelected = false
     }
   }
-  mutating func beforeGroup(_ group: [L2Element], _ binding: L2Binding?) {
+  mutating func beforeGroup(_ group: [L2Element]) {
     updateSelected()
   }
 
-  mutating func afterGroup(_ group: [L2Element], _ binding: L2Binding?) {
+  mutating func afterGroup(_ group: [L2Element]) {
     resetSelected()
   }
 

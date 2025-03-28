@@ -10,11 +10,16 @@ extension L1Element {
   func toL2Element() -> L2Element {
     switch self {
     case let .group(group):
-      return .group(group.map { $0.toL2Element() }, nil)
+      return .group(group.map { $0.toL2Element() })
     case let .text(text):
       return .text(text, nil)
     case let .wrapped(element, key, action):
-      return .group([element.toL2Element()], L2Binding(key: key, action: action))
+      switch element.toL2Element() {
+      case let .text(text, .none):
+        return .text(text, L2Binding(key: key, action: action))
+      default:
+        fatalError("Bindings on Groups not aloud right now")
+      }
     }
   }
 }
