@@ -17,7 +17,7 @@ struct InitialWalk: L2HashWalker {
     // ignored
   }
 
-  mutating func walkText(_ text: String, _ binding: L2Handler?) {
+  mutating func walkText(_ text: String, _ binding: InputHandler?) {
     setFirstSelection()
   }
 

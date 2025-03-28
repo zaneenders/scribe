@@ -16,7 +16,7 @@ extension L1Element {
     case let .input(element, handler):
       switch element.toL2Element() {
       case let .text(text, .none):
-        return .text(text, L2Handler(handler: handler))
+        return .text(text, handler)
       default:
         fatalError("Bindings on Groups not aloud right now")
       }

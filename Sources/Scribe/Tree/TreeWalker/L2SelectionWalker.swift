@@ -26,7 +26,7 @@ extension L2SelectionWalker {
     resetSelected()
   }
 
-  mutating func walkText(_ text: String, _ binding: L2Handler?) {
+  mutating func walkText(_ text: String, _ binding: InputHandler?) {
     updateSelected()
     leafNode(text)
     resetSelected()

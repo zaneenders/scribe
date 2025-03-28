@@ -13,15 +13,15 @@ struct ActionWalker: L2HashWalker {
 
   mutating func afterGroup(_ group: [L2Element]) {}
 
-  mutating func walkText(_ text: String, _ handler: L2Handler?) {
+  mutating func walkText(_ text: String, _ handler: InputHandler?) {
     Log.debug("\(#function): \(currentHash), \(state.selected)")
     runBinding(handler)
   }
 
-  private func runBinding(_ handler: L2Handler?) {
+  private func runBinding(_ handler: InputHandler?) {
     let selected = self.state.selected == currentHash
     if let handler {
-      handler.handler(input, selected)
+      handler(input, selected)
     }
   }
 }
