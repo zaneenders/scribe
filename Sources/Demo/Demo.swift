@@ -13,8 +13,10 @@ struct Demo: Scribe {
   let logLevel: Logger.Level = .debug
 
   // Entry point of your AST
-  var entry: some Block {
-    Entry()
+  var window: some Window {
+    TerminalWindow {
+      Entry()
+    }.environment(Mode())  // Adds Mode to the @``Environment`` to be accessed through out the Layers.
   }
 }
 
@@ -30,6 +32,7 @@ struct Demo: Scribe {
 ///          │                │                  │               │
 /// Hello, I am Scribe. Zane was here :0 Job running: ready    Hello
 struct Entry: Block {
+  @Environment(Mode.self) var inputMode
   let storage = HeapObject()
   // ``@State`` is used for simple variables that can be modified at run time
   // by user interaction from the `.bind` function or async task.
@@ -37,9 +40,16 @@ struct Entry: Block {
   @State var count = 0
   @State var message: String = "Hello"
   var component: some Block {
+    "\(inputMode.mode)"
     storage.message.bind { selected, key in
       if selected && key == .lowercaseI {
         // Mutating an object.
+        switch inputMode.mode {
+        case .input:
+          inputMode.mode = .movement
+        case .movement:
+          inputMode.mode = .input
+        }
         storage.message += "!"
         message += "#"
       }
@@ -88,7 +98,17 @@ final class HeapObject {
   var message = "Hello, I am Scribe."
 }
 
-enum RunningState: Sendable {
+enum RunningState {
   case running
   case ready
+}
+
+final class Mode {
+
+  enum InputMode {
+    case movement
+    case input
+  }
+
+  var mode: InputMode = .movement
 }
