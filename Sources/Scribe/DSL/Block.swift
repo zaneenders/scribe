@@ -37,9 +37,8 @@ extension Block {
       return .text(str)
     } else if let text = self as? Text {
       return .text(text.text)
-    } else if let actionBlock = self as? any ActionBlock {
-      return .wrapped(
-        actionBlock.component.toL1Element(), key: actionBlock.key, action: actionBlock.action)
+    } else if let inputBlock = self as? any InputBlock {
+      return .input(inputBlock.component.toL1Element(), handler: inputBlock.handler)
     } else if let arrayBlock = self as? any ArrayBlocks {
       return makeGroup(from: arrayBlock._children)
     } else if let tupleArray = self as? any TupleBlocks {

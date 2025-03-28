@@ -19,7 +19,7 @@ struct MoveInWalker: L2ElementWalker {
     Log.debug("\(self.startingSelection)")
   }
 
-  mutating func walkText(_ text: String, _ binding: L2Binding?) {
+  mutating func walkText(_ text: String, _ binding: InputHandler?) {
     appendPath(siblings: 0)
     if atSelected {
       // we are at the bottom and selected

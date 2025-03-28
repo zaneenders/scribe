@@ -1,11 +1,6 @@
 enum L2Element {
-  case text(String, L2Binding?)
+  case text(String, InputHandler?)
   case group([L2Element])
-}
-
-struct L2Binding {
-  let key: String
-  let action: BlockAction
 }
 
 extension L2Element {
