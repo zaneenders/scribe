@@ -63,7 +63,7 @@ For ideas on modifying the demo and exploring other tree structures, see the [De
 > Note: Drawing attention to the second binding we explored displayed below, is an example of triggering an async UI update. The UI is updated on the main thread via the `@MainActor` Swift API. But the work behind an async call like this could be on other threads allowing the UI to stay interactive. You can read more about how Swift handles concurrency [here](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/).
 
 ```swift
-"Job running: \(running)".bind { key, selected in
+"Job running: \(running)".bind { selected, key in
   if selected && key == .lowercaseI {
     self.longRunningTask()
   }

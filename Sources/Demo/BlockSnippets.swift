@@ -11,7 +11,7 @@ struct All: Block {
   let items = ["Zane", "Was", "Here"]
   @State var condition = true
   var component: some Block {
-    "Button".bind { key, selected in
+    "Button".bind { selected, key in
       if selected && key == .lowercaseI {
         condition.toggle()
       }
@@ -76,7 +76,7 @@ struct AsyncUpdateStateUpdate: Block {
   static let delay = 100
   @State var state: RunningState = .ready
   var component: some Block {
-    "\(state)".bind { key, selected in
+    "\(state)".bind { selected, key in
       if selected && key == .lowercaseI {
         update()
       }
