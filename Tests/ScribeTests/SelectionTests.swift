@@ -36,7 +36,6 @@ struct SelectionTests {
       ])
 
     container.moveDown()
-    container.printState(&renderer)
     container.expectState(
       &renderer,
       expected: [
