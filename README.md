@@ -87,8 +87,8 @@ Here are some of the planned upcoming APIs for the project.
 ### 0.0.1 Release Goals
 
 - [x] Optimize tree Navigation: Improve performance through flattening and structural control.
-- [ ] Implement Modal Input: Enable context-specific interactions like text input and custom modes.
-- [ ] Customizable Keybindings: Allow users to personalize movement and actions.
+- [x] Implement Modal Input: Enable context-specific interactions like text input and custom modes.
+- [x] Customizable Keybindings: Allow users to personalize movement and actions.
 - [ ] Basic Color Support: Add foreground and background colors using ANSI escape codes.
 - [ ] Horizontal Layout: Provide more flexible UI design language.
 - [ ] (Bonus) Z-Axis Layering: Enable modal windows as a possible input prompt.

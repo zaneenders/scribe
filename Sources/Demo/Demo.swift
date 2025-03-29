@@ -13,8 +13,29 @@ struct Demo: Scribe {
   let logLevel: Logger.Level = .debug
 
   // Entry point of your AST
-  var entry: some Block {
-    Entry()
+  var window: some Window {
+    TerminalWindow {
+      Entry()
+    }
+    // Adds Mode to @Environment to be accessed through out the Block layers.
+    .environment(Mode())
+    // Override the default listener listener function to configure your own
+    // movement commands.
+    .register { input, container in
+      switch input {
+      case .lowercaseL:
+        container.in()
+      case .lowercaseS:
+        container.out()
+      case .lowercaseJ:
+        container.down()
+      case .lowercaseF:
+        container.up()
+      default:
+        return input
+      }
+      return nil  // consume movement commands from being propagated
+    }
   }
 }
 
@@ -30,6 +51,7 @@ struct Demo: Scribe {
 ///          │                │                  │               │
 /// Hello, I am Scribe. Zane was here :0 Job running: ready    Hello
 struct Entry: Block {
+  @Environment(Mode.self) var inputMode
   let storage = HeapObject()
   // ``@State`` is used for simple variables that can be modified at run time
   // by user interaction from the `.bind` function or async task.
@@ -40,6 +62,12 @@ struct Entry: Block {
     storage.message.bind { selected, key in
       if selected && key == .lowercaseI {
         // Mutating an object.
+        switch inputMode.mode {
+        case .input:
+          inputMode.mode = .movement
+        case .movement:
+          inputMode.mode = .input
+        }
         storage.message += "!"
         message += "#"
       }
@@ -88,7 +116,17 @@ final class HeapObject {
   var message = "Hello, I am Scribe."
 }
 
-enum RunningState: Sendable {
+enum RunningState {
   case running
   case ready
+}
+
+final class Mode {
+
+  enum InputMode {
+    case movement
+    case input
+  }
+
+  var mode: InputMode = .movement
 }
