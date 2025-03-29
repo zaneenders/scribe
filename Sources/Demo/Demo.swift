@@ -19,7 +19,8 @@ struct Demo: Scribe {
     }
     // Adds Mode to @Environment to be accessed through out the Block layers.
     .environment(Mode())
-    // Registers an input listener to setup your movement commands.
+    // Override the default listener listener function to configure your own
+    // movement commands.
     .register { input, container in
       switch input {
       case .lowercaseL:
@@ -33,7 +34,7 @@ struct Demo: Scribe {
       default:
         return input
       }
-      return nil  // consume movement commands
+      return nil  // consume movement commands from being propagated
     }
   }
 }
