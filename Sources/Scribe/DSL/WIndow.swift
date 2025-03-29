@@ -1,6 +1,6 @@
 @MainActor
 public protocol Window {
-  var listener: InputListener? { get }
+  var listener: InputListener { get }
   associatedtype EntryBlock: Block
   @BlockParser var entry: EntryBlock { get }
 }
@@ -9,13 +9,28 @@ public protocol Window {
 /// Other ``Window`` types may be added in the future.
 public struct TerminalWindow<B: Block>: Window {
 
-  public let listener: InputListener?
+  public let listener: InputListener
 
   private let block: B
 
   public init(@BlockParser block: () -> B) {
     self.block = block()
-    self.listener = nil
+    // Default input handler
+    self.listener = { input, container in
+      switch input {
+      case .lowercaseL:
+        container.in()
+      case .lowercaseS:
+        container.out()
+      case .lowercaseJ:
+        container.down()
+      case .lowercaseF:
+        container.up()
+      default:
+        return input
+      }
+      return nil  // consume movement commands
+    }
   }
 
   init(_ block: B, listener: @escaping InputListener) {

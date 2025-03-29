@@ -9,8 +9,10 @@ import Testing
 struct SelectionTests {
 
   @Test func selectEntry() async throws {
-    let block = Entry()
-    var container = ScribeController(block)
+    let window = TerminalWindow {
+      Entry()
+    }.environment(Mode())
+    var container = ScribeController(window.entry)
     var renderer = TestRenderer()
     container.expectState(
       &renderer,
@@ -83,8 +85,10 @@ struct SelectionTests {
   }
 
   @Test func selectEntryMoveToNested() async throws {
-    let block = Entry()
-    var container = ScribeController(block)
+    let window = TerminalWindow {
+      Entry()
+    }.environment(Mode())
+    var container = ScribeController(window.entry)
     var renderer = TestRenderer()
     container.moveIn()
     container.moveIn()
@@ -313,16 +317,16 @@ struct SelectionTests {
 // Helper functions to make creating test easier.
 extension ScribeController {
   mutating func moveUp() {
-    self.action(.lowercaseF)
+    up()
   }
   mutating func moveDown() {
-    self.action(.lowercaseJ)
+    down()
   }
   mutating func moveOut() {
-    self.action(.lowercaseS)
+    out()
   }
   mutating func moveIn() {
-    self.action(.lowercaseL)
+    `in`()
   }
 
   mutating func expectState(_ renderer: inout TestRenderer, expected: [String]) {

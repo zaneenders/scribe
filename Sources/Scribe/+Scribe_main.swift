@@ -23,7 +23,7 @@ extension Scribe {
       }
     }
 
-    let listener: InputListener? = scribe.window.listener
+    let listener: InputListener = scribe.window.listener
 
     do {
       input_loop: for try await byte in renderer.input {
@@ -35,23 +35,13 @@ extension Scribe {
         This is kinda bad but does give me the idea of surfacing the shutdown
         sequence as an external API which could be cool.
         */
-        if let listener {
-          if let listenedCode = listener(code, &block_container) {
-            switch listenedCode {
-            case .ctrlC:
-              renderingLoop.cancel()
-              break input_loop
-            default:
-              block_container.action(listenedCode)
-            }
-          }
-        } else {
-          switch code {
+        if let listenedCode = listener(code, &block_container) {
+          switch listenedCode {
           case .ctrlC:
             renderingLoop.cancel()
             break input_loop
           default:
-            block_container.action(code)
+            block_container.action(listenedCode)
           }
         }
       }
