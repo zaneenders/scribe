@@ -86,7 +86,7 @@ Here are some of the planned upcoming APIs for the project.
 
 ### 0.0.1 Release Goals
 
-- [ ] Optimize tree Navigation: Improve performance through flattening and structural control.
+- [x] Optimize tree Navigation: Improve performance through flattening and structural control.
 - [ ] Implement Modal Input: Enable context-specific interactions like text input and custom modes.
 - [ ] Customizable Keybindings: Allow users to personalize movement and actions.
 - [ ] Basic Color Support: Add foreground and background colors using ANSI escape codes.
