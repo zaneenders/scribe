@@ -58,7 +58,7 @@ struct Entry: Block {
   @State var running: RunningState = .ready
   @State var count = 0
   @State var message: String = "Hello"
-  var component: some Block {
+  var layer: some Block {
     storage.message.bind { selected, key in
       if selected && key == .lowercaseI {
         // Mutating an object.
@@ -104,7 +104,7 @@ struct Entry: Block {
 /// or update based on another value.
 struct Nested: Block {
   @Binding var text: String
-  var component: some Block {
+  var layer: some Block {
     "Nested[text: \(text)]"
   }
 }

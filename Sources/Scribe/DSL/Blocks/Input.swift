@@ -13,13 +13,13 @@ extension String {
 protocol InputBlock: Block {
   var handler: InputHandler { get }
   associatedtype Wrapped: Block
-  var component: Wrapped { get }
+  var layer: Wrapped { get }
 }
 
 struct Input<W: Block>: InputBlock {
   let wrapped: W
   let handler: InputHandler
-  var component: some Block {
-    wrapped.component
+  var layer: some Block {
+    wrapped.layer
   }
 }

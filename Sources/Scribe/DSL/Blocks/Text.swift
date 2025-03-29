@@ -8,7 +8,7 @@ struct Text: Block {
 }
 
 extension String: Block {
-  public var component: some Block {
+  public var layer: some Block {
     Text(self)
   }
 }
