@@ -8,7 +8,7 @@ extension Scribe {
 
     var renderer = TerminalRenderer()
 
-    var block_container = BlockContainer(scribe.window.entry)
+    var block_container = ScribeController(scribe.window.entry)
 
     // Background render loop.
     let renderingLoop = Task {
@@ -23,18 +23,36 @@ extension Scribe {
       }
     }
 
+    let listener: InputListener? = scribe.window.listener
+
     do {
       input_loop: for try await byte in renderer.input {
         guard let code = AsciiKeyCode.decode(keyboard: byte) else {
           Log.warning("Could not decode: \(byte)")
           continue
         }
-        switch code {
-        case .ctrlC:
-          renderingLoop.cancel()
-          break input_loop
-        default:
-          block_container.action(code)
+        /*
+        This is kinda bad but does give me the idea of surfacing the shutdown
+        sequence as an external API which could be cool.
+        */
+        if let listener {
+          if let listenedCode = listener(code, &block_container) {
+            switch listenedCode {
+            case .ctrlC:
+              renderingLoop.cancel()
+              break input_loop
+            default:
+              block_container.action(listenedCode)
+            }
+          }
+        } else {
+          switch code {
+          case .ctrlC:
+            renderingLoop.cancel()
+            break input_loop
+          default:
+            block_container.action(code)
+          }
         }
       }
     } catch {

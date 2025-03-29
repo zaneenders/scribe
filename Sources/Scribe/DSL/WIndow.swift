@@ -1,5 +1,6 @@
 @MainActor
 public protocol Window {
+  var listener: InputListener? { get }
   associatedtype EntryBlock: Block
   @BlockParser var entry: EntryBlock { get }
 }
@@ -8,10 +9,18 @@ public protocol Window {
 /// Other ``Window`` types may be added in the future.
 public struct TerminalWindow<B: Block>: Window {
 
+  public let listener: InputListener?
+
   private let block: B
 
   public init(@BlockParser block: () -> B) {
     self.block = block()
+    self.listener = nil
+  }
+
+  init(_ block: B, listener: @escaping InputListener) {
+    self.block = block
+    self.listener = listener
   }
 
   public var entry: B {
@@ -19,7 +28,7 @@ public struct TerminalWindow<B: Block>: Window {
   }
 }
 
-extension Window {
+extension TerminalWindow {
   /// Adds a Object to the environment. Which you can access using the T.self
   /// where T is the type that you are inserting.
   /// You can store value types but you will be unable to mutate them. This
@@ -30,6 +39,13 @@ extension Window {
     temp = v
     Log.trace("\(v)")
     return self
+  }
+}
+
+public typealias InputListener = (AsciiKeyCode, inout ScribeController) -> AsciiKeyCode?
+extension TerminalWindow {
+  public func register(_ listener: @escaping InputListener) -> Self {
+    TerminalWindow(self.block, listener: listener)
   }
 }
 

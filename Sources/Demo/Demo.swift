@@ -16,7 +16,25 @@ struct Demo: Scribe {
   var window: some Window {
     TerminalWindow {
       Entry()
-    }.environment(Mode())  // Adds Mode to the @``Environment`` to be accessed through out the Layers.
+    }
+    // Adds Mode to @Environment to be accessed through out the Block layers.
+    .environment(Mode())
+    // Registers an input listener to setup your movement commands.
+    .register { input, container in
+      switch input {
+      case .lowercaseL:
+        container.in()
+      case .lowercaseS:
+        container.out()
+      case .lowercaseJ:
+        container.down()
+      case .lowercaseF:
+        container.up()
+      default:
+        return input
+      }
+      return nil  // consume movement commands
+    }
   }
 }
 
@@ -40,7 +58,6 @@ struct Entry: Block {
   @State var count = 0
   @State var message: String = "Hello"
   var component: some Block {
-    "\(inputMode.mode)"
     storage.message.bind { selected, key in
       if selected && key == .lowercaseI {
         // Mutating an object.

@@ -10,7 +10,7 @@ struct SelectionTests {
 
   @Test func selectEntry() async throws {
     let block = Entry()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(
       &renderer,
@@ -84,7 +84,7 @@ struct SelectionTests {
 
   @Test func selectEntryMoveToNested() async throws {
     let block = Entry()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.moveIn()
     container.moveIn()
@@ -106,7 +106,7 @@ struct SelectionTests {
 
   @Test func selectAll() async throws {
     let block = All()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[A]", "[Button]", "[Here]", "[Was]", "[Zane]"])
     // Move in
@@ -120,7 +120,7 @@ struct SelectionTests {
 
   @Test func selectOptionalBlock() async throws {
     let block = OptionalBlock()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(
       &renderer, expected: ["[Hello]", "[OptionalBlock(idk: Optional(\"Hello\"))]"])
@@ -129,7 +129,7 @@ struct SelectionTests {
   // Test up and down logic.
   @Test func selectBasicTupleBindedText() async throws {
     let block = BasicTupleBindedText()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]", "[Enders]"])
     container.moveIn()
@@ -149,14 +149,14 @@ struct SelectionTests {
 
   @Test func selectBasicTupleText() async throws {
     let block = BasicTupleText()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
   }
 
   @Test func selectBasicTupleTextMoveIn() async throws {
     let block = BasicTupleText()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
     container.moveIn()
@@ -167,7 +167,7 @@ struct SelectionTests {
 
   @Test func selectBasicTupleTextMoveInAndOut() async throws {
     let block = BasicTupleText()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
     container.moveIn()
@@ -181,7 +181,7 @@ struct SelectionTests {
 
   @Test func selectBasicTupleTextMoveInDownOut() async throws {
     let block = BasicTupleText()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
     container.moveIn()
@@ -195,7 +195,7 @@ struct SelectionTests {
 
   @Test func selectBasicTupleTextMoveInDownUpOut() async throws {
     let block = BasicTupleText()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[Hello]", "[Zane]"])
     container.moveIn()
@@ -211,7 +211,7 @@ struct SelectionTests {
 
   @Test func selectSelectionBlockDontMoveDown() async throws {
     let block = SelectionBlock()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
@@ -224,7 +224,7 @@ struct SelectionTests {
 
   @Test func selectSelectionBlock() async throws {
     let block = SelectionBlock()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(
       &renderer, expected: ["[0]", "[1]", "[2]", "[Hello]", "[Zane]", "[here]", "[was]"])
@@ -290,7 +290,7 @@ struct SelectionTests {
     let secondPause = AsyncUpdateStateUpdate.delay
 
     let block = AsyncUpdateStateUpdate()
-    var container = BlockContainer(block)
+    var container = ScribeController(block)
     var renderer = TestRenderer()
     container.expectState(&renderer, expected: ["[ready]"])
 
@@ -311,7 +311,7 @@ struct SelectionTests {
 }
 
 // Helper functions to make creating test easier.
-extension BlockContainer {
+extension ScribeController {
   mutating func moveUp() {
     self.action(.lowercaseF)
   }
