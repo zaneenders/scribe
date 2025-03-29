@@ -3,17 +3,17 @@
 @MainActor  // This is required to force ``Block``s to be processed on the main thread allowing for other actions to be performed on other threads/actors.
 public protocol Block {
   associatedtype Component: Block
-  @BlockParser var component: Component { get }
+  @BlockParser var layer: Component { get }
 }
 
 extension Block where Component == Never {
-  public var component: Never {
+  public var layer: Never {
     fatalError("\(Self.self):\(#fileID):\(#function)")
   }
 }
 
 extension Never: Block {
-  public var component: some Block {
+  public var layer: some Block {
     fatalError("\(Self.self):\(#fileID):\(#function)")
   }
 }
@@ -38,13 +38,13 @@ extension Block {
     } else if let text = self as? Text {
       return .text(text.text)
     } else if let inputBlock = self as? any InputBlock {
-      return .input(inputBlock.component.toL1Element(), handler: inputBlock.handler)
+      return .input(inputBlock.layer.toL1Element(), handler: inputBlock.handler)
     } else if let arrayBlock = self as? any ArrayBlocks {
       return makeGroup(from: arrayBlock._children)
     } else if let tupleArray = self as? any TupleBlocks {
       return makeGroup(from: tupleArray._children)
     } else {
-      return .group([self.component.toL1Element()])
+      return .group([self.layer.toL1Element()])
     }
   }
 

@@ -10,7 +10,7 @@ starting point for building more complex interfaces.
 struct All: Block {
   let items = ["Zane", "Was", "Here"]
   @State var condition = true
-  var component: some Block {
+  var layer: some Block {
     "Button".bind { selected, key in
       if selected && key == .lowercaseI {
         condition.toggle()
@@ -29,7 +29,7 @@ struct All: Block {
 
 struct OptionalBlock: Block {
   var idk: String? = "Hello"
-  var component: some Block {
+  var layer: some Block {
     "\(self)"
     if let hello = idk {
       hello
@@ -39,7 +39,7 @@ struct OptionalBlock: Block {
 
 // Test case for moving down.
 struct BasicTupleBindedText: Block {
-  var component: some Block {
+  var layer: some Block {
     "Hello".bind { _, _ in
       // ignored
     }
@@ -52,7 +52,7 @@ struct BasicTupleBindedText: Block {
 
 // Very simple block that would be a Tuple and String blocks.
 struct BasicTupleText: Block {
-  var component: some Block {
+  var layer: some Block {
     "Hello"
     "Zane"
   }
@@ -60,7 +60,7 @@ struct BasicTupleText: Block {
 
 // Used for testing selection and also to test merging two lists composed from arrays and tuple blocks.
 struct SelectionBlock: Block {
-  var component: some Block {
+  var layer: some Block {
     "Hello"
     "Zane"
     "was"
@@ -75,7 +75,7 @@ struct SelectionBlock: Block {
 struct AsyncUpdateStateUpdate: Block {
   static let delay = 100
   @State var state: RunningState = .ready
-  var component: some Block {
+  var layer: some Block {
     "\(state)".bind { selected, key in
       if selected && key == .lowercaseI {
         update()
