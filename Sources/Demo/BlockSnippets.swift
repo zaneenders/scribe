@@ -99,7 +99,6 @@ actor Worker {
   static let shared = Worker()
   func performWork(with delay: Duration) async -> RunningState {
     try? await Task.sleep(for: delay)
-    Log.notice("Sleep of \(delay) completed.")
     return .ready
   }
 }
