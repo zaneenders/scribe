@@ -1,0 +1,253 @@
+openapi: 3.1.0
+info:
+  title: OpenAI-compatible Chat API (trimmed)
+  version: 1.0.0
+  description: >
+    Minimal surface for streaming chat completions and listing models.
+    Works with OpenAI, Ollama (/v1), vLLM, and other OpenAI-compatible providers.
+servers:
+  - url: https://api.openai.com
+paths:
+  /v1/chat/completions:
+    post:
+      operationId: createChatCompletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChatCompletionRequest'
+      responses:
+        '200':
+          description: Server-Sent Events stream of completion chunks
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionChunk'
+  /v1/models:
+    get:
+      operationId: listModels
+      responses:
+        '200':
+          description: Models available on the server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListModelsResponse'
+components:
+  schemas:
+    CreateChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        stream:
+          type: boolean
+          default: true
+        temperature:
+          type: number
+          format: float
+        max_tokens:
+          type: integer
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatTool'
+        tool_choice:
+          description: Tool choice; use string "auto" or object per provider docs
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+        stream_options:
+          $ref: '#/components/schemas/ChatCompletionStreamOptions'
+        reasoning:
+          $ref: '#/components/schemas/ChatCompletionReasoning'
+    ChatCompletionStreamOptions:
+      type: object
+      description: OpenAI-style streaming options
+      properties:
+        include_usage:
+          type: boolean
+          default: false
+          description: >
+            If true, the server may send an additional chunk with token usage before the stream ends.
+      additionalProperties: true
+    ChatCompletionReasoning:
+      type: object
+      description: >
+        OpenAI-style reasoning/thinking configuration (same shape as scribe-agent LLMProvider).
+        `effort: none` turns separate reasoning off; `low` / `medium` / `high` request it where supported.
+        Providers that do not recognize the object typically ignore it.
+      properties:
+        effort:
+          type: string
+          enum: [high, medium, low, none]
+          description: Reasoning depth; none disables streamed reasoning deltas.
+      additionalProperties: true
+    ChatMessage:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type:
+            - string
+            - 'null'
+        name:
+          type: string
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantToolCall'
+        tool_call_id:
+          type: string
+      additionalProperties: true
+    AssistantToolCall:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        function:
+          type: object
+          properties:
+            name:
+              type: string
+            arguments:
+              type: string
+          additionalProperties: true
+      additionalProperties: true
+    ChatTool:
+      type: object
+      required: [type, function]
+      properties:
+        type:
+          type: string
+          enum: [function]
+        function:
+          $ref: '#/components/schemas/ChatToolFunction'
+    ChatToolFunction:
+      type: object
+      required: [name, parameters]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+    ChatCompletionChunk:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+        created:
+          type: integer
+          format: int64
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChunkChoice'
+        usage:
+          $ref: '#/components/schemas/CompletionUsage'
+      additionalProperties: true
+    CompletionUsage:
+      type: object
+      description: Token usage (often sent on the final stream chunk when include_usage is true)
+      properties:
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+      additionalProperties: true
+    ChunkChoice:
+      type: object
+      properties:
+        index:
+          type: integer
+        delta:
+          $ref: '#/components/schemas/ChoiceDelta'
+        finish_reason:
+          type:
+            - string
+            - 'null'
+      additionalProperties: true
+    ChoiceDelta:
+      type: object
+      properties:
+        role:
+          type: string
+        content:
+          type:
+            - string
+            - 'null'
+        reasoning_content:
+          type:
+            - string
+            - 'null'
+          description: >
+            Chain-of-thought or reasoning tokens from the model; clients may hide this
+            and must not treat it as user-visible assistant content.
+        reasoning:
+          type:
+            - string
+            - 'null'
+          description: >
+            Some providers stream reasoning under this key instead of or in addition to reasoning_content.
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCallDelta'
+      additionalProperties: true
+    ToolCallDelta:
+      type: object
+      properties:
+        index:
+          type: integer
+        id:
+          type: string
+        type:
+          type: string
+        function:
+          type: object
+          properties:
+            name:
+              type: string
+            arguments:
+              type: string
+          additionalProperties: true
+      additionalProperties: true
+    ListModelsResponse:
+      type: object
+      properties:
+        object:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelObject'
+      additionalProperties: true
+    ModelObject:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+      additionalProperties: true

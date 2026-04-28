@@ -1,0 +1,9 @@
+{
+  "openai": {
+    "baseUrl": "http://localhost:11434"
+  },
+  "agent": {
+    "model": "gemma4:e2b",
+    "maxToolRounds": 256
+  }
+}
