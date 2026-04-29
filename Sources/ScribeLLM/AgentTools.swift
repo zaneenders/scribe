@@ -1,6 +1,13 @@
 import Foundation
 import OpenAPIRuntime
 
+/// OpenAI-style tool definitions (aligned with ``ToolRunner``).
+public enum AgentTools {
+  public static func all() -> [Components.Schemas.ChatTool] {
+    OpenAIToolParameterSchema.all
+  }
+}
+
 /// Builders for `ChatToolFunction.parameters` (OpenAPI object schemas as `OpenAPIObjectContainer`).
 private enum OpenAIToolParameterSchema {
   static func asPayload(
@@ -21,7 +28,8 @@ private enum OpenAIToolParameterSchema {
   private static let content = stringProperty(description: "Full file contents.")
   private static let command = stringProperty(description: "Shell command to run (passed to /bin/sh -c).")
   private static let cwd = stringProperty(
-    description: "Optional working directory for the command (relative paths resolve against the process cwd)."
+    description:
+      "Optional working directory for the command (relative paths resolve against the process cwd)."
   )
   private static let oldString = stringProperty(
     description: "Exact text to replace; must match exactly one place."
@@ -49,7 +57,8 @@ private enum OpenAIToolParameterSchema {
         _type: .function,
         function: .init(
           name: "read_file",
-          description: "Read a UTF-8 file at the given path (relative paths resolve against the process cwd).",
+          description:
+            "Read a UTF-8 file at the given path (relative paths resolve against the process cwd).",
           parameters: asPayload([
             "type": "object",
             "properties": [
@@ -92,9 +101,4 @@ private enum OpenAIToolParameterSchema {
       ),
     ]
   }
-}
-
-/// OpenAI-style tool definitions (aligned with `ToolRunner`).
-enum AgentTools {
-  static func all() -> [Components.Schemas.ChatTool] { OpenAIToolParameterSchema.all }
 }

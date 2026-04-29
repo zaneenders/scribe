@@ -3,7 +3,11 @@ import HTTPTypes
 import OpenAPIRuntime
 
 struct BearerTokenMiddleware: ClientMiddleware {
-  var token: String?
+  let token: String?
+
+  init(token: String?) {
+    self.token = token
+  }
 
   func intercept(
     _ request: HTTPRequest,

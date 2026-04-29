@@ -2,22 +2,34 @@ import Configuration
 import Foundation
 
 /// Dotted keys in `scribe-config.json` for ``ConfigReader`` (matches nested JSON paths).
-internal enum ScribeConfigBinding {
-  static let openAIBaseURL: ConfigKey = "openai.baseUrl"
-  static let openAIAPIKey: ConfigKey = "openai.apiKey"
-  static let agentModel: ConfigKey = "agent.model"
-  static let agentMaxToolRounds: ConfigKey = "agent.maxToolRounds"
+public enum ScribeConfigBinding {
+  public static let openAIBaseURL: ConfigKey = "openai.baseUrl"
+  public static let openAIAPIKey: ConfigKey = "openai.apiKey"
+  public static let agentModel: ConfigKey = "agent.model"
+  public static let agentMaxToolRounds: ConfigKey = "agent.maxToolRounds"
 }
 
-struct AgentConfig {
+public struct AgentConfig: Sendable {
   private static let configFileName = "scribe-config.json"
 
-  var openAIBaseURL: String
-  var openAIAPIKey: String?
-  var agentModel: String
-  var agentMaxToolRounds: Int
+  public var openAIBaseURL: String
+  public var openAIAPIKey: String?
+  public var agentModel: String
+  public var agentMaxToolRounds: Int
 
-  static func load() async throws -> AgentConfig {
+  public init(
+    openAIBaseURL: String,
+    openAIAPIKey: String?,
+    agentModel: String,
+    agentMaxToolRounds: Int
+  ) {
+    self.openAIBaseURL = openAIBaseURL
+    self.openAIAPIKey = openAIAPIKey
+    self.agentModel = agentModel
+    self.agentMaxToolRounds = agentMaxToolRounds
+  }
+
+  public static func load() async throws -> AgentConfig {
     let configPath = resolveScribeConfigPath()
 
     let fileProvider: FileProvider<JSONSnapshot>
@@ -54,7 +66,7 @@ struct AgentConfig {
       openAIBaseURL: baseURL,
       openAIAPIKey: apiKey,
       agentModel: model,
-      agentMaxToolRounds: maxRounds,
+      agentMaxToolRounds: maxRounds
     )
   }
 

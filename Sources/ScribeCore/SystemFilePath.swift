@@ -1,9 +1,9 @@
+import SystemPackage
+
 #if canImport(System)
 import System
 #endif
-import SystemPackage
 
-/// Native swift-system path: ``System/FilePath`` when the System module is available (e.g. Apple platforms), otherwise ``SystemPackage/FilePath``.
 #if canImport(System)
 internal typealias ScribeFilePath = System.FilePath
 #else

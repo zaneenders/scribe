@@ -1,12 +1,18 @@
 import Foundation
 
-struct ToolRunner {
-  struct Outcome: Sendable {
-    let text: String
+public struct ToolRunner: Sendable {
+  public init() {}
+
+  public struct Outcome: Sendable {
+    public let text: String
+
+    public init(text: String) {
+      self.text = text
+    }
   }
 
   /// Entry point for the OpenAPI tool loop.
-  func run(name: String, argumentsJSON: String) async -> String {
+  public func run(name: String, argumentsJSON: String) async -> String {
     await Self._run(name: name, arguments: argumentsJSON).text
   }
 
@@ -71,7 +77,8 @@ struct ToolRunner {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDir), isDir.boolValue
     else {
-      throw PathResolution.PathError(description: "parent directory does not exist for write: \(userPath)")
+      throw PathResolution.PathError(
+        description: "parent directory does not exist for write: \(userPath)")
     }
   }
 

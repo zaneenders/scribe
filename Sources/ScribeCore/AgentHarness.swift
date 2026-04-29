@@ -1,95 +1,30 @@
 import Foundation
 import OpenAPIRuntime
+import ScribeLLM
 
-private enum AssistantStreamTone {
-  case reasoning
-  case content
-}
+public struct AgentHarness {
+  public var client: Client
+  public var model: String
+  public var maxToolRounds: Int
+  private let output: any ScribeAgentOutput
+  private let tools = AgentTools.all()
+  private let runner = ToolRunner()
 
-/// Accumulates one assistant step from streamed chunks (content + parallel tool calls).
-struct StreamedAssistantTurn {
-  var text = ""
-  var toolCalls: [Int: PartialToolCall] = [:]
-  var finishReason: String?
-
-  struct PartialToolCall {
-    var id: String?
-    var name: String?
-    var arguments: String
+  public init(
+    output: any ScribeAgentOutput,
+    client: Client,
+    model: String,
+    maxToolRounds: Int
+  ) {
+    self.output = output
+    self.client = client
+    self.model = model
+    self.maxToolRounds = maxToolRounds
   }
 
-  mutating func apply(chunk: Components.Schemas.ChatCompletionChunk) {
-    guard let choices = chunk.choices else { return }
-    for choice in choices {
-      if let fr = choice.finishReason {
-        finishReason = fr
-      }
-      guard let delta = choice.delta else { continue }
-      if let c = delta.content, !c.isEmpty {
-        text += c
-      }
-      guard let deltas = delta.toolCalls else { continue }
-      for td in deltas {
-        let idx = td.index ?? 0
-        var acc = toolCalls[idx] ?? PartialToolCall(id: nil, name: nil, arguments: "")
-        if let id = td.id { acc.id = id }
-        if let fn = td.function {
-          if let n = fn.name { acc.name = n }
-          if let a = fn.arguments { acc.arguments += a }
-        }
-        toolCalls[idx] = acc
-      }
-    }
-  }
-
-  func resolvedToolCalls() -> [(id: String, name: String, arguments: String)] {
-    toolCalls.keys.sorted().compactMap { key in
-      guard let t = toolCalls[key], let id = t.id, let name = t.name else { return nil }
-      return (id, name, t.arguments)
-    }
-  }
-}
-
-struct AgentHarness {
-  var client: Client
-  var model: String
-  var maxToolRounds: Int
-  let tools = AgentTools.all()
-  let runner = ToolRunner()
-
-  private static func formatUsageCreative(_ u: Components.Schemas.CompletionUsage) -> String? {
-    let p = u.promptTokens
-    let c = u.completionTokens
-    let t = u.totalTokens
-    guard p != nil || c != nil || t != nil else { return nil }
-    let inStr = p.map(String.init) ?? "—"
-    let outStr = c.map(String.init) ?? "—"
-    let sumStr = t.map(String.init) ?? "—"
-
-    let innerVisible = "◆ \(inStr) in  ·  \(outStr) out  ·  \(sumStr) Σ ◆"
-    let targetWidth = max(innerVisible.count + 10, 54)
-    let sidePad = max(0, targetWidth - innerVisible.count)
-    let padL = sidePad / 2
-    let padR = sidePad - padL
-
-    let bg = ANSI.usagePanelBg
-    let rail = ANSI.usagePanelRailBg
-    let m = ANSI.usagePanelMuted
-    let ni = ANSI.usagePanelIn
-    let no = ANSI.usagePanelOut
-    let ns = ANSI.usagePanelSum
-    let x = ANSI.reset
-
-    let railRow = "  \(rail)\(m)" + String(repeating: "\u{00B7}", count: targetWidth) + "\(x)"
-    let midInner =
-      "\(m)◆ \(ni)\(inStr)\(m) in  ·  \(no)\(outStr)\(m) out  ·  \(ns)\(sumStr)\(m)\u{001B}[22m Σ ◆"
-    let midRow =
-      "  \(bg)" + String(repeating: " ", count: padL) + midInner + String(repeating: " ", count: padR) + "\(x)"
-
-    return "\n\(railRow)\n\(midRow)\n\(railRow)"
-  }
-
-  func runModelTurn(messages: inout [Components.Schemas.ChatMessage]) async throws {
+  public func runModelTurn(messages: inout [Components.Schemas.ChatMessage]) async throws
+    -> ModelTurnOutcome
+  {
     for round in 0..<maxToolRounds {
       let requestBody = Components.Schemas.CreateChatCompletionRequest(
         model: model,
@@ -139,7 +74,7 @@ struct AgentHarness {
 
       var turn = StreamedAssistantTurn()
       var streamStarted = false
-      var tone: AssistantStreamTone?
+      var streamSection: AssistantStreamSection?
       var lastUsage: Components.Schemas.CompletionUsage?
       for try await sse in sseStream {
         guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
@@ -152,10 +87,7 @@ struct AgentHarness {
             from: Data(raw.utf8)
           )
         } catch {
-          try? FileHandle.standardError.write(
-            contentsOf: Data(
-              "\(ANSI.dim)(skipped one stream line: not valid completion JSON)\(ANSI.reset)\n".utf8
-            ))
+          try output.printSkippedUnreadableStreamLine()
           continue
         }
         if let u = chunk.usage {
@@ -165,52 +97,40 @@ struct AgentHarness {
           guard let delta = choice.delta else { continue }
           for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
             streamStarted = true
-            if tone != .reasoning {
-              try FileHandle.standardOutput.write(contentsOf: Data(ANSI.reset.utf8))
-              if tone != nil { try FileHandle.standardOutput.write(contentsOf: Data("\n".utf8)) }
-              try FileHandle.standardOutput.write(
-                contentsOf: Data("\(ANSI.purple)scribe:\(ANSI.reset)\n".utf8))
-              try FileHandle.standardOutput.write(contentsOf: Data("\(ANSI.thinking)  ".utf8))
-              tone = .reasoning
+            if case .some(.reasoning) = streamSection {
+            } else {
+              try output.enterAssistantStreamSection(.reasoning, previous: streamSection)
+              streamSection = .reasoning
             }
-            try FileHandle.standardOutput.write(contentsOf: Data(r.utf8))
-            try FileHandle.standardOutput.synchronize()
+            try output.appendAssistantStreamText(.reasoning, text: r)
           }
           if let t = delta.content, !t.isEmpty {
             streamStarted = true
-            if tone != .content {
-              try FileHandle.standardOutput.write(contentsOf: Data(ANSI.reset.utf8))
-              if tone != nil { try FileHandle.standardOutput.write(contentsOf: Data("\n".utf8)) }
-              try FileHandle.standardOutput.write(
-                contentsOf: Data("\(ANSI.purple)scribe:\(ANSI.reset)\n".utf8))
-              try FileHandle.standardOutput.write(contentsOf: Data(ANSI.cyan.utf8))
-              tone = .content
+            if case .some(.answer) = streamSection {
+            } else {
+              try output.enterAssistantStreamSection(.answer, previous: streamSection)
+              streamSection = .answer
             }
-            try FileHandle.standardOutput.write(contentsOf: Data(t.utf8))
-            try FileHandle.standardOutput.synchronize()
+            try output.appendAssistantStreamText(.answer, text: t)
           }
         }
         turn.apply(chunk: chunk)
       }
       if streamStarted {
-        try FileHandle.standardOutput.write(contentsOf: Data("\(ANSI.reset)\n".utf8))
-        try FileHandle.standardOutput.synchronize()
+        try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)
       } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
-        print(
-          "\(ANSI.purple)scribe:\(ANSI.reset)\n\(ANSI.dim)(empty turn)\(ANSI.reset)"
+        try output.printEmptyAssistantTurn()
+      }
+
+      if let u = lastUsage {
+        try output.emitUsage(
+          promptTokens: u.promptTokens,
+          completionTokens: u.completionTokens,
+          totalTokens: u.totalTokens
         )
       }
 
-      if let u = lastUsage, let usageLine = Self.formatUsageCreative(u) {
-        print(usageLine)
-      }
-
       let toolInvocations = turn.resolvedToolCalls()
-      // Use a real empty string when there is no visible `content` delta. Reasoning/thinking
-      // chunks are shown in the terminal but are not merged into `turn.text`; `content: nil`
-      // encodes with no `content` key (`encodeIfPresent`), and some providers respond with
-      // HTTP 400 "invalid message content type" for assistant rows that have `tool_calls`
-      // but omit or null-out `content`.
       let assistantText = turn.text.isEmpty ? "" : turn.text
       let assistantMessage = Components.Schemas.ChatMessage(
         role: .assistant,
@@ -233,29 +153,21 @@ struct AgentHarness {
       messages.append(assistantMessage)
 
       if toolInvocations.isEmpty {
-        print()
-        return
+        try output.printBlankLine()
+        return .completed
       }
 
-      print(
-        "\(ANSI.yellow)\(ANSI.bold)tool round \(round + 1)\(ANSI.reset) "
-          + "\(ANSI.cyan)\(toolInvocations.map(\.name).joined(separator: ", "))\(ANSI.reset)"
-      )
+      try output.printToolRoundHeader(round: round + 1, toolNames: toolInvocations.map(\.name))
 
       for inv in toolInvocations {
-        let output = await runner.run(name: inv.name, argumentsJSON: inv.arguments)
+        let jsonOutput = await runner.run(name: inv.name, argumentsJSON: inv.arguments)
         let argSummary = ToolDisplay.argumentSummary(name: inv.name, argumentsJSON: inv.arguments)
-        let head =
-          "\(ANSI.yellow)▶ \(inv.name)\(ANSI.reset)"
-          + (argSummary.map { " \(ANSI.dim)\($0)\(ANSI.reset)" } ?? "")
-        print(head)
-        for line in ToolDisplay.outputLines(name: inv.name, jsonOutput: output) {
-          print("  \(line)")
-        }
-        print()
+        let lines = ToolDisplay.outputLines(name: inv.name, jsonOutput: jsonOutput)
+        try output.printToolInvocation(name: inv.name, argumentSummary: argSummary, outputLines: lines)
+        try output.printBlankLine()
         let toolMsg = Components.Schemas.ChatMessage(
           role: .tool,
-          content: output,
+          content: jsonOutput,
           name: nil,
           toolCalls: nil,
           toolCallId: inv.id
@@ -263,11 +175,12 @@ struct AgentHarness {
         messages.append(toolMsg)
       }
     }
-    print("\(ANSI.yellow)Stopped: max tool rounds (\(maxToolRounds)) exceeded.\(ANSI.reset)\n")
+    try output.printMaxToolRoundsExceeded(max: maxToolRounds)
+    return .hitToolRoundLimit
   }
 }
 
-/// Human-readable terminal formatting for JSON tool payloads (conversation history still receives raw JSON).
+/// Human-readable transcript lines for tool JSON (conversation history still receives raw JSON).
 private enum ToolDisplay {
   private static let toolJSONDecoder: JSONDecoder = {
     let d = JSONDecoder()
@@ -275,7 +188,6 @@ private enum ToolDisplay {
     return d
   }()
 
-  /// Arguments for `shell` / `read_file` / `write_file` / `edit_file` display (matches `ToolRunner` keys).
   private struct ShellInvocationArgs: Decodable {
     let command: String
     let cwd: String?
@@ -285,7 +197,6 @@ private enum ToolDisplay {
     let path: String
   }
 
-  /// Decoded tool result body (keys align with `ToolRunner` JSON); optional fields depend on tool.
   private struct ToolResultBody: Decodable {
     let ok: Bool
     let error: String?
@@ -297,7 +208,6 @@ private enum ToolDisplay {
     let replaced: Bool?
   }
 
-  /// Short line parsed from tool arguments for the heading (e.g. shell command).
   static func argumentSummary(name: String, argumentsJSON: String) -> String? {
     let trimmed = argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let data = trimmed.data(using: .utf8) else { return nil }
@@ -309,7 +219,9 @@ private enum ToolDisplay {
       }
       return args.command
     case "read_file", "write_file", "edit_file":
-      guard let args = try? toolJSONDecoder.decode(PathInvocationArgs.self, from: data) else { return nil }
+      guard let args = try? toolJSONDecoder.decode(PathInvocationArgs.self, from: data) else {
+        return nil
+      }
       return args.path
     default:
       return nil
@@ -369,7 +281,6 @@ private enum ToolDisplay {
     return lines.isEmpty ? ["(empty file)"] : lines
   }
 
-  /// Pretty-print for tool payloads that do not need custom line layout (unknown tools, missing fields).
   private static func fallbackPrettyLines(_ jsonOutput: String) -> [String]? {
     guard let data = jsonOutput.data(using: .utf8),
       let obj = try? JSONSerialization.jsonObject(with: data),
