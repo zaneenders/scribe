@@ -1,3 +1,9 @@
+import Foundation
+import ScribeCore
+import ScribeLLM
+import SlateCore
+import Synchronization
+
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -5,11 +11,6 @@ import Glibc
 #elseif canImport(Musl)
 import Musl
 #endif
-import Foundation
-import ScribeCore
-import ScribeLLM
-import Synchronization
-import SlateCore
 
 // MARK: - User input
 
@@ -68,7 +69,7 @@ private func slateIsUserSubmissionLine(_ line: TLine) -> Bool {
 }
 
 /// Latest usage for the fixed top row (not part of scrollback).
-fileprivate struct UsageHUDSnapshot: Equatable {
+private struct UsageHUDSnapshot: Equatable {
   var prompt: Int?
   var completion: Int?
   var total: Int?
@@ -76,7 +77,7 @@ fileprivate struct UsageHUDSnapshot: Equatable {
 }
 
 /// Config header fixed at the top (not scrollback).
-fileprivate struct BannerSnapshot: Equatable {
+private struct BannerSnapshot: Equatable {
   var baseURL: String
   var model: String
   var cwd: String
@@ -119,6 +120,12 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
     state.withLock { $0.modelBusy }
   }
 
+  fileprivate func snapshotTranscriptForLayout() -> (completed: [TLine], open: TLine?) {
+    state.withLock { sink in
+      (sink.lines, sink.assistantOpenLine)
+    }
+  }
+
   fileprivate func snapshotLines() -> [TLine] {
     state.withLock { sink in
       var out = sink.lines
@@ -148,7 +155,7 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
           spans: [
             StyledSpan(
               fg: ScribePalette.orange, bg: ScribePalette.black, bold: false,
-              text: slateUserTranscriptHeader),
+              text: slateUserTranscriptHeader)
           ]))
       for row in logicalLines {
         if row.isEmpty {
@@ -160,7 +167,7 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
             spans: [
               StyledSpan(
                 fg: ScribePalette.white, bg: ScribePalette.black, bold: false,
-                text: slateUserTranscriptBodyPrefix + row),
+                text: slateUserTranscriptBodyPrefix + row)
             ]))
       }
       trimIfNeeded(&sink.lines)
@@ -573,10 +580,51 @@ private enum SlateChatRenderer {
 
   private static let inputGutterColumns = 5
 
+  /// Rows available for transcript text between the fixed header and the input stack (matches ``makeGrid``).
+  static func transcriptContentRows(
+    cols: Int,
+    rows: Int,
+    banner: BannerSnapshot?,
+    usage: UsageHUDSnapshot?,
+    inputLine: String,
+    waitingForLLM: Bool
+  ) -> Int {
+    let headerRows: Int = {
+      if banner != nil {
+        return min(3, max(0, rows &- 1))
+      }
+      if usage != nil, rows >= 2 {
+        return 1
+      }
+      return 0
+    }()
+
+    let showSpinner = waitingForLLM && inputLine.isEmpty
+    let textWidth = max(0, cols &- inputGutterColumns)
+    let maxInputRows = min(8, max(1, rows &- headerRows &- 1))
+    let inputRowCount: Int
+    if showSpinner || textWidth == 0 {
+      inputRowCount = 1
+    } else {
+      var lines = TranscriptLayout.inputVisualLines(from: inputLine, textWidth: textWidth)
+      let needsExtraCursorRow =
+        lines.last.map { $0.count >= textWidth && textWidth > 0 } ?? false
+      if needsExtraCursorRow {
+        lines.append("")
+      }
+      let capped = min(maxInputRows, max(1, lines.count))
+      inputRowCount = capped
+    }
+
+    let firstInputRow = rows &- inputRowCount
+    return max(0, firstInputRow &- headerRows)
+  }
+
   static func makeGrid(
     cols: Int,
     rows: Int,
-    transcript: [TLine],
+    flattenedTranscript: [TLine],
+    transcriptTailStart: Int,
     banner: BannerSnapshot?,
     usage: UsageHUDSnapshot?,
     inputLine: String,
@@ -598,6 +646,10 @@ private enum SlateChatRenderer {
       }
       return 0
     }()
+
+    let contentRows = transcriptContentRows(
+      cols: cols, rows: rows, banner: banner, usage: usage,
+      inputLine: inputLine, waitingForLLM: waitingForLLM)
 
     if headerRows >= 1 {
       let usageReserve: Int
@@ -645,12 +697,11 @@ private enum SlateChatRenderer {
       inputRowCount = capped
       visualLines =
         lines.count > capped
-          ? Array(lines.suffix(capped))
-          : lines + Array(repeating: "", count: max(0, capped &- lines.count))
+        ? Array(lines.suffix(capped))
+        : lines + Array(repeating: "", count: max(0, capped &- lines.count))
     }
 
     let firstInputRow = rows &- inputRowCount
-    let contentRows = max(0, firstInputRow &- headerRows)
     let wrapW = cols
 
     fillInputBackground(
@@ -659,9 +710,11 @@ private enum SlateChatRenderer {
     )
 
     if contentRows > 0 {
-      let flat = TranscriptLayout.flattenedRows(from: transcript, width: wrapW)
-      let visible =
-        flat.count > contentRows ? Array(flat.suffix(contentRows)) : flat
+      let flat = flattenedTranscript
+      let maxTailStart = max(0, flat.count &- contentRows)
+      let tailStart = min(max(0, transcriptTailStart), maxTailStart)
+      let visibleCount = min(contentRows, flat.count &- tailStart)
+      let visible = visibleCount > 0 ? Array(flat[tailStart..<(tailStart &+ visibleCount)]) : []
       let topPad = contentRows &- visible.count
       var y = headerRows &+ topPad
       for line in visible {
@@ -852,6 +905,25 @@ private enum SlateChatRenderer {
 
 // MARK: - Host
 
+/// Arrow / page keys mapped to transcript viewport motion (CSI, xterm-style).
+private enum TranscriptScrollStep {
+  case lineUp
+  case lineDown
+  case pageUp
+  case pageDown
+  /// ``ESC [ F`` (empty params): follow live tail / newest content.
+  case snapToLiveBottom
+  /// ``ESC [ H`` (empty params): jump to oldest buffered history in view.
+  case snapToHistoryTop
+}
+
+/// Incremental word-wrap flatten of completed transcript lines (streaming only re-wraps the open tail).
+private struct TranscriptFlattenCache {
+  var wrapWidth: Int = -1
+  var completedLogicalLines: Int = 0
+  var completedFlat: [TLine] = []
+}
+
 @MainActor
 private final class SlateChatHost {
 
@@ -864,10 +936,45 @@ private final class SlateChatHost {
   private static let bracketPasteOpenSeq: ContiguousArray<UInt8> = [27, 91, 50, 48, 48, 126]
   private static let bracketPasteCloseSeq: ContiguousArray<UInt8> = [27, 91, 50, 48, 49, 126]
 
+  /// Recognizes `\e[A` / `\e[B`, `\e[5~` / `\e[6~`, and bare `\e[H` / `\e[F` (cursor keys / paging / Home / End).
+  private static func parseTranscriptScrollStep(fromCSI bytes: ContiguousArray<UInt8>) -> TranscriptScrollStep? {
+    guard bytes.count >= 3, bytes[0] == 27, bytes[1] == 91 else { return nil }
+    let terminator = bytes[bytes.count - 1]
+
+    let paramRegion = bytes[2..<(bytes.count - 1)]
+    guard let inner = String(bytes: paramRegion, encoding: .utf8) else { return nil }
+    let ints = inner.split(separator: ";").compactMap { Int($0) }
+
+    switch terminator {
+    case UInt8(ascii: "A"):
+      return .lineUp
+    case UInt8(ascii: "B"):
+      return .lineDown
+    case UInt8(ascii: "H"):
+      guard inner.isEmpty else { return nil }
+      return .snapToHistoryTop
+    case UInt8(ascii: "F"):
+      guard inner.isEmpty else { return nil }
+      return .snapToLiveBottom
+    case UInt8(ascii: "~"):
+      guard let k = ints.first else { return nil }
+      if k == 5 { return .pageUp }
+      if k == 6 { return .pageDown }
+      return nil
+    default:
+      return nil
+    }
+  }
+
   private let configuration: AgentConfig
   private let client: Client
   private let systemPrompt: String
   private var inputBuffer = ""
+  /// Index into the flattened transcript of the top row of the transcript viewport (used when ``followingLiveTranscript`` is false).
+  private var transcriptFirstVisibleRow: Int = 0
+  /// When true, the viewport follows the live tail (new tokens stay at the bottom). When false, ``transcriptFirstVisibleRow`` is fixed so streaming does not move the view.
+  private var followingLiveTranscript: Bool = true
+  private var flattenCache = TranscriptFlattenCache()
   /// Incomplete `\e`-led sequence (`\e[` CSI until terminator, or `\e` + immediate non-`[` char).
   private var escAccumulator: ContiguousArray<UInt8>?
   private var utf8Staging: ContiguousArray<UInt8> = []
@@ -953,17 +1060,34 @@ private final class SlateChatHost {
               Task { await gate.complete(nil) }
               return .stop
             }
-            if self.handleKey(byte: byte, sink: sink, gate: gate) {
+            if self.handleKey(byte: byte, sink: sink, gate: gate, slate: slate) {
               Task { await gate.complete(nil) }
               return .stop
             }
           }
         }
+        let flatTranscript = self.syncFlattenedTranscript(sink: sink, slate: slate)
+        let contentRows = SlateChatRenderer.transcriptContentRows(
+          cols: slate.cols,
+          rows: slate.rows,
+          banner: sink.bannerSnapshot(),
+          usage: sink.usageHUDSnapshot(),
+          inputLine: self.inputBuffer,
+          waitingForLLM: sink.modelTurnBusy()
+        )
+        let maxTailStart = max(0, flatTranscript.count &- contentRows)
+        if self.followingLiveTranscript {
+          self.transcriptFirstVisibleRow = maxTailStart
+        } else {
+          self.transcriptFirstVisibleRow = min(self.transcriptFirstVisibleRow, maxTailStart)
+        }
+        let transcriptTailStart = self.transcriptFirstVisibleRow
         slate.enscribe(
           grid: SlateChatRenderer.makeGrid(
             cols: slate.cols,
             rows: slate.rows,
-            transcript: sink.snapshotLines(),
+            flattenedTranscript: flatTranscript,
+            transcriptTailStart: transcriptTailStart,
             banner: sink.bannerSnapshot(),
             usage: sink.usageHUDSnapshot(),
             inputLine: self.inputBuffer,
@@ -982,6 +1106,8 @@ private final class SlateChatHost {
 
   private func submitUserLine(sink: SlateTranscriptSink, gate: UserLineGate) {
     swallowLfAfterCrSubmit = true
+    followingLiveTranscript = true
+    transcriptFirstVisibleRow = 0
     let submit = inputBuffer
     inputBuffer = ""
     let trimmedVisible = submit.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -994,17 +1120,82 @@ private final class SlateChatHost {
     }
   }
 
-  /// Returns `true` if the enclosing app should terminate (interrupt / EOF semantics).
-  private func handleKey(byte: UInt8, sink: SlateTranscriptSink, gate: UserLineGate) -> Bool {
-    if byte == 3 || byte == 4 { return true }
+  /// Recomputes word-wrapped transcript rows, reusing flatten work for completed lines across streaming frames.
+  private func syncFlattenedTranscript(sink: SlateTranscriptSink, slate: Slate) -> [TLine] {
+    let (completed, open) = sink.snapshotTranscriptForLayout()
+    let width = slate.cols
 
-    if sink.modelTurnBusy() {
-      if escAccumulator != nil {
-        escAccumulator = nil
+    if width != flattenCache.wrapWidth {
+      flattenCache = TranscriptFlattenCache()
+      flattenCache.wrapWidth = width
+      flattenCache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
+      flattenCache.completedLogicalLines = completed.count
+    } else if completed.count < flattenCache.completedLogicalLines {
+      flattenCache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
+      flattenCache.completedLogicalLines = completed.count
+    } else if completed.count > flattenCache.completedLogicalLines {
+      let start = flattenCache.completedLogicalLines
+      if start < completed.count {
+        let newSlice = completed[start...]
+        flattenCache.completedFlat.append(
+          contentsOf: TranscriptLayout.flattenedRows(from: Array(newSlice), width: width))
       }
-      swallowLfAfterCrSubmit = false
-      return false
+      flattenCache.completedLogicalLines = completed.count
     }
+
+    if let open {
+      return flattenCache.completedFlat
+        + TranscriptLayout.flattenedRows(from: [open], width: width)
+    }
+    return flattenCache.completedFlat
+  }
+
+  private func applyTranscriptScroll(
+    _ step: TranscriptScrollStep,
+    sink: SlateTranscriptSink,
+    slate: Slate
+  ) {
+    let flat = syncFlattenedTranscript(sink: sink, slate: slate)
+    let contentRows = SlateChatRenderer.transcriptContentRows(
+      cols: slate.cols,
+      rows: slate.rows,
+      banner: sink.bannerSnapshot(),
+      usage: sink.usageHUDSnapshot(),
+      inputLine: inputBuffer,
+      waitingForLLM: sink.modelTurnBusy()
+    )
+    let page = max(1, contentRows)
+    let maxTailStart = max(0, flat.count &- contentRows)
+
+    switch step {
+    case .snapToLiveBottom:
+      followingLiveTranscript = true
+      transcriptFirstVisibleRow = maxTailStart
+    case .snapToHistoryTop:
+      followingLiveTranscript = false
+      transcriptFirstVisibleRow = 0
+    case .lineUp, .pageUp:
+      let delta = step == .lineUp ? 1 : page
+      let wasFollowing = followingLiveTranscript
+      followingLiveTranscript = false
+      if wasFollowing {
+        transcriptFirstVisibleRow = max(0, maxTailStart &- delta)
+      } else {
+        transcriptFirstVisibleRow = max(0, transcriptFirstVisibleRow &- delta)
+      }
+    case .lineDown, .pageDown:
+      let delta = step == .lineDown ? 1 : page
+      transcriptFirstVisibleRow = min(transcriptFirstVisibleRow &+ delta, maxTailStart)
+      if transcriptFirstVisibleRow >= maxTailStart {
+        followingLiveTranscript = true
+      }
+    }
+    renderWake?.requestRender()
+  }
+
+  /// Returns `true` if the enclosing app should terminate (interrupt / EOF semantics).
+  private func handleKey(byte: UInt8, sink: SlateTranscriptSink, gate: UserLineGate, slate: Slate) -> Bool {
+    if byte == 3 || byte == 4 { return true }
 
     if bracketedPasteActive {
       ingestBracketPasteByte(byte)
@@ -1016,6 +1207,10 @@ private final class SlateChatHost {
       if seq.count >= 2, seq.first == 27, seq[1] != 91 {
         // `\e` + non-CSI: historically Option/Alt+Return sent ESC then CR/LF.
         escAccumulator = nil
+        if sink.modelTurnBusy() {
+          swallowLfAfterCrSubmit = false
+          return false
+        }
         if byte == 10 || byte == 13 {
           inputBuffer.append("\n")
         } else {
@@ -1031,6 +1226,13 @@ private final class SlateChatHost {
         if Self.isCsiTerminator(last) {
           escAccumulator = nil
           swallowLfAfterCrSubmit = false
+          if let scroll = Self.parseTranscriptScrollStep(fromCSI: seq) {
+            applyTranscriptScroll(scroll, sink: sink, slate: slate)
+            return false
+          }
+          if sink.modelTurnBusy() {
+            return false
+          }
           handleTerminatedCSI(seq, sink: sink, gate: gate)
           return false
         }
@@ -1040,6 +1242,11 @@ private final class SlateChatHost {
 
     if byte == 27 {
       escAccumulator = [27]
+      return false
+    }
+
+    if sink.modelTurnBusy() {
+      swallowLfAfterCrSubmit = false
       return false
     }
 
