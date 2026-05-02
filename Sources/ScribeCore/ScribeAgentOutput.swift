@@ -1,4 +1,5 @@
 import Foundation
+import ScribeLLM
 
 /// Hooks for streaming model + tool transcript. The agent loop in ``AgentHarness`` calls these; hosts inject a conforming type (TTY, silent, SwiftUI bridge, etc.).
 ///
@@ -7,16 +8,19 @@ public protocol ScribeAgentOutput: Sendable {
   func printConfigBanner(baseURL: String, model: String, cwd: String)
   func printUserPromptDecoration()
 
-  func enterAssistantStreamSection(_ section: AssistantStreamSection, previous: AssistantStreamSection?)
-    throws
+  func enterAssistantStreamSection(
+    _ section: AssistantStreamSection,
+    previous: AssistantStreamSection?
+  ) throws
   func appendAssistantStreamText(_ section: AssistantStreamSection, text: String) throws
   func finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: Bool) throws
   func printEmptyAssistantTurn() throws
 
+  /// - Parameters:
+  ///   - usage: Usage for the most recent model HTTP response in this harness step (one streaming completion).
+  ///   - outputTokensPerSecond: Throughput for that same response only (wall time from first token to stream end).
   func emitUsage(
-    promptTokens: Int?,
-    completionTokens: Int?,
-    totalTokens: Int?,
+    usage: Components.Schemas.CompletionUsage?,
     outputTokensPerSecond: Double?
   ) throws
 
@@ -37,16 +41,15 @@ public protocol ScribeAgentOutput: Sendable {
 extension ScribeAgentOutput {
   public func printConfigBanner(baseURL: String, model: String, cwd: String) {}
   public func printUserPromptDecoration() {}
-  public func enterAssistantStreamSection(_ section: AssistantStreamSection, previous: AssistantStreamSection?)
-    throws
-  {}
+  public func enterAssistantStreamSection(
+    _ section: AssistantStreamSection,
+    previous: AssistantStreamSection?
+  ) throws {}
   public func appendAssistantStreamText(_ section: AssistantStreamSection, text: String) throws {}
   public func finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: Bool) throws {}
   public func printEmptyAssistantTurn() throws {}
   public func emitUsage(
-    promptTokens: Int?,
-    completionTokens: Int?,
-    totalTokens: Int?,
+    usage: Components.Schemas.CompletionUsage?,
     outputTokensPerSecond: Double?
   ) throws {}
   public func printBlankLine() throws {}

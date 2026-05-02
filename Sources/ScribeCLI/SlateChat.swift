@@ -16,16 +16,24 @@ import Musl
 
 private actor UserLineGate {
   private var waiting: CheckedContinuation<String?, Never>?
+  private var queue: [String] = []
 
   func nextLine() async -> String? {
-    await withCheckedContinuation { cont in
+    if !queue.isEmpty {
+      return queue.removeFirst()
+    }
+    return await withCheckedContinuation { cont in
       waiting = cont
     }
   }
 
   func complete(_ line: String?) {
-    waiting?.resume(returning: line)
-    waiting = nil
+    if let cont = waiting {
+      cont.resume(returning: line)
+      waiting = nil
+    } else if let line {
+      queue.append(line)
+    }
   }
 }
 
@@ -87,9 +95,17 @@ private func slateIsUserSubmissionLine(_ line: TLine) -> Bool {
 
 /// Latest usage for the fixed top row (not part of scrollback).
 private struct UsageHUDSnapshot: Equatable {
-  var prompt: Int?
-  var completion: Int?
-  var total: Int?
+  var roundPrompt: Int?
+  var roundCompletion: Int?
+  var roundTotal: Int?
+  var turnPrompt: Int
+  var turnCompletion: Int
+  var turnTotal: Int
+  var sessionPrompt: Int
+  var sessionCompletion: Int
+  var sessionTotal: Int
+  var reasoningTokens: Int?
+  var cachedPromptTokens: Int?
   var outputTokensPerSecond: Double?
 }
 
@@ -107,7 +123,18 @@ private struct SinkState {
   var modelBusy: Bool = false
   var coordinatorFinished: Bool = false
   var usageHUD: UsageHUDSnapshot?
+  var usageTurnPrompt: Int = 0
+  var usageTurnCompletion: Int = 0
+  var usageTurnTotal: Int = 0
+  var usageSessionPrompt: Int = 0
+  var usageSessionCompletion: Int = 0
+  var usageSessionTotal: Int = 0
   var banner: BannerSnapshot?
+  /// Optional message held in the queued tray (a dedicated UI strip above the input area, not
+  /// part of scrollback). Populated by the host while the agent is busy; cleared when the message
+  /// is sent to the coordinator (via interrupt or natural turn-end flush) or when the user
+  /// recalls it with Ctrl+C.
+  var queuedTrayText: String? = nil
 }
 
 /// Slate-backed transcript sink: same information as ``TerminalScribeOutput``, with truecolor preserved in the grid.
@@ -161,7 +188,10 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
     state.withLock { $0.banner }
   }
 
-  /// Records a submitted user turn in the scrollback (trimmed text matches what the coordinator sends to the model).
+  /// Records a submitted user turn in the scrollback as a normal (orange/white) entry.
+  /// Hosts call this when the coordinator actually picks the message up via the user-line gate, so
+  /// queued-tray submissions only appear in scrollback at the moment they are dispatched (not while
+  /// they sit in the tray).
   public func recordUserSubmission(trimmedVisible: String) {
     guard !trimmedVisible.isEmpty else { return }
     let logicalLines =
@@ -190,6 +220,20 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
       trimIfNeeded(&sink.lines)
     }
     ping()
+  }
+
+  /// Sets (or clears) the queued-tray banner that displays an in-flight user submission while the
+  /// agent is busy. The text is rendered in a dedicated strip above the input row.
+  public func setQueuedTrayText(_ text: String?) {
+    state.withLock { sink in
+      sink.queuedTrayText = text
+    }
+    ping()
+  }
+
+  /// Snapshot of the current queued-tray text (used by the renderer).
+  fileprivate func queuedTrayTextSnapshot() -> String? {
+    state.withLock { $0.queuedTrayText }
   }
 
   private func appendLine(_ line: TLine) {
@@ -227,11 +271,22 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
   public func markModelTurnRunning(_ running: Bool) throws {
     state.withLock { sink in
       sink.modelBusy = running
-      // New model turn: drop last turn's throughput so the HUD isn't stuck showing a stale "out/s"
-      // until this stream finishes (and turn boundaries read clearly in the fixed header).
-      if running, var u = sink.usageHUD {
-        u.outputTokensPerSecond = nil
-        sink.usageHUD = u
+      if running {
+        sink.usageTurnPrompt = 0
+        sink.usageTurnCompletion = 0
+        sink.usageTurnTotal = 0
+        if var u = sink.usageHUD {
+          u.roundPrompt = nil
+          u.roundCompletion = nil
+          u.roundTotal = nil
+          u.turnPrompt = 0
+          u.turnCompletion = 0
+          u.turnTotal = 0
+          u.outputTokensPerSecond = nil
+          u.reasoningTokens = nil
+          u.cachedPromptTokens = nil
+          sink.usageHUD = u
+        }
       }
     }
     ping()
@@ -327,6 +382,85 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
     ping()
   }
 
+  /// Flushes optional open assistant reply after a streamed-style replay (`enterAssistantStreamSection` + optional `appendAssistantStreamText`).
+  public func endReplayedAssistantSection(answerHadVisibleCharacters: Bool) throws {
+    state.withLock { sink in
+      if let open = sink.assistantOpenLine {
+        let hasSpanText = open.spans.contains { !$0.text.isEmpty }
+        if answerHadVisibleCharacters || hasSpanText {
+          sink.lines.append(open)
+        }
+        sink.assistantOpenLine = nil
+      }
+      trimIfNeeded(&sink.lines)
+    }
+    ping()
+  }
+
+  /// Replays prior turns from a persisted message list (skips system rows). Used when resuming a session.
+  public func replayPersistedConversation(_ messages: [Components.Schemas.ChatMessage]) throws {
+    var i = 0
+    while i < messages.count, messages[i].role == .system {
+      i += 1
+    }
+    var toolRoundCounter = 0
+    while i < messages.count {
+      let msg = messages[i]
+      switch msg.role {
+      case .system:
+        i += 1
+      case .user:
+        let t = (msg.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty {
+          recordUserSubmission(trimmedVisible: t)
+        }
+        i += 1
+      case .assistant:
+        let text = msg.content ?? ""
+        let visibleTrimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let calls = msg.toolCalls ?? []
+
+        try enterAssistantStreamSection(.answer, previous: nil)
+        if !text.isEmpty {
+          try appendAssistantStreamText(.answer, text: text)
+        }
+        try endReplayedAssistantSection(answerHadVisibleCharacters: !visibleTrimmed.isEmpty)
+
+        if !calls.isEmpty {
+          toolRoundCounter += 1
+          let names = calls.map { $0.function?.name ?? "(tool)" }
+          try printToolRoundHeader(round: toolRoundCounter, toolNames: names)
+
+          var k = i + 1
+          var toolBodies: [String: String] = [:]
+          while k < messages.count, messages[k].role == .tool {
+            if let tid = messages[k].toolCallId {
+              toolBodies[tid] = messages[k].content ?? ""
+            }
+            k += 1
+          }
+
+          for tc in calls {
+            let id = tc.id ?? ""
+            let name = tc.function?.name ?? "tool"
+            let args = tc.function?.arguments ?? "{}"
+            let jsonOut = toolBodies[id] ?? ""
+            let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: args)
+            let lines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: jsonOut)
+            try printToolInvocation(name: name, argumentSummary: argSummary, outputLines: lines)
+            try printBlankLine()
+          }
+          i = k
+        } else {
+          i += 1
+        }
+        try printBlankLine()
+      case .tool:
+        i += 1
+      }
+    }
+  }
+
   public func printEmptyAssistantTurn() throws {
     let lineA = TLine(
       spans: [
@@ -347,18 +481,31 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
   }
 
   public func emitUsage(
-    promptTokens: Int?,
-    completionTokens: Int?,
-    totalTokens: Int?,
+    usage: Components.Schemas.CompletionUsage?,
     outputTokensPerSecond: Double?
   ) throws {
-    guard promptTokens != nil || completionTokens != nil || totalTokens != nil else { return }
+    guard let usage, let triple = usage.scribeReportedPromptCompletionTotal else { return }
     state.withLock { sink in
+      sink.usageTurnPrompt += triple.prompt
+      sink.usageTurnCompletion += triple.completion
+      sink.usageTurnTotal += triple.total
+      sink.usageSessionPrompt += triple.prompt
+      sink.usageSessionCompletion += triple.completion
+      sink.usageSessionTotal += triple.total
       sink.usageHUD = UsageHUDSnapshot(
-        prompt: promptTokens,
-        completion: completionTokens,
-        total: totalTokens,
-        outputTokensPerSecond: outputTokensPerSecond)
+        roundPrompt: triple.prompt,
+        roundCompletion: triple.completion,
+        roundTotal: triple.total,
+        turnPrompt: sink.usageTurnPrompt,
+        turnCompletion: sink.usageTurnCompletion,
+        turnTotal: sink.usageTurnTotal,
+        sessionPrompt: sink.usageSessionPrompt,
+        sessionCompletion: sink.usageSessionCompletion,
+        sessionTotal: sink.usageSessionTotal,
+        reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
+        cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
+        outputTokensPerSecond: outputTokensPerSecond
+      )
     }
     ping()
   }
@@ -437,13 +584,17 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
   }
 
   public func printTurnInterrupted() throws {
-    appendLine(
-      TLine(
-        spans: [
-          StyledSpan(
-            fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
-            text: "(interrupted)")
-        ]))
+    state.withLock { sink in
+      sink.lines.append(
+        TLine(
+          spans: [
+            StyledSpan(
+              fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+              text: "(interrupted)")
+          ]))
+      trimIfNeeded(&sink.lines)
+    }
+    ping()
   }
 }
 
@@ -606,6 +757,43 @@ private enum SlateChatRenderer {
   ]
 
   private static let inputGutterColumns = 5
+  /// Width of `queued: ` prefix; continuation rows under the queued tray indent to align under text.
+  private static let queuedTrayGutterColumns = 8
+  /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
+  private static let queuedTrayMaxRows = 4
+
+  /// Wrapped tray rows for an optional queued submission, capped by ``queuedTrayMaxRows``.
+  /// Returns an empty array when ``queuedTrayText`` is nil/empty.
+  private static func queuedTrayVisualLines(
+    queuedTrayText: String?,
+    textWidth: Int
+  ) -> [String] {
+    guard let raw = queuedTrayText, !raw.isEmpty, textWidth > 0 else { return [] }
+    let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+    let lines = TranscriptLayout.inputVisualLines(from: normalized, textWidth: textWidth)
+    if lines.count <= queuedTrayMaxRows { return lines }
+    var capped = Array(lines.prefix(queuedTrayMaxRows))
+    if !capped.isEmpty {
+      var last = capped[capped.count - 1]
+      if last.count > 1 {
+        last = String(last.prefix(max(1, last.count - 1))) + "…"
+      } else {
+        last = "…"
+      }
+      capped[capped.count - 1] = last
+    }
+    return capped
+  }
+
+  /// Number of rows to reserve for the queued tray strip (0 when no queued message).
+  static func queuedTrayRowCount(
+    queuedTrayText: String?,
+    cols: Int
+  ) -> Int {
+    let textWidth = max(0, cols &- queuedTrayGutterColumns)
+    let lines = queuedTrayVisualLines(queuedTrayText: queuedTrayText, textWidth: textWidth)
+    return lines.count
+  }
 
   /// Rows available for transcript text between the fixed header and the input stack (matches ``makeGrid``).
   static func transcriptContentRows(
@@ -614,14 +802,15 @@ private enum SlateChatRenderer {
     banner: BannerSnapshot?,
     usage: UsageHUDSnapshot?,
     inputLine: String,
-    waitingForLLM: Bool
+    waitingForLLM: Bool,
+    queuedTrayText: String?
   ) -> Int {
     let headerRows: Int = {
       if banner != nil {
         return min(3, max(0, rows &- 1))
       }
       if usage != nil, rows >= 2 {
-        return 1
+        return min(3, max(1, rows &- 1))
       }
       return 0
     }()
@@ -643,8 +832,10 @@ private enum SlateChatRenderer {
       inputRowCount = capped
     }
 
+    let trayRowCount = queuedTrayRowCount(queuedTrayText: queuedTrayText, cols: cols)
     let firstInputRow = rows &- inputRowCount
-    return max(0, firstInputRow &- headerRows)
+    let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
+    return max(0, firstTrayRow &- headerRows)
   }
 
   static func makeGrid(
@@ -656,7 +847,8 @@ private enum SlateChatRenderer {
     usage: UsageHUDSnapshot?,
     inputLine: String,
     llmWaitAnimationFrame: Int,
-    waitingForLLM: Bool
+    waitingForLLM: Bool,
+    queuedTrayText: String?
   ) -> TerminalCellGrid {
     var grid = TerminalCellGrid(
       cols: cols,
@@ -669,40 +861,42 @@ private enum SlateChatRenderer {
         return min(3, max(0, rows &- 1))
       }
       if usage != nil, rows >= 2 {
-        return 1
+        return min(3, max(1, rows &- 1))
       }
       return 0
     }()
 
     let contentRows = transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: usage,
-      inputLine: inputLine, waitingForLLM: waitingForLLM)
+      inputLine: inputLine, waitingForLLM: waitingForLLM,
+      queuedTrayText: queuedTrayText)
+
+    let usageReserve: Int = {
+      guard let u = usage else { return 0 }
+      let w = usageHUDCharCount(u, maxRows: headerRows)
+      return min(cols, w &+ 1)
+    }()
+    let bannerMaxWithUsage = usageReserve > 0 ? max(0, cols &- usageReserve) : cols
 
     if headerRows >= 1 {
-      let usageReserve: Int
-      if let u = usage {
-        usageReserve = min(cols, usageHUDCharCount(u) &+ 1)
-      } else {
-        usageReserve = 0
-      }
-      let llmMax = max(0, cols &- usageReserve)
-
       if let banner {
         paintBannerKV(
-          into: &grid, row: 0, cols: cols, maxWidth: llmMax, label: "LLM: ", value: banner.baseURL)
+          into: &grid, row: 0, cols: cols, maxWidth: bannerMaxWithUsage, label: "LLM: ",
+          value: banner.baseURL)
       }
       if let u = usage {
-        paintUsageHUD(into: &grid, cols: cols, usage: u)
+        paintUsageHUD(into: &grid, cols: cols, usage: u, maxRows: headerRows)
       }
     }
 
     if headerRows >= 2, let banner {
       paintBannerKV(
-        into: &grid, row: 1, cols: cols, maxWidth: cols, label: "Model: ", value: banner.model)
+        into: &grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage, label: "Model: ",
+        value: banner.model)
     }
     if headerRows >= 3, let banner {
       paintBannerKV(
-        into: &grid, row: 2, cols: cols, maxWidth: cols, label: "CWD: ", value: banner.cwd)
+        into: &grid, row: 2, cols: cols, maxWidth: bannerMaxWithUsage, label: "CWD: ", value: banner.cwd)
     }
 
     let showSpinner = waitingForLLM && inputLine.isEmpty
@@ -729,10 +923,18 @@ private enum SlateChatRenderer {
     }
 
     let firstInputRow = rows &- inputRowCount
+    let trayTextWidth = max(0, cols &- queuedTrayGutterColumns)
+    let rawTrayLines = queuedTrayVisualLines(
+      queuedTrayText: queuedTrayText, textWidth: trayTextWidth)
+    // Cap tray rows so an oversized tray on a tiny terminal can't overpaint the input strip.
+    let availableTrayRows = max(0, firstInputRow &- headerRows)
+    let trayVisualLines = Array(rawTrayLines.prefix(availableTrayRows))
+    let trayRowCount = trayVisualLines.count
+    let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
     let wrapW = cols
 
     fillInputBackground(
-      into: &grid, startRow: firstInputRow, rowCount: inputRowCount, cols: cols,
+      into: &grid, startRow: firstTrayRow, rowCount: trayRowCount &+ inputRowCount, cols: cols,
       background: ScribePalette.inputAreaBg
     )
 
@@ -745,10 +947,19 @@ private enum SlateChatRenderer {
       let topPad = contentRows &- visible.count
       var y = headerRows &+ topPad
       for line in visible {
-        guard y < firstInputRow else { break }
+        guard y < firstTrayRow else { break }
         blit(line: line, into: &grid, column: 0, row: y, width: wrapW)
         y &+= 1
       }
+    }
+
+    if trayRowCount > 0 {
+      paintQueuedTrayRows(
+        into: &grid,
+        startRow: firstTrayRow,
+        cols: cols,
+        textWidth: trayTextWidth,
+        visualLines: trayVisualLines)
     }
 
     paintInputRows(
@@ -764,33 +975,84 @@ private enum SlateChatRenderer {
     return grid
   }
 
-  private static func usageHUDLine(from usage: UsageHUDSnapshot) -> TLine {
-    let inStr = usage.prompt.map(String.init) ?? "—"
-    let outStr = usage.completion.map(String.init) ?? "—"
-    let sumStr = usage.total.map(String.init) ?? "—"
-    let rateStr = usage.outputTokensPerSecond.map { String(format: "%.1f", $0) + " out/s" }
-    let m = ScribePalette.usageMuted
-    let ni = ScribePalette.usageInOut
-    let ns = ScribePalette.usageSum
-    var spans: [StyledSpan] = [
-      StyledSpan(fg: m, bg: ScribePalette.black, bold: false, text: "· "),
-      StyledSpan(fg: ni, bg: ScribePalette.black, bold: false, text: inStr),
-      StyledSpan(fg: m, bg: ScribePalette.black, bold: false, text: " in · "),
-      StyledSpan(fg: ni, bg: ScribePalette.black, bold: false, text: outStr),
-      StyledSpan(fg: m, bg: ScribePalette.black, bold: false, text: " out"),
-    ]
-    if let rateStr {
-      spans.append(StyledSpan(fg: m, bg: ScribePalette.black, bold: false, text: " · "))
-      spans.append(StyledSpan(fg: ni, bg: ScribePalette.black, bold: false, text: rateStr))
-    }
-    spans.append(StyledSpan(fg: m, bg: ScribePalette.black, bold: false, text: " · Σ "))
-    spans.append(StyledSpan(fg: ns, bg: ScribePalette.black, bold: true, text: sumStr))
-    spans.append(StyledSpan(fg: m, bg: ScribePalette.black, bold: false, text: " ·"))
-    return TLine(spans: spans)
+  private static func formatUsageInt(_ n: Int) -> String {
+    ScribeUsageFormatting.groupingInt(n)
   }
 
-  private static func usageHUDCharCount(_ usage: UsageHUDSnapshot) -> Int {
-    usageHUDLine(from: usage).spans.reduce(0) { $0 + $1.text.count }
+  private static func formatUsageIntOpt(_ n: Int?) -> String {
+    guard let n else { return "—" }
+    return formatUsageInt(n)
+  }
+
+  private static func uSpan(_ fg: TerminalRGB, _ text: String, bold: Bool = false) -> StyledSpan {
+    StyledSpan(fg: fg, bg: ScribePalette.black, bold: bold, text: text)
+  }
+
+  /// Up to three lines, aligned with the three-row config banner: (1) last request in/out/rate, (2) optional R+cache, (3) turn and session Σ.
+  /// When ``maxRows`` is smaller than the full set, the optional R/cache row is dropped first so totals stay visible.
+  private static func usageHUDLines(from usage: UsageHUDSnapshot, maxRows: Int) -> [TLine] {
+    let sep = "  ·  "
+
+    var row0: [StyledSpan] = [
+      uSpan(ScribePalette.usageLabel, "in "),
+      uSpan(ScribePalette.usagePrompt, formatUsageIntOpt(usage.roundPrompt)),
+      uSpan(ScribePalette.usageMuted, sep),
+      uSpan(ScribePalette.usageLabel, "out "),
+      uSpan(ScribePalette.usageCompletion, formatUsageIntOpt(usage.roundCompletion)),
+    ]
+    if let tps = usage.outputTokensPerSecond {
+      row0.append(uSpan(ScribePalette.usageMuted, sep))
+      row0.append(uSpan(ScribePalette.usageLabel, "rate "))
+      row0.append(uSpan(ScribePalette.usageRate, String(format: "%.1f/s", tps)))
+    }
+    let line0 = TLine(spans: row0)
+
+    let hasR = (usage.reasoningTokens ?? 0) > 0
+    let hasCache = (usage.cachedPromptTokens ?? 0) > 0
+    let lineDetail: TLine? = {
+      guard hasR || hasCache else { return nil }
+      var row1: [StyledSpan] = []
+      if hasR {
+        row1.append(uSpan(ScribePalette.usageLabel, "reasoning "))
+        row1.append(uSpan(ScribePalette.usageReasoning, formatUsageInt(usage.reasoningTokens!)))
+      }
+      if hasR && hasCache {
+        row1.append(uSpan(ScribePalette.usageMuted, sep))
+      }
+      if hasCache {
+        row1.append(uSpan(ScribePalette.usageLabel, "cache "))
+        row1.append(uSpan(ScribePalette.usageCache, formatUsageInt(usage.cachedPromptTokens!)))
+      }
+      return TLine(spans: row1)
+    }()
+
+    let lineSums = TLine(spans: [
+      uSpan(ScribePalette.usageLabel, "turn Σ "),
+      uSpan(ScribePalette.usageTurnSum, formatUsageInt(usage.turnTotal), bold: true),
+      uSpan(ScribePalette.usageMuted, sep),
+      uSpan(ScribePalette.usageLabel, "all Σ "),
+      uSpan(ScribePalette.usageSessionSum, formatUsageInt(usage.sessionTotal), bold: true),
+    ])
+
+    var full: [TLine] = [line0]
+    if let lineDetail {
+      full.append(lineDetail)
+    }
+    full.append(lineSums)
+
+    guard maxRows > 0 else { return [] }
+    if full.count <= maxRows { return full }
+    if maxRows == 1 { return [line0] }
+    // maxRows == 2 and we have 3 logical lines: drop the middle (detail) band.
+    if maxRows == 2, full.count == 3 {
+      return [line0, lineSums]
+    }
+    return Array(full.prefix(maxRows))
+  }
+
+  private static func usageHUDCharCount(_ usage: UsageHUDSnapshot, maxRows: Int) -> Int {
+    let ls = usageHUDLines(from: usage, maxRows: maxRows)
+    return ls.map { $0.spans.reduce(0) { $0 + $1.text.count } }.max() ?? 0
   }
 
   private static func paintBannerKV(
@@ -821,13 +1083,17 @@ private enum SlateChatRenderer {
   private static func paintUsageHUD(
     into grid: inout TerminalCellGrid,
     cols: Int,
-    usage: UsageHUDSnapshot?
+    usage: UsageHUDSnapshot?,
+    maxRows: Int
   ) {
-    guard let usage else { return }
-    let line = usageHUDLine(from: usage)
-    let w = line.spans.reduce(0) { $0 + $1.text.count }
-    let startCol = max(0, cols &- w)
-    blit(line: line, into: &grid, column: startCol, row: 0, width: cols - startCol)
+    guard let usage, maxRows > 0 else { return }
+    let lines = usageHUDLines(from: usage, maxRows: maxRows)
+    for (row, line) in lines.enumerated() {
+      guard row >= 0, row < grid.rows else { break }
+      let w = line.spans.reduce(0) { $0 + $1.text.count }
+      let startCol = max(0, cols &- w)
+      blit(line: line, into: &grid, column: startCol, row: row, width: cols &- startCol)
+    }
   }
 
   private static func fillInputBackground(
@@ -904,6 +1170,55 @@ private enum SlateChatRenderer {
         if onLastInputRow {
           paint("▏", foreground: ScribePalette.white)
         }
+      }
+
+      while col < cols {
+        grid[column: col, row: row] = TerminalCell(
+          glyph: " ", foreground: ScribePalette.white, background: bg, flags: [])
+        col += 1
+      }
+      lineIdx &+= 1
+    }
+  }
+
+  /// Paints the queued-tray strip that sits between the transcript and the input area:
+  /// first row prefixed with `queued: ` (orange) plus the message in dimmed white;
+  /// continuation rows align under the message with an 8-space gutter.
+  private static func paintQueuedTrayRows(
+    into grid: inout TerminalCellGrid,
+    startRow: Int,
+    cols: Int,
+    textWidth: Int,
+    visualLines: [String]
+  ) {
+    guard !visualLines.isEmpty else { return }
+    let bg = ScribePalette.inputAreaBg
+    let gutterText = String(repeating: " ", count: min(queuedTrayGutterColumns, cols))
+    var lineIdx = 0
+    while lineIdx < visualLines.count {
+      let row = startRow &+ lineIdx
+      guard row >= 0, row < grid.rows else { break }
+      var col = 0
+      func paint(
+        _ text: String,
+        foreground: TerminalRGB,
+        flags: TerminalCellFlags = []
+      ) {
+        for ch in text {
+          guard col < cols else { return }
+          grid[column: col, row: row] = TerminalCell(
+            glyph: ch, foreground: foreground, background: bg, flags: flags)
+          col += 1
+        }
+      }
+
+      if lineIdx == 0 {
+        paint("queued: ", foreground: ScribePalette.orange)
+      } else {
+        paint(gutterText, foreground: ScribePalette.grayDim)
+      }
+      if textWidth > 0 {
+        paint(String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.grayLight)
       }
 
       while col < cols {
@@ -996,6 +1311,10 @@ private final class SlateChatHost {
   private let configuration: AgentConfig
   private let client: Client
   private let systemPrompt: String
+  private let resumeArchive: ChatSessionArchive?
+  private let sessionPersistenceURL: URL
+  private let sessionId: UUID
+  private let sessionCreatedAt: Date
   private var inputBuffer = ""
   /// Index into the flattened transcript of the top row of the transcript viewport (used when ``followingLiveTranscript`` is false).
   private var transcriptFirstVisibleRow: Int = 0
@@ -1014,11 +1333,31 @@ private final class SlateChatHost {
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
   private let modelInterruptFlag = ModelTurnInterruptFlag()
+  /// Holds a user submission that arrived while the agent was busy. The text lives in the queued
+  /// tray UI strip above the input; it is delivered to the coordinator when the user explicitly
+  /// hits Enter again (interrupting the agent), recalls it with Ctrl+C, or when the current model
+  /// turn finishes naturally.
+  private var queuedSubmission: String? = nil
+  /// Previous-render snapshot of `sink.modelTurnBusy()`, used to detect busy → idle transitions
+  /// in `onEvent` and auto-flush a queued submission to the coordinator at that moment.
+  private var lastObservedModelBusy: Bool = false
 
-  init(configuration: AgentConfig, client: Client, systemPrompt: String) {
+  init(
+    configuration: AgentConfig,
+    client: Client,
+    systemPrompt: String,
+    resumeArchive: ChatSessionArchive?,
+    sessionPersistenceURL: URL,
+    sessionId: UUID,
+    sessionCreatedAt: Date
+  ) {
     self.configuration = configuration
     self.client = client
     self.systemPrompt = systemPrompt
+    self.resumeArchive = resumeArchive
+    self.sessionPersistenceURL = sessionPersistenceURL
+    self.sessionId = sessionId
+    self.sessionCreatedAt = sessionCreatedAt
   }
 
   deinit {
@@ -1044,8 +1383,40 @@ private final class SlateChatHost {
       prepare: { [self] wake in
         sink.installWake(wake)
         self.renderWake = wake
+        let resumeSnapshot = self.resumeArchive
+        if let resumed = resumeSnapshot {
+          do {
+            try sink.replayPersistedConversation(resumed.messages)
+          } catch {
+            try? sink.printHarnessRunError(error)
+          }
+          self.flattenCache = TranscriptFlattenCache()
+        }
+
+        let persistURL = self.sessionPersistenceURL
+        let cid = self.sessionId
+        let created = self.sessionCreatedAt
+        let modelSnapshot = configuration.agentModel
+        let baseSnapshot = configuration.openAIBaseURL
+        let persist: @Sendable ([Components.Schemas.ChatMessage]) -> Void = { history in
+          let cwd = FileManager.default.currentDirectoryPath
+          try? ChatSessionStore.save(
+            ChatSessionArchive(
+              id: cid,
+              createdAt: created,
+              updatedAt: Date(),
+              cwd: cwd,
+              model: modelSnapshot,
+              baseURL: baseSnapshot,
+              messages: history
+            ),
+            to: persistURL
+          )
+        }
+
         let interruptFlag = self.modelInterruptFlag
-        self.coordinatorTask = Task { [configuration, client, systemPrompt, sink, gate] in
+        self.coordinatorTask = Task {
+          [configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, cid] in
           defer { sink.markCoordinatorFinished() }
           do {
             try await ScribeAgentCoordinator.runInteractive(
@@ -1053,7 +1424,20 @@ private final class SlateChatHost {
               client: client,
               systemPrompt: systemPrompt,
               sink: sink,
-              readUserLine: { await gate.nextLine() },
+              readUserLine: {
+                // Record the submission in scrollback exactly when the coordinator picks it up,
+                // so messages held in the queued-tray (during a busy turn) appear in scrollback
+                // only at the moment they're dispatched—not while they sit in the tray.
+                guard let line = await gate.nextLine() else { return nil }
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                  sink.recordUserSubmission(trimmedVisible: trimmed)
+                }
+                return line
+              },
+              initialConversation: resumeSnapshot?.messages,
+              onConversationPersist: persist,
+              chatSessionId: cid,
               prepareModelTurnStart: { interruptFlag.clear() },
               shouldAbortTurn: { interruptFlag.peek() }
             )
@@ -1097,14 +1481,27 @@ private final class SlateChatHost {
             }
           }
         }
+        // Auto-flush a queued tray message when the agent finishes a turn naturally
+        // (busy → idle transition with the queue non-empty): hand it to the gate so the
+        // coordinator picks it up on its next `readUserLine`, and clear the tray.
+        let nowBusy = sink.modelTurnBusy()
+        if !nowBusy, self.lastObservedModelBusy, let queued = self.queuedSubmission {
+          self.queuedSubmission = nil
+          sink.setQueuedTrayText(nil)
+          Task { await gate.complete(queued) }
+        }
+        self.lastObservedModelBusy = nowBusy
+
         let flatTranscript = self.syncFlattenedTranscript(sink: sink, slate: slate)
+        let queuedTrayText = sink.queuedTrayTextSnapshot()
         let contentRows = SlateChatRenderer.transcriptContentRows(
           cols: slate.cols,
           rows: slate.rows,
           banner: sink.bannerSnapshot(),
           usage: sink.usageHUDSnapshot(),
           inputLine: self.inputBuffer,
-          waitingForLLM: sink.modelTurnBusy()
+          waitingForLLM: sink.modelTurnBusy(),
+          queuedTrayText: queuedTrayText
         )
         let maxTailStart = max(0, flatTranscript.count &- contentRows)
         if self.followingLiveTranscript {
@@ -1123,7 +1520,8 @@ private final class SlateChatHost {
             usage: sink.usageHUDSnapshot(),
             inputLine: self.inputBuffer,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
-            waitingForLLM: sink.modelTurnBusy()))
+            waitingForLLM: sink.modelTurnBusy(),
+            queuedTrayText: queuedTrayText))
         return sink.coordinatorFinished() ? .stop : .continue
       })
 
@@ -1135,19 +1533,49 @@ private final class SlateChatHost {
     await gate.complete(nil)
   }
 
+  /// Handles ``Enter`` in the input box. The behaviour is:
+  ///
+  /// - **Empty buffer + no queued tray message** → no-op.
+  /// - **Empty buffer + queued tray message** → interrupt the in-flight model turn (if any)
+  ///   and dispatch the queued message to the coordinator (records it in scrollback the moment
+  ///   the coordinator picks it up).
+  /// - **Non-empty buffer + agent idle** → dispatch immediately (no tray, no delay): the
+  ///   "first message goes straight to the agent" case.
+  /// - **Non-empty buffer + agent busy** → place the buffer text into the queued tray
+  ///   (replacing any earlier queued text). The user can then either edit + Enter to refine,
+  ///   Enter on an empty buffer to send-via-interrupt, or Ctrl+C to recall the queued message.
   private func submitUserLine(sink: SlateTranscriptSink, gate: UserLineGate) {
     swallowLfAfterCrSubmit = true
     followingLiveTranscript = true
     transcriptFirstVisibleRow = 0
     let submit = inputBuffer
     inputBuffer = ""
-    let trimmedVisible = submit.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !trimmedVisible.isEmpty {
-      sink.recordUserSubmission(trimmedVisible: trimmedVisible)
-    }
     utf8Staging.removeAll(keepingCapacity: true)
-    Task {
-      await gate.complete(submit)
+    let trimmed = submit.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if trimmed.isEmpty {
+      // Second-Enter idiom: send the queued tray message now (interrupting if needed).
+      guard let queued = queuedSubmission else { return }
+      queuedSubmission = nil
+      sink.setQueuedTrayText(nil)
+      if sink.modelTurnBusy() {
+        modelInterruptFlag.request()
+      }
+      Task { await gate.complete(queued) }
+      renderWake?.requestRender()
+      return
+    }
+
+    if sink.modelTurnBusy() {
+      // Park in the queued tray and wait for either the user (Enter / Ctrl+C) or for the
+      // current turn to finish (auto-flushed in `onEvent`).
+      queuedSubmission = submit
+      sink.setQueuedTrayText(submit)
+      renderWake?.requestRender()
+    } else {
+      // Agent is idle; dispatch immediately. Scrollback recording happens in the readUserLine
+      // wrapper at pickup time.
+      Task { await gate.complete(submit) }
     }
   }
 
@@ -1193,7 +1621,8 @@ private final class SlateChatHost {
       banner: sink.bannerSnapshot(),
       usage: sink.usageHUDSnapshot(),
       inputLine: inputBuffer,
-      waitingForLLM: sink.modelTurnBusy()
+      waitingForLLM: sink.modelTurnBusy(),
+      queuedTrayText: sink.queuedTrayTextSnapshot()
     )
     let page = max(1, contentRows)
     let maxTailStart = max(0, flat.count &- contentRows)
@@ -1227,6 +1656,19 @@ private final class SlateChatHost {
   /// Returns `true` if the enclosing app should terminate (interrupt / EOF semantics).
   private func handleKey(byte: UInt8, sink: SlateTranscriptSink, gate: UserLineGate, slate: Slate) -> Bool {
     if byte == 3 {
+      // Ctrl+C is a three-step ladder so the user can stage their reaction:
+      //   1. With a queued tray message: pull it back into the input buffer for editing.
+      //      The agent keeps running — this press only recalls the queued text.
+      //   2. With no queue and an in-flight turn: interrupt the agent.
+      //   3. With no queue and an idle prompt: exit the chat.
+      if let queued = queuedSubmission {
+        queuedSubmission = nil
+        sink.setQueuedTrayText(nil)
+        inputBuffer = queued
+        utf8Staging.removeAll(keepingCapacity: true)
+        renderWake?.requestRender()
+        return false
+      }
       if sink.modelTurnBusy() {
         modelInterruptFlag.request()
         renderWake?.requestRender()
@@ -1246,10 +1688,6 @@ private final class SlateChatHost {
       if seq.count >= 2, seq.first == 27, seq[1] != 91 {
         // `\e` + non-CSI: historically Option/Alt+Return sent ESC then CR/LF.
         escAccumulator = nil
-        if sink.modelTurnBusy() {
-          swallowLfAfterCrSubmit = false
-          return false
-        }
         if byte == 10 || byte == 13 {
           inputBuffer.append("\n")
         } else {
@@ -1269,9 +1707,6 @@ private final class SlateChatHost {
             applyTranscriptScroll(scroll, sink: sink, slate: slate)
             return false
           }
-          if sink.modelTurnBusy() {
-            return false
-          }
           handleTerminatedCSI(seq, sink: sink, gate: gate)
           return false
         }
@@ -1281,11 +1716,6 @@ private final class SlateChatHost {
 
     if byte == 27 {
       escAccumulator = [27]
-      return false
-    }
-
-    if sink.modelTurnBusy() {
-      swallowLfAfterCrSubmit = false
       return false
     }
 
@@ -1456,10 +1886,17 @@ enum ChatTerminalError: Error, LocalizedError {
 
 enum SlateChat {
   /// Runs the chat session using the Slate alternate-screen UI; fails if stdin is not a TTY or Slate cannot attach.
+  ///
+  /// When ``resumeArchive`` is `nil`, ``sessionPersistenceURL`` must end with `{uuid}.json` (see ``ChatSessionStore/fileURL(sessionId:configuration:)``).
+  ///
+  /// - Parameters:
+  ///   - resumeArchive: If set, restores model context and redraws approximate transcript (`sessionPersistenceURL` should point at that archive).
   static func runFullscreen(
     configuration: AgentConfig,
     client: Client,
-    systemPrompt: String
+    systemPrompt: String,
+    resumeArchive: ChatSessionArchive? = nil,
+    sessionPersistenceURL: URL
   ) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
       configuration.makeStderrLogger().error(
@@ -1467,10 +1904,26 @@ enum SlateChat {
       throw ChatTerminalError.notATerminal
     }
     try await Task { @MainActor () throws -> Void in
+      let stem = sessionPersistenceURL.deletingPathExtension().lastPathComponent
+      let inferredNewId =
+        UUID(uuidString: stem)
+      let sessionId = resumeArchive?.id ?? inferredNewId
+      let sessionCreatedAt = resumeArchive?.createdAt ?? Date()
+      guard let sid = sessionId else {
+        throw AgentAPIError(
+          description:
+            "Session file path must end with `/{uuid}.json` (new sessions), or use `scribe chat --resume` with an existing archive."
+        )
+      }
       let host = SlateChatHost(
         configuration: configuration,
         client: client,
-        systemPrompt: systemPrompt)
+        systemPrompt: systemPrompt,
+        resumeArchive: resumeArchive,
+        sessionPersistenceURL: sessionPersistenceURL,
+        sessionId: sid,
+        sessionCreatedAt: sessionCreatedAt
+      )
       do {
         try await host.run()
       } catch Slate.InstallationError.notInteractiveTerminal {

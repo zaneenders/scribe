@@ -1,5 +1,6 @@
 import Foundation
 import ScribeCore
+import ScribeLLM
 import SlateCore
 
 /// Terminal ``ScribeAgentOutput`` that prints Slate-style truecolor CSI (``CSI``, ``TerminalRGB`` / ``ScribePalette``); swap for another conforming sink at alternate hosts.
@@ -62,16 +63,13 @@ public struct TerminalScribeOutput: ScribeAgentOutput {
   }
 
   public func emitUsage(
-    promptTokens: Int?,
-    completionTokens: Int?,
-    totalTokens: Int?,
+    usage: Components.Schemas.CompletionUsage?,
     outputTokensPerSecond: Double?
   ) throws {
+    guard let usage else { return }
     guard
       let line = UsageBanner.line(
-        promptTokens: promptTokens,
-        completionTokens: completionTokens,
-        totalTokens: totalTokens,
+        usage: usage,
         outputTokensPerSecond: outputTokensPerSecond
       )
     else { return }

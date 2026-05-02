@@ -23,10 +23,29 @@ enum ScribePalette {
   /// Bottom input strip (distinct from main transcript black).
   static let inputAreaBg = TerminalRGB(r: 32, g: 32, b: 40)
 
-  /// Usage banner / HUD panel fills.
+  /// Usage HUD: metric labels (not numeric values)
+  static let usageLabel = TerminalRGB(r: 145, g: 145, b: 155)
+  /// Tokens billed as prompt / input side
+  static let usagePrompt = TerminalRGB(r: 120, g: 195, b: 255)
+  /// Completion / output tokens
+  static let usageCompletion = TerminalRGB(r: 115, g: 230, b: 195)
+  /// Reasoning / chain-of-thought slice of usage
+  static let usageReasoning = TerminalRGB(r: 255, g: 210, b: 115)
+  /// Prompt cache hits (served from cache)
+  static let usageCache = TerminalRGB(r: 150, g: 215, b: 130)
+  /// Streaming throughput
+  static let usageRate = TerminalRGB(r: 255, g: 145, b: 195)
+  /// Sum for current user message (tool rounds included)
+  static let usageTurnSum = TerminalRGB(r: 255, g: 225, b: 135)
+  /// Sum since session start
+  static let usageSessionSum = TerminalRGB(r: 210, g: 175, b: 255)
+
+  /// Usage banner / HUD panel fills (terminal `UsageBanner`).
   static let usageBg = TerminalRGB(r: 28, g: 28, b: 28)
   static let usageRail = TerminalRGB(r: 48, g: 48, b: 48)
   static let usageMuted = TerminalRGB(r: 128, g: 128, b: 128)
-  static let usageInOut = TerminalRGB(r: 135, g: 175, b: 255)
-  static let usageSum = TerminalRGB(r: 215, g: 215, b: 135)
+  /// Default accent for in/out in single-line usage banner (terminal)
+  static let usageInOut = usagePrompt
+  /// Legacy Σ accent in terminal banner
+  static let usageSum = usageTurnSum
 }

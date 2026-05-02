@@ -16,24 +16,24 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateChatCompletionRequest'
+              $ref: "#/components/schemas/CreateChatCompletionRequest"
       responses:
-        '200':
+        "200":
           description: Server-Sent Events stream of completion chunks
           content:
             text/event-stream:
               schema:
-                $ref: '#/components/schemas/ChatCompletionChunk'
+                $ref: "#/components/schemas/ChatCompletionChunk"
   /v1/models:
     get:
       operationId: listModels
       responses:
-        '200':
+        "200":
           description: Models available on the server
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListModelsResponse'
+                $ref: "#/components/schemas/ListModelsResponse"
 components:
   schemas:
     CreateChatCompletionRequest:
@@ -45,7 +45,7 @@ components:
         messages:
           type: array
           items:
-            $ref: '#/components/schemas/ChatMessage'
+            $ref: "#/components/schemas/ChatMessage"
         stream:
           type: boolean
           default: true
@@ -57,7 +57,7 @@ components:
         tools:
           type: array
           items:
-            $ref: '#/components/schemas/ChatTool'
+            $ref: "#/components/schemas/ChatTool"
         tool_choice:
           description: Tool choice; use string "auto" or object per provider docs
           oneOf:
@@ -65,9 +65,9 @@ components:
             - type: object
               additionalProperties: true
         stream_options:
-          $ref: '#/components/schemas/ChatCompletionStreamOptions'
+          $ref: "#/components/schemas/ChatCompletionStreamOptions"
         reasoning:
-          $ref: '#/components/schemas/ChatCompletionReasoning'
+          $ref: "#/components/schemas/ChatCompletionReasoning"
     ChatCompletionStreamOptions:
       type: object
       description: OpenAI-style streaming options
@@ -100,15 +100,20 @@ components:
         content:
           type:
             - string
-            - 'null'
+            - "null"
         name:
           type: string
         tool_calls:
           type: array
           items:
-            $ref: '#/components/schemas/AssistantToolCall'
+            $ref: "#/components/schemas/AssistantToolCall"
         tool_call_id:
           type: string
+        reasoning_content:
+          type: string
+          description: >
+            Chain-of-thought from a prior assistant turn; some providers (e.g. DeepSeek thinking mode)
+            require this to be echoed on follow-up requests unchanged.
       additionalProperties: true
     AssistantToolCall:
       type: object
@@ -134,7 +139,7 @@ components:
           type: string
           enum: [function]
         function:
-          $ref: '#/components/schemas/ChatToolFunction'
+          $ref: "#/components/schemas/ChatToolFunction"
     ChatToolFunction:
       type: object
       required: [name, parameters]
@@ -161,13 +166,37 @@ components:
         choices:
           type: array
           items:
-            $ref: '#/components/schemas/ChunkChoice'
+            $ref: "#/components/schemas/ChunkChoice"
         usage:
-          $ref: '#/components/schemas/CompletionUsage'
+          $ref: "#/components/schemas/CompletionUsage"
+      additionalProperties: true
+    PromptTokensDetails:
+      type: object
+      description: Breakdown of prompt tokens (OpenAI-compatible)
+      properties:
+        audio_tokens:
+          type: integer
+        cached_tokens:
+          type: integer
+      additionalProperties: true
+    CompletionTokensDetails:
+      type: object
+      description: Breakdown of completion tokens, including reasoning (OpenAI-compatible)
+      properties:
+        reasoning_tokens:
+          type: integer
+        audio_tokens:
+          type: integer
+        accepted_prediction_tokens:
+          type: integer
+        rejected_prediction_tokens:
+          type: integer
       additionalProperties: true
     CompletionUsage:
       type: object
-      description: Token usage (often sent on the final stream chunk when include_usage is true)
+      description: >
+        Token usage (final stream chunk when stream_options.include_usage is true).
+        Aligns with OpenAI chat completions usage; many OpenAI-compatible servers omit nested details.
       properties:
         prompt_tokens:
           type: integer
@@ -175,6 +204,10 @@ components:
           type: integer
         total_tokens:
           type: integer
+        prompt_tokens_details:
+          $ref: "#/components/schemas/PromptTokensDetails"
+        completion_tokens_details:
+          $ref: "#/components/schemas/CompletionTokensDetails"
       additionalProperties: true
     ChunkChoice:
       type: object
@@ -182,11 +215,11 @@ components:
         index:
           type: integer
         delta:
-          $ref: '#/components/schemas/ChoiceDelta'
+          $ref: "#/components/schemas/ChoiceDelta"
         finish_reason:
           type:
             - string
-            - 'null'
+            - "null"
       additionalProperties: true
     ChoiceDelta:
       type: object
@@ -196,24 +229,24 @@ components:
         content:
           type:
             - string
-            - 'null'
+            - "null"
         reasoning_content:
           type:
             - string
-            - 'null'
+            - "null"
           description: >
             Chain-of-thought or reasoning tokens from the model; clients may hide this
             and must not treat it as user-visible assistant content.
         reasoning:
           type:
             - string
-            - 'null'
+            - "null"
           description: >
             Some providers stream reasoning under this key instead of or in addition to reasoning_content.
         tool_calls:
           type: array
           items:
-            $ref: '#/components/schemas/ToolCallDelta'
+            $ref: "#/components/schemas/ToolCallDelta"
       additionalProperties: true
     ToolCallDelta:
       type: object
@@ -241,7 +274,7 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/ModelObject'
+            $ref: "#/components/schemas/ModelObject"
       additionalProperties: true
     ModelObject:
       type: object

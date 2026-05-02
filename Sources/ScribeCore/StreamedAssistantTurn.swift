@@ -4,6 +4,8 @@ import ScribeLLM
 /// Accumulates one assistant step from streamed chunks (content + parallel tool calls).
 struct StreamedAssistantTurn {
   var text = ""
+  /// Accumulated thinking/reasoning stream; must be sent back as `reasoning_content` on the next API call for providers such as DeepSeek.
+  var reasoningText = ""
   var toolCalls: [Int: PartialToolCall] = [:]
   var finishReason: String?
 
@@ -20,6 +22,9 @@ struct StreamedAssistantTurn {
         finishReason = fr
       }
       guard let delta = choice.delta else { continue }
+      for piece in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
+        reasoningText += piece
+      }
       if let c = delta.content, !c.isEmpty {
         text += c
       }

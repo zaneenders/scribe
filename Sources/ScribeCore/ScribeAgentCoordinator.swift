@@ -6,12 +6,17 @@ public enum ScribeAgentCoordinator {
   /// Interactive session; `systemPrompt` is supplied by the CLI (or another host).
   ///
   /// Supply `readUserLine` to integrate with alternate-screen TUIs (for example Slate) or stdin that is not `readLine()`-friendly.
+  ///
+  /// When ``chatSessionId`` is set, request logging uses ``scribe-{uuid}.log`` under the configured log directory—the same uuid as the chat session archive when the host uses ``ChatSessionStore/fileURL``.
   public static func runInteractive(
     configuration: AgentConfig,
     client: Client,
     systemPrompt: String,
     sink: any ScribeAgentOutput,
     readUserLine: @escaping @Sendable () async -> String?,
+    initialConversation: [Components.Schemas.ChatMessage]? = nil,
+    onConversationPersist: (@Sendable ([Components.Schemas.ChatMessage]) -> Void)? = nil,
+    chatSessionId: UUID? = nil,
     prepareModelTurnStart: @escaping @Sendable () -> Void = {},
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws {
@@ -22,15 +27,26 @@ public enum ScribeAgentCoordinator {
       cwd: cwd
     )
 
-    var history: [Components.Schemas.ChatMessage] = [
-      .init(
-        role: .system,
-        content: systemPrompt,
-        name: nil,
-        toolCalls: nil,
-        toolCallId: nil
-      )
-    ]
+    var history: [Components.Schemas.ChatMessage]
+    if let initialConversation, !initialConversation.isEmpty {
+      history = initialConversation
+      if history.first?.role != .system {
+        throw AgentAPIError(description: "Resumed conversation must begin with a system message.")
+      }
+    } else {
+      history = [
+        .init(
+          role: .system,
+          content: systemPrompt,
+          name: nil,
+          toolCalls: nil,
+          toolCallId: nil
+        )
+      ]
+    }
+
+    let persistConversation = onConversationPersist
+    persistConversation?(history)
 
     let harness = AgentHarness(
       output: sink,
@@ -64,7 +80,7 @@ public enum ScribeAgentCoordinator {
       do {
         _ = try await harness.runModelTurn(
           messages: &history,
-          logger: configuration.makeRequestLogger(),
+          logger: configuration.makeRequestLogger(chatSessionId: chatSessionId),
           shouldAbortTurn: shouldAbortTurn
         )
       } catch is AgentTurnInterruptedError {
@@ -75,7 +91,9 @@ public enum ScribeAgentCoordinator {
           history.removeLast()
         }
       }
+      persistConversation?(history)
     }
+    persistConversation?(history)
   }
 
   /// Cooked stdin via blocking ``readLine()`` on a detached task.
@@ -93,6 +111,9 @@ public enum ScribeAgentCoordinator {
       readUserLine: {
         await Task.detached(priority: .userInitiated) { readLine() }.value
       },
+      initialConversation: nil,
+      onConversationPersist: nil,
+      chatSessionId: nil,
       prepareModelTurnStart: {},
       shouldAbortTurn: { false }
     )

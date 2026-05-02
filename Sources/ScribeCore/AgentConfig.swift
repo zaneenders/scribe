@@ -4,15 +4,15 @@ import Foundation
 /// Dotted keys in `scribe-config.json` for ``ConfigReader`` (matches nested JSON paths).
 /// All application settings are read from that file (see ``AgentConfig/load()``); there are no separate secret lookup paths and keys are not marked `isSecret` (so configuration access logs show values as read).
 ///
-/// Keys include `openai.*`, `agent.*`, `logging.level` (see ``ScribeLogLevel``), and optional `logging.directory`.
+/// Keys include `openai.*`, `agent.*`, `logging.level` (see ``ScribeLogLevel``), and required `logging.storage` (base directory; `logs/` and `sessions/` subdirectories are created under it).
 public enum ScribeConfigBinding {
   public static let openAIBaseURL: ConfigKey = "openai.baseUrl"
   public static let openAIAPIKey: ConfigKey = "openai.apiKey"
   public static let agentModel: ConfigKey = "agent.model"
   public static let agentMaxToolRounds: ConfigKey = "agent.maxToolRounds"
   public static let loggingLevel: ConfigKey = "logging.level"
-  /// Directory for per-request log files (see ``AgentConfig/makeRequestLogger()``). Relative paths resolve against the process working directory when the config is loaded.
-  public static let loggingDirectory: ConfigKey = "logging.directory"
+  /// Base directory for all Scribe storage. `logs/` and `sessions/` subdirectories are created under it automatically. Relative paths resolve against the process working directory when the config is loaded. Required.
+  public static let loggingStorage: ConfigKey = "logging.storage"
 }
 
 public struct AgentConfig: Sendable {
@@ -23,8 +23,10 @@ public struct AgentConfig: Sendable {
   public var agentModel: String
   public var agentMaxToolRounds: Int
   public var logLevel: ScribeLogLevel
-  /// Absolute path of the directory where ``makeRequestLogger()`` creates log files (defaults to the working directory at load time).
+  /// Absolute path of the directory where ``makeRequestLogger()`` creates log files.
   public var logDirectoryPath: String
+  /// Absolute path of the directory used by ``ChatSessionStore`` for `scribe chat` session files.
+  public var chatSessionsDirectoryPath: String
   /// Absolute path of the JSON file ``load()`` read (or attempted), for diagnostics.
   public var resolvedConfigurationPath: String
 
@@ -35,6 +37,7 @@ public struct AgentConfig: Sendable {
     agentMaxToolRounds: Int,
     logLevel: ScribeLogLevel,
     logDirectoryPath: String,
+    chatSessionsDirectoryPath: String,
     resolvedConfigurationPath: String
   ) {
     self.openAIBaseURL = openAIBaseURL
@@ -43,6 +46,7 @@ public struct AgentConfig: Sendable {
     self.agentMaxToolRounds = agentMaxToolRounds
     self.logLevel = logLevel
     self.logDirectoryPath = logDirectoryPath
+    self.chatSessionsDirectoryPath = chatSessionsDirectoryPath
     self.resolvedConfigurationPath = resolvedConfigurationPath
   }
 
@@ -98,9 +102,19 @@ public struct AgentConfig: Sendable {
       )
     }
 
-    let dirRaw = try await reader.fetchString(forKey: ScribeConfigBinding.loggingDirectory)?
+    let storageRaw = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.loggingStorage)
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    let logDirectoryPath = Self.resolveLogDirectory(configured: dirRaw)
+    guard !storageRaw.isEmpty else {
+      throw AgentAPIError(
+        description:
+          "`\(ScribeConfigBinding.loggingStorage.description)` must be a non-empty path in `\(configFileName)`."
+      )
+    }
+    let storagePath = Self.resolveConfigurableDirectory(configuredRelativeOrAbsolutePath: storageRaw)
+    let logDirectoryPath = URL(fileURLWithPath: storagePath, isDirectory: true)
+      .appendingPathComponent("logs", isDirectory: true).standardizedFileURL.path
+    let chatSessionsDirectoryPath = URL(fileURLWithPath: storagePath, isDirectory: true)
+      .appendingPathComponent("sessions", isDirectory: true).standardizedFileURL.path
 
     let resolvedPathString = PathResolution.fileSystemPath(configPath)
     let config = AgentConfig(
@@ -110,13 +124,14 @@ public struct AgentConfig: Sendable {
       agentMaxToolRounds: maxRounds,
       logLevel: logLevel,
       logDirectoryPath: logDirectoryPath,
+      chatSessionsDirectoryPath: chatSessionsDirectoryPath,
       resolvedConfigurationPath: resolvedPathString
     )
     config.makeStderrLogger().info("Loaded configuration from \(resolvedPathString)")
     return config
   }
 
-  private static func resolveLogDirectory(configured: String?) -> String {
+  private static func resolveConfigurableDirectory(configuredRelativeOrAbsolutePath configured: String?) -> String {
     let trimmed = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let cwd = FileManager.default.currentDirectoryPath
     if trimmed.isEmpty {

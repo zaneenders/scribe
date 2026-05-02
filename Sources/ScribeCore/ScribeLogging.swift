@@ -109,18 +109,40 @@ extension AgentConfig {
     }
   }
 
-  /// Logs to standard error and a new file under ``logDirectoryPath``; the file is closed when this logger is released.
-  public func makeRequestLogger() -> Logger {
+  /// Creates a logger that mirrors to stderr and to a log file under ``logDirectoryPath``.
+  ///
+  /// When ``chatSessionId`` is set, the log file name is ``scribe-{uuid}.log`` (matching the `{uuid}.json` chat archive) and each call **appends** so every model turn in that session shares one file.
+  /// When `nil`, each call uses a new uniquely named file (``scribe-{timestamp}-{…}.log``), e.g. for ``runAgentIPC``.
+  public func makeRequestLogger(chatSessionId: UUID? = nil) -> Logger {
     let level = logLevel.swiftLogLevel
-    try? FileManager.default.createDirectory(
-      at: URL(fileURLWithPath: logDirectoryPath, isDirectory: true),
-      withIntermediateDirectories: true
-    )
-    let fileURL = newRequestLogFileURL()
-    FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-    guard let fileHandle = try? FileHandle(forWritingTo: fileURL) else {
-      return makeStderrLogger()
+    let dir = URL(fileURLWithPath: logDirectoryPath, isDirectory: true).standardizedFileURL
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+    let fileURL: URL =
+      if let sid = chatSessionId {
+        dir.appendingPathComponent("scribe-\(sid.uuidString).log", isDirectory: false)
+      } else {
+        newEphemeralRequestLogFileURL()
+      }
+
+    let fileHandle: FileHandle
+    if chatSessionId != nil {
+      if !FileManager.default.fileExists(atPath: fileURL.path) {
+        FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+      }
+      guard let fh = try? FileHandle(forUpdating: fileURL) else {
+        return makeStderrLogger()
+      }
+      _ = try? fh.seekToEnd()
+      fileHandle = fh
+    } else {
+      FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+      guard let fh = try? FileHandle(forWritingTo: fileURL) else {
+        return makeStderrLogger()
+      }
+      fileHandle = fh
     }
+
     let sink = FileSink(handle: fileHandle)
     let stderrWriter = LockedDataWriter { data in
       try? FileHandle.standardError.write(contentsOf: data)
@@ -135,7 +157,7 @@ extension AgentConfig {
     }
   }
 
-  private func newRequestLogFileURL() -> URL {
+  private func newEphemeralRequestLogFileURL() -> URL {
     let dir = URL(fileURLWithPath: logDirectoryPath, isDirectory: true)
     let token = "\(UInt64(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString.prefix(8))"
     return dir.appendingPathComponent("scribe-\(token).log", isDirectory: false)

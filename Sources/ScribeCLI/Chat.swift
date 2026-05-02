@@ -9,8 +9,39 @@ struct Chat: AsyncParsableCommand {
     abstract: "Interactive terminal session (default)"
   )
 
+  @Flag(name: .long, help: "List saved chat sessions (newest first) and exit.")
+  var sessions = false
+
+  @Option(
+    name: .long,
+    help:
+      "Resume a session: file path, full session id, a unique id prefix, or 'latest' (see also --sessions)."
+  )
+  var resume: String?
+
   func run() async throws {
     let config = try await AgentConfig.load()
+    let log = config.makeStderrLogger()
+
+    if sessions {
+      let root = try ChatSessionStore.sessionsDirectoryURL(configuration: config)
+      let files = try ChatSessionStore.listSessionFiles(configuration: config)
+      guard !files.isEmpty else {
+        print("No saved sessions under \(root.path)")
+        return
+      }
+      let formatter = ISO8601DateFormatter()
+      formatter.formatOptions = [.withInternetDateTime]
+      for url in files {
+        guard let archive = try? ChatSessionStore.load(from: url) else { continue }
+        let updated = formatter.string(from: archive.updatedAt)
+        print("\(archive.id.uuidString)  updated \(updated)  model \(archive.model)  msgs \(archive.messages.count)")
+        print("  cwd  \(archive.cwd)")
+        print("  path \(url.path)\n")
+      }
+      return
+    }
+
     let base = config.openAIBaseURL
     let token = config.openAIAPIKey
     guard let serverURL = URL(string: base) else {
@@ -35,9 +66,64 @@ struct Chat: AsyncParsableCommand {
 
       Working directory (relative paths resolve here): \(cwd)
       """
+
+    let sessionPersistenceURL: URL
+    let resumeArchive: ChatSessionArchive?
+    if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
+      sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
+        specifier: spec, configuration: config)
+      let archived = try ChatSessionStore.load(from: sessionPersistenceURL)
+      resumeArchive = archived
+      if archived.model != config.agentModel {
+        log.warning(
+          "Resuming session saved with model \(archived.model); current config uses \(config.agentModel)."
+        )
+      }
+      log.info("Resuming chat session \(archived.id) at \(sessionPersistenceURL.path)")
+    } else {
+      let id = UUID()
+      sessionPersistenceURL = try ChatSessionStore.fileURL(sessionId: id, configuration: config)
+      resumeArchive = nil
+      log.info("Logging chat session to \(sessionPersistenceURL.path)")
+    }
+
     try await SlateChat.runFullscreen(
       configuration: config,
       client: client,
-      systemPrompt: systemPrompt)
+      systemPrompt: systemPrompt,
+      resumeArchive: resumeArchive,
+      sessionPersistenceURL: sessionPersistenceURL
+    )
+    printExitResumeHint(
+      resumeArchive: resumeArchive,
+      sessionPersistenceURL: sessionPersistenceURL
+    )
+  }
+}
+
+extension Chat {
+  /// Printed after a normal chat exit regardless of stderr log level (`--logging.level`).
+  fileprivate func printExitResumeHint(
+    resumeArchive: ChatSessionArchive?,
+    sessionPersistenceURL: URL
+  ) {
+    let stemUUID = UUID(uuidString: sessionPersistenceURL.deletingPathExtension().lastPathComponent)
+    let specifier: String
+    if let archived = resumeArchive {
+      specifier = archived.id.uuidString
+    } else if let stem = stemUUID {
+      specifier = stem.uuidString
+    } else {
+      specifier = "'" + Self.escapeForSingleQuotedPOSIXPath(sessionPersistenceURL.path) + "'"
+    }
+    let binaryName =
+      CommandLine.arguments.first.map { NSString(string: $0).lastPathComponent } ?? "scribe"
+    let hint = "\(binaryName) --resume \(specifier)"
+    guard let text = ("Resume with: \(hint)\n").data(using: .utf8) else { return }
+    try? FileHandle.standardError.write(contentsOf: text)
+  }
+
+  private static func escapeForSingleQuotedPOSIXPath(_ path: String) -> String {
+    path.replacingOccurrences(of: "'", with: "'\"'\"'")
   }
 }
