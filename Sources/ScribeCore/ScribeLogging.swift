@@ -70,7 +70,33 @@ final class FileSink: @unchecked Sendable {
   }
 }
 
-/// Writes `[scribe][level] …` lines; level filtering is performed by ``Logger`` before ``log(event:)`` is called.
+/// Lock-protected wrapper around `ISO8601DateFormatter` so a single shared instance can be
+/// reused from many tasks under strict concurrency. ``ISO8601DateFormatter`` does not conform
+/// to `Sendable`; serializing access here keeps the format string cached without paying the
+/// per-call setup cost on every log line.
+private final class ScribeLogTimestampFormatter: @unchecked Sendable {
+  private let lock = NSLock()
+  private let inner: ISO8601DateFormatter
+
+  init() {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    self.inner = f
+  }
+
+  func string(from date: Date) -> String {
+    lock.lock()
+    defer { lock.unlock() }
+    return inner.string(from: date)
+  }
+}
+
+private let scribeLogTimestampFormatter = ScribeLogTimestampFormatter()
+
+/// One log line per call, formatted as
+/// `<iso8601-ms> [<level>] <message>` so each line is timestamped and easy to grep,
+/// and message bodies are expected to use the structured `event=ns.name k=v k=v` style
+/// described in `docs/chat-input-behavior.md`.
 struct ScribeLineLogHandler: LogHandler {
   var logLevel: Logger.Level = .info
   var metadata: Logger.Metadata = [:]
@@ -85,9 +111,10 @@ struct ScribeLineLogHandler: LogHandler {
   func log(event: LogEvent) {
     var text = "\(event.message)"
     if let error = event.error {
-      text += " — \(error)"
+      text += " err=\"\(error)\""
     }
-    let line = "[scribe][\(event.level.rawValue)] \(text)\n"
+    let timestamp = scribeLogTimestampFormatter.string(from: Date())
+    let line = "\(timestamp) [\(event.level.rawValue)] \(text)\n"
     dataWriter.write(Data(line.utf8))
   }
 
@@ -98,68 +125,42 @@ struct ScribeLineLogHandler: LogHandler {
 }
 
 extension AgentConfig {
-  /// Logs to standard error only (no per-request file). Suitable for startup and errors before a request session exists.
-  public func makeStderrLogger() -> Logger {
-    let level = logLevel.swiftLogLevel
-    let writer = LockedDataWriter { data in
-      try? FileHandle.standardError.write(contentsOf: data)
-    }
-    return Logger(label: "scribe") { _ in
-      ScribeLineLogHandler(minimumLevel: level, dataWriter: writer)
-    }
-  }
-
-  /// Creates a logger that mirrors to stderr and to a log file under ``logDirectoryPath``.
+  /// Returns a logger appending all events for one Scribe invocation to
+  /// ``logDirectoryPath``/`scribe-{sessionId}.log`. Pass the chat session id when one exists
+  /// (so the log file shares a UUID stem with the matching `{uuid}.json` transcript archive),
+  /// or a freshly-minted UUID for ephemeral / non-chat invocations (e.g. `runAgentIPC`).
   ///
-  /// When ``chatSessionId`` is set, the log file name is ``scribe-{uuid}.log`` (matching the `{uuid}.json` chat archive) and each call **appends** so every model turn in that session shares one file.
-  /// When `nil`, each call uses a new uniquely named file (``scribe-{timestamp}-{…}.log``), e.g. for ``runAgentIPC``.
-  public func makeRequestLogger(chatSessionId: UUID? = nil) -> Logger {
+  /// All Scribe events for a single chat session — input handling, queue transitions, model
+  /// turn HTTP/SSE detail, persist, errors — are intentionally funneled into this one file
+  /// so debugging only ever requires opening one log; there is no separate diagnostics file.
+  public func makeSessionLogger(sessionId: UUID) -> Logger {
     let level = logLevel.swiftLogLevel
     let dir = URL(fileURLWithPath: logDirectoryPath, isDirectory: true).standardizedFileURL
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-    let fileURL: URL =
-      if let sid = chatSessionId {
-        dir.appendingPathComponent("scribe-\(sid.uuidString).log", isDirectory: false)
-      } else {
-        newEphemeralRequestLogFileURL()
-      }
+    let fileURL = dir.appendingPathComponent(
+      "scribe-\(sessionId.uuidString).log", isDirectory: false)
 
-    let fileHandle: FileHandle
-    if chatSessionId != nil {
-      if !FileManager.default.fileExists(atPath: fileURL.path) {
-        FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-      }
-      guard let fh = try? FileHandle(forUpdating: fileURL) else {
-        return makeStderrLogger()
-      }
-      _ = try? fh.seekToEnd()
-      fileHandle = fh
-    } else {
+    if !FileManager.default.fileExists(atPath: fileURL.path) {
       FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-      guard let fh = try? FileHandle(forWritingTo: fileURL) else {
-        return makeStderrLogger()
-      }
-      fileHandle = fh
     }
+    guard let fileHandle = try? FileHandle(forUpdating: fileURL) else {
+      // Last-resort fallback: emit to stderr if we can't open the per-session file.
+      // We deliberately do not create a parallel "diagnostics" log here.
+      return Logger(label: "scribe.session") { _ in
+        ScribeLineLogHandler(
+          minimumLevel: level,
+          dataWriter: LockedDataWriter { data in
+            try? FileHandle.standardError.write(contentsOf: data)
+          })
+      }
+    }
+    _ = try? fileHandle.seekToEnd()
 
     let sink = FileSink(handle: fileHandle)
-    let stderrWriter = LockedDataWriter { data in
-      try? FileHandle.standardError.write(contentsOf: data)
-    }
     let fileWriter = LockedDataWriter { data in sink.write(data) }
-    return Logger(label: "scribe.request") { _ in
-      var stderrHandler = ScribeLineLogHandler(minimumLevel: level, dataWriter: stderrWriter)
-      stderrHandler.logLevel = level
-      var fileHandler = ScribeLineLogHandler(minimumLevel: level, dataWriter: fileWriter)
-      fileHandler.logLevel = level
-      return MultiplexLogHandler([stderrHandler, fileHandler])
+    return Logger(label: "scribe.session") { _ in
+      ScribeLineLogHandler(minimumLevel: level, dataWriter: fileWriter)
     }
-  }
-
-  private func newEphemeralRequestLogFileURL() -> URL {
-    let dir = URL(fileURLWithPath: logDirectoryPath, isDirectory: true)
-    let token = "\(UInt64(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString.prefix(8))"
-    return dir.appendingPathComponent("scribe-\(token).log", isDirectory: false)
   }
 }

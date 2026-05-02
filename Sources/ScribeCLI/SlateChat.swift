@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 import ScribeCore
 import ScribeLLM
 import SlateCore
@@ -290,6 +291,21 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
       }
     }
     ping()
+    // The pump's external-wake throttle (`latest: true`) is supposed to deliver the trailing
+    // tick at the end of a burst, but in practice an SSE stream can call `requestRender()`
+    // 30+ times/sec right up to `markModelTurnRunning(false)` and the throttle window may
+    // happen to be "between" emissions when we flip idle. Without a follow-up, the spinner
+    // stays hot until the next stdin/resize event. Ping again after the throttle interval to
+    // guarantee the UI catches up.
+    if !running {
+      let wakeRef = state.withLock { $0.wake }
+      if let wakeRef {
+        Task.detached(priority: .userInitiated) {
+          try? await Task.sleep(for: .milliseconds(50))
+          wakeRef.requestRender()
+        }
+      }
+    }
   }
 
   public func printConfigBanner(baseURL: String, model: String, cwd: String) {
@@ -1341,6 +1357,10 @@ private final class SlateChatHost {
   /// Previous-render snapshot of `sink.modelTurnBusy()`, used to detect busy → idle transitions
   /// in `onEvent` and auto-flush a queued submission to the coordinator at that moment.
   private var lastObservedModelBusy: Bool = false
+  /// Per-session logger threaded in from `Chat.run`; writes to `scribe-{uuid}.log`.
+  /// All chat events emitted from this host use this logger and the structured
+  /// `event=ns.name k=v k=v` format documented in ``docs/chat-input-behavior.md``.
+  private let log: Logger
 
   init(
     configuration: AgentConfig,
@@ -1349,7 +1369,8 @@ private final class SlateChatHost {
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL,
     sessionId: UUID,
-    sessionCreatedAt: Date
+    sessionCreatedAt: Date,
+    log: Logger
   ) {
     self.configuration = configuration
     self.client = client
@@ -1358,6 +1379,7 @@ private final class SlateChatHost {
     self.sessionPersistenceURL = sessionPersistenceURL
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
+    self.log = log
   }
 
   deinit {
@@ -1375,10 +1397,17 @@ private final class SlateChatHost {
       try? FileHandle.standardOutput.write(contentsOf: Data("\u{001b}[?2004l".utf8))
     }
 
-    // `externalCoalesceMaxFramesPerSecond: 0` disables throttling for `ExternalWake`. The default
-    // coalesces wakes (~60/s), which can drop the post-turn "model finished" render; the UI then
-    // keeps the LLM spinner on the input row until another key event or resize even though
-    // `markModelTurnRunning(false)` already ran (turn is back on the user).
+    // External wakes (every SSE chunk, every persist, every emitUsage) are coalesced at the
+    // pump's default ~60 fps — i.e. at most one render per ~16 ms regardless of how busy the
+    // streaming side is. Coupled with the async tty writer in `slate` (frames are submitted
+    // to a background task instead of blocking the main actor on `write(2)`), this keeps the
+    // main actor responsive to stdin even during heavy reasoning streams.
+    //
+    // The throttle pipeline can elide the *trailing* wake at the end of a fast burst — so
+    // `markModelTurnRunning(false)` schedules a deferred follow-up render (see
+    // ``SlateTranscriptSink/markModelTurnRunning``) that fires ~50 ms later, guaranteeing the
+    // UI catches up to the new idle state instead of leaving the spinner hot until the next
+    // key/resize.
     await slate.start(
       prepare: { [self] wake in
         sink.installWake(wake)
@@ -1398,25 +1427,44 @@ private final class SlateChatHost {
         let created = self.sessionCreatedAt
         let modelSnapshot = configuration.agentModel
         let baseSnapshot = configuration.openAIBaseURL
+        let persistLog = self.log
         let persist: @Sendable ([Components.Schemas.ChatMessage]) -> Void = { history in
           let cwd = FileManager.default.currentDirectoryPath
-          try? ChatSessionStore.save(
-            ChatSessionArchive(
-              id: cid,
-              createdAt: created,
-              updatedAt: Date(),
-              cwd: cwd,
-              model: modelSnapshot,
-              baseURL: baseSnapshot,
-              messages: history
-            ),
-            to: persistURL
-          )
+          do {
+            try ChatSessionStore.save(
+              ChatSessionArchive(
+                id: cid,
+                createdAt: created,
+                updatedAt: Date(),
+                cwd: cwd,
+                model: modelSnapshot,
+                baseURL: baseSnapshot,
+                messages: history
+              ),
+              to: persistURL
+            )
+            persistLog.trace(
+              """
+              event=chat.persist.save \
+              messages=\(history.count) \
+              path=\(persistURL.path)
+              """
+            )
+          } catch {
+            persistLog.error(
+              """
+              event=chat.persist.fail \
+              path=\(persistURL.path) \
+              err="\(error.localizedDescription)"
+              """
+            )
+          }
         }
 
         let interruptFlag = self.modelInterruptFlag
+        let sessionLog = self.log
         self.coordinatorTask = Task {
-          [configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, cid] in
+          [configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog] in
           defer { sink.markCoordinatorFinished() }
           do {
             try await ScribeAgentCoordinator.runInteractive(
@@ -1437,12 +1485,18 @@ private final class SlateChatHost {
               },
               initialConversation: resumeSnapshot?.messages,
               onConversationPersist: persist,
-              chatSessionId: cid,
               prepareModelTurnStart: { interruptFlag.clear() },
-              shouldAbortTurn: { interruptFlag.peek() }
+              shouldAbortTurn: { interruptFlag.peek() },
+              log: sessionLog
             )
           } catch {
             try? sink.printHarnessRunError(error)
+            sessionLog.error(
+              """
+              event=chat.coordinator.fail \
+              err="\(String(describing: error))"
+              """
+            )
           }
         }
         self.spinnerTask?.cancel()
@@ -1457,7 +1511,7 @@ private final class SlateChatHost {
         }
         wake.requestRender()
       },
-      externalCoalesceMaxFramesPerSecond: 0,
+      externalCoalesceMaxFramesPerSecond: 60,
       onEvent: { event in
         switch event {
         case .resize:
@@ -1486,12 +1540,20 @@ private final class SlateChatHost {
         // coordinator picks it up on its next `readUserLine`, and clear the tray.
         let nowBusy = sink.modelTurnBusy()
         if !nowBusy, self.lastObservedModelBusy, let queued = self.queuedSubmission {
+          self.log.debug(
+            """
+            event=chat.queue.auto-flush \
+            trigger=busy-to-idle \
+            chars=\(queued.count)
+            """
+          )
           self.queuedSubmission = nil
           sink.setQueuedTrayText(nil)
           Task { await gate.complete(queued) }
         }
         self.lastObservedModelBusy = nowBusy
 
+        let prepareStart = Date()
         let flatTranscript = self.syncFlattenedTranscript(sink: sink, slate: slate)
         let queuedTrayText = sink.queuedTrayTextSnapshot()
         let contentRows = SlateChatRenderer.transcriptContentRows(
@@ -1510,6 +1572,8 @@ private final class SlateChatHost {
           self.transcriptFirstVisibleRow = min(self.transcriptFirstVisibleRow, maxTailStart)
         }
         let transcriptTailStart = self.transcriptFirstVisibleRow
+        let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
+        let submitStart = Date()
         slate.enscribe(
           grid: SlateChatRenderer.makeGrid(
             cols: slate.cols,
@@ -1522,6 +1586,29 @@ private final class SlateChatHost {
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: sink.modelTurnBusy(),
             queuedTrayText: queuedTrayText))
+        // `slate.enscribe` builds the cell grid + encodes it + submits one frame to the
+        // async tty writer. The actual `write(2)` happens off-actor, so a high `submit_ms`
+        // here means encode/grid-build was expensive (transcript layout, grid blits) — *not*
+        // tty drain. Splitting prepare/submit pinpoints which side any future regression
+        // lives on.
+        let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
+        let totalMs = prepareMs &+ submitMs
+        if totalMs >= 50 {
+          self.log.debug(
+            """
+            event=chat.render.slow \
+            elapsed_ms=\(totalMs) \
+            prepare_ms=\(prepareMs) \
+            submit_ms=\(submitMs) \
+            flat_rows=\(flatTranscript.count) \
+            cols=\(slate.cols) \
+            rows=\(slate.rows) \
+            model_busy=\(nowBusy) \
+            queue_chars=\(self.queuedSubmission?.count ?? 0) \
+            buffer_chars=\(self.inputBuffer.count)
+            """
+          )
+        }
         return sink.coordinatorFinished() ? .stop : .continue
       })
 
@@ -1552,13 +1639,35 @@ private final class SlateChatHost {
     inputBuffer = ""
     utf8Staging.removeAll(keepingCapacity: true)
     let trimmed = submit.trimmingCharacters(in: .whitespacesAndNewlines)
+    let busy = sink.modelTurnBusy()
+    let newlines = submit.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
 
     if trimmed.isEmpty {
       // Second-Enter idiom: send the queued tray message now (interrupting if needed).
-      guard let queued = queuedSubmission else { return }
+      guard let queued = queuedSubmission else {
+        log.debug(
+          """
+          event=chat.user.submit \
+          kind=noop \
+          reason=empty-buffer-no-queue \
+          model_busy=\(busy)
+          """
+        )
+        return
+      }
+      let queuedNewlines = queued.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
+      log.debug(
+        """
+        event=chat.user.submit \
+        kind=interrupt-and-send \
+        chars=\(queued.count) \
+        newlines=\(queuedNewlines) \
+        model_busy=\(busy)
+        """
+      )
       queuedSubmission = nil
       sink.setQueuedTrayText(nil)
-      if sink.modelTurnBusy() {
+      if busy {
         modelInterruptFlag.request()
       }
       Task { await gate.complete(queued) }
@@ -1566,15 +1675,35 @@ private final class SlateChatHost {
       return
     }
 
-    if sink.modelTurnBusy() {
+    if busy {
       // Park in the queued tray and wait for either the user (Enter / Ctrl+C) or for the
       // current turn to finish (auto-flushed in `onEvent`).
+      let replacing = queuedSubmission != nil
+      log.debug(
+        """
+        event=chat.user.submit \
+        kind=queue \
+        chars=\(submit.count) \
+        newlines=\(newlines) \
+        replacing=\(replacing) \
+        model_busy=true
+        """
+      )
       queuedSubmission = submit
       sink.setQueuedTrayText(submit)
       renderWake?.requestRender()
     } else {
       // Agent is idle; dispatch immediately. Scrollback recording happens in the readUserLine
       // wrapper at pickup time.
+      log.debug(
+        """
+        event=chat.user.submit \
+        kind=immediate \
+        chars=\(submit.count) \
+        newlines=\(newlines) \
+        model_busy=false
+        """
+      )
       Task { await gate.complete(submit) }
     }
   }
@@ -1653,6 +1782,21 @@ private final class SlateChatHost {
     renderWake?.requestRender()
   }
 
+  /// Inserts a soft newline into the input buffer and emits a `chat.user.input.newline`
+  /// log line tagged with the originating key sequence. This is the single recorded path for
+  /// Shift+Enter / Alt+Enter / Ctrl+J behaviour so the source key can be traced from the log.
+  private func insertNewlineIntoInput(source: String) {
+    inputBuffer.append("\n")
+    log.debug(
+      """
+      event=chat.user.input.newline \
+      source=\(source) \
+      buffer_chars=\(inputBuffer.count) \
+      has_queue=\(queuedSubmission != nil)
+      """
+    )
+  }
+
   /// Returns `true` if the enclosing app should terminate (interrupt / EOF semantics).
   private func handleKey(byte: UInt8, sink: SlateTranscriptSink, gate: UserLineGate, slate: Slate) -> Bool {
     if byte == 3 {
@@ -1661,7 +1805,16 @@ private final class SlateChatHost {
       //      The agent keeps running — this press only recalls the queued text.
       //   2. With no queue and an in-flight turn: interrupt the agent.
       //   3. With no queue and an idle prompt: exit the chat.
+      let busy = sink.modelTurnBusy()
       if let queued = queuedSubmission {
+        log.debug(
+          """
+          event=chat.user.ctrl-c \
+          action=recall-queue \
+          queue_chars=\(queued.count) \
+          model_busy=\(busy)
+          """
+        )
         queuedSubmission = nil
         sink.setQueuedTrayText(nil)
         inputBuffer = queued
@@ -1669,14 +1822,31 @@ private final class SlateChatHost {
         renderWake?.requestRender()
         return false
       }
-      if sink.modelTurnBusy() {
+      if busy {
+        log.debug(
+          """
+          event=chat.user.ctrl-c \
+          action=interrupt-agent \
+          model_busy=true
+          """
+        )
         modelInterruptFlag.request()
         renderWake?.requestRender()
         return false
       }
+      log.debug(
+        """
+        event=chat.user.ctrl-c \
+        action=exit \
+        model_busy=false
+        """
+      )
       return true
     }
-    if byte == 4 { return true }
+    if byte == 4 {
+      log.debug("event=chat.user.ctrl-d action=exit")
+      return true
+    }
 
     if bracketedPasteActive {
       ingestBracketPasteByte(byte)
@@ -1689,7 +1859,7 @@ private final class SlateChatHost {
         // `\e` + non-CSI: historically Option/Alt+Return sent ESC then CR/LF.
         escAccumulator = nil
         if byte == 10 || byte == 13 {
-          inputBuffer.append("\n")
+          insertNewlineIntoInput(source: "esc-prefix-cr-or-lf")
         } else {
           ingestUtf8Continuation(byte)
         }
@@ -1731,7 +1901,8 @@ private final class SlateChatHost {
     case 13:
       submitUserLine(sink: sink, gate: gate)
     case 10:
-      inputBuffer.append("\n")
+      // Bare LF without a preceding CR — emitted by some terminals for Shift+Enter / Ctrl+J.
+      insertNewlineIntoInput(source: "raw-lf")
     case 8, 127:
       removeLastLogicalCharacterFromInput()
     default:
@@ -1809,6 +1980,12 @@ private final class SlateChatHost {
         bracketCloseMatchPrefix = 0
         bracketedPasteActive = false
         collapseUtfStagingToBuffer()
+        log.debug(
+          """
+          event=chat.user.input.paste-end \
+          buffer_chars=\(inputBuffer.count)
+          """
+        )
       }
       return
     }
@@ -1831,6 +2008,12 @@ private final class SlateChatHost {
       utf8Staging.removeAll(keepingCapacity: true)
       bracketedPasteActive = true
       bracketCloseMatchPrefix = 0
+      log.debug(
+        """
+        event=chat.user.input.paste-begin \
+        buffer_chars=\(inputBuffer.count)
+        """
+      )
       return
     }
 
@@ -1841,20 +2024,24 @@ private final class SlateChatHost {
     guard let inner = String(bytes: paramRegion, encoding: .utf8) else { return }
     let ints = inner.split(separator: ";").compactMap { Int($0) }
 
+    let csiSource: String
     switch terminator {
     case UInt8(ascii: "u"):
       // CSI u — plain Enter is `\r`. Non-zero modifier = soft newline (bitmask Shift=1, Alt=2, …).
       guard let key = ints.first, key == 13 else { return }
       guard ints.count >= 2, ints[1] != 0 else { return }
+      csiSource = "csi-u-modified-enter mod=\(ints[1])"
 
     case UInt8(ascii: "~"):
       // Bracket paste open/close handled above; bracketed paste uses 200~/201~ digits.
       // xterm-style modified keys: `CSI 27 ; <modifier> ; 13 ~` (Shift+Enter often `27;2;13~`).
       if ints.count >= 3, ints[0] == 27, ints[2] == 13, ints[1] != 0 {
+        csiSource = "csi-tilde-xterm-modified-enter mod=\(ints[1])"
         break
       }
       // Alternate `CSI 13 ; <modifier> ~` forms.
       if ints.count >= 2, ints[0] == 13, ints[1] != 0 {
+        csiSource = "csi-tilde-modified-enter mod=\(ints[1])"
         break
       }
       return
@@ -1863,7 +2050,7 @@ private final class SlateChatHost {
       return
     }
 
-    inputBuffer.append("\n")
+    insertNewlineIntoInput(source: csiSource)
     swallowLfAfterCrSubmit = false
   }
 }
@@ -1891,44 +2078,48 @@ enum SlateChat {
   ///
   /// - Parameters:
   ///   - resumeArchive: If set, restores model context and redraws approximate transcript (`sessionPersistenceURL` should point at that archive).
+  ///   - sessionId: UUID identifying this Scribe invocation (matches the `{uuid}.json` archive
+  ///     stem and the `scribe-{uuid}.log` file the `log` parameter writes to).
+  ///   - log: Per-session logger created in `Chat.run` via ``AgentConfig/makeSessionLogger(sessionId:)``.
+  ///     All chat events for this invocation funnel into this single `Logger`; we no longer emit
+  ///     to a separate diagnostics file.
   static func runFullscreen(
     configuration: AgentConfig,
     client: Client,
     systemPrompt: String,
     resumeArchive: ChatSessionArchive? = nil,
-    sessionPersistenceURL: URL
+    sessionPersistenceURL: URL,
+    sessionId: UUID,
+    log: Logger
   ) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
-      configuration.makeStderrLogger().error(
-        "chat: stdin is not a TTY; interactive fullscreen chat is unavailable in this environment")
+      log.error("event=chat.session.fail reason=stdin-not-tty")
       throw ChatTerminalError.notATerminal
     }
+    log.debug(
+      """
+      event=chat.fullscreen.attach \
+      session_file=\(sessionPersistenceURL.lastPathComponent)
+      """
+    )
     try await Task { @MainActor () throws -> Void in
-      let stem = sessionPersistenceURL.deletingPathExtension().lastPathComponent
-      let inferredNewId =
-        UUID(uuidString: stem)
-      let sessionId = resumeArchive?.id ?? inferredNewId
       let sessionCreatedAt = resumeArchive?.createdAt ?? Date()
-      guard let sid = sessionId else {
-        throw AgentAPIError(
-          description:
-            "Session file path must end with `/{uuid}.json` (new sessions), or use `scribe chat --resume` with an existing archive."
-        )
-      }
       let host = SlateChatHost(
         configuration: configuration,
         client: client,
         systemPrompt: systemPrompt,
         resumeArchive: resumeArchive,
         sessionPersistenceURL: sessionPersistenceURL,
-        sessionId: sid,
-        sessionCreatedAt: sessionCreatedAt
+        sessionId: sessionId,
+        sessionCreatedAt: sessionCreatedAt,
+        log: log
       )
       do {
         try await host.run()
       } catch Slate.InstallationError.notInteractiveTerminal {
-        configuration.makeStderrLogger().error(
-          "chat: Slate refused non-interactive terminal (InstallationError.notInteractiveTerminal)")
+        log.error(
+          "event=chat.fullscreen.fail reason=slate-not-interactive"
+        )
         throw ChatTerminalError.slateNotInteractive
       }
     }.value

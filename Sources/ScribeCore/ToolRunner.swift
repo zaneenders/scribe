@@ -42,8 +42,19 @@ public struct ToolRunner: Sendable {
 
       case "read_file":
         let path = try string(obj["path"], field: "path")
-        let text = try readFile(path: path)
-        return .init(text: jsonOk(["content": text]))
+        let offset = optionalInt(obj["offset"])
+        let limit = optionalInt(obj["limit"])
+        let result = try readFile(path: path, offset: offset, limit: limit)
+        return .init(
+          text: jsonOk([
+            "path": result.absolutePath,
+            "content": result.content,
+            "bytes": result.totalBytes,
+            "total_lines": result.totalLines,
+            "start_line": result.startLine,
+            "end_line": result.endLine,
+            "truncated": result.truncated,
+          ] as [String: Any]))
 
       case "write_file":
         let path = try string(obj["path"], field: "path")
@@ -66,7 +77,92 @@ public struct ToolRunner: Sendable {
     }
   }
 
-  private static func readFile(path: String) throws -> String {
+  /// Result of a `read_file` invocation. Pagination is **line-based and 1-indexed** so the
+  /// model can iterate over a file with `offset = previous end_line + 1` after each call:
+  /// see ``readFile(path:offset:limit:)`` for the slicing rules.
+  ///
+  /// `totalBytes` reports the byte count of the *whole* file (not just the slice) so the
+  /// model can decide whether more pages are worth fetching, and `truncated` is `true` when
+  /// `limit` cut the slice short of `total_lines`.
+  struct ReadFileResult {
+    let absolutePath: String
+    let content: String
+    let totalBytes: Int
+    let totalLines: Int
+    let startLine: Int
+    let endLine: Int
+    let truncated: Bool
+  }
+
+  /// Default cap when the model omits `limit` — picked to keep tool messages bounded so a
+  /// single read on a multi-megabyte file does not balloon the conversation history (every
+  /// subsequent model turn re-uploads the full transcript).
+  static let readFileDefaultLineLimit = 2000
+
+  /// Reads a UTF-8 file with optional **line-based** pagination.
+  ///
+  /// - `offset`: 1-indexed start line. Values `nil`, `0`, or `1` start from the top. Values
+  ///   greater than `total_lines` produce an empty `content` slice (still `ok=true`) so the
+  ///   model can detect end-of-file without erroring out.
+  /// - `limit`: maximum number of lines to return; defaults to ``readFileDefaultLineLimit``.
+  ///   Pass `0` (or any non-positive value) to mean "no cap" and read to end of file.
+  ///
+  /// `start_line` and `end_line` in the returned result are inclusive 1-indexed line numbers
+  /// within the original file; `end_line == start_line - 1` indicates an empty slice.
+  private static func readFile(
+    path: String,
+    offset: Int?,
+    limit: Int?
+  ) throws -> ReadFileResult {
+    let fp = try PathResolution.resolve(reading: path)
+    let s = PathResolution.fileSystemPath(fp)
+    let text = try String(contentsOfFile: s, encoding: .utf8)
+    let totalBytes = text.utf8.count
+
+    // `omittingEmptySubsequences: false` preserves trailing empty line for `"foo\n"` so
+    // counts match what a user sees in `wc -l + 1`.
+    let parts = text.split(separator: "\n", omittingEmptySubsequences: false)
+    let totalLines = parts.count
+
+    let startIndex = max(0, (offset ?? 1) - 1)
+    let resolvedLimit: Int
+    if let limit, limit > 0 {
+      resolvedLimit = limit
+    } else if limit == nil {
+      resolvedLimit = readFileDefaultLineLimit
+    } else {
+      // Explicit `0` (or negative) — treat as "no cap".
+      resolvedLimit = totalLines
+    }
+
+    if startIndex >= totalLines {
+      return ReadFileResult(
+        absolutePath: s,
+        content: "",
+        totalBytes: totalBytes,
+        totalLines: totalLines,
+        startLine: totalLines + 1,
+        endLine: totalLines,
+        truncated: false
+      )
+    }
+
+    let endIndex = min(totalLines, startIndex + resolvedLimit)
+    let slice = parts[startIndex..<endIndex].joined(separator: "\n")
+    return ReadFileResult(
+      absolutePath: s,
+      content: slice,
+      totalBytes: totalBytes,
+      totalLines: totalLines,
+      startLine: startIndex + 1,
+      endLine: endIndex,
+      truncated: endIndex < totalLines
+    )
+  }
+
+  /// Convenience for callers that need full file contents (e.g. ``editFile`` matching).
+  /// Equivalent to `readFile(path:offset:limit:)` with no slicing — all lines are returned.
+  private static func readFileWhole(path: String) throws -> String {
     let fp = try PathResolution.resolve(reading: path)
     let s = PathResolution.fileSystemPath(fp)
     return try String(contentsOfFile: s, encoding: .utf8)
@@ -90,7 +186,7 @@ public struct ToolRunner: Sendable {
   }
 
   private static func editFile(path: String, old: String, new: String) throws -> String {
-    var text = try readFile(path: path)
+    var text = try readFileWhole(path: path)
     if old.isEmpty { throw PathResolution.PathError(description: "old_string must not be empty for edit_file") }
     let n = numberOfNonOverlappingOccurrences(in: text, of: old)
     guard n == 1 else {
@@ -118,6 +214,18 @@ public struct ToolRunner: Sendable {
 
   private static func optionalString(_ v: Any?) -> String? {
     (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// Accepts JSON numbers (`Int` / `Double` after `JSONSerialization`) and decimal strings
+  /// (`"100"`); returns `nil` for missing, empty, or unparseable values so the caller can
+  /// fall back to a default.
+  private static func optionalInt(_ v: Any?) -> Int? {
+    if let n = v as? Int { return n }
+    if let n = v as? Double { return Int(n) }
+    if let s = (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+      return Int(s)
+    }
+    return nil
   }
 
   private static func numberOfNonOverlappingOccurrences(in haystack: String, of needle: String) -> Int {

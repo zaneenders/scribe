@@ -1,5 +1,6 @@
 import Configuration
 import Foundation
+import Logging
 
 /// Dotted keys in `scribe-config.json` for ``ConfigReader`` (matches nested JSON paths).
 /// All application settings are read from that file (see ``AgentConfig/load()``); there are no separate secret lookup paths and keys are not marked `isSecret` (so configuration access logs show values as read).
@@ -23,7 +24,8 @@ public struct AgentConfig: Sendable {
   public var agentModel: String
   public var agentMaxToolRounds: Int
   public var logLevel: ScribeLogLevel
-  /// Absolute path of the directory where ``makeRequestLogger()`` creates log files.
+  /// Absolute path of the directory where ``makeSessionLogger(sessionId:)`` appends log files
+  /// (`scribe-{uuid}.log`, one per Scribe invocation; no separate diagnostics file).
   public var logDirectoryPath: String
   /// Absolute path of the directory used by ``ChatSessionStore`` for `scribe chat` session files.
   public var chatSessionsDirectoryPath: String
@@ -127,7 +129,10 @@ public struct AgentConfig: Sendable {
       chatSessionsDirectoryPath: chatSessionsDirectoryPath,
       resolvedConfigurationPath: resolvedPathString
     )
-    config.makeStderrLogger().info("Loaded configuration from \(resolvedPathString)")
+    // Boot info is intentionally not logged here — `AgentConfig.load()` runs before any chat
+    // session id exists, so it has nowhere to write that wouldn't create a parallel
+    // diagnostics file. Callers (e.g. `Chat.run`) should mint a session logger via
+    // ``makeSessionLogger(sessionId:)`` and emit a `event=chat.session.start` line themselves.
     return config
   }
 

@@ -21,7 +21,6 @@ struct Chat: AsyncParsableCommand {
 
   func run() async throws {
     let config = try await AgentConfig.load()
-    let log = config.makeStderrLogger()
 
     if sessions {
       let root = try ChatSessionStore.sessionsDirectoryURL(configuration: config)
@@ -64,27 +63,52 @@ struct Chat: AsyncParsableCommand {
       Tool names must match exactly: shell, read_file, write_file, edit_file.
       Parallel tool calls are fine when they do not depend on each other’s outputs.
 
+      For `read_file`, prefer paginating large files: pass `offset` (1-indexed start line) and `limit` (max lines, default 2000) and use the returned `end_line` + 1 as the next `offset` if `truncated` is true. This keeps the conversation history small.
+
       Working directory (relative paths resolve here): \(cwd)
       """
 
     let sessionPersistenceURL: URL
     let resumeArchive: ChatSessionArchive?
+    let sessionId: UUID
     if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
       sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
         specifier: spec, configuration: config)
       let archived = try ChatSessionStore.load(from: sessionPersistenceURL)
       resumeArchive = archived
-      if archived.model != config.agentModel {
-        log.warning(
-          "Resuming session saved with model \(archived.model); current config uses \(config.agentModel)."
-        )
-      }
-      log.info("Resuming chat session \(archived.id) at \(sessionPersistenceURL.path)")
+      sessionId = archived.id
     } else {
-      let id = UUID()
-      sessionPersistenceURL = try ChatSessionStore.fileURL(sessionId: id, configuration: config)
+      sessionId = UUID()
+      sessionPersistenceURL = try ChatSessionStore.fileURL(
+        sessionId: sessionId, configuration: config)
       resumeArchive = nil
-      log.info("Logging chat session to \(sessionPersistenceURL.path)")
+    }
+
+    let log = config.makeSessionLogger(sessionId: sessionId)
+    let mode = resumeArchive == nil ? "new" : "resume"
+    log.notice(
+      """
+      event=chat.session.start \
+      session_id=\(sessionId.uuidString) \
+      mode=\(mode) \
+      model=\(config.agentModel) \
+      base_url=\(config.openAIBaseURL) \
+      api_key=\(config.openAIAPIKey == nil ? "none" : "set") \
+      max_tool_rounds=\(config.agentMaxToolRounds) \
+      log_level=\(config.logLevel.rawValue) \
+      cwd=\(cwd) \
+      session_file=\(sessionPersistenceURL.path) \
+      config_file=\(config.resolvedConfigurationPath)
+      """
+    )
+    if let archived = resumeArchive, archived.model != config.agentModel {
+      log.warning(
+        """
+        event=chat.session.resume.model-mismatch \
+        archived_model=\(archived.model) \
+        current_model=\(config.agentModel)
+        """
+      )
     }
 
     try await SlateChat.runFullscreen(
@@ -92,8 +116,11 @@ struct Chat: AsyncParsableCommand {
       client: client,
       systemPrompt: systemPrompt,
       resumeArchive: resumeArchive,
-      sessionPersistenceURL: sessionPersistenceURL
+      sessionPersistenceURL: sessionPersistenceURL,
+      sessionId: sessionId,
+      log: log
     )
+    log.notice("event=chat.session.end status=ok")
     printExitResumeHint(
       resumeArchive: resumeArchive,
       sessionPersistenceURL: sessionPersistenceURL
@@ -102,7 +129,7 @@ struct Chat: AsyncParsableCommand {
 }
 
 extension Chat {
-  /// Printed after a normal chat exit regardless of stderr log level (`--logging.level`).
+  /// Printed after a normal chat exit regardless of configured ``logging.level`` (stdout hint only — structured logs stay in log files).
   fileprivate func printExitResumeHint(
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL

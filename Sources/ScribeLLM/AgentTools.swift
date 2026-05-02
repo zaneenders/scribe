@@ -36,6 +36,22 @@ private enum OpenAIToolParameterSchema {
   )
   private static let newString = stringProperty(description: "Replacement text.")
 
+  /// Line-based, 1-indexed start position for `read_file` pagination.
+  private static let readFileOffset: [String: (any Sendable)?] = [
+    "type": "integer",
+    "description":
+      "1-indexed line number to start reading from. Omit (or pass 1) to start at the top. "
+      + "Use the previous call's `end_line + 1` to read the next page of a large file.",
+  ]
+  /// Maximum number of lines to return; defaults to 2000 server-side when omitted.
+  private static let readFileLimit: [String: (any Sendable)?] = [
+    "type": "integer",
+    "description":
+      "Maximum number of lines to return (default 2000). Pass a smaller value when only a "
+      + "section is needed; pass `0` to read to end of file. Response includes `total_lines`, "
+      + "`start_line`, `end_line`, and `truncated` so you can tell whether to fetch another page.",
+  ]
+
   static var all: [Components.Schemas.ChatTool] {
     [
       .init(
@@ -58,11 +74,17 @@ private enum OpenAIToolParameterSchema {
         function: .init(
           name: "read_file",
           description:
-            "Read a UTF-8 file at the given path (relative paths resolve against the process cwd).",
+            "Read a UTF-8 file at the given path (relative paths resolve against the process cwd). "
+            + "Supports line-based pagination via `offset` and `limit` so very large files can be "
+            + "fetched in sections without bloating the conversation history. The result includes "
+            + "`bytes`, `total_lines`, `start_line`, `end_line`, and `truncated` so you can decide "
+            + "whether to request another page (`offset = previous end_line + 1`).",
           parameters: asPayload([
             "type": "object",
             "properties": [
-              "path": path
+              "path": path,
+              "offset": readFileOffset,
+              "limit": readFileLimit,
             ] as [String: (any Sendable)?],
             "required": ["path"] as (any Sendable)?,
           ])
