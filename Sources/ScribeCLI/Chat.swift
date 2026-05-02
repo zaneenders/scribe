@@ -35,12 +35,9 @@ struct Chat: AsyncParsableCommand {
 
       Working directory (relative paths resolve here): \(cwd)
       """
-    let sink = TerminalScribeOutput()
-    try await ScribeAgentCoordinator.runInteractive(
+    try await SlateChat.runFullscreen(
       configuration: config,
       client: client,
-      systemPrompt: systemPrompt,
-      sink: sink
-    )
+      systemPrompt: systemPrompt)
   }
 }

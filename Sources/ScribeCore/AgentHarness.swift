@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
@@ -22,9 +23,13 @@ public struct AgentHarness {
     self.maxToolRounds = maxToolRounds
   }
 
-  public func runModelTurn(messages: inout [Components.Schemas.ChatMessage]) async throws
+  public func runModelTurn(
+    messages: inout [Components.Schemas.ChatMessage],
+    logger: Logger
+  ) async throws
     -> ModelTurnOutcome
   {
+    logger.debug("Starting chat completion request (stream) model=\(model)")
     for round in 0..<maxToolRounds {
       let requestBody = Components.Schemas.CreateChatCompletionRequest(
         model: model,
@@ -76,6 +81,8 @@ public struct AgentHarness {
       var streamStarted = false
       var streamSection: AssistantStreamSection?
       var lastUsage: Components.Schemas.CompletionUsage?
+      let streamWallStart = Date()
+      var firstStreamContentAt: Date?
       for try await sse in sseStream {
         guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
         else { continue }
@@ -87,6 +94,7 @@ public struct AgentHarness {
             from: Data(raw.utf8)
           )
         } catch {
+          logger.debug("Skipping unreadable SSE JSON line: \(error.localizedDescription)")
           try output.printSkippedUnreadableStreamLine()
           continue
         }
@@ -96,6 +104,7 @@ public struct AgentHarness {
         for choice in chunk.choices ?? [] {
           guard let delta = choice.delta else { continue }
           for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            if firstStreamContentAt == nil { firstStreamContentAt = Date() }
             streamStarted = true
             if case .some(.reasoning) = streamSection {
             } else {
@@ -105,6 +114,7 @@ public struct AgentHarness {
             try output.appendAssistantStreamText(.reasoning, text: r)
           }
           if let t = delta.content, !t.isEmpty {
+            if firstStreamContentAt == nil { firstStreamContentAt = Date() }
             streamStarted = true
             if case .some(.answer) = streamSection {
             } else {
@@ -123,10 +133,18 @@ public struct AgentHarness {
       }
 
       if let u = lastUsage {
+        let streamWallEnd = Date()
+        let genStart = firstStreamContentAt ?? streamWallStart
+        let denom = max(0.001, streamWallEnd.timeIntervalSince(genStart))
+        let tps: Double? = {
+          guard let c = u.completionTokens, c > 0 else { return nil }
+          return Double(c) / denom
+        }()
         try output.emitUsage(
           promptTokens: u.promptTokens,
           completionTokens: u.completionTokens,
-          totalTokens: u.totalTokens
+          totalTokens: u.totalTokens,
+          outputTokensPerSecond: tps
         )
       }
 

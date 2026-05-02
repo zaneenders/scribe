@@ -1,9 +1,13 @@
 {
   "openai": {
-    "baseUrl": "http://localhost:11434"
+    "baseUrl": "http://localhost:11434",
+    "apiKey": ""
   },
   "agent": {
     "model": "gemma4:e2b",
     "maxToolRounds": 256
+  },
+  "logging": {
+    "level": "trace"
   }
 }

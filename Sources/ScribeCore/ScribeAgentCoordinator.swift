@@ -3,12 +3,15 @@ import ScribeLLM
 
 public enum ScribeAgentCoordinator {
 
-  /// Interactive readline session; `systemPrompt` is supplied by the CLI (or another host).
+  /// Interactive session; `systemPrompt` is supplied by the CLI (or another host).
+  ///
+  /// Supply `readUserLine` to integrate with alternate-screen TUIs (for example Slate) or stdin that is not `readLine()`-friendly.
   public static func runInteractive(
     configuration: AgentConfig,
     client: Client,
     systemPrompt: String,
-    sink: any ScribeAgentOutput
+    sink: any ScribeAgentOutput,
+    readUserLine: @escaping @Sendable () async -> String?
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
     sink.printConfigBanner(
@@ -36,7 +39,7 @@ public enum ScribeAgentCoordinator {
 
     while true {
       sink.printUserPromptDecoration()
-      guard let line = readLine() else { break }
+      guard let line = await readUserLine() else { break }
       let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmed == "exit" { break }
       if trimmed.isEmpty { continue }
@@ -51,8 +54,12 @@ public enum ScribeAgentCoordinator {
         )
       )
 
+      try sink.markModelTurnRunning(true)
+      defer {
+        try? sink.markModelTurnRunning(false)
+      }
       do {
-        _ = try await harness.runModelTurn(messages: &history)
+        _ = try await harness.runModelTurn(messages: &history, logger: configuration.makeRequestLogger())
       } catch {
         try sink.printHarnessRunError(error)
         if history.last?.role == .user {
@@ -60,6 +67,24 @@ public enum ScribeAgentCoordinator {
         }
       }
     }
+  }
+
+  /// Cooked stdin via blocking ``readLine()`` on a detached task.
+  public static func runInteractive(
+    configuration: AgentConfig,
+    client: Client,
+    systemPrompt: String,
+    sink: any ScribeAgentOutput
+  ) async throws {
+    try await runInteractive(
+      configuration: configuration,
+      client: client,
+      systemPrompt: systemPrompt,
+      sink: sink,
+      readUserLine: {
+        await Task.detached(priority: .userInitiated) { readLine() }.value
+      }
+    )
   }
 
   /// One user turn over stdin/stdout JSON; suitable for subprocess nesting (agents calling `scribe agent`).
@@ -93,7 +118,8 @@ public enum ScribeAgentCoordinator {
       maxToolRounds: configuration.agentMaxToolRounds
     )
     do {
-      let outcome = try await harness.runModelTurn(messages: &history)
+      let outcome = try await harness.runModelTurn(
+        messages: &history, logger: configuration.makeRequestLogger())
       if outcome == .hitToolRoundLimit {
         return .failure(
           "Stopped after reaching the configured tool round limit (\(configuration.agentMaxToolRounds))."

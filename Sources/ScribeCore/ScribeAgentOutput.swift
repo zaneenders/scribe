@@ -2,7 +2,7 @@ import Foundation
 
 /// Hooks for streaming model + tool transcript. The agent loop in ``AgentHarness`` calls these; hosts inject a conforming type (TTY, silent, SwiftUI bridge, etc.).
 ///
-/// Defined in ``ScribeCore`` because the harness lives here. Terminal styling primitives live in ``ScribeTUI`` (ANSI, layouts); the CLI executable composes them into ``TerminalScribeOutput`` conforming to this protocol.
+/// Defined in ``ScribeCore`` because the harness lives here; concrete sinks (e.g. Slate grid + CSI line output in the CLI target) implement this protocol.
 public protocol ScribeAgentOutput: Sendable {
   func printConfigBanner(baseURL: String, model: String, cwd: String)
   func printUserPromptDecoration()
@@ -13,7 +13,12 @@ public protocol ScribeAgentOutput: Sendable {
   func finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: Bool) throws
   func printEmptyAssistantTurn() throws
 
-  func emitUsage(promptTokens: Int?, completionTokens: Int?, totalTokens: Int?) throws
+  func emitUsage(
+    promptTokens: Int?,
+    completionTokens: Int?,
+    totalTokens: Int?,
+    outputTokensPerSecond: Double?
+  ) throws
 
   func printBlankLine() throws
   func printToolRoundHeader(round: Int, toolNames: [String]) throws
@@ -23,6 +28,9 @@ public protocol ScribeAgentOutput: Sendable {
 
   func printSkippedUnreadableStreamLine() throws
   func printHarnessRunError(_ error: Error) throws
+
+  /// Called around each ``AgentHarness/runModelTurn(messages:logger:)`` so hosts can disable input or show activity.
+  func markModelTurnRunning(_ running: Bool) throws
 }
 
 extension ScribeAgentOutput {
@@ -34,11 +42,17 @@ extension ScribeAgentOutput {
   public func appendAssistantStreamText(_ section: AssistantStreamSection, text: String) throws {}
   public func finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: Bool) throws {}
   public func printEmptyAssistantTurn() throws {}
-  public func emitUsage(promptTokens: Int?, completionTokens: Int?, totalTokens: Int?) throws {}
+  public func emitUsage(
+    promptTokens: Int?,
+    completionTokens: Int?,
+    totalTokens: Int?,
+    outputTokensPerSecond: Double?
+  ) throws {}
   public func printBlankLine() throws {}
   public func printToolRoundHeader(round: Int, toolNames: [String]) throws {}
   public func printToolInvocation(name: String, argumentSummary: String?, outputLines: [String]) throws {}
   public func printMaxToolRoundsExceeded(max: Int) throws {}
   public func printSkippedUnreadableStreamLine() throws {}
   public func printHarnessRunError(_ error: Error) throws {}
+  public func markModelTurnRunning(_ running: Bool) throws {}
 }

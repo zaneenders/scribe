@@ -2,11 +2,17 @@ import Configuration
 import Foundation
 
 /// Dotted keys in `scribe-config.json` for ``ConfigReader`` (matches nested JSON paths).
+/// All application settings are read from that file (see ``AgentConfig/load()``); there are no separate secret lookup paths and keys are not marked `isSecret` (so configuration access logs show values as read).
+///
+/// Keys include `openai.*`, `agent.*`, `logging.level` (see ``ScribeLogLevel``), and optional `logging.directory`.
 public enum ScribeConfigBinding {
   public static let openAIBaseURL: ConfigKey = "openai.baseUrl"
   public static let openAIAPIKey: ConfigKey = "openai.apiKey"
   public static let agentModel: ConfigKey = "agent.model"
   public static let agentMaxToolRounds: ConfigKey = "agent.maxToolRounds"
+  public static let loggingLevel: ConfigKey = "logging.level"
+  /// Directory for per-request log files (see ``AgentConfig/makeRequestLogger()``). Relative paths resolve against the process working directory when the config is loaded.
+  public static let loggingDirectory: ConfigKey = "logging.directory"
 }
 
 public struct AgentConfig: Sendable {
@@ -16,17 +22,28 @@ public struct AgentConfig: Sendable {
   public var openAIAPIKey: String?
   public var agentModel: String
   public var agentMaxToolRounds: Int
+  public var logLevel: ScribeLogLevel
+  /// Absolute path of the directory where ``makeRequestLogger()`` creates log files (defaults to the working directory at load time).
+  public var logDirectoryPath: String
+  /// Absolute path of the JSON file ``load()`` read (or attempted), for diagnostics.
+  public var resolvedConfigurationPath: String
 
   public init(
     openAIBaseURL: String,
     openAIAPIKey: String?,
     agentModel: String,
-    agentMaxToolRounds: Int
+    agentMaxToolRounds: Int,
+    logLevel: ScribeLogLevel,
+    logDirectoryPath: String,
+    resolvedConfigurationPath: String
   ) {
     self.openAIBaseURL = openAIBaseURL
     self.openAIAPIKey = openAIAPIKey
     self.agentModel = agentModel
     self.agentMaxToolRounds = agentMaxToolRounds
+    self.logLevel = logLevel
+    self.logDirectoryPath = logDirectoryPath
+    self.resolvedConfigurationPath = resolvedConfigurationPath
   }
 
   public static func load() async throws -> AgentConfig {
@@ -60,14 +77,58 @@ public struct AgentConfig: Sendable {
     }
     let maxRounds = try await reader.fetchRequiredInt(forKey: ScribeConfigBinding.agentMaxToolRounds)
 
-    let apiKey = try await reader.fetchString(forKey: ScribeConfigBinding.openAIAPIKey, isSecret: true)
+    let apiKey: String
+    do {
+      apiKey = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.openAIAPIKey)
+    } catch {
+      throw AgentAPIError(
+        description:
+          "`\(ScribeConfigBinding.openAIAPIKey.description)` must be present in `\(configFileName)` (use \"\" when no API key is required, e.g. local Ollama). Underlying error: \(error)"
+      )
+    }
+    let apiKeyTrimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
 
-    return AgentConfig(
+    let levelRaw = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.loggingLevel)
+    guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
+      let allowed = ScribeLogLevel.allCases.map(\.rawValue).joined(separator: ", ")
+      throw AgentAPIError(
+        description:
+          "`\(ScribeConfigBinding.loggingLevel.description)` must be one of \(allowed) in `\(configFileName)`."
+      )
+    }
+
+    let dirRaw = try await reader.fetchString(forKey: ScribeConfigBinding.loggingDirectory)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let logDirectoryPath = Self.resolveLogDirectory(configured: dirRaw)
+
+    let resolvedPathString = PathResolution.fileSystemPath(configPath)
+    let config = AgentConfig(
       openAIBaseURL: baseURL,
-      openAIAPIKey: apiKey,
+      openAIAPIKey: resolvedAPIKey,
       agentModel: model,
-      agentMaxToolRounds: maxRounds
+      agentMaxToolRounds: maxRounds,
+      logLevel: logLevel,
+      logDirectoryPath: logDirectoryPath,
+      resolvedConfigurationPath: resolvedPathString
     )
+    config.makeStderrLogger().info("Loaded configuration from \(resolvedPathString)")
+    return config
+  }
+
+  private static func resolveLogDirectory(configured: String?) -> String {
+    let trimmed = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let cwd = FileManager.default.currentDirectoryPath
+    if trimmed.isEmpty {
+      return cwd
+    }
+    let expanded = NSString(string: trimmed).expandingTildeInPath
+    if expanded.hasPrefix("/") {
+      return URL(fileURLWithPath: expanded, isDirectory: true).standardizedFileURL.path
+    }
+    return URL(fileURLWithPath: cwd, isDirectory: true)
+      .appendingPathComponent(expanded, isDirectory: true)
+      .standardizedFileURL.path
   }
 
   private static func resolveScribeConfigPath() -> ScribeFilePath {

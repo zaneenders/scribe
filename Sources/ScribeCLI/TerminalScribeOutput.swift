@@ -1,41 +1,44 @@
 import Foundation
 import ScribeCore
-import ScribeTUI
+import SlateCore
 
-/// Terminal ``ScribeAgentOutput`` built from ``ScribeTUI`` primitives; swap for another conforming type at the host if you add SwiftUI / headless routing.
+/// Terminal ``ScribeAgentOutput`` that prints Slate-style truecolor CSI (``CSI``, ``TerminalRGB`` / ``ScribePalette``); swap for another conforming sink at alternate hosts.
 ///
 /// Stateless; safe as ``Sendable`` because output goes through process-global handles only.
 public struct TerminalScribeOutput: ScribeAgentOutput {
   public init() {}
 
   public func printConfigBanner(baseURL: String, model: String, cwd: String) {
-    let labelGray = ANSI.grayDark
-    let valueGray = ANSI.grayLight
+    let labelGray = CSI.sgrForeground(ScribePalette.grayDark)
+    let valueGray = CSI.sgrForeground(ScribePalette.grayLight)
+    let x = CSI.sgr0
     print(
-      "\(labelGray)LLM:\(ANSI.reset) \(valueGray)\(baseURL)\(ANSI.reset)\n\(labelGray)Model:\(ANSI.reset) \(valueGray)\(model)\(ANSI.reset)\n\(labelGray)CWD:\(ANSI.reset) \(valueGray)\(cwd)\(ANSI.reset)\n"
+      "\(labelGray)LLM:\(x) \(valueGray)\(baseURL)\(x)\n\(labelGray)Model:\(x) \(valueGray)\(model)\(x)\n\(labelGray)CWD:\(x) \(valueGray)\(cwd)\(x)\n"
     )
   }
 
   public func printUserPromptDecoration() {
     try? FileHandle.standardOutput.write(
-      contentsOf: Data("\(ANSI.orange)you:\(ANSI.reset) ".utf8))
+      contentsOf: Data("\(CSI.sgrForeground(ScribePalette.orange))you:\(CSI.sgr0) ".utf8))
   }
 
   public func enterAssistantStreamSection(
     _ section: AssistantStreamSection,
     previous: AssistantStreamSection?
   ) throws {
-    try FileHandle.standardOutput.write(contentsOf: Data(ANSI.reset.utf8))
+    try FileHandle.standardOutput.write(contentsOf: Data(CSI.sgr0.utf8))
     if previous != nil {
       try FileHandle.standardOutput.write(contentsOf: Data("\n".utf8))
     }
     try FileHandle.standardOutput.write(
-      contentsOf: Data("\(ANSI.purple)scribe:\(ANSI.reset)\n".utf8))
+      contentsOf: Data("\(CSI.sgrForeground(ScribePalette.purple))scribe:\(CSI.sgr0)\n".utf8))
     switch section {
     case .reasoning:
-      try FileHandle.standardOutput.write(contentsOf: Data("\(ANSI.thinking)  ".utf8))
+      try FileHandle.standardOutput.write(
+        contentsOf: Data("\(CSI.sgrBoldForeground(ScribePalette.thinking))  ".utf8))
     case .answer:
-      try FileHandle.standardOutput.write(contentsOf: Data(ANSI.cyan.utf8))
+      try FileHandle.standardOutput.write(
+        contentsOf: Data(CSI.sgrForeground(ScribePalette.cyan).utf8))
     }
   }
 
@@ -47,26 +50,29 @@ public struct TerminalScribeOutput: ScribeAgentOutput {
 
   public func finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: Bool) throws {
     guard streamHadVisibleTokens else { return }
-    try FileHandle.standardOutput.write(contentsOf: Data("\(ANSI.reset)\n".utf8))
+    try FileHandle.standardOutput.write(contentsOf: Data("\(CSI.sgr0)\n".utf8))
     try FileHandle.standardOutput.synchronize()
   }
 
   public func printEmptyAssistantTurn() throws {
+    let x = CSI.sgr0
     print(
-      "\(ANSI.purple)scribe:\(ANSI.reset)\n\(ANSI.dim)(empty turn)\(ANSI.reset)"
+      "\(CSI.sgrForeground(ScribePalette.purple))scribe:\(x)\n\(CSI.sgrFaint)(empty turn)\(x)"
     )
   }
 
   public func emitUsage(
     promptTokens: Int?,
     completionTokens: Int?,
-    totalTokens: Int?
+    totalTokens: Int?,
+    outputTokensPerSecond: Double?
   ) throws {
     guard
       let line = UsageBanner.line(
         promptTokens: promptTokens,
         completionTokens: completionTokens,
-        totalTokens: totalTokens
+        totalTokens: totalTokens,
+        outputTokensPerSecond: outputTokensPerSecond
       )
     else { return }
     print(line)
@@ -77,9 +83,12 @@ public struct TerminalScribeOutput: ScribeAgentOutput {
   }
 
   public func printToolRoundHeader(round: Int, toolNames: [String]) throws {
+    let y = CSI.sgrForeground(ScribePalette.yellow)
+    let b = CSI.sgrBold
+    let x = CSI.sgr0
     print(
-      "\(ANSI.yellow)\(ANSI.bold)tool round \(round)\(ANSI.reset) "
-        + "\(ANSI.cyan)\(toolNames.joined(separator: ", "))\(ANSI.reset)"
+      "\(y)\(b)tool round \(round)\(x) "
+        + "\(CSI.sgrForeground(ScribePalette.cyan))\(toolNames.joined(separator: ", "))\(x)"
     )
   }
 
@@ -88,9 +97,11 @@ public struct TerminalScribeOutput: ScribeAgentOutput {
     argumentSummary: String?,
     outputLines: [String]
   ) throws {
+    let x = CSI.sgrFaint
+    let z = CSI.sgr0
     let head =
-      "\(ANSI.yellow)▶ \(name)\(ANSI.reset)"
-      + (argumentSummary.map { " \(ANSI.dim)\($0)\(ANSI.reset)" } ?? "")
+      "\(CSI.sgrForeground(ScribePalette.yellow))▶ \(name)\(z)"
+      + (argumentSummary.map { " \(x)\($0)\(z)" } ?? "")
     print(head)
     for line in outputLines {
       print("  \(line)")
@@ -98,17 +109,21 @@ public struct TerminalScribeOutput: ScribeAgentOutput {
   }
 
   public func printMaxToolRoundsExceeded(max: Int) throws {
-    print("\(ANSI.yellow)Stopped: max tool rounds (\(max)) exceeded.\(ANSI.reset)\n")
+    print("\(CSI.sgrForeground(ScribePalette.yellow))Stopped: max tool rounds (\(max)) exceeded.\(CSI.sgr0)\n")
   }
 
   public func printSkippedUnreadableStreamLine() throws {
     try FileHandle.standardError.write(
       contentsOf: Data(
-        "\(ANSI.dim)(skipped one stream line: not valid completion JSON)\(ANSI.reset)\n".utf8
+        "\(CSI.sgrFaint)(skipped one stream line: not valid completion JSON)\(CSI.sgr0)\n".utf8
       ))
   }
 
   public func printHarnessRunError(_ error: Error) throws {
-    print("\(ANSI.red)error: \(error)\(ANSI.reset)\n")
+    print("\(CSI.sgrForeground(ScribePalette.red))error: \(error)\(CSI.sgr0)\n")
+  }
+
+  public func markModelTurnRunning(_ running: Bool) throws {
+    _ = running
   }
 }
