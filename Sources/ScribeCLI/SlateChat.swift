@@ -29,6 +29,23 @@ private actor UserLineGate {
   }
 }
 
+/// Cooperative abort for Ctrl+C during an assistant/tool round without cancelling the long-lived coordinator task.
+private final class ModelTurnInterruptFlag: @unchecked Sendable {
+  private let lock = Mutex(false)
+
+  func clear() {
+    lock.withLock { $0 = false }
+  }
+
+  func request() {
+    lock.withLock { $0 = true }
+  }
+
+  func peek() -> Bool {
+    lock.withLock { $0 }
+  }
+}
+
 // MARK: - Transcript model (thread-safe for streaming + render)
 
 private struct StyledSpan: Equatable {
@@ -416,6 +433,16 @@ public final class SlateTranscriptSink: ScribeAgentOutput, @unchecked Sendable {
           StyledSpan(
             fg: ScribePalette.red, bg: ScribePalette.black, bold: false,
             text: "error: \(error)")
+        ]))
+  }
+
+  public func printTurnInterrupted() throws {
+    appendLine(
+      TLine(
+        spans: [
+          StyledSpan(
+            fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+            text: "(interrupted)")
         ]))
   }
 }
@@ -985,6 +1012,8 @@ private final class SlateChatHost {
   private var renderWake: ExternalWake?
   private var llmWaitAnimationFrame: Int = 0
   private var spinnerTask: Task<Void, Never>?
+  private var coordinatorTask: Task<Void, Never>?
+  private let modelInterruptFlag = ModelTurnInterruptFlag()
 
   init(configuration: AgentConfig, client: Client, systemPrompt: String) {
     self.configuration = configuration
@@ -1000,7 +1029,6 @@ private final class SlateChatHost {
     let slate = try Slate()
     let sink = SlateTranscriptSink()
     let gate = UserLineGate()
-    var coordinatorTask: Task<Void, Never>?
 
     // Bracketed paste: pasted text (possibly multi-byte or multi-line) is wrapped so newlines aren’t mistaken for submits.
     try? FileHandle.standardOutput.write(contentsOf: Data("\u{001b}[?2004h".utf8))
@@ -1016,7 +1044,8 @@ private final class SlateChatHost {
       prepare: { [self] wake in
         sink.installWake(wake)
         self.renderWake = wake
-        coordinatorTask = Task { [configuration, client, systemPrompt, sink, gate] in
+        let interruptFlag = self.modelInterruptFlag
+        self.coordinatorTask = Task { [configuration, client, systemPrompt, sink, gate] in
           defer { sink.markCoordinatorFinished() }
           do {
             try await ScribeAgentCoordinator.runInteractive(
@@ -1024,7 +1053,9 @@ private final class SlateChatHost {
               client: client,
               systemPrompt: systemPrompt,
               sink: sink,
-              readUserLine: { await gate.nextLine() }
+              readUserLine: { await gate.nextLine() },
+              prepareModelTurnStart: { interruptFlag.clear() },
+              shouldAbortTurn: { interruptFlag.peek() }
             )
           } catch {
             try? sink.printHarnessRunError(error)
@@ -1195,7 +1226,15 @@ private final class SlateChatHost {
 
   /// Returns `true` if the enclosing app should terminate (interrupt / EOF semantics).
   private func handleKey(byte: UInt8, sink: SlateTranscriptSink, gate: UserLineGate, slate: Slate) -> Bool {
-    if byte == 3 || byte == 4 { return true }
+    if byte == 3 {
+      if sink.modelTurnBusy() {
+        modelInterruptFlag.request()
+        renderWake?.requestRender()
+        return false
+      }
+      return true
+    }
+    if byte == 4 { return true }
 
     if bracketedPasteActive {
       ingestBracketPasteByte(byte)

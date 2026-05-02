@@ -28,6 +28,7 @@ public protocol ScribeAgentOutput: Sendable {
 
   func printSkippedUnreadableStreamLine() throws
   func printHarnessRunError(_ error: Error) throws
+  func printTurnInterrupted() throws
 
   /// Called around each ``AgentHarness/runModelTurn(messages:logger:)`` so hosts can disable input or show activity.
   func markModelTurnRunning(_ running: Bool) throws
@@ -54,5 +55,6 @@ extension ScribeAgentOutput {
   public func printMaxToolRoundsExceeded(max: Int) throws {}
   public func printSkippedUnreadableStreamLine() throws {}
   public func printHarnessRunError(_ error: Error) throws {}
+  public func printTurnInterrupted() throws {}
   public func markModelTurnRunning(_ running: Bool) throws {}
 }

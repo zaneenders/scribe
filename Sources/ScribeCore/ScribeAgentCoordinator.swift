@@ -11,7 +11,9 @@ public enum ScribeAgentCoordinator {
     client: Client,
     systemPrompt: String,
     sink: any ScribeAgentOutput,
-    readUserLine: @escaping @Sendable () async -> String?
+    readUserLine: @escaping @Sendable () async -> String?,
+    prepareModelTurnStart: @escaping @Sendable () -> Void = {},
+    shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
     sink.printConfigBanner(
@@ -54,12 +56,19 @@ public enum ScribeAgentCoordinator {
         )
       )
 
+      prepareModelTurnStart()
       try sink.markModelTurnRunning(true)
       defer {
         try? sink.markModelTurnRunning(false)
       }
       do {
-        _ = try await harness.runModelTurn(messages: &history, logger: configuration.makeRequestLogger())
+        _ = try await harness.runModelTurn(
+          messages: &history,
+          logger: configuration.makeRequestLogger(),
+          shouldAbortTurn: shouldAbortTurn
+        )
+      } catch is AgentTurnInterruptedError {
+        try sink.printTurnInterrupted()
       } catch {
         try sink.printHarnessRunError(error)
         if history.last?.role == .user {
@@ -83,7 +92,9 @@ public enum ScribeAgentCoordinator {
       sink: sink,
       readUserLine: {
         await Task.detached(priority: .userInitiated) { readLine() }.value
-      }
+      },
+      prepareModelTurnStart: {},
+      shouldAbortTurn: { false }
     )
   }
 

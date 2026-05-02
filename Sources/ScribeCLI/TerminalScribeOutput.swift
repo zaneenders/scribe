@@ -123,6 +123,10 @@ public struct TerminalScribeOutput: ScribeAgentOutput {
     print("\(CSI.sgrForeground(ScribePalette.red))error: \(error)\(CSI.sgr0)\n")
   }
 
+  public func printTurnInterrupted() throws {
+    print("\(CSI.sgrFaint)(interrupted)\(CSI.sgr0)\n")
+  }
+
   public func markModelTurnRunning(_ running: Bool) throws {
     _ = running
   }

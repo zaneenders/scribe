@@ -3,6 +3,41 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
+private enum AbortOrHTTPResult<Response: Sendable>: Sendable {
+  case response(Response)
+  case aborted
+}
+
+/// Runs ``operation`` concurrently with a lightweight poll so ``shouldAbortTurn()`` can fire during slow HTTP setup (spinner) before any SSE bytes arrive.
+private func raceHTTPAgainstTurnAbort<Response: Sendable>(
+  shouldAbortTurn: @escaping @Sendable () -> Bool,
+  operation: @Sendable @escaping () async throws -> Response
+) async throws -> Response {
+  try await withThrowingTaskGroup(of: AbortOrHTTPResult<Response>.self) { group in
+    group.addTask {
+      try await .response(operation())
+    }
+    group.addTask {
+      while true {
+        try await Task.sleep(for: .milliseconds(100))
+        if shouldAbortTurn() { return .aborted }
+      }
+    }
+    guard let first = try await group.next() else {
+      group.cancelAll()
+      throw AgentTurnInterruptedError()
+    }
+    switch first {
+    case .aborted:
+      group.cancelAll()
+      throw AgentTurnInterruptedError()
+    case .response(let value):
+      group.cancelAll()
+      return value
+    }
+  }
+}
+
 public struct AgentHarness {
   public var client: Client
   public var model: String
@@ -25,12 +60,16 @@ public struct AgentHarness {
 
   public func runModelTurn(
     messages: inout [Components.Schemas.ChatMessage],
-    logger: Logger
+    logger: Logger,
+    shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws
     -> ModelTurnOutcome
   {
     logger.debug("Starting chat completion request (stream) model=\(model)")
     for round in 0..<maxToolRounds {
+      if shouldAbortTurn() {
+        throw AgentTurnInterruptedError()
+      }
       let requestBody = Components.Schemas.CreateChatCompletionRequest(
         model: model,
         messages: messages,
@@ -42,7 +81,10 @@ public struct AgentHarness {
         streamOptions: .init(includeUsage: true),
         reasoning: nil
       )
-      let response = try await client.createChatCompletion(body: .json(requestBody))
+      let chatClient = client
+      let response = try await raceHTTPAgainstTurnAbort(shouldAbortTurn: shouldAbortTurn) {
+        try await chatClient.createChatCompletion(body: .json(requestBody))
+      }
       let httpBody: HTTPBody
       switch response {
       case .ok(let ok):
@@ -84,6 +126,12 @@ public struct AgentHarness {
       let streamWallStart = Date()
       var firstStreamContentAt: Date?
       for try await sse in sseStream {
+        if shouldAbortTurn() {
+          if streamStarted {
+            try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)
+          }
+          throw AgentTurnInterruptedError()
+        }
         guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
         else { continue }
         if raw == "[DONE]" { break }
@@ -126,6 +174,12 @@ public struct AgentHarness {
         }
         turn.apply(chunk: chunk)
       }
+      if shouldAbortTurn() {
+        if streamStarted {
+          try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)
+        }
+        throw AgentTurnInterruptedError()
+      }
       if streamStarted {
         try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)
       } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
@@ -147,6 +201,12 @@ public struct AgentHarness {
           outputTokensPerSecond: tps
         )
       }
+
+      if shouldAbortTurn() {
+        throw AgentTurnInterruptedError()
+      }
+
+      let messagesCountBeforeAssistant = messages.count
 
       let toolInvocations = turn.resolvedToolCalls()
       let assistantText = turn.text.isEmpty ? "" : turn.text
@@ -178,6 +238,10 @@ public struct AgentHarness {
       try output.printToolRoundHeader(round: round + 1, toolNames: toolInvocations.map(\.name))
 
       for inv in toolInvocations {
+        if shouldAbortTurn() {
+          messages.removeSubrange(messagesCountBeforeAssistant..<messages.endIndex)
+          throw AgentTurnInterruptedError()
+        }
         let jsonOutput = await runner.run(name: inv.name, argumentsJSON: inv.arguments)
         let argSummary = ToolDisplay.argumentSummary(name: inv.name, argumentsJSON: inv.arguments)
         let lines = ToolDisplay.outputLines(name: inv.name, jsonOutput: jsonOutput)
