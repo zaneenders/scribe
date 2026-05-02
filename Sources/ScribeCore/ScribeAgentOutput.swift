@@ -1,6 +1,11 @@
 import Foundation
 import ScribeLLM
 
+public enum AssistantStreamSection: Sendable, Equatable {
+  case reasoning
+  case answer
+}
+
 /// Hooks for streaming model + tool transcript. The agent loop in ``AgentHarness`` calls these; hosts inject a conforming type (TTY, silent, SwiftUI bridge, etc.).
 ///
 /// Defined in ``ScribeCore`` because the harness lives here; concrete sinks (e.g. Slate grid + CSI line output in the CLI target) implement this protocol.

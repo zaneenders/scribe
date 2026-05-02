@@ -3,40 +3,26 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
-private enum AbortOrHTTPResult<Response: Sendable>: Sendable {
-  case response(Response)
-  case aborted
-}
+// MARK: - Error & outcome types for the agent harness
 
-/// Runs ``operation`` concurrently with a lightweight poll so ``shouldAbortTurn()`` can fire during slow HTTP setup (spinner) before any SSE bytes arrive.
-private func raceHTTPAgainstTurnAbort<Response: Sendable>(
-  shouldAbortTurn: @escaping @Sendable () -> Bool,
-  operation: @Sendable @escaping () async throws -> Response
-) async throws -> Response {
-  try await withThrowingTaskGroup(of: AbortOrHTTPResult<Response>.self) { group in
-    group.addTask {
-      try await .response(operation())
-    }
-    group.addTask {
-      while true {
-        try await Task.sleep(for: .milliseconds(100))
-        if shouldAbortTurn() { return .aborted }
-      }
-    }
-    guard let first = try await group.next() else {
-      group.cancelAll()
-      throw AgentTurnInterruptedError()
-    }
-    switch first {
-    case .aborted:
-      group.cancelAll()
-      throw AgentTurnInterruptedError()
-    case .response(let value):
-      group.cancelAll()
-      return value
-    }
+public struct AgentAPIError: Error, LocalizedError {
+  public var errorDescription: String?
+
+  public init(description: String) {
+    self.errorDescription = description
   }
 }
+
+/// Thrown when an interactive host asks to stop the current model/tool round.
+public struct AgentTurnInterruptedError: Error, Sendable {}
+
+/// Result of ``AgentHarness/runModelTurn(messages:logger:shouldAbortTurn:)``.
+public enum ModelTurnOutcome: Sendable, Equatable {
+  case completed
+  case hitToolRoundLimit
+}
+
+// MARK: - AgentHarness
 
 public struct AgentHarness {
   public var client: Client
@@ -105,9 +91,7 @@ public struct AgentHarness {
         payload_messages=\(messages.count)
         """
       )
-      let response = try await raceHTTPAgainstTurnAbort(shouldAbortTurn: shouldAbortTurn) {
-        try await chatClient.createChatCompletion(body: .json(requestBody))
-      }
+      let response = try await chatClient.createChatCompletion(body: .json(requestBody))
       let httpElapsedMs = Int(Date().timeIntervalSince(httpStart) * 1000)
       let httpBody: HTTPBody
       switch response {
@@ -267,20 +251,6 @@ public struct AgentHarness {
           }
         }
         turn.apply(chunk: chunk)
-      }
-      if shouldAbortTurn() {
-        logger.notice(
-          """
-          event=agent.stream.abort \
-          where=post-stream \
-          chunks=\(decodedChunkCount) \
-          had_visible_tokens=\(streamStarted)
-          """
-        )
-        if streamStarted {
-          try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)
-        }
-        throw AgentTurnInterruptedError()
       }
       if streamStarted {
         try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)

@@ -40,12 +40,5 @@ enum ScribePalette {
   /// Sum since session start
   static let usageSessionSum = TerminalRGB(r: 210, g: 175, b: 255)
 
-  /// Usage banner / HUD panel fills (terminal `UsageBanner`).
-  static let usageBg = TerminalRGB(r: 28, g: 28, b: 28)
-  static let usageRail = TerminalRGB(r: 48, g: 48, b: 48)
   static let usageMuted = TerminalRGB(r: 128, g: 128, b: 128)
-  /// Default accent for in/out in single-line usage banner (terminal)
-  static let usageInOut = usagePrompt
-  /// Legacy Σ accent in terminal banner
-  static let usageSum = usageTurnSum
 }

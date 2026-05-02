@@ -1387,7 +1387,7 @@ private final class SlateChatHost {
   }
 
   func run() async throws {
-    let slate = try Slate()
+    var slate = try Slate()
     let sink = SlateTranscriptSink()
     let gate = UserLineGate()
 
@@ -1512,7 +1512,7 @@ private final class SlateChatHost {
         wake.requestRender()
       },
       externalCoalesceMaxFramesPerSecond: 60,
-      onEvent: { event in
+      onEvent: { slate, event in
         switch event {
         case .resize:
           slate.refreshWindowSize()
@@ -1709,7 +1709,7 @@ private final class SlateChatHost {
   }
 
   /// Recomputes word-wrapped transcript rows, reusing flatten work for completed lines across streaming frames.
-  private func syncFlattenedTranscript(sink: SlateTranscriptSink, slate: Slate) -> [TLine] {
+  private func syncFlattenedTranscript(sink: SlateTranscriptSink, slate: borrowing Slate) -> [TLine] {
     let (completed, open) = sink.snapshotTranscriptForLayout()
     let width = slate.cols
 
@@ -1741,7 +1741,7 @@ private final class SlateChatHost {
   private func applyTranscriptScroll(
     _ step: TranscriptScrollStep,
     sink: SlateTranscriptSink,
-    slate: Slate
+    slate: borrowing Slate
   ) {
     let flat = syncFlattenedTranscript(sink: sink, slate: slate)
     let contentRows = SlateChatRenderer.transcriptContentRows(
@@ -1798,7 +1798,7 @@ private final class SlateChatHost {
   }
 
   /// Returns `true` if the enclosing app should terminate (interrupt / EOF semantics).
-  private func handleKey(byte: UInt8, sink: SlateTranscriptSink, gate: UserLineGate, slate: Slate) -> Bool {
+  private func handleKey(byte: UInt8, sink: SlateTranscriptSink, gate: UserLineGate, slate: borrowing Slate) -> Bool {
     if byte == 3 {
       // Ctrl+C is a three-step ladder so the user can stage their reaction:
       //   1. With a queued tray message: pull it back into the input buffer for editing.

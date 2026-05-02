@@ -150,10 +150,10 @@ public enum ToolInvocationFormatting {
   private static func readFileSummaryLine(decoded: ToolResultBody) -> String {
     var parts: [String] = []
     if let bytes = decoded.bytes {
-      parts.append("\(formatGroupedInt(bytes)) bytes")
+      parts.append("\(ScribeUsageFormatting.groupingInt(bytes)) bytes")
     }
     if let total = decoded.totalLines {
-      parts.append("\(formatGroupedInt(total)) lines")
+      parts.append("\(ScribeUsageFormatting.groupingInt(total)) lines")
     }
     if let start = decoded.startLine, let end = decoded.endLine {
       if end >= start {
@@ -193,22 +193,8 @@ public enum ToolInvocationFormatting {
     let head = Array(split.prefix(shellTranscriptStreamHeadLines))
     let tail = Array(split.suffix(shellTranscriptStreamTailLines))
     let marker =
-      "… (\(formatGroupedInt(hidden)) more line\(hidden == 1 ? "" : "s") hidden — full output preserved in conversation) …"
+      "… (\(ScribeUsageFormatting.groupingInt(hidden)) more line\(hidden == 1 ? "" : "s") hidden — full output preserved in conversation) …"
     return head + [marker] + tail
-  }
-
-  /// Renders `1234567` as `1,234,567` for human-readable summaries — kept inline rather than
-  /// pulling in `NumberFormatter` (which is slower and not `Sendable`).
-  private static func formatGroupedInt(_ n: Int) -> String {
-    let s = String(abs(n))
-    var out = ""
-    var counter = 0
-    for ch in s.reversed() {
-      if counter != 0, counter % 3 == 0 { out.append(",") }
-      out.append(ch)
-      counter += 1
-    }
-    return (n < 0 ? "-" : "") + String(out.reversed())
   }
 
   private static func fallbackPrettyLines(_ jsonOutput: String) -> [String]? {
