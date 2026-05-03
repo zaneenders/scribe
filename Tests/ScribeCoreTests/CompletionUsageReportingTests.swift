@@ -21,10 +21,10 @@ struct CompletionUsageReportingTests {
 
   @Test func nestedDetailsRoundTripThroughJSON() async throws {
     let json = """
-    {"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,
-     "prompt_tokens_details":{"cached_tokens":8},
-     "completion_tokens_details":{"reasoning_tokens":12}}
-    """
+      {"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,
+       "prompt_tokens_details":{"cached_tokens":8},
+       "completion_tokens_details":{"reasoning_tokens":12}}
+      """
     let u = try JSONDecoder().decode(Components.Schemas.CompletionUsage.self, from: Data(json.utf8))
     #expect(u.promptTokensDetails?.cachedTokens == 8)
     #expect(u.completionTokensDetails?.reasoningTokens == 12)

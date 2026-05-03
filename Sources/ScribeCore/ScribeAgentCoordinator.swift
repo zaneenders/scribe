@@ -35,11 +35,12 @@ public enum ScribeAgentCoordinator {
     log: Logger
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
-    onEvent(.configBanner(
-      baseURL: configuration.openAIBaseURL,
-      model: configuration.agentModel,
-      cwd: cwd
-    ))
+    onEvent(
+      .configBanner(
+        baseURL: configuration.openAIBaseURL,
+        model: configuration.agentModel,
+        cwd: cwd
+      ))
 
     var history: [Components.Schemas.ChatMessage]
     if let initialConversation, !initialConversation.isEmpty {
@@ -79,8 +80,20 @@ public enum ScribeAgentCoordinator {
     let harness = AgentHarness(
       onEvent: onEvent,
       client: client,
-      model: configuration.agentModel,
-      maxToolRounds: configuration.agentMaxToolRounds
+      model: configuration.agentModel
+    )
+    let executor = ToolExecutor(
+      registry: ToolRegistry(tools: [
+        ShellTool(),
+        ReadFileTool(),
+        WriteFileTool(),
+        EditFileTool(),
+      ]))
+    let loop = AgentLoop(
+      harness: harness,
+      executor: executor,
+      maxToolRounds: configuration.agentMaxToolRounds,
+      onEvent: onEvent
     )
 
     var turnIndex = 0
@@ -124,7 +137,7 @@ public enum ScribeAgentCoordinator {
       }
       let turnStart = Date()
       do {
-        let outcome = try await harness.runModelTurn(
+        let outcome = try await loop.runModelTurn(
           messages: &history,
           logger: log,
           shouldAbortTurn: shouldAbortTurn
@@ -169,9 +182,9 @@ public enum ScribeAgentCoordinator {
           """
           event=agent.turn.end \
           turn=\(turnIndex) \
-          status=error \
-          elapsed_ms=\(elapsedMs) \
-          err="\(scribeError.errorDescription ?? String(describing: scribeError))"
+            status=error \
+            elapsed_ms=\(elapsedMs) \
+            err="\(scribeError.errorDescription ?? String(describing: scribeError))"
           """
         )
         onEvent(.harnessError(scribeError))
@@ -243,8 +256,20 @@ public enum ScribeAgentCoordinator {
     let harness = AgentHarness(
       onEvent: onEvent,
       client: client,
-      model: configuration.agentModel,
-      maxToolRounds: configuration.agentMaxToolRounds
+      model: configuration.agentModel
+    )
+    let executor = ToolExecutor(
+      registry: ToolRegistry(tools: [
+        ShellTool(),
+        ReadFileTool(),
+        WriteFileTool(),
+        EditFileTool(),
+      ]))
+    let loop = AgentLoop(
+      harness: harness,
+      executor: executor,
+      maxToolRounds: configuration.agentMaxToolRounds,
+      onEvent: onEvent
     )
     let sessionId = UUID()
     let ipcLog = configuration.makeSessionLogger(sessionId: sessionId)
@@ -258,7 +283,7 @@ public enum ScribeAgentCoordinator {
       """
     )
     do {
-      let outcome = try await harness.runModelTurn(
+      let outcome = try await loop.runModelTurn(
         messages: &history, logger: ipcLog)
       if outcome == .hitToolRoundLimit {
         ipcLog.notice(
@@ -281,24 +306,24 @@ public enum ScribeAgentCoordinator {
         """
       )
       return .success(assistant: text)
-      } catch let e as ScribeError {
-        ipcLog.error(
-          """
-          event=ipc.session.end \
-          status=error \
-          err="\(e.errorDescription ?? String(describing: e))"
-          """
-        )
-        return .failure(e.errorDescription ?? String(describing: e))
-      } catch {
-        ipcLog.error(
-          """
-          event=ipc.session.end \
-          status=error \
-          err="\(String(describing: error))"
-          """
-        )
-        return .failure(String(describing: error))
-      }
+    } catch let e as ScribeError {
+      ipcLog.error(
+        """
+        event=ipc.session.end \
+        status=error \
+        err="\(e.errorDescription ?? String(describing: e))"
+        """
+      )
+      return .failure(e.errorDescription ?? String(describing: e))
+    } catch {
+      ipcLog.error(
+        """
+        event=ipc.session.end \
+        status=error \
+        err="\(String(describing: error))"
+        """
+      )
+      return .failure(String(describing: error))
+    }
   }
 }

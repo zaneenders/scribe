@@ -75,9 +75,11 @@ public enum ChatSessionStore {
       return FileManager.default.fileExists(atPath: meta.path)
     }
     return sessionDirs.sorted { a, b in
-      let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+      let da =
+        (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
         ?? .distantPast
-      let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+      let db =
+        (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
         ?? .distantPast
       return da > db
     }
@@ -230,11 +232,12 @@ public enum ChatSessionStore {
       }
     }
 
-    let contents = (try? FileManager.default.contentsOfDirectory(
-      at: root,
-      includingPropertiesForKeys: nil,
-      options: [.skipsHiddenFiles]
-    )) ?? []
+    let contents =
+      (try? FileManager.default.contentsOfDirectory(
+        at: root,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+      )) ?? []
     let matches = contents.filter { $0.lastPathComponent.lowercased().hasPrefix(lower) }
     guard matches.count == 1, let only = matches.first else {
       if matches.isEmpty {

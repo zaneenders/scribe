@@ -47,426 +47,321 @@ public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
 /// Thrown when an interactive host asks to stop the current model/tool round.
 public struct AgentTurnInterruptedError: Error, Sendable {}
 
-/// Result of ``AgentHarness/runModelTurn(messages:logger:shouldAbortTurn:)``.
+/// Result of ``AgentLoop/runModelTurn(messages:logger:shouldAbortTurn:)``.
 public enum ModelTurnOutcome: Sendable, Equatable {
   case completed
   case hitToolRoundLimit
 }
 
+/// Result of a single LLM round from ``AgentHarness/runRound(messages:logger:shouldAbortTurn:)``.
+public enum RoundOutcome: Sendable, Equatable {
+  case completed
+  case toolCalls([ToolInvocation])
+}
+
+/// A resolved tool call produced by the assistant in a single round.
+public struct ToolInvocation: Sendable, Equatable {
+  public let id: String
+  public let name: String
+  public let arguments: String
+
+  public init(id: String, name: String, arguments: String) {
+    self.id = id
+    self.name = name
+    self.arguments = arguments
+  }
+}
+
 // MARK: - AgentHarness
 
-public struct AgentHarness {
+public protocol AgentHarnessProtocol: Sendable {
+  var model: String { get }
+
+  func runRound(
+    messages: inout [Components.Schemas.ChatMessage],
+    logger: Logger,
+    shouldAbortTurn: @escaping @Sendable () -> Bool
+  ) async throws -> RoundOutcome
+}
+
+public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public var client: Client
   public var model: String
-  public var maxToolRounds: Int
   private let onEvent: @Sendable (TranscriptEvent) -> Void
   private let tools = AgentTools.all()
-  private let runner = ToolRunner()
 
   public init(
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     client: Client,
-    model: String,
-    maxToolRounds: Int
+    model: String
   ) {
     self.onEvent = onEvent
     self.client = client
     self.model = model
-    self.maxToolRounds = maxToolRounds
   }
 
-  public func runModelTurn(
+  public func runRound(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
-  ) async throws
-    -> ModelTurnOutcome
-  {
-    logger.debug(
+  ) async throws -> RoundOutcome {
+    let requestBody = Components.Schemas.CreateChatCompletionRequest(
+      model: model,
+      messages: messages,
+      stream: true,
+      temperature: 0,
+      maxTokens: nil,
+      tools: tools,
+      toolChoice: .case1("auto"),
+      streamOptions: .init(includeUsage: true),
+      reasoning: nil
+    )
+    let chatClient = client
+    let httpStart = Date()
+    logger.info(
       """
-      event=agent.turn.start \
-      model=\(model) \
-      messages=\(messages.count) \
-      max_tool_rounds=\(maxToolRounds)
+      event=agent.http.request \
+      messages=\(messages.count)
       """
     )
-    for round in 0..<maxToolRounds {
-      let roundNum = round + 1
-      if shouldAbortTurn() {
-        logger.debug(
-          """
-          event=agent.abort \
-          where=before-http \
-          round=\(roundNum)
-          """
-        )
-        throw AgentTurnInterruptedError()
+    let response = try await chatClient.createChatCompletion(body: .json(requestBody))
+    let httpElapsedMs = Int(Date().timeIntervalSince(httpStart) * 1000)
+    let httpBody: HTTPBody
+    switch response {
+    case .ok(let ok):
+      httpBody = try ok.body.textEventStream
+      logger.debug(
+        """
+        event=agent.http.response \
+        status=200 \
+        elapsed_ms=\(httpElapsedMs)
+        """
+      )
+    case .undocumented(statusCode: let code, let payload):
+      var detail = ""
+      if let body = payload.body {
+        let chunk = try await HTTPBody.ByteChunk(collecting: body, upTo: 4096)
+        detail = String(decoding: chunk, as: UTF8.self)
       }
-      let requestBody = Components.Schemas.CreateChatCompletionRequest(
-        model: model,
-        messages: messages,
-        stream: true,
-        temperature: 0,
-        maxTokens: nil,
-        tools: tools,
-        toolChoice: .case1("auto"),
-        streamOptions: .init(includeUsage: true),
-        reasoning: nil
-      )
-      let chatClient = client
-      let httpStart = Date()
-      logger.info(
-        """
-        event=agent.http.request \
-        round=\(roundNum) \
-        payload_messages=\(messages.count)
-        """
-      )
-      let response = try await chatClient.createChatCompletion(body: .json(requestBody))
-      let httpElapsedMs = Int(Date().timeIntervalSince(httpStart) * 1000)
-      let httpBody: HTTPBody
-      switch response {
-      case .ok(let ok):
-        httpBody = try ok.body.textEventStream
-        logger.debug(
-          """
-          event=agent.http.response \
-          round=\(roundNum) \
-          status=200 \
-          elapsed_ms=\(httpElapsedMs)
-          """
-        )
-      case .undocumented(statusCode: let code, let payload):
-        var detail = ""
-        if let body = payload.body {
-          let chunk = try await HTTPBody.ByteChunk(collecting: body, upTo: 4096)
-          detail = String(decoding: chunk, as: UTF8.self)
+      let hint: String = {
+        let d = detail.lowercased()
+        if d.contains("model"), d.contains("not found") {
+          return
+            " Unset `\(ScribeConfigBinding.agentModel.description)` in `scribe-config.json` to use the first model from /v1/models, set it to an installed name, or run e.g. `ollama pull llama3.2`."
         }
-        let hint: String = {
-          let d = detail.lowercased()
-          if d.contains("model"), d.contains("not found") {
-            return
-              " Unset `\(ScribeConfigBinding.agentModel.description)` in `scribe-config.json` to use the first model from /v1/models, set it to an installed name, or run e.g. `ollama pull llama3.2`."
-          }
-          if code == 404 {
-            return
-              " Set `\(ScribeConfigBinding.openAIBaseURL.description)` in `scribe-config.json` to the host only (no `/v1`), e.g. http://127.0.0.1:11434 for Ollama."
-          }
-          return ""
-        }()
-        let detailSnippet =
-          detail.count > 512 ? String(detail.prefix(512)) + "…(\(detail.count) chars)" : detail
-        let level: Logger.Level = code >= 500 ? .error : .warning
-        logger.log(
-          level: level,
-          """
-          event=agent.http.response \
-          round=\(roundNum) \
-          status=\(code) \
-          elapsed_ms=\(httpElapsedMs) \
-          body_snippet="\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))"
-          """
-        )
-        throw ScribeError.apiHTTPError(
-          statusCode: code,
-          detail: detail,
-          hint: hint.isEmpty ? nil : hint
-        )
-      }
-      let sseStream = httpBody.asDecodedServerSentEvents(
-        while: { $0 != HTTPBody.ByteChunk("[DONE]".utf8) }
+        if code == 404 {
+          return
+            " Set `\(ScribeConfigBinding.openAIBaseURL.description)` in `scribe-config.json` to the host only (no `/v1`), e.g. http://127.0.0.1:11434 for Ollama."
+        }
+        return ""
+      }()
+      let detailSnippet =
+        detail.count > 512 ? String(detail.prefix(512)) + "…(\(detail.count) chars)" : detail
+      let level: Logger.Level = code >= 500 ? .error : .warning
+      logger.log(
+        level: level,
+        """
+        event=agent.http.response \
+        status=\(code) \
+        elapsed_ms=\(httpElapsedMs) \
+        body_snippet="\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))"
+        """
       )
-      let jsonDecoder = JSONDecoder()
+      throw ScribeError.apiHTTPError(
+        statusCode: code,
+        detail: detail,
+        hint: hint.isEmpty ? nil : hint
+      )
+    }
+    let sseStream = httpBody.asDecodedServerSentEvents(
+      while: { $0 != HTTPBody.ByteChunk("[DONE]".utf8) }
+    )
+    let jsonDecoder = JSONDecoder()
 
-      var turn = StreamedAssistantTurn()
-      var streamStarted = false
-      var streamSection: AssistantStreamSection?
-      var lastUsage: Components.Schemas.CompletionUsage?
-      let streamWallStart = Date()
-      var firstStreamContentAt: Date?
-      var decodedChunkCount = 0
-      var skippedChunkCount = 0
-      var loggedFirstChunk = false
-      // Periodic progress log every N decoded chunks. We deliberately do NOT log every chunk
-      // (high-throughput streams produce hundreds per turn — per-chunk lines drown out the
-      // signal). The first/last events plus periodic progress give a trace of stream health.
-      let streamProgressEvery = 200
-      for try await sse in sseStream {
-        if shouldAbortTurn() {
-          logger.notice(
-            """
-            event=agent.stream.abort \
-            where=mid-stream \
-            chunks=\(decodedChunkCount) \
-            had_visible_tokens=\(streamStarted)
-            """
-          )
-          if streamStarted {
-            onEvent(.finalizeAssistantStream)
-          }
-          throw AgentTurnInterruptedError()
-        }
-        guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
-        else { continue }
-        if raw == "[DONE]" { break }
-        let chunk: Components.Schemas.ChatCompletionChunk
-        do {
-          chunk = try jsonDecoder.decode(
-            Components.Schemas.ChatCompletionChunk.self,
-            from: Data(raw.utf8)
-          )
-        } catch {
-          skippedChunkCount += 1
-          logger.warning(
-            """
-            event=agent.stream.unreadable-chunk \
-            chunk_index=\(decodedChunkCount + 1) \
-            err="\(error.localizedDescription)" \
-            raw_prefix="\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))"
-            """
-          )
-          onEvent(.skippedUnreadableStreamLine)
-          continue
-        }
-        decodedChunkCount += 1
-        if !loggedFirstChunk {
-          loggedFirstChunk = true
-          let firstChunkMs = Int(Date().timeIntervalSince(httpStart) * 1000)
-          logger.debug(
-            """
-            event=agent.stream.first-chunk \
-            round=\(roundNum) \
-            ttfb_ms=\(firstChunkMs)
-            """
-          )
-        } else if decodedChunkCount % streamProgressEvery == 0 {
-          let elapsedMs = max(1, Int(Date().timeIntervalSince(streamWallStart) * 1000))
-          let chunksPerSec = Double(decodedChunkCount) / (Double(elapsedMs) / 1000.0)
-          logger.trace(
-            """
-            event=agent.stream.progress \
-            round=\(roundNum) \
-            chunks=\(decodedChunkCount) \
-            elapsed_ms=\(elapsedMs) \
-            chunks_per_s=\(String(format: "%.1f", chunksPerSec))
-            """
-          )
-        }
-        if let u = chunk.usage {
-          lastUsage = u
-        }
-        for choice in chunk.choices ?? [] {
-          guard let delta = choice.delta else { continue }
-          for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
-            if firstStreamContentAt == nil { firstStreamContentAt = Date() }
-            streamStarted = true
-            if case .some(.reasoning) = streamSection {
-            } else {
-              onEvent(.enterAssistantSection(.reasoning, previous: streamSection))
-              streamSection = .reasoning
-            }
-            onEvent(.appendAssistantText(.reasoning, text: r))
-          }
-          if let t = delta.content, !t.isEmpty {
-            if firstStreamContentAt == nil { firstStreamContentAt = Date() }
-            streamStarted = true
-            if case .some(.answer) = streamSection {
-            } else {
-              onEvent(.enterAssistantSection(.answer, previous: streamSection))
-              streamSection = .answer
-            }
-            onEvent(.appendAssistantText(.answer, text: t))
-          }
-        }
-        turn.apply(chunk: chunk)
-      }
-      if streamStarted {
-        onEvent(.finalizeAssistantStream)
-      } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
+    var turn = StreamedAssistantTurn()
+    var streamStarted = false
+    var streamSection: AssistantStreamSection?
+    var lastUsage: Components.Schemas.CompletionUsage?
+    let streamWallStart = Date()
+    var firstStreamContentAt: Date?
+    var decodedChunkCount = 0
+    var skippedChunkCount = 0
+    var loggedFirstChunk = false
+    // Periodic progress log every N decoded chunks. We deliberately do NOT log every chunk
+    // (high-throughput streams produce hundreds per turn — per-chunk lines drown out the
+    // signal). The first/last events plus periodic progress give a trace of stream health.
+    let streamProgressEvery = 200
+    for try await sse in sseStream {
+      if shouldAbortTurn() {
         logger.notice(
           """
-          event=agent.stream.empty \
-          chunks=\(decodedChunkCount)
-          """
-        )
-        onEvent(.emptyAssistantTurn)
-      }
-
-      let streamWallEnd = Date()
-      let streamElapsedMs = Int(streamWallEnd.timeIntervalSince(streamWallStart) * 1000)
-      if let u = lastUsage {
-        let genStart = firstStreamContentAt ?? streamWallStart
-        let denom = max(0.001, streamWallEnd.timeIntervalSince(genStart))
-        let tps: Double? = {
-          guard let c = u.completionTokens, c > 0 else { return nil }
-          return Double(c) / denom
-        }()
-        logger.debug(
-          """
-          event=agent.stream.end \
-          round=\(roundNum) \
+          event=agent.stream.abort \
+          where=mid-stream \
           chunks=\(decodedChunkCount) \
-          skipped=\(skippedChunkCount) \
-          elapsed_ms=\(streamElapsedMs) \
-          prompt_tokens=\(u.promptTokens.map(String.init(describing:)) ?? "nil") \
-          completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
-          tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
+          had_visible_tokens=\(streamStarted)
           """
         )
-        onEvent(.usage(u, tokensPerSecond: tps))
-      } else {
-        logger.debug(
-          """
-          event=agent.stream.end \
-          round=\(roundNum) \
-          chunks=\(decodedChunkCount) \
-          skipped=\(skippedChunkCount) \
-          elapsed_ms=\(streamElapsedMs) \
-          usage=missing
-          """
-        )
-      }
-
-      if shouldAbortTurn() {
-        logger.debug(
-          """
-          event=agent.abort \
-          where=post-stream-pre-tools \
-          round=\(roundNum)
-          """
-        )
+        if streamStarted {
+          onEvent(.finalizeAssistantStream)
+        }
         throw AgentTurnInterruptedError()
       }
-
-      let messagesCountBeforeAssistant = messages.count
-
-      let toolInvocations = turn.resolvedToolCalls()
-      let assistantText = turn.text.isEmpty ? "" : turn.text
-      let assistantReasoning = turn.reasoningText.isEmpty ? nil : turn.reasoningText
-      let assistantMessage = Components.Schemas.ChatMessage(
-        role: .assistant,
-        content: assistantText,
-        name: nil,
-        toolCalls: toolInvocations.isEmpty
-          ? nil
-          : toolInvocations.map { inv in
-            .init(
-              id: inv.id,
-              _type: "function",
-              function: .init(
-                name: inv.name,
-                arguments: inv.arguments
-              )
-            )
-          },
-        toolCallId: nil,
-        reasoningContent: assistantReasoning
-      )
-      messages.append(assistantMessage)
-
-      if toolInvocations.isEmpty {
-        logger.info(
+      guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+      else { continue }
+      if raw == "[DONE]" { break }
+      let chunk: Components.Schemas.ChatCompletionChunk
+      do {
+        chunk = try jsonDecoder.decode(
+          Components.Schemas.ChatCompletionChunk.self,
+          from: Data(raw.utf8)
+        )
+      } catch {
+        skippedChunkCount += 1
+        logger.warning(
           """
-          event=agent.assistant.final \
-          round=\(roundNum) \
-          answer_chars=\(assistantText.count) \
-          reasoning_chars=\(assistantReasoning?.count ?? 0)
+          event=agent.stream.unreadable-chunk \
+          chunk_index=\(decodedChunkCount + 1) \
+          err="\(error.localizedDescription)" \
+          raw_prefix="\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))"
           """
         )
-        onEvent(.blankLine)
-        return .completed
+        onEvent(.skippedUnreadableStreamLine)
+        continue
       }
-
-      logger.info(
-        """
-        event=agent.tool.round \
-        round=\(roundNum) \
-        tool_count=\(toolInvocations.count) \
-        tools=\(toolInvocations.map(\.name).joined(separator: ","))
-        """
-      )
-      onEvent(.toolRoundHeader(round: roundNum, toolNames: toolInvocations.map(\.name)))
-
-      for inv in toolInvocations {
-        if shouldAbortTurn() {
-          logger.notice(
-            """
-            event=agent.abort \
-            where=pre-tool \
-            tool=\(inv.name) \
-            round=\(roundNum)
-            """
-          )
-          messages.removeSubrange(messagesCountBeforeAssistant..<messages.endIndex)
-          throw AgentTurnInterruptedError()
-        }
-        let toolStarted = Date()
-        let jsonOutput = await runner.run(name: inv.name, argumentsJSON: inv.arguments)
-        let elapsedMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
-        let unknown = jsonOutput.contains("unknown tool")
-        if unknown {
-          logger.warning(
-            """
-            event=agent.tool.unknown \
-            tool=\(inv.name) \
-            round=\(roundNum)
-            """
-          )
-        }
+      decodedChunkCount += 1
+      if !loggedFirstChunk {
+        loggedFirstChunk = true
+        let firstChunkMs = Int(Date().timeIntervalSince(httpStart) * 1000)
         logger.debug(
           """
-          event=agent.tool.invoke \
-          round=\(roundNum) \
-          tool=\(inv.name) \
-          args_chars=\(inv.arguments.count) \
-          output_chars=\(jsonOutput.count) \
-          elapsed_ms=\(elapsedMs) \
-          unknown=\(unknown)
+          event=agent.stream.first-chunk \
+          ttfb_ms=\(firstChunkMs)
           """
         )
-        // Tool-specific structured detail. Right now only `read_file` carries enough
-        // metadata to be worth a dedicated log line, but the same pattern can be extended
-        // to other tools (`shell` exit code, `edit_file` chars-replaced, etc.) without
-        // changing the harness's main control flow.
-        if inv.name == "read_file" {
-          let summary = ToolInvocationFormatting.readFileLogSummary(jsonOutput: jsonOutput)
-          logger.debug(
-            """
-            event=agent.tool.read_file \
-            round=\(roundNum) \
-            \(summary)
-            """
-          )
-        }
-        let argSummary = ToolInvocationFormatting.argumentSummary(
-          name: inv.name, argumentsJSON: inv.arguments)
-        let lines = ToolInvocationFormatting.outputLines(name: inv.name, jsonOutput: jsonOutput)
-        onEvent(.toolInvocation(name: inv.name, argumentSummary: argSummary, outputLines: lines))
-        onEvent(.blankLine)
-        let toolMsg = Components.Schemas.ChatMessage(
-          role: .tool,
-          content: jsonOutput,
-          name: nil,
-          toolCalls: nil,
-          toolCallId: inv.id
+      } else if decodedChunkCount % streamProgressEvery == 0 {
+        let elapsedMs = max(1, Int(Date().timeIntervalSince(streamWallStart) * 1000))
+        let chunksPerSec = Double(decodedChunkCount) / (Double(elapsedMs) / 1000.0)
+        logger.trace(
+          """
+          event=agent.stream.progress \
+          chunks=\(decodedChunkCount) \
+          elapsed_ms=\(elapsedMs) \
+          chunks_per_s=\(String(format: "%.1f", chunksPerSec))
+          """
         )
-        messages.append(toolMsg)
       }
-      logger.trace(
+      if let u = chunk.usage {
+        lastUsage = u
+      }
+      for choice in chunk.choices ?? [] {
+        guard let delta = choice.delta else { continue }
+        for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
+          if firstStreamContentAt == nil { firstStreamContentAt = Date() }
+          streamStarted = true
+          if case .some(.reasoning) = streamSection {
+          } else {
+            onEvent(.enterAssistantSection(.reasoning, previous: streamSection))
+            streamSection = .reasoning
+          }
+          onEvent(.appendAssistantText(.reasoning, text: r))
+        }
+        if let t = delta.content, !t.isEmpty {
+          if firstStreamContentAt == nil { firstStreamContentAt = Date() }
+          streamStarted = true
+          if case .some(.answer) = streamSection {
+          } else {
+            onEvent(.enterAssistantSection(.answer, previous: streamSection))
+            streamSection = .answer
+          }
+          onEvent(.appendAssistantText(.answer, text: t))
+        }
+      }
+      turn.apply(chunk: chunk)
+    }
+    if streamStarted {
+      onEvent(.finalizeAssistantStream)
+    } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
+      logger.notice(
         """
-        event=agent.tool.round.end \
-        round=\(roundNum) \
-        messages=\(messages.count)
+        event=agent.stream.empty \
+        chunks=\(decodedChunkCount)
+        """
+      )
+      onEvent(.emptyAssistantTurn)
+    }
+
+    let streamWallEnd = Date()
+    let streamElapsedMs = Int(streamWallEnd.timeIntervalSince(streamWallStart) * 1000)
+    if let u = lastUsage {
+      let genStart = firstStreamContentAt ?? streamWallStart
+      let denom = max(0.001, streamWallEnd.timeIntervalSince(genStart))
+      let tps: Double? = {
+        guard let c = u.completionTokens, c > 0 else { return nil }
+        return Double(c) / denom
+      }()
+      logger.debug(
+        """
+        event=agent.stream.end \
+        chunks=\(decodedChunkCount) \
+        skipped=\(skippedChunkCount) \
+        elapsed_ms=\(streamElapsedMs) \
+        prompt_tokens=\(u.promptTokens.map(String.init(describing:)) ?? "nil") \
+        completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
+        tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
+        """
+      )
+      onEvent(.usage(u, tokensPerSecond: tps))
+    } else {
+      logger.debug(
+        """
+        event=agent.stream.end \
+        chunks=\(decodedChunkCount) \
+        skipped=\(skippedChunkCount) \
+        elapsed_ms=\(streamElapsedMs) \
+        usage=missing
         """
       )
     }
-    logger.notice(
-      """
-      event=agent.turn.tool-round-limit \
-      max=\(maxToolRounds)
-      """
+
+    let toolInvocations = turn.resolvedToolCalls()
+    let assistantText = turn.text.isEmpty ? "" : turn.text
+    let assistantReasoning = turn.reasoningText.isEmpty ? nil : turn.reasoningText
+    let assistantMessage = Components.Schemas.ChatMessage(
+      role: .assistant,
+      content: assistantText,
+      name: nil,
+      toolCalls: toolInvocations.isEmpty
+        ? nil
+        : toolInvocations.map { inv in
+          .init(
+            id: inv.id,
+            _type: "function",
+            function: .init(
+              name: inv.name,
+              arguments: inv.arguments
+            )
+          )
+        },
+      toolCallId: nil,
+      reasoningContent: assistantReasoning
     )
-    onEvent(.maxToolRoundsExceeded(max: maxToolRounds))
-    return .hitToolRoundLimit
+    messages.append(assistantMessage)
+
+    if toolInvocations.isEmpty {
+      logger.info(
+        """
+        event=agent.assistant.final \
+        answer_chars=\(assistantText.count) \
+        reasoning_chars=\(assistantReasoning?.count ?? 0)
+        """
+      )
+      onEvent(.blankLine)
+      return .completed
+    }
+
+    return .toolCalls(
+      toolInvocations.map {
+        ToolInvocation(id: $0.id, name: $0.name, arguments: $0.arguments)
+      })
   }
 }
