@@ -79,7 +79,7 @@ struct Chat: AsyncParsableCommand {
       sessionId = archived.id
     } else {
       sessionId = UUID()
-      sessionPersistenceURL = try ChatSessionStore.fileURL(
+      sessionPersistenceURL = try ChatSessionStore.sessionDirectoryURL(
         sessionId: sessionId, configuration: config)
       resumeArchive = nil
     }

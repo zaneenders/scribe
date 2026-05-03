@@ -23,8 +23,7 @@ struct ChatSessionPersistenceTests {
     )
 
     let temp = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: false)
-      .appendingPathExtension("json")
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
 
     try ChatSessionStore.save(original, to: temp)
     defer { try? FileManager.default.removeItem(at: temp) }
@@ -67,11 +66,11 @@ struct ChatSessionPersistenceTests {
         .init(role: .system, content: "s", name: nil, toolCalls: nil, toolCallId: nil)
       ]
     )
-    let fileURL = try ChatSessionStore.fileURL(sessionId: id, configuration: config)
-    try ChatSessionStore.save(archive, to: fileURL)
+    let dirURL = try ChatSessionStore.sessionDirectoryURL(sessionId: id, configuration: config)
+    try ChatSessionStore.save(archive, to: dirURL)
 
     let listed = try ChatSessionStore.listSessionFiles(configuration: config)
-    let wantPath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
+    let wantPath = dirURL.standardizedFileURL.resolvingSymlinksInPath().path
     #expect(listed.contains { $0.standardizedFileURL.resolvingSymlinksInPath().path == wantPath })
   }
 
@@ -89,8 +88,7 @@ struct ChatSessionPersistenceTests {
       messages: messages
     )
     let temp = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: false)
-      .appendingPathExtension("json")
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
 
     try ChatSessionStore.save(bad, to: temp)
     defer { try? FileManager.default.removeItem(at: temp) }
@@ -133,15 +131,15 @@ struct ChatSessionPersistenceTests {
       cwd: "/", model: "m", baseURL: nil,
       messages: [.init(role: .system, content: "new", name: nil, toolCalls: nil, toolCallId: nil)]
     )
-    let olderURL = try ChatSessionStore.fileURL(sessionId: olderId, configuration: config)
-    let newerURL = try ChatSessionStore.fileURL(sessionId: newerId, configuration: config)
+    let olderURL = try ChatSessionStore.sessionDirectoryURL(sessionId: olderId, configuration: config)
+    let newerURL = try ChatSessionStore.sessionDirectoryURL(sessionId: newerId, configuration: config)
     try ChatSessionStore.save(older, to: olderURL)
     // Small sleep to ensure modification time differs.
     Thread.sleep(forTimeInterval: 0.1)
     try ChatSessionStore.save(newer, to: newerURL)
 
     let resolved = try ChatSessionStore.resolveResumeURL(specifier: "latest", configuration: config)
-    #expect(resolved.lastPathComponent == "\(newerId.uuidString).json")
+    #expect(resolved.lastPathComponent == newerId.uuidString)
   }
 
   @Test func resolveResumeURLLatestThrowsWhenNoSessions() throws {
@@ -189,12 +187,12 @@ struct ChatSessionPersistenceTests {
       cwd: "/", model: "m", baseURL: nil,
       messages: [.init(role: .system, content: "s", name: nil, toolCalls: nil, toolCallId: nil)]
     )
-    let _ = try ChatSessionStore.fileURL(sessionId: targetId, configuration: config)
-    try ChatSessionStore.save(archive, to: ChatSessionStore.fileURL(sessionId: targetId, configuration: config))
+    let dirURL = try ChatSessionStore.sessionDirectoryURL(sessionId: targetId, configuration: config)
+    try ChatSessionStore.save(archive, to: dirURL)
 
     let resolved = try ChatSessionStore.resolveResumeURL(
       specifier: targetId.uuidString, configuration: config)
-    #expect(resolved.lastPathComponent == "\(targetId.uuidString).json")
+    #expect(resolved.lastPathComponent == targetId.uuidString)
   }
 
   @Test func resolveResumeURLByPrefix() throws {
@@ -221,11 +219,11 @@ struct ChatSessionPersistenceTests {
       messages: [.init(role: .system, content: "s", name: nil, toolCalls: nil, toolCallId: nil)]
     )
     try ChatSessionStore.save(
-      archive, to: ChatSessionStore.fileURL(sessionId: targetId, configuration: config))
+      archive, to: ChatSessionStore.sessionDirectoryURL(sessionId: targetId, configuration: config))
 
     let resolved = try ChatSessionStore.resolveResumeURL(
       specifier: "aaaa0000", configuration: config)
-    #expect(resolved.lastPathComponent == "\(targetId.uuidString).json")
+    #expect(resolved.lastPathComponent == targetId.uuidString)
   }
 
   @Test func resolveResumeURLByPath() throws {
@@ -251,13 +249,13 @@ struct ChatSessionPersistenceTests {
       cwd: "/", model: "m", baseURL: nil,
       messages: [.init(role: .system, content: "s", name: nil, toolCalls: nil, toolCallId: nil)]
     )
-    let fileURL = try ChatSessionStore.fileURL(sessionId: targetId, configuration: config)
-    try ChatSessionStore.save(archive, to: fileURL)
+    let dirURL = try ChatSessionStore.sessionDirectoryURL(sessionId: targetId, configuration: config)
+    try ChatSessionStore.save(archive, to: dirURL)
 
     // Resolve by full path
     let resolved = try ChatSessionStore.resolveResumeURL(
-      specifier: fileURL.path, configuration: config)
-    #expect(resolved.standardizedFileURL.path == fileURL.standardizedFileURL.path)
+      specifier: dirURL.path, configuration: config)
+    #expect(resolved.standardizedFileURL.path == dirURL.standardizedFileURL.path)
   }
 
   @Test func resolveResumeURLThrowsForEmptySpecifier() {
@@ -304,11 +302,91 @@ struct ChatSessionPersistenceTests {
         id: id, createdAt: Date(), updatedAt: Date(),
         cwd: "/", model: "m", baseURL: nil, messages: [sys])
       try ChatSessionStore.save(
-        archive, to: ChatSessionStore.fileURL(sessionId: id, configuration: config))
+        archive, to: ChatSessionStore.sessionDirectoryURL(sessionId: id, configuration: config))
     }
 
     #expect(throws: (any Error).self) {
       _ = try ChatSessionStore.resolveResumeURL(specifier: "bbbb", configuration: config)
     }
+  }
+
+  // MARK: - Incremental JSONL persistence
+
+  @Test func appendMessagesCreatesJsonlInsideDirectory() throws {
+    let temp = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temp) }
+
+    let archive = ChatSessionArchive(
+      id: UUID(), createdAt: Date(), updatedAt: Date(),
+      cwd: "/tmp", model: "m", baseURL: nil,
+      messages: [.init(role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil)]
+    )
+    try ChatSessionStore.save(archive, to: temp)
+
+    let newMessages: [Components.Schemas.ChatMessage] = [
+      .init(role: .user, content: "hello", name: nil, toolCalls: nil, toolCallId: nil),
+      .init(role: .assistant, content: "hi", name: nil, toolCalls: nil, toolCallId: nil),
+    ]
+    try ChatSessionStore.appendMessages(newMessages, to: temp)
+
+    let jsonlURL = temp.appendingPathComponent("messages.jsonl", isDirectory: false)
+    #expect(FileManager.default.fileExists(atPath: jsonlURL.path))
+
+    let data = try Data(contentsOf: jsonlURL)
+    let lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
+    #expect(lines.count == 3)
+  }
+
+  @Test func loadIgnoresPartialTrailingLineInMessagesJsonl() throws {
+    let temp = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temp) }
+
+    let archive = ChatSessionArchive(
+      id: UUID(), createdAt: Date(), updatedAt: Date(),
+      cwd: "/tmp", model: "m", baseURL: nil,
+      messages: [.init(role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil)]
+    )
+    try ChatSessionStore.save(archive, to: temp)
+
+    let jsonlURL = temp.appendingPathComponent("messages.jsonl", isDirectory: false)
+    let validLine = try JSONEncoder().encode(
+      Components.Schemas.ChatMessage(role: .user, content: "ok", name: nil, toolCalls: nil, toolCallId: nil)
+    )
+    let handle = try FileHandle(forWritingTo: jsonlURL)
+    defer { try? handle.close() }
+    try handle.seekToEnd()
+    try handle.write(contentsOf: validLine + Data([UInt8(ascii: "\n")]) + Data("{bad json".utf8))
+
+    let merged = try ChatSessionStore.load(from: temp)
+    #expect(merged.messages.count == 2)
+    #expect(merged.messages[1].content == "ok")
+  }
+
+  @Test func appendMessagesUpdatesDirectoryModificationTime() throws {
+    let temp = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temp) }
+
+    let archive = ChatSessionArchive(
+      id: UUID(), createdAt: Date(), updatedAt: Date(),
+      cwd: "/tmp", model: "m", baseURL: nil,
+      messages: [.init(role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil)]
+    )
+    try ChatSessionStore.save(archive, to: temp)
+
+    let before = try temp.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate!
+    Thread.sleep(forTimeInterval: 0.15)
+
+    let newMessage = Components.Schemas.ChatMessage(
+      role: .user, content: "hello", name: nil, toolCalls: nil, toolCallId: nil)
+    try ChatSessionStore.appendMessages([newMessage], to: temp)
+
+    let after = try temp.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate!
+    #expect(after >= before)
   }
 }

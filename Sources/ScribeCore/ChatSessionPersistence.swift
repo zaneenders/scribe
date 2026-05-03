@@ -35,6 +35,16 @@ public struct ChatSessionArchive: Codable, Sendable, Equatable {
   }
 }
 
+/// Metadata stored separately from messages so the archive can be updated incrementally.
+private struct ChatSessionMetadata: Codable, Sendable {
+  var schemaVersion: Int
+  var id: UUID
+  var createdAt: Date
+  var model: String
+  var cwd: String
+  var baseURL: String?
+}
+
 public enum ChatSessionStore {
 
   /// Resolved session root (creates directories). Reads ``AgentConfig/chatSessionsDirectoryPath``.
@@ -45,7 +55,7 @@ public enum ChatSessionStore {
     return url
   }
 
-  /// All `*.json` session files under the configured sessions directory (newest first by modification time).
+  /// All session directories under the configured sessions directory (newest first by modification time).
   public static func listSessionFiles(configuration: AgentConfig) throws -> [URL] {
     let root = try sessionsDirectoryURL(configuration: configuration)
     guard FileManager.default.fileExists(atPath: root.path) else {
@@ -56,8 +66,15 @@ public enum ChatSessionStore {
       includingPropertiesForKeys: [.contentModificationDateKey],
       options: [.skipsHiddenFiles]
     )
-    let jsonFiles = contents.filter { $0.pathExtension.lowercased() == "json" }
-    return jsonFiles.sorted { a, b in
+    let sessionDirs = contents.filter { url in
+      var isDir: ObjCBool = false
+      guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+        return false
+      }
+      let meta = url.appendingPathComponent("metadata.json", isDirectory: false)
+      return FileManager.default.fileExists(atPath: meta.path)
+    }
+    return sessionDirs.sorted { a, b in
       let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
         ?? .distantPast
       let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
@@ -66,31 +83,117 @@ public enum ChatSessionStore {
     }
   }
 
-  public static func fileURL(sessionId: UUID, configuration: AgentConfig) throws -> URL {
-    try sessionsDirectoryURL(configuration: configuration).appendingPathComponent(
-      "\(sessionId.uuidString).json", isDirectory: false)
+  public static func sessionDirectoryURL(sessionId: UUID, configuration: AgentConfig) throws -> URL {
+    try sessionsDirectoryURL(configuration: configuration)
+      .appendingPathComponent(sessionId.uuidString, isDirectory: true)
   }
 
-  public static func save(_ archive: ChatSessionArchive, to url: URL) throws {
+  /// Write the full archive into a session directory as `metadata.json` + `messages.jsonl`.
+  public static func save(_ archive: ChatSessionArchive, to directory: URL) throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let metadata = ChatSessionMetadata(
+      schemaVersion: archive.schemaVersion,
+      id: archive.id,
+      createdAt: archive.createdAt,
+      model: archive.model,
+      cwd: archive.cwd,
+      baseURL: archive.baseURL
+    )
+
     let enc = JSONEncoder()
     enc.outputFormatting = [.sortedKeys]
     enc.dateEncodingStrategy = .iso8601
-    let data = try enc.encode(archive)
-    try data.write(to: url, options: [.atomic])
+
+    let metaURL = directory.appendingPathComponent("metadata.json", isDirectory: false)
+    let metaData = try enc.encode(metadata)
+    try metaData.write(to: metaURL, options: [.atomic])
+
+    let messagesURL = directory.appendingPathComponent("messages.jsonl", isDirectory: false)
+    var messagesData = Data()
+    for message in archive.messages {
+      var line = try enc.encode(message)
+      line.append(UInt8(ascii: "\n"))
+      messagesData.append(line)
+    }
+    try messagesData.write(to: messagesURL, options: [.atomic])
   }
 
-  public static func load(from url: URL) throws -> ChatSessionArchive {
-    let data = try Data(contentsOf: url)
+  /// Append messages to `messages.jsonl` inside a session directory.
+  public static func appendMessages(
+    _ messages: [Components.Schemas.ChatMessage],
+    to directory: URL
+  ) throws {
+    let messagesURL = directory.appendingPathComponent("messages.jsonl", isDirectory: false)
+    let enc = JSONEncoder()
+    enc.outputFormatting = [.sortedKeys]
+    enc.dateEncodingStrategy = .iso8601
+
+    if !FileManager.default.fileExists(atPath: messagesURL.path) {
+      FileManager.default.createFile(atPath: messagesURL.path, contents: nil)
+    }
+
+    let handle = try FileHandle(forWritingTo: messagesURL)
+    defer { try? handle.close() }
+    try handle.seekToEnd()
+
+    for message in messages {
+      var data = try enc.encode(message)
+      data.append(UInt8(ascii: "\n"))
+      try handle.write(contentsOf: data)
+    }
+
+    // Touch the directory so listSessionFiles reflects recent activity.
+    try? FileManager.default.setAttributes(
+      [.modificationDate: Date()],
+      ofItemAtPath: directory.path
+    )
+  }
+
+  /// Read a session directory (`metadata.json` + `messages.jsonl`) into a ``ChatSessionArchive``.
+  public static func load(from directory: URL) throws -> ChatSessionArchive {
+    let metaURL = directory.appendingPathComponent("metadata.json", isDirectory: false)
+    let messagesURL = directory.appendingPathComponent("messages.jsonl", isDirectory: false)
+
+    let metaData = try Data(contentsOf: metaURL)
     let dec = JSONDecoder()
     dec.dateDecodingStrategy = .iso8601
-    let archive = try dec.decode(ChatSessionArchive.self, from: data)
-    guard archive.messages.first?.role == .system else {
+    let metadata = try dec.decode(ChatSessionMetadata.self, from: metaData)
+
+    var messages: [Components.Schemas.ChatMessage] = []
+    if FileManager.default.fileExists(atPath: messagesURL.path) {
+      let data = try Data(contentsOf: messagesURL)
+      let lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
+      for line in lines {
+        if let message = try? dec.decode(Components.Schemas.ChatMessage.self, from: Data(line)) {
+          messages.append(message)
+        } else {
+          break
+        }
+      }
+    }
+
+    guard messages.first?.role == .system else {
       throw AgentAPIError(description: "Session file missing leading system message.")
     }
-    return archive
+
+    let updatedAt =
+      (try? directory.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+      ?? Date()
+
+    return ChatSessionArchive(
+      schemaVersion: metadata.schemaVersion,
+      id: metadata.id,
+      createdAt: metadata.createdAt,
+      updatedAt: updatedAt,
+      cwd: metadata.cwd,
+      model: metadata.model,
+      baseURL: metadata.baseURL,
+      messages: messages
+    )
   }
 
-  /// Resolves `path`, `UUID` / prefix, or the token `latest` (most recently modified file in the session directory).
+  /// Resolves `path`, `UUID` / prefix, or the token `latest` (most recently modified directory in the session directory).
   public static func resolveResumeURL(specifier: String, configuration: AgentConfig) throws -> URL {
     let trimmed = specifier.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
@@ -106,14 +209,22 @@ public enum ChatSessionStore {
     }
 
     let pathURL = URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath)
-    if FileManager.default.fileExists(atPath: pathURL.path) {
-      return pathURL.standardizedFileURL
+    var isDir: ObjCBool = false
+    if FileManager.default.fileExists(atPath: pathURL.path, isDirectory: &isDir) {
+      if isDir.boolValue {
+        return pathURL.standardizedFileURL
+      }
+      // If it points to a file inside a session dir (e.g. metadata.json), return the parent.
+      let parent = pathURL.deletingLastPathComponent()
+      if parent.lastPathComponent != "/" {
+        return parent.standardizedFileURL
+      }
     }
 
     let root = try sessionsDirectoryURL(configuration: configuration)
     let lower = trimmed.lowercased()
     if let u = UUID(uuidString: lower) {
-      let candidate = root.appendingPathComponent("\(u.uuidString).json")
+      let candidate = root.appendingPathComponent(u.uuidString, isDirectory: true)
       if FileManager.default.fileExists(atPath: candidate.path) {
         return candidate
       }

@@ -212,25 +212,35 @@ internal final class SlateChatHost {
         let modelSnapshot = configuration.agentModel
         let baseSnapshot = configuration.openAIBaseURL
         let persistLog = self.log
+        let persistedCount = Mutex(resumeSnapshot?.messages.count ?? 0)
         let persist: @Sendable ([Components.Schemas.ChatMessage]) -> Void = { history in
+          let previous = persistedCount.withLock { $0 }
+          guard history.count > previous else { return }
           let cwd = FileManager.default.currentDirectoryPath
           do {
-            try ChatSessionStore.save(
-              ChatSessionArchive(
-                id: cid,
-                createdAt: created,
-                updatedAt: Date(),
-                cwd: cwd,
-                model: modelSnapshot,
-                baseURL: baseSnapshot,
-                messages: history
-              ),
-              to: persistURL
-            )
+            if previous == 0 {
+              try ChatSessionStore.save(
+                ChatSessionArchive(
+                  id: cid,
+                  createdAt: created,
+                  updatedAt: Date(),
+                  cwd: cwd,
+                  model: modelSnapshot,
+                  baseURL: baseSnapshot,
+                  messages: history
+                ),
+                to: persistURL
+              )
+            } else {
+              let newMessages = Array(history[previous..<history.count])
+              try ChatSessionStore.appendMessages(newMessages, to: persistURL)
+            }
+            persistedCount.withLock { $0 = history.count }
             persistLog.trace(
               """
               event=chat.persist.save \
               messages=\(history.count) \
+              previous=\(previous) \
               path=\(persistURL.path)
               """
             )
