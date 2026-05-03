@@ -503,12 +503,22 @@ public final class SlateTranscriptSink: Sendable {
         let text = msg.content ?? ""
         let visibleTrimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let calls = msg.toolCalls ?? []
+        let reasoning = msg.reasoningContent ?? ""
 
-        emit(.enterAssistantSection(.answer, previous: nil))
-        if !text.isEmpty {
-          emit(.appendAssistantText(.answer, text: text))
+        var section: AssistantStreamSection? = nil
+        if !reasoning.isEmpty {
+          emit(.enterAssistantSection(.reasoning, previous: nil))
+          emit(.appendAssistantText(.reasoning, text: reasoning))
+          section = .reasoning
         }
-        endReplayedAssistantSection(answerHadVisibleCharacters: !visibleTrimmed.isEmpty)
+
+        if !text.isEmpty || section == nil {
+          emit(.enterAssistantSection(.answer, previous: section))
+          if !text.isEmpty {
+            emit(.appendAssistantText(.answer, text: text))
+          }
+        }
+        endReplayedAssistantSection(answerHadVisibleCharacters: !visibleTrimmed.isEmpty || !reasoning.isEmpty)
 
         if !calls.isEmpty {
           toolRoundCounter += 1
