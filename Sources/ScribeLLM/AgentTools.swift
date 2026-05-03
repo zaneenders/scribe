@@ -1,7 +1,7 @@
 import Foundation
 import OpenAPIRuntime
 
-/// OpenAI-style tool definitions (aligned with ``ToolRunner``).
+/// OpenAI-style tool definitions (aligned with ``ToolRegistry``).
 public enum AgentTools {
   public static func all() -> [Components.Schemas.ChatTool] {
     OpenAIToolParameterSchema.all

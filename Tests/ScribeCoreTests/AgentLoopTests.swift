@@ -92,10 +92,10 @@ private final class AbortState: @unchecked Sendable {
 struct AgentLoopTests {
   @Test func completedRoundReturnsCompleted() async throws {
     let harness = FakeHarness(outcomes: [.completed])
-    let executor = ToolExecutor(registry: ToolRegistry(tools: [FakeTool()]))
+    let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      registry: registry,
       maxToolRounds: 5,
       onEvent: { _ in }
     )
@@ -113,10 +113,10 @@ struct AgentLoopTests {
       .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{\"x\":1}")]),
       .completed,
     ])
-    let executor = ToolExecutor(registry: ToolRegistry(tools: [FakeTool()]))
+    let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      registry: registry,
       maxToolRounds: 5,
       onEvent: { _ in }
     )
@@ -138,11 +138,11 @@ struct AgentLoopTests {
     let harness = FakeHarness(
       outcomes: Array(
         repeating: .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{}")]), count: 10))
-    let executor = ToolExecutor(registry: ToolRegistry(tools: [FakeTool()]))
+    let registry = ToolRegistry(tools: [FakeTool()])
     let collector = EventCollector()
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      registry: registry,
       maxToolRounds: 2,
       onEvent: { collector.append($0) }
     )
@@ -158,10 +158,10 @@ struct AgentLoopTests {
 
   @Test func abortBeforeRoundThrowsInterrupted() async throws {
     let harness = FakeHarness(outcomes: [.completed])
-    let executor = ToolExecutor(registry: ToolRegistry(tools: [FakeTool()]))
+    let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      registry: registry,
       maxToolRounds: 5,
       onEvent: { _ in }
     )
@@ -183,10 +183,10 @@ struct AgentLoopTests {
     let harness = FakeHarness(outcomes: [
       .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{}")])
     ])
-    let executor = ToolExecutor(registry: ToolRegistry(tools: [FakeTool()]))
+    let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      registry: registry,
       maxToolRounds: 5,
       onEvent: { _ in }
     )
@@ -216,11 +216,11 @@ struct AgentLoopTests {
       .toolCalls([ToolInvocation(id: "call_1", name: "missing_tool", arguments: "{}")]),
       .completed,
     ])
-    let executor = ToolExecutor(registry: ToolRegistry(tools: [FakeTool()]))
+    let registry = ToolRegistry(tools: [FakeTool()])
     let collector = EventCollector()
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      registry: registry,
       maxToolRounds: 5,
       onEvent: { collector.append($0) }
     )

@@ -2,22 +2,22 @@ import Foundation
 import Logging
 import ScribeLLM
 
-/// Orchestrates the interaction between ``AgentHarness`` (LLM loop) and ``ToolExecutor`` (tool
+/// Orchestrates the interaction between ``AgentHarness`` (LLM loop) and ``ToolRegistry`` (tool
 /// execution), driving multi-round model turns.
 public struct AgentLoop: Sendable {
   private let harness: any AgentHarnessProtocol
-  private let executor: ToolExecutor
+  private let registry: ToolRegistry
   private let maxToolRounds: Int
   private let onEvent: @Sendable (TranscriptEvent) -> Void
 
   public init(
     harness: any AgentHarnessProtocol,
-    executor: ToolExecutor,
+    registry: ToolRegistry,
     maxToolRounds: Int,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void
   ) {
     self.harness = harness
-    self.executor = executor
+    self.registry = registry
     self.maxToolRounds = maxToolRounds
     self.onEvent = onEvent
   }
@@ -96,7 +96,7 @@ public struct AgentLoop: Sendable {
             throw AgentTurnInterruptedError()
           }
           let toolStarted = Date()
-          let jsonOutput = await executor.run(name: inv.name, argumentsJSON: inv.arguments)
+          let jsonOutput = await registry.run(name: inv.name, arguments: inv.arguments)
           let elapsedMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
           let unknown = jsonOutput.contains("unknown tool")
           if unknown {

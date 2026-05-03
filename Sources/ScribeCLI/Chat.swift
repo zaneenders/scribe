@@ -115,7 +115,7 @@ struct Chat: AsyncParsableCommand {
     let defaultTools: [any ScribeTool] = [
       ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()
     ]
-    let toolExecutor = ToolExecutor(registry: ToolRegistry(tools: defaultTools))
+    let toolRegistry = ToolRegistry(tools: defaultTools)
     let toolDefinitions = AgentTools.all()
 
     try await SlateChat.runFullscreen(
@@ -126,7 +126,7 @@ struct Chat: AsyncParsableCommand {
       sessionPersistenceURL: sessionPersistenceURL,
       sessionId: sessionId,
       log: log,
-      toolExecutor: toolExecutor,
+      toolRegistry: toolRegistry,
       toolDefinitions: toolDefinitions
     )
     log.notice("event=chat.session.end status=ok")

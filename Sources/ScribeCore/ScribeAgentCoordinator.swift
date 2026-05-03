@@ -33,7 +33,7 @@ public enum ScribeAgentCoordinator {
     prepareModelTurnStart: @escaping @Sendable () -> Void = {},
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
     log: Logger,
-    toolExecutor: ToolExecutor,
+    toolRegistry: ToolRegistry,
     toolDefinitions: [Components.Schemas.ChatTool]
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
@@ -99,7 +99,7 @@ public enum ScribeAgentCoordinator {
     )
     let loop = AgentLoop(
       harness: harness,
-      executor: toolExecutor,
+      registry: toolRegistry,
       maxToolRounds: configuration.agentMaxToolRounds,
       onEvent: wrappedOnEvent
     )
@@ -238,7 +238,7 @@ public enum ScribeAgentCoordinator {
       prepareModelTurnStart: {},
       shouldAbortTurn: { false },
       log: configuration.makeSessionLogger(sessionId: sessionId),
-      toolExecutor: ToolExecutor(registry: ToolRegistry(tools: defaultTools)),
+      toolRegistry: ToolRegistry(tools: defaultTools),
       toolDefinitions: AgentTools.all()
     )
   }
@@ -250,7 +250,7 @@ public enum ScribeAgentCoordinator {
     systemPrompt: String,
     request: ScribeAgentRequest,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
-    toolExecutor: ToolExecutor,
+    toolRegistry: ToolRegistry,
     toolDefinitions: [Components.Schemas.ChatTool]
   ) async -> ScribeAgentResponse {
     var history: [Components.Schemas.ChatMessage] = [
@@ -277,7 +277,7 @@ public enum ScribeAgentCoordinator {
     )
     let loop = AgentLoop(
       harness: harness,
-      executor: toolExecutor,
+      registry: toolRegistry,
       maxToolRounds: configuration.agentMaxToolRounds,
       onEvent: onEvent
     )

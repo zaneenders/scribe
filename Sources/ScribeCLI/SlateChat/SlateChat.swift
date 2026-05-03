@@ -48,7 +48,7 @@ enum SlateChat {
     sessionPersistenceURL: URL,
     sessionId: UUID,
     log: Logger,
-    toolExecutor: ToolExecutor,
+    toolRegistry: ToolRegistry,
     toolDefinitions: [Components.Schemas.ChatTool]
   ) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
@@ -72,7 +72,7 @@ enum SlateChat {
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
         log: log,
-        toolExecutor: toolExecutor,
+        toolRegistry: toolRegistry,
         toolDefinitions: toolDefinitions
       )
       do {

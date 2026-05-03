@@ -150,7 +150,7 @@ internal final class SlateChatHost {
   /// All chat events emitted from this host use this logger and the structured
   /// `event=ns.name k=v k=v` format documented in ``docs/chat-input-behavior.md``.
   private let log: Logger
-  private let toolExecutor: ToolExecutor
+  private let toolRegistry: ToolRegistry
   private let toolDefinitions: [Components.Schemas.ChatTool]
 
   init(
@@ -162,7 +162,7 @@ internal final class SlateChatHost {
     sessionId: UUID,
     sessionCreatedAt: Date,
     log: Logger,
-    toolExecutor: ToolExecutor,
+    toolRegistry: ToolRegistry,
     toolDefinitions: [Components.Schemas.ChatTool]
   ) {
     self.configuration = configuration
@@ -173,7 +173,7 @@ internal final class SlateChatHost {
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.log = log
-    self.toolExecutor = toolExecutor
+    self.toolRegistry = toolRegistry
     self.toolDefinitions = toolDefinitions
   }
 
@@ -267,7 +267,7 @@ internal final class SlateChatHost {
         let sessionLog = self.log
         self.coordinatorTask = Task {
           [configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
-           toolExecutor, toolDefinitions] in
+           toolRegistry, toolDefinitions] in
           defer { sink.markCoordinatorFinished() }
           do {
             try await ScribeAgentCoordinator.runInteractive(
@@ -291,7 +291,7 @@ internal final class SlateChatHost {
               prepareModelTurnStart: { interruptFlag.clear() },
               shouldAbortTurn: { interruptFlag.peek() },
               log: sessionLog,
-              toolExecutor: toolExecutor,
+              toolRegistry: toolRegistry,
               toolDefinitions: toolDefinitions
             )
           } catch {
