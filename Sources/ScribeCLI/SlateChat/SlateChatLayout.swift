@@ -205,7 +205,7 @@ public final class SlateTranscriptSink: Sendable {
             TLine(
               spans: [
                 StyledSpan(
-                  fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+                  fg: ScribePalette.gray, bg: ScribePalette.black, bold: false,
                   text: "  · reasoning")
               ]))
         case .answer:
@@ -213,7 +213,7 @@ public final class SlateTranscriptSink: Sendable {
             TLine(
               spans: [
                 StyledSpan(
-                  fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+                  fg: ScribePalette.gray, bg: ScribePalette.black, bold: false,
                   text: "  · answer")
               ]))
         }
@@ -261,7 +261,7 @@ public final class SlateTranscriptSink: Sendable {
       let lineB = TLine(
         spans: [
           StyledSpan(
-            fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false, text: "(empty turn)")
+            fg: ScribePalette.gray, bg: ScribePalette.black, bold: false, text: "(empty turn)")
         ])
       state.withLock { sink in
         sink.lines.append(lineA)
@@ -306,7 +306,7 @@ public final class SlateTranscriptSink: Sendable {
           fg: ScribePalette.yellow, bg: ScribePalette.black, bold: true,
           text: "tool round \(round) "),
         StyledSpan(
-          fg: ScribePalette.toolName, bg: ScribePalette.black, bold: false, text: names),
+          fg: ScribePalette.cyan, bg: ScribePalette.black, bold: false, text: names),
       ])
       appendLine(line)
 
@@ -317,7 +317,7 @@ public final class SlateTranscriptSink: Sendable {
       if let argumentSummary {
         spans.append(
           StyledSpan(
-            fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+            fg: ScribePalette.gray, bg: ScribePalette.black, bold: false,
             text: " \(argumentSummary)"))
       }
       appendLine(TLine(spans: spans))
@@ -345,7 +345,7 @@ public final class SlateTranscriptSink: Sendable {
         TLine(
           spans: [
             StyledSpan(
-              fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+              fg: ScribePalette.gray, bg: ScribePalette.black, bold: false,
               text: "(skipped one stream line: not valid completion JSON)")
           ]))
 
@@ -364,7 +364,7 @@ public final class SlateTranscriptSink: Sendable {
           TLine(
             spans: [
               StyledSpan(
-                fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+                fg: ScribePalette.gray, bg: ScribePalette.black, bold: false,
                 text: "(interrupted)")
             ]))
         trimIfNeeded(&sink.lines)
@@ -490,7 +490,7 @@ public final class SlateTranscriptSink: Sendable {
 
   private static func style(for section: AssistantStreamSection) -> (fg: TerminalRGB, bold: Bool) {
     switch section {
-    case .reasoning: (ScribePalette.thinking, true)
+    case .reasoning: (ScribePalette.yellowBright, true)
     case .answer: (ScribePalette.cyan, false)
     }
   }

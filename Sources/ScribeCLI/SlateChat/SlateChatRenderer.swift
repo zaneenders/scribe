@@ -407,7 +407,7 @@ internal enum SlateChatRenderer {
         paint("scribe: ", foreground: ScribePalette.purple)
         let frames = llmWaitSpinner
         let ch = frames[llmWaitAnimationFrame % frames.count]
-        paint(String(ch), foreground: ScribePalette.thinking)
+        paint(String(ch), foreground: ScribePalette.yellowBright)
         paint("▏", foreground: ScribePalette.white)
       } else if lineIdx == 0 {
         paint("you: ", foreground: ScribePalette.orange)
@@ -418,7 +418,7 @@ internal enum SlateChatRenderer {
           paint("▏", foreground: ScribePalette.white)
         }
       } else {
-        paint(gutter, foreground: ScribePalette.grayDim)
+        paint(gutter, foreground: ScribePalette.gray)
         if lineIdx < visualLines.count, textWidth > 0 {
           paint(String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.white)
         }
@@ -470,7 +470,7 @@ internal enum SlateChatRenderer {
       if lineIdx == 0 {
         paint("queued: ", foreground: ScribePalette.orange)
       } else {
-        paint(gutterText, foreground: ScribePalette.grayDim)
+        paint(gutterText, foreground: ScribePalette.gray)
       }
       if textWidth > 0 {
         paint(String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.grayLight)
