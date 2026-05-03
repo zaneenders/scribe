@@ -1,5 +1,5 @@
 {
-  "originHash" : "4981f1b41e261627e9364c744cf901dd4a625668764257428259af86bc2e3db3",
+  "originHash" : "c75e0273319788023ae0e50577ce040c330e629c33daec1382f05f834c852776",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "343b2c1793058fcc53c1bd7e2907f8e3a4d640fb",
         "version" : "3.9.0"
+      }
+    },
+    {
+      "identity" : "slate",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/zaneenders/slate",
+      "state" : {
+        "branch" : "1e183f4",
+        "revision" : "1e183f409758a505a6af3e9a98ff5fcaa8d33b65"
       }
     },
     {
@@ -69,14 +78,14 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-certificates.git",
       "state" : {
-        "revision" : "5aa1c0d1bc204908df47c2075bdbb39573d05e8d",
-        "version" : "1.19.0"
+        "revision" : "bde8ca32a096825dfce37467137c903418c1893d",
+        "version" : "1.19.1"
       }
     },
     {
       "identity" : "swift-collections",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-collections",
+      "location" : "https://github.com/apple/swift-collections.git",
       "state" : {
         "revision" : "6675bc0ff86e61436e615df6fc5174e043e57924",
         "version" : "1.4.1"

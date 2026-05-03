@@ -10,9 +10,9 @@ let package = Package(
     .executable(name: "scribe", targets: ["ScribeCLI"]),
     .library(name: "ScribeCore", targets: ["ScribeCore"]),
     .library(name: "ScribeLLM", targets: ["ScribeLLM"]),
-    .library(name: "ScribeTUI", targets: ["ScribeTUI"]),
   ],
   dependencies: [
+    .package(url: "https://github.com/zaneenders/slate", revision: "1e183f4"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
     .package(url: "https://github.com/swift-server/swift-openapi-async-http-client", from: "1.0.0"),
@@ -20,6 +20,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-configuration", from: "1.0.0"),
     .package(url: "https://github.com/swiftlang/swift-subprocess.git", from: "0.4.0"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
+    .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
   ],
   targets: [
     .target(
@@ -44,14 +45,8 @@ let package = Package(
         .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "Configuration", package: "swift-configuration"),
         .product(name: "Subprocess", package: "swift-subprocess"),
+        .product(name: "Logging", package: "swift-log"),
       ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .target(
-      name: "ScribeTUI",
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
@@ -61,7 +56,8 @@ let package = Package(
       name: "ScribeCLI",
       dependencies: [
         "ScribeCore",
-        "ScribeTUI",
+        "ScribeLLM",
+        .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
       ],
       swiftSettings: [
