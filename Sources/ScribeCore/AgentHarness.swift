@@ -28,17 +28,17 @@ public struct AgentHarness {
   public var client: Client
   public var model: String
   public var maxToolRounds: Int
-  private let output: any ScribeAgentOutput
+  private let onEvent: @Sendable (TranscriptEvent) -> Void
   private let tools = AgentTools.all()
   private let runner = ToolRunner()
 
   public init(
-    output: any ScribeAgentOutput,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     client: Client,
     model: String,
     maxToolRounds: Int
   ) {
-    self.output = output
+    self.onEvent = onEvent
     self.client = client
     self.model = model
     self.maxToolRounds = maxToolRounds
@@ -172,7 +172,7 @@ public struct AgentHarness {
             """
           )
           if streamStarted {
-            try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)
+            onEvent(.finalizeAssistantStream)
           }
           throw AgentTurnInterruptedError()
         }
@@ -195,7 +195,7 @@ public struct AgentHarness {
             raw_prefix="\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))"
             """
           )
-          try output.printSkippedUnreadableStreamLine()
+          onEvent(.skippedUnreadableStreamLine)
           continue
         }
         decodedChunkCount += 1
@@ -232,28 +232,26 @@ public struct AgentHarness {
             streamStarted = true
             if case .some(.reasoning) = streamSection {
             } else {
-              try output.enterAssistantStreamSection(
-                .reasoning, previous: streamSection)
+              onEvent(.enterAssistantSection(.reasoning, previous: streamSection))
               streamSection = .reasoning
             }
-            try output.appendAssistantStreamText(.reasoning, text: r)
+            onEvent(.appendAssistantText(.reasoning, text: r))
           }
           if let t = delta.content, !t.isEmpty {
             if firstStreamContentAt == nil { firstStreamContentAt = Date() }
             streamStarted = true
             if case .some(.answer) = streamSection {
             } else {
-              try output.enterAssistantStreamSection(
-                .answer, previous: streamSection)
+              onEvent(.enterAssistantSection(.answer, previous: streamSection))
               streamSection = .answer
             }
-            try output.appendAssistantStreamText(.answer, text: t)
+            onEvent(.appendAssistantText(.answer, text: t))
           }
         }
         turn.apply(chunk: chunk)
       }
       if streamStarted {
-        try output.finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: true)
+        onEvent(.finalizeAssistantStream)
       } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
         logger.notice(
           """
@@ -261,7 +259,7 @@ public struct AgentHarness {
           chunks=\(decodedChunkCount)
           """
         )
-        try output.printEmptyAssistantTurn()
+        onEvent(.emptyAssistantTurn)
       }
 
       let streamWallEnd = Date()
@@ -285,7 +283,7 @@ public struct AgentHarness {
           tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
           """
         )
-        try output.emitUsage(usage: u, outputTokensPerSecond: tps)
+        onEvent(.usage(u, tokensPerSecond: tps))
       } else {
         logger.debug(
           """
@@ -345,7 +343,7 @@ public struct AgentHarness {
           reasoning_chars=\(assistantReasoning?.count ?? 0)
           """
         )
-        try output.printBlankLine()
+        onEvent(.blankLine)
         return .completed
       }
 
@@ -357,7 +355,7 @@ public struct AgentHarness {
         tools=\(toolInvocations.map(\.name).joined(separator: ","))
         """
       )
-      try output.printToolRoundHeader(round: roundNum, toolNames: toolInvocations.map(\.name))
+      onEvent(.toolRoundHeader(round: roundNum, toolNames: toolInvocations.map(\.name)))
 
       for inv in toolInvocations {
         if shouldAbortTurn() {
@@ -413,8 +411,8 @@ public struct AgentHarness {
         let argSummary = ToolInvocationFormatting.argumentSummary(
           name: inv.name, argumentsJSON: inv.arguments)
         let lines = ToolInvocationFormatting.outputLines(name: inv.name, jsonOutput: jsonOutput)
-        try output.printToolInvocation(name: inv.name, argumentSummary: argSummary, outputLines: lines)
-        try output.printBlankLine()
+        onEvent(.toolInvocation(name: inv.name, argumentSummary: argSummary, outputLines: lines))
+        onEvent(.blankLine)
         let toolMsg = Components.Schemas.ChatMessage(
           role: .tool,
           content: jsonOutput,
@@ -438,7 +436,7 @@ public struct AgentHarness {
       max=\(maxToolRounds)
       """
     )
-    try output.printMaxToolRoundsExceeded(max: maxToolRounds)
+    onEvent(.maxToolRoundsExceeded(max: maxToolRounds))
     return .hitToolRoundLimit
   }
 }

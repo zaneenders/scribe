@@ -26,7 +26,6 @@ internal struct TLine: Equatable {
 }
 
 private let slateUserTranscriptHeader = "you:"
-
 private let slateUserTranscriptBodyPrefix = "  "
 
 private func slateIsYouTranscriptHeaderLine(_ line: TLine) -> Bool {
@@ -83,15 +82,11 @@ private struct SinkState {
   var usageSessionCompletion: Int = 0
   var usageSessionTotal: Int = 0
   var banner: BannerSnapshot?
-  /// Optional message held in the queued tray (a dedicated UI strip above the input area, not
-  /// part of scrollback). Populated by the host while the agent is busy; cleared when the message
-  /// is sent to the coordinator (via interrupt or natural turn-end flush) or when the user
-  /// recalls it with Ctrl+C.
   var queuedTrayText: String? = nil
 }
 
-/// Slate-backed transcript sink: same information as ``TerminalScribeOutput``, with truecolor preserved in the grid.
-public final class SlateTranscriptSink: ScribeAgentOutput, Sendable {
+/// Slate-backed transcript sink: accumulates styled transcript lines and renders them via Slate.
+public final class SlateTranscriptSink: Sendable {
   private let state = Mutex(SinkState())
 
   public init() {}
@@ -123,16 +118,6 @@ public final class SlateTranscriptSink: ScribeAgentOutput, Sendable {
     }
   }
 
-  private func snapshotLines() -> [TLine] {
-    state.withLock { sink in
-      var out = sink.lines
-      if let open = sink.assistantOpenLine {
-        out.append(open)
-      }
-      return out
-    }
-  }
-
   internal func usageHUDSnapshot() -> UsageHUDSnapshot? {
     state.withLock { $0.usageHUD }
   }
@@ -142,9 +127,6 @@ public final class SlateTranscriptSink: ScribeAgentOutput, Sendable {
   }
 
   /// Records a submitted user turn in the scrollback as a normal (orange/white) entry.
-  /// Hosts call this when the coordinator actually picks the message up via the user-line gate, so
-  /// queued-tray submissions only appear in scrollback at the moment they are dispatched (not while
-  /// they sit in the tray).
   public func recordUserSubmission(trimmedVisible: String) {
     guard !trimmedVisible.isEmpty else { return }
     let logicalLines =
@@ -175,8 +157,6 @@ public final class SlateTranscriptSink: ScribeAgentOutput, Sendable {
     ping()
   }
 
-  /// Sets (or clears) the queued-tray banner that displays an in-flight user submission while the
-  /// agent is busy. The text is rendered in a dedicated strip above the input row.
   public func setQueuedTrayText(_ text: String?) {
     state.withLock { sink in
       sink.queuedTrayText = text
@@ -184,10 +164,314 @@ public final class SlateTranscriptSink: ScribeAgentOutput, Sendable {
     ping()
   }
 
-  /// Snapshot of the current queued-tray text (used by the renderer).
   internal func queuedTrayTextSnapshot() -> String? {
     state.withLock { $0.queuedTrayText }
   }
+
+  // MARK: - Event dispatch
+
+  public func emit(_ event: TranscriptEvent) {
+    switch event {
+    case .configBanner(let baseURL, let model, let cwd):
+      state.withLock { sink in
+        sink.banner = BannerSnapshot(baseURL: baseURL, model: model, cwd: cwd)
+      }
+      ping()
+
+    case .enterAssistantSection(let section, let previous):
+      state.withLock { sink in
+        if previous != nil {
+          if let open = sink.assistantOpenLine {
+            sink.lines.append(open)
+            sink.assistantOpenLine = nil
+          }
+          if previous == .reasoning && section == .answer {
+            sink.lines.append(TLine(spans: []))
+          }
+        } else {
+          if let last = sink.lines.last, slateIsUserSubmissionLine(last) {
+            sink.lines.append(TLine(spans: []))
+          }
+        }
+        let header = TLine(
+          spans: [
+            StyledSpan(
+              fg: ScribePalette.purple, bg: ScribePalette.black, bold: false, text: "scribe:")
+          ])
+        sink.lines.append(header)
+        switch section {
+        case .reasoning:
+          sink.lines.append(
+            TLine(
+              spans: [
+                StyledSpan(
+                  fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+                  text: "  · reasoning")
+              ]))
+        case .answer:
+          sink.lines.append(
+            TLine(
+              spans: [
+                StyledSpan(
+                  fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+                  text: "  · answer")
+              ]))
+        }
+        trimIfNeeded(&sink.lines)
+        sink.assistantOpenLine = TLine(spans: [])
+      }
+      ping()
+
+    case .appendAssistantText(let section, let text):
+      let st = Self.style(for: section)
+      let parts = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+      for (i, part) in parts.enumerated() {
+        state.withLock { sink in
+          if sink.assistantOpenLine == nil {
+            sink.assistantOpenLine = TLine(spans: [])
+          }
+          Self.appendText(
+            to: &sink.assistantOpenLine!, fg: st.fg, bg: ScribePalette.black, bold: st.bold, text: part)
+          if i + 1 < parts.count {
+            if let open = sink.assistantOpenLine {
+              sink.lines.append(open)
+              sink.assistantOpenLine = TLine(spans: [])
+            }
+          }
+        }
+        ping()
+      }
+
+    case .finalizeAssistantStream:
+      state.withLock { sink in
+        if let open = sink.assistantOpenLine {
+          sink.lines.append(open)
+          sink.assistantOpenLine = nil
+        }
+        trimIfNeeded(&sink.lines)
+      }
+      ping()
+
+    case .emptyAssistantTurn:
+      let lineA = TLine(
+        spans: [
+          StyledSpan(
+            fg: ScribePalette.purple, bg: ScribePalette.black, bold: false, text: "scribe:")
+        ])
+      let lineB = TLine(
+        spans: [
+          StyledSpan(
+            fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false, text: "(empty turn)")
+        ])
+      state.withLock { sink in
+        sink.lines.append(lineA)
+        sink.lines.append(lineB)
+        trimIfNeeded(&sink.lines)
+      }
+      ping()
+
+    case .usage(let usage, let tps):
+      guard let triple = usage.scribeReportedPromptCompletionTotal else { break }
+      state.withLock { sink in
+        sink.usageTurnPrompt += triple.prompt
+        sink.usageTurnCompletion += triple.completion
+        sink.usageTurnTotal += triple.total
+        sink.usageSessionPrompt += triple.prompt
+        sink.usageSessionCompletion += triple.completion
+        sink.usageSessionTotal += triple.total
+        sink.usageHUD = UsageHUDSnapshot(
+          roundPrompt: triple.prompt,
+          roundCompletion: triple.completion,
+          roundTotal: triple.total,
+          turnPrompt: sink.usageTurnPrompt,
+          turnCompletion: sink.usageTurnCompletion,
+          turnTotal: sink.usageTurnTotal,
+          sessionPrompt: sink.usageSessionPrompt,
+          sessionCompletion: sink.usageSessionCompletion,
+          sessionTotal: sink.usageSessionTotal,
+          reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
+          cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
+          outputTokensPerSecond: tps
+        )
+      }
+      ping()
+
+    case .blankLine:
+      appendLine(TLine(spans: []))
+
+    case .toolRoundHeader(let round, let toolNames):
+      let names = toolNames.joined(separator: ", ")
+      let line = TLine(spans: [
+        StyledSpan(
+          fg: ScribePalette.yellow, bg: ScribePalette.black, bold: true,
+          text: "tool round \(round) "),
+        StyledSpan(
+          fg: ScribePalette.toolName, bg: ScribePalette.black, bold: false, text: names),
+      ])
+      appendLine(line)
+
+    case .toolInvocation(let name, let argumentSummary, let outputLines):
+      var spans: [StyledSpan] = [
+        StyledSpan(fg: ScribePalette.yellow, bg: ScribePalette.black, bold: false, text: "▶ \(name)")
+      ]
+      if let argumentSummary {
+        spans.append(
+          StyledSpan(
+            fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+            text: " \(argumentSummary)"))
+      }
+      appendLine(TLine(spans: spans))
+      for ol in outputLines {
+        let indented = TLine(
+          spans: [
+            StyledSpan(
+              fg: ScribePalette.white, bg: ScribePalette.black, bold: false,
+              text: "  \(ol)")
+          ])
+        appendLine(indented)
+      }
+
+    case .maxToolRoundsExceeded(let max):
+      appendLine(
+        TLine(
+          spans: [
+            StyledSpan(
+              fg: ScribePalette.yellow, bg: ScribePalette.black, bold: false,
+              text: "Stopped: max tool rounds (\(max)) exceeded.")
+          ]))
+
+    case .skippedUnreadableStreamLine:
+      appendLine(
+        TLine(
+          spans: [
+            StyledSpan(
+              fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+              text: "(skipped one stream line: not valid completion JSON)")
+          ]))
+
+    case .harnessError(let errorText):
+      appendLine(
+        TLine(
+          spans: [
+            StyledSpan(
+              fg: ScribePalette.red, bg: ScribePalette.black, bold: false,
+              text: "error: \(errorText)")
+          ]))
+
+    case .turnInterrupted:
+      state.withLock { sink in
+        sink.lines.append(
+          TLine(
+            spans: [
+              StyledSpan(
+                fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
+                text: "(interrupted)")
+            ]))
+        trimIfNeeded(&sink.lines)
+      }
+      ping()
+
+    case .modelTurnRunning(let running):
+      state.withLock { sink in
+        sink.modelBusy = running
+        if running {
+          sink.usageTurnPrompt = 0
+          sink.usageTurnCompletion = 0
+          sink.usageTurnTotal = 0
+          if var u = sink.usageHUD {
+            u.roundPrompt = nil
+            u.roundCompletion = nil
+            u.roundTotal = nil
+            u.turnPrompt = 0
+            u.turnCompletion = 0
+            u.turnTotal = 0
+            u.outputTokensPerSecond = nil
+            u.reasoningTokens = nil
+            u.cachedPromptTokens = nil
+            sink.usageHUD = u
+          }
+        }
+      }
+      ping()
+      if !running {
+        let wakeRef = state.withLock { $0.wake }
+        if let wakeRef {
+          Task.detached(priority: .userInitiated) {
+            try? await Task.sleep(for: .milliseconds(50))
+            wakeRef.requestRender()
+          }
+        }
+      }
+    }
+  }
+
+  // MARK: - Replay
+
+  /// Replays prior turns from a persisted message list (skips system rows). Used when resuming a session.
+  public func replayPersistedConversation(_ messages: [Components.Schemas.ChatMessage]) {
+    var i = 0
+    while i < messages.count, messages[i].role == .system {
+      i += 1
+    }
+    var toolRoundCounter = 0
+    while i < messages.count {
+      let msg = messages[i]
+      switch msg.role {
+      case .system:
+        i += 1
+      case .user:
+        let t = (msg.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty {
+          recordUserSubmission(trimmedVisible: t)
+        }
+        i += 1
+      case .assistant:
+        let text = msg.content ?? ""
+        let visibleTrimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let calls = msg.toolCalls ?? []
+
+        emit(.enterAssistantSection(.answer, previous: nil))
+        if !text.isEmpty {
+          emit(.appendAssistantText(.answer, text: text))
+        }
+        endReplayedAssistantSection(answerHadVisibleCharacters: !visibleTrimmed.isEmpty)
+
+        if !calls.isEmpty {
+          toolRoundCounter += 1
+          let names = calls.map { $0.function?.name ?? "(tool)" }
+          emit(.toolRoundHeader(round: toolRoundCounter, toolNames: names))
+
+          var k = i + 1
+          var toolBodies: [String: String] = [:]
+          while k < messages.count, messages[k].role == .tool {
+            if let tid = messages[k].toolCallId {
+              toolBodies[tid] = messages[k].content ?? ""
+            }
+            k += 1
+          }
+
+          for tc in calls {
+            let id = tc.id ?? ""
+            let name = tc.function?.name ?? "tool"
+            let args = tc.function?.arguments ?? "{}"
+            let jsonOut = toolBodies[id] ?? ""
+            let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: args)
+            let lines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: jsonOut)
+            emit(.toolInvocation(name: name, argumentSummary: argSummary, outputLines: lines))
+            emit(.blankLine)
+          }
+          i = k
+        } else {
+          i += 1
+        }
+        emit(.blankLine)
+      case .tool:
+        i += 1
+      }
+    }
+  }
+
+  // MARK: - Private helpers
 
   private func appendLine(_ line: TLine) {
     state.withLock { sink in
@@ -221,137 +505,7 @@ public final class SlateTranscriptSink: ScribeAgentOutput, Sendable {
     }
   }
 
-  public func markModelTurnRunning(_ running: Bool) throws {
-    state.withLock { sink in
-      sink.modelBusy = running
-      if running {
-        sink.usageTurnPrompt = 0
-        sink.usageTurnCompletion = 0
-        sink.usageTurnTotal = 0
-        if var u = sink.usageHUD {
-          u.roundPrompt = nil
-          u.roundCompletion = nil
-          u.roundTotal = nil
-          u.turnPrompt = 0
-          u.turnCompletion = 0
-          u.turnTotal = 0
-          u.outputTokensPerSecond = nil
-          u.reasoningTokens = nil
-          u.cachedPromptTokens = nil
-          sink.usageHUD = u
-        }
-      }
-    }
-    ping()
-    // The pump's external-wake throttle (`latest: true`) is supposed to deliver the trailing
-    // tick at the end of a burst, but in practice an SSE stream can call `requestRender()`
-    // 30+ times/sec right up to `markModelTurnRunning(false)` and the throttle window may
-    // happen to be "between" emissions when we flip idle. Without a follow-up, the spinner
-    // stays hot until the next stdin/resize event. Ping again after the throttle interval to
-    // guarantee the UI catches up.
-    if !running {
-      let wakeRef = state.withLock { $0.wake }
-      if let wakeRef {
-        Task.detached(priority: .userInitiated) {
-          try? await Task.sleep(for: .milliseconds(50))
-          wakeRef.requestRender()
-        }
-      }
-    }
-  }
-
-  public func printConfigBanner(baseURL: String, model: String, cwd: String) {
-    state.withLock { sink in
-      sink.banner = BannerSnapshot(baseURL: baseURL, model: model, cwd: cwd)
-    }
-    ping()
-  }
-
-  public func printUserPromptDecoration() {}
-
-  public func enterAssistantStreamSection(
-    _ section: AssistantStreamSection,
-    previous: AssistantStreamSection?
-  ) throws {
-    state.withLock { sink in
-      if previous != nil {
-        if let open = sink.assistantOpenLine {
-          sink.lines.append(open)
-          sink.assistantOpenLine = nil
-        }
-        if previous == .reasoning && section == .answer {
-          sink.lines.append(TLine(spans: []))
-        }
-      } else {
-        if let last = sink.lines.last, slateIsUserSubmissionLine(last) {
-          sink.lines.append(TLine(spans: []))
-        }
-      }
-
-      let header = TLine(
-        spans: [
-          StyledSpan(
-            fg: ScribePalette.purple, bg: ScribePalette.black, bold: false, text: "scribe:")
-        ])
-      sink.lines.append(header)
-      switch section {
-      case .reasoning:
-        sink.lines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false, text: "  · reasoning")
-            ]))
-      case .answer:
-        sink.lines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false, text: "  · answer")
-            ]))
-      }
-      trimIfNeeded(&sink.lines)
-
-      sink.assistantOpenLine = TLine(spans: [])
-    }
-    ping()
-  }
-
-  public func appendAssistantStreamText(_ section: AssistantStreamSection, text: String) throws {
-    let st = Self.style(for: section)
-    let parts = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    for (i, part) in parts.enumerated() {
-      state.withLock { sink in
-        if sink.assistantOpenLine == nil {
-          sink.assistantOpenLine = TLine(spans: [])
-        }
-        Self.appendText(
-          to: &sink.assistantOpenLine!, fg: st.fg, bg: ScribePalette.black, bold: st.bold, text: part)
-        if i + 1 < parts.count {
-          if let open = sink.assistantOpenLine {
-            sink.lines.append(open)
-            sink.assistantOpenLine = TLine(spans: [])
-          }
-        }
-      }
-      ping()
-    }
-  }
-
-  public func finalizeAssistantStreamIfNeeded(streamHadVisibleTokens: Bool) throws {
-    guard streamHadVisibleTokens else { return }
-    state.withLock { sink in
-      if let open = sink.assistantOpenLine {
-        sink.lines.append(open)
-        sink.assistantOpenLine = nil
-      }
-      trimIfNeeded(&sink.lines)
-    }
-    ping()
-  }
-
-  /// Flushes optional open assistant reply after a streamed-style replay (`enterAssistantStreamSection` + optional `appendAssistantStreamText`).
-  public func endReplayedAssistantSection(answerHadVisibleCharacters: Bool) throws {
+  private func endReplayedAssistantSection(answerHadVisibleCharacters: Bool) {
     state.withLock { sink in
       if let open = sink.assistantOpenLine {
         let hasSpanText = open.spans.contains { !$0.text.isEmpty }
@@ -360,206 +514,6 @@ public final class SlateTranscriptSink: ScribeAgentOutput, Sendable {
         }
         sink.assistantOpenLine = nil
       }
-      trimIfNeeded(&sink.lines)
-    }
-    ping()
-  }
-
-  /// Replays prior turns from a persisted message list (skips system rows). Used when resuming a session.
-  public func replayPersistedConversation(_ messages: [Components.Schemas.ChatMessage]) throws {
-    var i = 0
-    while i < messages.count, messages[i].role == .system {
-      i += 1
-    }
-    var toolRoundCounter = 0
-    while i < messages.count {
-      let msg = messages[i]
-      switch msg.role {
-      case .system:
-        i += 1
-      case .user:
-        let t = (msg.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty {
-          recordUserSubmission(trimmedVisible: t)
-        }
-        i += 1
-      case .assistant:
-        let text = msg.content ?? ""
-        let visibleTrimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let calls = msg.toolCalls ?? []
-
-        try enterAssistantStreamSection(.answer, previous: nil)
-        if !text.isEmpty {
-          try appendAssistantStreamText(.answer, text: text)
-        }
-        try endReplayedAssistantSection(answerHadVisibleCharacters: !visibleTrimmed.isEmpty)
-
-        if !calls.isEmpty {
-          toolRoundCounter += 1
-          let names = calls.map { $0.function?.name ?? "(tool)" }
-          try printToolRoundHeader(round: toolRoundCounter, toolNames: names)
-
-          var k = i + 1
-          var toolBodies: [String: String] = [:]
-          while k < messages.count, messages[k].role == .tool {
-            if let tid = messages[k].toolCallId {
-              toolBodies[tid] = messages[k].content ?? ""
-            }
-            k += 1
-          }
-
-          for tc in calls {
-            let id = tc.id ?? ""
-            let name = tc.function?.name ?? "tool"
-            let args = tc.function?.arguments ?? "{}"
-            let jsonOut = toolBodies[id] ?? ""
-            let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: args)
-            let lines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: jsonOut)
-            try printToolInvocation(name: name, argumentSummary: argSummary, outputLines: lines)
-            try printBlankLine()
-          }
-          i = k
-        } else {
-          i += 1
-        }
-        try printBlankLine()
-      case .tool:
-        i += 1
-      }
-    }
-  }
-
-  public func printEmptyAssistantTurn() throws {
-    let lineA = TLine(
-      spans: [
-        StyledSpan(
-          fg: ScribePalette.purple, bg: ScribePalette.black, bold: false, text: "scribe:")
-      ])
-    let lineB = TLine(
-      spans: [
-        StyledSpan(
-          fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false, text: "(empty turn)")
-      ])
-    state.withLock { sink in
-      sink.lines.append(lineA)
-      sink.lines.append(lineB)
-      trimIfNeeded(&sink.lines)
-    }
-    ping()
-  }
-
-  public func emitUsage(
-    usage: Components.Schemas.CompletionUsage?,
-    outputTokensPerSecond: Double?
-  ) throws {
-    guard let usage, let triple = usage.scribeReportedPromptCompletionTotal else { return }
-    state.withLock { sink in
-      sink.usageTurnPrompt += triple.prompt
-      sink.usageTurnCompletion += triple.completion
-      sink.usageTurnTotal += triple.total
-      sink.usageSessionPrompt += triple.prompt
-      sink.usageSessionCompletion += triple.completion
-      sink.usageSessionTotal += triple.total
-      sink.usageHUD = UsageHUDSnapshot(
-        roundPrompt: triple.prompt,
-        roundCompletion: triple.completion,
-        roundTotal: triple.total,
-        turnPrompt: sink.usageTurnPrompt,
-        turnCompletion: sink.usageTurnCompletion,
-        turnTotal: sink.usageTurnTotal,
-        sessionPrompt: sink.usageSessionPrompt,
-        sessionCompletion: sink.usageSessionCompletion,
-        sessionTotal: sink.usageSessionTotal,
-        reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
-        cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
-        outputTokensPerSecond: outputTokensPerSecond
-      )
-    }
-    ping()
-  }
-
-  public func printBlankLine() throws {
-    appendLine(TLine(spans: []))
-  }
-
-  public func printToolRoundHeader(round: Int, toolNames: [String]) throws {
-    let names = toolNames.joined(separator: ", ")
-    let line = TLine(spans: [
-      StyledSpan(
-        fg: ScribePalette.yellow, bg: ScribePalette.black, bold: true,
-        text: "tool round \(round) "),
-      StyledSpan(
-        fg: ScribePalette.toolName, bg: ScribePalette.black, bold: false, text: names),
-    ])
-    appendLine(line)
-  }
-
-  public func printToolInvocation(
-    name: String,
-    argumentSummary: String?,
-    outputLines: [String]
-  ) throws {
-    var spans: [StyledSpan] = [
-      StyledSpan(fg: ScribePalette.yellow, bg: ScribePalette.black, bold: false, text: "▶ \(name)")
-    ]
-    if let argumentSummary {
-      spans.append(
-        StyledSpan(
-          fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
-          text: " \(argumentSummary)"))
-    }
-    appendLine(TLine(spans: spans))
-    for ol in outputLines {
-      let indented =
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: ScribePalette.white, bg: ScribePalette.black, bold: false,
-              text: "  \(ol)")
-          ])
-      appendLine(indented)
-    }
-  }
-
-  public func printMaxToolRoundsExceeded(max: Int) throws {
-    appendLine(
-      TLine(
-        spans: [
-          StyledSpan(
-            fg: ScribePalette.yellow, bg: ScribePalette.black, bold: false,
-            text: "Stopped: max tool rounds (\(max)) exceeded.")
-        ]))
-  }
-
-  public func printSkippedUnreadableStreamLine() throws {
-    appendLine(
-      TLine(
-        spans: [
-          StyledSpan(
-            fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
-            text: "(skipped one stream line: not valid completion JSON)")
-        ]))
-  }
-
-  public func printHarnessRunError(_ error: Error) throws {
-    appendLine(
-      TLine(
-        spans: [
-          StyledSpan(
-            fg: ScribePalette.red, bg: ScribePalette.black, bold: false,
-            text: "error: \(error)")
-        ]))
-  }
-
-  public func printTurnInterrupted() throws {
-    state.withLock { sink in
-      sink.lines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: ScribePalette.grayDim, bg: ScribePalette.black, bold: false,
-              text: "(interrupted)")
-          ]))
       trimIfNeeded(&sink.lines)
     }
     ping()
@@ -617,8 +571,6 @@ internal enum TranscriptLayout {
     }
 
     flush()
-    // Strings that are only U+0020 spaces split into empty chunks above, leaving `lines` empty.
-    // That drops blank transcript rows (`you:` continuation with no trailing text).
     if lines.isEmpty, !text.isEmpty {
       var remainder = Substring(text)
       while remainder.count > width {
@@ -631,7 +583,6 @@ internal enum TranscriptLayout {
     return lines
   }
 
-  /// Wrapped display lines for the input buffer (logical newlines + word wrap).
   static func inputVisualLines(from buffer: String, textWidth: Int) -> [String] {
     guard textWidth > 0 else { return buffer.isEmpty ? [""] : [] }
     if buffer.isEmpty { return [""] }
@@ -643,7 +594,6 @@ internal enum TranscriptLayout {
     return rows
   }
 
-  /// Flattens styled transcript lines into wrapped rows of ``TLine``.
   static func flattenedRows(from lines: [TLine], width: Int) -> [TLine] {
     guard width > 0 else { return [] }
     var out: [TLine] = []
@@ -703,7 +653,6 @@ internal enum TranscriptLayout {
   }
 }
 
-/// Helper to append one character span (file-private linkage to avoid exposing on sink).
 internal func SlateTranscriptSinkAppendSpan(
   _ line: inout TLine, fg: TerminalRGB, bg: TerminalRGB, bold: Bool, char: Character
 ) {

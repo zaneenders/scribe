@@ -202,11 +202,7 @@ internal final class SlateChatHost {
         self.renderWake = wake
         let resumeSnapshot = self.resumeArchive
         if let resumed = resumeSnapshot {
-          do {
-            try sink.replayPersistedConversation(resumed.messages)
-          } catch {
-            try? sink.printHarnessRunError(error)
-          }
+          sink.replayPersistedConversation(resumed.messages)
           self.flattenCache = TranscriptFlattenCache()
         }
 
@@ -259,7 +255,7 @@ internal final class SlateChatHost {
               configuration: configuration,
               client: client,
               systemPrompt: systemPrompt,
-              sink: sink,
+              onEvent: { event in sink.emit(event) },
               readUserLine: {
                 // Record the submission in scrollback exactly when the coordinator picks it up,
                 // so messages held in the queued-tray (during a busy turn) appear in scrollback
@@ -278,7 +274,7 @@ internal final class SlateChatHost {
               log: sessionLog
             )
           } catch {
-            try? sink.printHarnessRunError(error)
+            sink.emit(.harnessError(String(describing: error)))
             sessionLog.error(
               """
               event=chat.coordinator.fail \

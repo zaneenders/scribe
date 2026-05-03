@@ -26,7 +26,7 @@ public enum ScribeAgentCoordinator {
     configuration: AgentConfig,
     client: Client,
     systemPrompt: String,
-    sink: any ScribeAgentOutput,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     readUserLine: @escaping @Sendable () async -> String?,
     initialConversation: [Components.Schemas.ChatMessage]? = nil,
     onConversationPersist: (@Sendable ([Components.Schemas.ChatMessage]) -> Void)? = nil,
@@ -35,11 +35,11 @@ public enum ScribeAgentCoordinator {
     log: Logger
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
-    sink.printConfigBanner(
+    onEvent(.configBanner(
       baseURL: configuration.openAIBaseURL,
       model: configuration.agentModel,
       cwd: cwd
-    )
+    ))
 
     var history: [Components.Schemas.ChatMessage]
     if let initialConversation, !initialConversation.isEmpty {
@@ -77,7 +77,7 @@ public enum ScribeAgentCoordinator {
     )
 
     let harness = AgentHarness(
-      output: sink,
+      onEvent: onEvent,
       client: client,
       model: configuration.agentModel,
       maxToolRounds: configuration.agentMaxToolRounds
@@ -85,7 +85,6 @@ public enum ScribeAgentCoordinator {
 
     var turnIndex = 0
     while true {
-      sink.printUserPromptDecoration()
       guard let line = await readUserLine() else {
         log.info("event=chat.user.eof reason=stdin-closed")
         break
@@ -119,9 +118,9 @@ public enum ScribeAgentCoordinator {
       )
 
       prepareModelTurnStart()
-      try sink.markModelTurnRunning(true)
+      onEvent(.modelTurnRunning(true))
       defer {
-        try? sink.markModelTurnRunning(false)
+        onEvent(.modelTurnRunning(false))
       }
       let turnStart = Date()
       do {
@@ -162,7 +161,7 @@ public enum ScribeAgentCoordinator {
           elapsed_ms=\(elapsedMs)
           """
         )
-        try sink.printTurnInterrupted()
+        onEvent(.turnInterrupted)
       } catch {
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
         log.error(
@@ -174,7 +173,7 @@ public enum ScribeAgentCoordinator {
           err="\(String(describing: error))"
           """
         )
-        try sink.printHarnessRunError(error)
+        onEvent(.harnessError(String(describing: error)))
         if history.last?.role == .user {
           history.removeLast()
         }
@@ -197,14 +196,14 @@ public enum ScribeAgentCoordinator {
     configuration: AgentConfig,
     client: Client,
     systemPrompt: String,
-    sink: any ScribeAgentOutput
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
   ) async throws {
     let sessionId = UUID()
     try await runInteractive(
       configuration: configuration,
       client: client,
       systemPrompt: systemPrompt,
-      sink: sink,
+      onEvent: onEvent,
       readUserLine: {
         await Task.detached(priority: .userInitiated) { readLine() }.value
       },
@@ -222,7 +221,7 @@ public enum ScribeAgentCoordinator {
     client: Client,
     systemPrompt: String,
     request: ScribeAgentRequest,
-    sink: any ScribeAgentOutput
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
   ) async -> ScribeAgentResponse {
     var history: [Components.Schemas.ChatMessage] = [
       .init(
@@ -241,7 +240,7 @@ public enum ScribeAgentCoordinator {
       ),
     ]
     let harness = AgentHarness(
-      output: sink,
+      onEvent: onEvent,
       client: client,
       model: configuration.agentModel,
       maxToolRounds: configuration.agentMaxToolRounds
