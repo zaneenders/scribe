@@ -142,7 +142,7 @@ extension AgentConfig {
       "scribe-\(sessionId.uuidString).log", isDirectory: false)
 
     if !FileManager.default.fileExists(atPath: fileURL.path) {
-      FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+      _ = FileManager.default.createFile(atPath: fileURL.path, contents: nil)
     }
     guard let fileHandle = try? FileHandle(forUpdating: fileURL) else {
       // Last-resort fallback: emit to stderr if we can't open the per-session file.
