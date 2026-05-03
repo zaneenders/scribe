@@ -199,6 +199,7 @@ internal final class SlateChatHost {
     await slate.start(
       prepare: { [self] wake in
         sink.installWake(wake)
+        sink.setContextWindow(self.configuration.contextWindow)
         self.renderWake = wake
         let resumeSnapshot = self.resumeArchive
         if let resumed = resumeSnapshot {

@@ -47,19 +47,39 @@ private func slateIsUserSubmissionLine(_ line: TLine) -> Bool {
   slateIsYouTranscriptHeaderLine(line) || slateIsUserTranscriptBodyLine(line)
 }
 
+/// Snapshot of token-usage counters rendered in the upper‑right HUD strip.
+///
+/// Two scopes are tracked:
+/// - **Round** – the single most recent API response (one HTTP request/response pair).
+/// - **Turn** – the sum of every API round triggered by the current user message
+///   (including tool‑call loops). Reset to zero when a new user turn starts
+///   (`.modelTurnRunning(true)`).
+/// - **Session** – the cumulative total across all turns since `scribe chat` began.
+///   Never reset during a session.
 internal struct UsageHUDSnapshot: Equatable {
+  /// Prompt tokens in the most recent API round.
   var roundPrompt: Int?
+  /// Completion tokens in the most recent API round.
   var roundCompletion: Int?
+  /// Total tokens in the most recent API round.
   var roundTotal: Int?
+  /// Prompt tokens summed across all API rounds in the current user turn.
   var turnPrompt: Int
+  /// Completion tokens summed across all API rounds in the current user turn.
   var turnCompletion: Int
+  /// Total tokens summed across all API rounds in the current user turn.
   var turnTotal: Int
+  /// Prompt tokens summed across every turn in the current chat session.
   var sessionPrompt: Int
+  /// Completion tokens summed across every turn in the current chat session.
   var sessionCompletion: Int
+  /// Total tokens summed across every turn in the current chat session.
   var sessionTotal: Int
   var reasoningTokens: Int?
   var cachedPromptTokens: Int?
   var outputTokensPerSecond: Double?
+  var contextWindow: Int?
+  var contextWindowUsedPercent: Int?
 }
 
 internal struct BannerSnapshot: Equatable {
@@ -81,6 +101,7 @@ private struct SinkState {
   var usageSessionPrompt: Int = 0
   var usageSessionCompletion: Int = 0
   var usageSessionTotal: Int = 0
+  var contextWindow: Int?
   var banner: BannerSnapshot?
   var queuedTrayText: String? = nil
 }
@@ -166,6 +187,12 @@ public final class SlateTranscriptSink: Sendable {
 
   internal func queuedTrayTextSnapshot() -> String? {
     state.withLock { $0.queuedTrayText }
+  }
+
+  public func setContextWindow(_ value: Int?) {
+    state.withLock { sink in
+      sink.contextWindow = value
+    }
   }
 
   // MARK: - Event dispatch
@@ -271,6 +298,9 @@ public final class SlateTranscriptSink: Sendable {
       ping()
 
     case .usage(let usage, let tps):
+      // Accumulate into both the turn-level totals (reset per user message)
+      // and the session-level totals (never reset).  One user turn can produce
+      // several `.usage` events when tool calls force multiple LLM rounds.
       guard let triple = usage.scribeReportedPromptCompletionTotal else { break }
       state.withLock { sink in
         sink.usageTurnPrompt += triple.prompt
@@ -279,6 +309,10 @@ public final class SlateTranscriptSink: Sendable {
         sink.usageSessionPrompt += triple.prompt
         sink.usageSessionCompletion += triple.completion
         sink.usageSessionTotal += triple.total
+        let pct: Int? = {
+          guard let cw = sink.contextWindow, cw > 0, triple.prompt > 0 else { return nil }
+          return min(100, Int(Double(triple.prompt) / Double(cw) * 100))
+        }()
         sink.usageHUD = UsageHUDSnapshot(
           roundPrompt: triple.prompt,
           roundCompletion: triple.completion,
@@ -291,7 +325,9 @@ public final class SlateTranscriptSink: Sendable {
           sessionTotal: sink.usageSessionTotal,
           reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
           cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
-          outputTokensPerSecond: tps
+          outputTokensPerSecond: tps,
+          contextWindow: sink.contextWindow,
+          contextWindowUsedPercent: pct
         )
       }
       ping()
@@ -375,6 +411,9 @@ public final class SlateTranscriptSink: Sendable {
       state.withLock { sink in
         sink.modelBusy = running
         if running {
+          // New user turn: reset turn-level counters.
+          // Session counters are intentionally left alone — they continue
+          // accumulating across the entire chat session.
           sink.usageTurnPrompt = 0
           sink.usageTurnCompletion = 0
           sink.usageTurnTotal = 0

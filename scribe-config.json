@@ -5,7 +5,9 @@
   },
   "agent": {
     "model": "gemma4:e2b",
-    "maxToolRounds": 256
+    "maxToolRounds": 256,
+    "contextWindow": 128000,
+    "contextWindowThreshold": 0.8
   },
   "logging": {
     "level": "trace",

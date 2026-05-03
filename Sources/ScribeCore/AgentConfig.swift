@@ -5,12 +5,15 @@ import Logging
 /// Dotted keys in `scribe-config.json` for ``ConfigReader`` (matches nested JSON paths).
 /// All application settings are read from that file (see ``AgentConfig/load()``); there are no separate secret lookup paths and keys are not marked `isSecret` (so configuration access logs show values as read).
 ///
-/// Keys include `openai.*`, `agent.*`, `logging.level` (see ``ScribeLogLevel``), and required `logging.storage` (base directory; `logs/` and `sessions/` subdirectories are created under it).
+/// **Note for future code:** Every key declared in this enum is treated as *required* by ``AgentConfig/load()``.
+/// If you add a new key here, make sure the corresponding `fetchRequired*` call exists in `load()` and that every test constructor and `scribe-config.json` is updated.
 public enum ScribeConfigBinding {
   public static let openAIBaseURL: ConfigKey = "openai.baseUrl"
   public static let openAIAPIKey: ConfigKey = "openai.apiKey"
   public static let agentModel: ConfigKey = "agent.model"
   public static let agentMaxToolRounds: ConfigKey = "agent.maxToolRounds"
+  public static let contextWindow: ConfigKey = "agent.contextWindow"
+  public static let contextWindowThreshold: ConfigKey = "agent.contextWindowThreshold"
   public static let loggingLevel: ConfigKey = "logging.level"
   /// Base directory for all Scribe storage. `logs/` and `sessions/` subdirectories are created under it automatically. Relative paths resolve against the process working directory when the config is loaded. Required.
   public static let loggingStorage: ConfigKey = "logging.storage"
@@ -23,6 +26,8 @@ public struct AgentConfig: Sendable {
   public var openAIAPIKey: String?
   public var agentModel: String
   public var agentMaxToolRounds: Int
+  public var contextWindow: Int
+  public var contextWindowThreshold: Double
   public var logLevel: ScribeLogLevel
   /// Absolute path of the directory where ``makeSessionLogger(sessionId:)`` appends log files
   /// (`scribe-{uuid}.log`, one per Scribe invocation; no separate diagnostics file).
@@ -37,6 +42,8 @@ public struct AgentConfig: Sendable {
     openAIAPIKey: String?,
     agentModel: String,
     agentMaxToolRounds: Int,
+    contextWindow: Int,
+    contextWindowThreshold: Double,
     logLevel: ScribeLogLevel,
     logDirectoryPath: String,
     chatSessionsDirectoryPath: String,
@@ -46,6 +53,8 @@ public struct AgentConfig: Sendable {
     self.openAIAPIKey = openAIAPIKey
     self.agentModel = agentModel
     self.agentMaxToolRounds = agentMaxToolRounds
+    self.contextWindow = contextWindow
+    self.contextWindowThreshold = contextWindowThreshold
     self.logLevel = logLevel
     self.logDirectoryPath = logDirectoryPath
     self.chatSessionsDirectoryPath = chatSessionsDirectoryPath
@@ -85,6 +94,24 @@ public struct AgentConfig: Sendable {
       )
     }
     let maxRounds = try await reader.fetchRequiredInt(forKey: ScribeConfigBinding.agentMaxToolRounds)
+
+    let contextWindow = try await reader.fetchRequiredInt(forKey: ScribeConfigBinding.contextWindow)
+    guard contextWindow > 0 else {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.contextWindow.description,
+        reason:
+          "`\(ScribeConfigBinding.contextWindow.description)` must be a positive integer in `\(configFileName)`."
+      )
+    }
+
+    let contextWindowThreshold = try await reader.fetchRequiredDouble(forKey: ScribeConfigBinding.contextWindowThreshold)
+    guard contextWindowThreshold > 0 else {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.contextWindowThreshold.description,
+        reason:
+          "`\(ScribeConfigBinding.contextWindowThreshold.description)` must be a number greater than 0 in `\(configFileName)`."
+      )
+    }
 
     let apiKey: String
     do {
@@ -130,6 +157,8 @@ public struct AgentConfig: Sendable {
       openAIAPIKey: resolvedAPIKey,
       agentModel: model,
       agentMaxToolRounds: maxRounds,
+      contextWindow: contextWindow,
+      contextWindowThreshold: contextWindowThreshold,
       logLevel: logLevel,
       logDirectoryPath: logDirectoryPath,
       chatSessionsDirectoryPath: chatSessionsDirectoryPath,

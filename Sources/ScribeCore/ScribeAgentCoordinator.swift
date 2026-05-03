@@ -77,8 +77,20 @@ public enum ScribeAgentCoordinator {
       """
     )
 
+    let tracker = TokenTracker(
+      contextWindow: configuration.contextWindow,
+      threshold: configuration.contextWindowThreshold
+    )
+
+    let wrappedOnEvent: @Sendable (TranscriptEvent) -> Void = { event in
+      if case .usage(let usage, _) = event {
+        tracker.accumulate(usage: usage)
+      }
+      onEvent(event)
+    }
+
     let harness = AgentHarness(
-      onEvent: onEvent,
+      onEvent: wrappedOnEvent,
       client: client,
       model: configuration.agentModel
     )
@@ -93,7 +105,7 @@ public enum ScribeAgentCoordinator {
       harness: harness,
       executor: executor,
       maxToolRounds: configuration.agentMaxToolRounds,
-      onEvent: onEvent
+      onEvent: wrappedOnEvent
     )
 
     var turnIndex = 0
@@ -164,6 +176,7 @@ public enum ScribeAgentCoordinator {
             """
           )
         }
+        tracker.logStatus(logger: log)
       } catch is AgentTurnInterruptedError {
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
         log.notice(
