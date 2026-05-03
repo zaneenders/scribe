@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import Synchronization
 
 /// Severity-ordered levels for `logging.level` in `scribe-config.json`.
 ///
@@ -37,8 +38,8 @@ public enum ScribeLogLevel: String, Sendable, CaseIterable {
 
 // MARK: - swift-log handlers
 
-final class LockedDataWriter: @unchecked Sendable {
-  private let lock = NSLock()
+final class LockedDataWriter: Sendable {
+  private let mutex = Mutex(())
   private let emit: @Sendable (Data) -> Void
 
   init(_ emit: @escaping @Sendable (Data) -> Void) {
@@ -46,13 +47,11 @@ final class LockedDataWriter: @unchecked Sendable {
   }
 
   func write(_ data: Data) {
-    lock.lock()
-    defer { lock.unlock() }
-    emit(data)
+    mutex.withLock { _ in emit(data) }
   }
 }
 
-final class FileSink: @unchecked Sendable {
+final class FileSink: Sendable {
   private let handle: FileHandle
 
   init(handle: FileHandle) {
@@ -70,28 +69,15 @@ final class FileSink: @unchecked Sendable {
   }
 }
 
-/// Lock-protected wrapper around `ISO8601DateFormatter` so a single shared instance can be
-/// reused from many tasks under strict concurrency. ``ISO8601DateFormatter`` does not conform
-/// to `Sendable`; serializing access here keeps the format string cached without paying the
-/// per-call setup cost on every log line.
-private final class ScribeLogTimestampFormatter: @unchecked Sendable {
-  private let lock = NSLock()
-  private let inner: ISO8601DateFormatter
-
-  init() {
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    self.inner = f
-  }
-
-  func string(from date: Date) -> String {
-    lock.lock()
-    defer { lock.unlock() }
-    return inner.string(from: date)
-  }
-}
-
-private let scribeLogTimestampFormatter = ScribeLogTimestampFormatter()
+/// Lock-protected `ISO8601DateFormatter` so a single shared instance can be reused from many
+/// tasks under strict concurrency. ``ISO8601DateFormatter`` does not conform to `Sendable`;
+/// wrapping it in `Mutex` serializes access and keeps the format string cached without paying
+/// the per-call setup cost on every log line.
+private let scribeLogTimestampFormatter: Mutex<ISO8601DateFormatter> = {
+  let formatter = ISO8601DateFormatter()
+  formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  return Mutex(formatter)
+}()
 
 /// One log line per call, formatted as
 /// `<iso8601-ms> [<level>] <message>` so each line is timestamped and easy to grep,
@@ -113,7 +99,7 @@ struct ScribeLineLogHandler: LogHandler {
     if let error = event.error {
       text += " err=\"\(error)\""
     }
-    let timestamp = scribeLogTimestampFormatter.string(from: Date())
+    let timestamp = scribeLogTimestampFormatter.withLock { $0.string(from: Date()) }
     let line = "\(timestamp) [\(event.level.rawValue)] \(text)\n"
     dataWriter.write(Data(line.utf8))
   }
