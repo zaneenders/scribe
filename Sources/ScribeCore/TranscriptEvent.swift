@@ -20,7 +20,7 @@ public enum TranscriptEvent: Sendable {
   case toolInvocation(name: String, argumentSummary: String?, outputLines: [String])
   case maxToolRoundsExceeded(max: Int)
   case skippedUnreadableStreamLine
-  case harnessError(String)
+  case harnessError(ScribeError)
   case turnInterrupted
   case modelTurnRunning(Bool)
 }

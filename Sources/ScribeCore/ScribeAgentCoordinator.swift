@@ -52,7 +52,7 @@ public enum ScribeAgentCoordinator {
           first_role=\(String(describing: history.first?.role))
           """
         )
-        throw AgentAPIError(description: "Resumed conversation must begin with a system message.")
+        throw ScribeError.sessionCorrupted(reason: "Resumed conversation must begin with a system message.")
       }
     } else {
       history = [
@@ -164,16 +164,17 @@ public enum ScribeAgentCoordinator {
         onEvent(.turnInterrupted)
       } catch {
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
+        let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
         log.error(
           """
           event=agent.turn.end \
           turn=\(turnIndex) \
           status=error \
           elapsed_ms=\(elapsedMs) \
-          err="\(String(describing: error))"
+          err="\(scribeError.errorDescription ?? String(describing: scribeError))"
           """
         )
-        onEvent(.harnessError(String(describing: error)))
+        onEvent(.harnessError(scribeError))
         if history.last?.role == .user {
           history.removeLast()
         }
@@ -280,24 +281,24 @@ public enum ScribeAgentCoordinator {
         """
       )
       return .success(assistant: text)
-    } catch let e as AgentAPIError {
-      ipcLog.error(
-        """
-        event=ipc.session.end \
-        status=error \
-        err="\(e.errorDescription ?? String(describing: e))"
-        """
-      )
-      return .failure(e.errorDescription ?? String(describing: e))
-    } catch {
-      ipcLog.error(
-        """
-        event=ipc.session.end \
-        status=error \
-        err="\(String(describing: error))"
-        """
-      )
-      return .failure(String(describing: error))
-    }
+      } catch let e as ScribeError {
+        ipcLog.error(
+          """
+          event=ipc.session.end \
+          status=error \
+          err="\(e.errorDescription ?? String(describing: e))"
+          """
+        )
+        return .failure(e.errorDescription ?? String(describing: e))
+      } catch {
+        ipcLog.error(
+          """
+          event=ipc.session.end \
+          status=error \
+          err="\(String(describing: error))"
+          """
+        )
+        return .failure(String(describing: error))
+      }
   }
 }

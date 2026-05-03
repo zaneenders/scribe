@@ -349,13 +349,13 @@ public final class SlateTranscriptSink: Sendable {
               text: "(skipped one stream line: not valid completion JSON)")
           ]))
 
-    case .harnessError(let errorText):
+    case .harnessError(let error):
       appendLine(
         TLine(
           spans: [
             StyledSpan(
               fg: ScribePalette.red, bg: ScribePalette.black, bold: false,
-              text: "error: \(errorText)")
+              text: "error: \(error.errorDescription ?? String(describing: error))")
           ]))
 
     case .turnInterrupted:

@@ -44,8 +44,9 @@ struct Chat: AsyncParsableCommand {
     let base = config.openAIBaseURL
     let token = config.openAIAPIKey
     guard let serverURL = URL(string: base) else {
-      throw AgentAPIError(
-        description:
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.openAIBaseURL.description,
+        reason:
           "Invalid \(ScribeConfigBinding.openAIBaseURL.description) in `scribe-config.json`. Use host only, no `/v1` (e.g. http://127.0.0.1:11434 for Ollama)."
       )
     }

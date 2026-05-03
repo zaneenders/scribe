@@ -59,8 +59,9 @@ public struct AgentConfig: Sendable {
     do {
       fileProvider = try await FileProvider<JSONSnapshot>(filePath: configPath.configurationFilePath)
     } catch {
-      throw AgentAPIError(
-        description:
+      throw ScribeError.configuration(
+        key: nil,
+        reason:
           "Could not load configuration at \(configPath). Create `\(configFileName)` in `~`, the current directory (or any ancestor), or set SCRIBE_CONFIG_PATH to a JSON file path. (\(error))"
       )
     }
@@ -69,15 +70,17 @@ public struct AgentConfig: Sendable {
 
     let baseURL = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.openAIBaseURL)
     guard !baseURL.isEmpty else {
-      throw AgentAPIError(
-        description:
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.openAIBaseURL.description,
+        reason:
           "\(ScribeConfigBinding.openAIBaseURL.description) must be a non-empty string in `\(configFileName)`."
       )
     }
     let model = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.agentModel)
     guard !model.isEmpty else {
-      throw AgentAPIError(
-        description:
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.agentModel.description,
+        reason:
           "\(ScribeConfigBinding.agentModel.description) must be a non-empty string in `\(configFileName)`."
       )
     }
@@ -87,8 +90,9 @@ public struct AgentConfig: Sendable {
     do {
       apiKey = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.openAIAPIKey)
     } catch {
-      throw AgentAPIError(
-        description:
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.openAIAPIKey.description,
+        reason:
           "`\(ScribeConfigBinding.openAIAPIKey.description)` must be present in `\(configFileName)` (use \"\" when no API key is required, e.g. local Ollama). Underlying error: \(error)"
       )
     }
@@ -98,8 +102,9 @@ public struct AgentConfig: Sendable {
     let levelRaw = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.loggingLevel)
     guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
       let allowed = ScribeLogLevel.allCases.map(\.rawValue).joined(separator: ", ")
-      throw AgentAPIError(
-        description:
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.loggingLevel.description,
+        reason:
           "`\(ScribeConfigBinding.loggingLevel.description)` must be one of \(allowed) in `\(configFileName)`."
       )
     }
@@ -107,8 +112,9 @@ public struct AgentConfig: Sendable {
     let storageRaw = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.loggingStorage)
       .trimmingCharacters(in: .whitespacesAndNewlines)
     guard !storageRaw.isEmpty else {
-      throw AgentAPIError(
-        description:
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.loggingStorage.description,
+        reason:
           "`\(ScribeConfigBinding.loggingStorage.description)` must be a non-empty path in `\(configFileName)`."
       )
     }

@@ -284,11 +284,12 @@ internal final class SlateChatHost {
               log: sessionLog
             )
           } catch {
-            sink.emit(.harnessError(String(describing: error)))
+            let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
+            sink.emit(.harnessError(scribeError))
             sessionLog.error(
               """
               event=chat.coordinator.fail \
-              err="\(String(describing: error))"
+              err="\(scribeError.errorDescription ?? String(describing: scribeError))"
               """
             )
           }

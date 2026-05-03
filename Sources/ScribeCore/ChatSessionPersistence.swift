@@ -174,7 +174,7 @@ public enum ChatSessionStore {
     }
 
     guard messages.first?.role == .system else {
-      throw AgentAPIError(description: "Session file missing leading system message.")
+      throw ScribeError.sessionCorrupted(reason: "Session file missing leading system message.")
     }
 
     let updatedAt =
@@ -197,13 +197,13 @@ public enum ChatSessionStore {
   public static func resolveResumeURL(specifier: String, configuration: AgentConfig) throws -> URL {
     let trimmed = specifier.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
-      throw AgentAPIError(description: "Empty --resume value.")
+      throw ScribeError.invalidInput(message: "Empty --resume value.")
     }
 
     if trimmed.lowercased() == "latest" {
       let files = try listSessionFiles(configuration: configuration)
       guard let first = files.first else {
-        throw AgentAPIError(description: "No saved chat sessions found (use `scribe chat --sessions`).")
+        throw ScribeError.resumeNotFound(specifier: "latest")
       }
       return first
     }
@@ -238,9 +238,9 @@ public enum ChatSessionStore {
     let matches = contents.filter { $0.lastPathComponent.lowercased().hasPrefix(lower) }
     guard matches.count == 1, let only = matches.first else {
       if matches.isEmpty {
-        throw AgentAPIError(description: "No session matches “\(trimmed)”. Try `scribe chat --sessions`.")
+        throw ScribeError.resumeNotFound(specifier: trimmed)
       }
-      throw AgentAPIError(description: "Ambiguous session prefix “\(trimmed)”; use a longer id or a full path.")
+      throw ScribeError.resumeAmbiguous(specifier: trimmed)
     }
     return only
   }
