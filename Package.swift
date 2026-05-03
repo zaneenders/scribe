@@ -12,7 +12,7 @@ let package = Package(
     .library(name: "ScribeLLM", targets: ["ScribeLLM"]),
   ],
   dependencies: [
-    .package(path: "../slate"),
+    .package(url: "https://github.com/zaneenders/slate", revision: "1e183f4"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
     .package(url: "https://github.com/swift-server/swift-openapi-async-http-client", from: "1.0.0"),
