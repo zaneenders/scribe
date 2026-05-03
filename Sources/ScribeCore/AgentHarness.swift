@@ -88,16 +88,18 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public var client: Client
   public var model: String
   private let onEvent: @Sendable (TranscriptEvent) -> Void
-  private let tools = AgentTools.all()
+  private let tools: [Components.Schemas.ChatTool]
 
   public init(
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     client: Client,
-    model: String
+    model: String,
+    tools: [Components.Schemas.ChatTool]
   ) {
     self.onEvent = onEvent
     self.client = client
     self.model = model
+    self.tools = tools
   }
 
   public func runRound(

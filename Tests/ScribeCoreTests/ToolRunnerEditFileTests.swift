@@ -5,7 +5,7 @@ import Testing
 @Suite
 struct ToolRunnerEditFileTests {
   @Test func replacesUniqueOccurrence() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("note.txt")
       try "hello world".write(to: fileURL, atomically: true, encoding: .utf8)
@@ -27,7 +27,7 @@ struct ToolRunnerEditFileTests {
   }
 
   @Test func failsWhenOldStringEmpty() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("a.txt")
       try "x".write(to: fileURL, atomically: true, encoding: .utf8)
@@ -45,7 +45,7 @@ struct ToolRunnerEditFileTests {
   }
 
   @Test func failsWhenOldStringNotFound() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("b.txt")
       try "abc".write(to: fileURL, atomically: true, encoding: .utf8)
@@ -63,7 +63,7 @@ struct ToolRunnerEditFileTests {
   }
 
   @Test func failsWhenOldStringNotUnique() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("c.txt")
       try "foo foo".write(to: fileURL, atomically: true, encoding: .utf8)
@@ -81,7 +81,7 @@ struct ToolRunnerEditFileTests {
   }
 
   @Test func missingFileFails() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let bogus =
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-edit-missing-\(UUID().uuidString).txt")

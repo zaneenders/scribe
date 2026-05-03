@@ -47,7 +47,9 @@ enum SlateChat {
     resumeArchive: ChatSessionArchive? = nil,
     sessionPersistenceURL: URL,
     sessionId: UUID,
-    log: Logger
+    log: Logger,
+    toolExecutor: ToolExecutor,
+    toolDefinitions: [Components.Schemas.ChatTool]
   ) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
       log.error("event=chat.session.fail reason=stdin-not-tty")
@@ -69,7 +71,9 @@ enum SlateChat {
         sessionPersistenceURL: sessionPersistenceURL,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
-        log: log
+        log: log,
+        toolExecutor: toolExecutor,
+        toolDefinitions: toolDefinitions
       )
       do {
         try await host.run()

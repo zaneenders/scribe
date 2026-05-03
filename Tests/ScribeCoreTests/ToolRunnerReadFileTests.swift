@@ -5,7 +5,7 @@ import Testing
 @Suite
 struct ToolRunnerReadFileTests {
   @Test func returnsUtf8ContentWithMetadata() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("sample.txt")
       // Trailing newline produces 3 split parts (alpha, β, "") under
@@ -28,7 +28,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func returnsRequestedSliceWithOffsetAndLimit() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("multi.txt")
       let body = (1...10).map { "line\($0)" }.joined(separator: "\n")
@@ -51,7 +51,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func returnsEmptyContentWhenOffsetPastEnd() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("short.txt")
       let body = "only-line"
@@ -68,7 +68,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func limitZeroMeansNoCap() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("all.txt")
       let body = (1...50).map { "L\($0)" }.joined(separator: "\n")
@@ -85,7 +85,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func missingFileFails() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let bogus =
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-no-such-file-\(UUID().uuidString).txt")
@@ -97,7 +97,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func missingPathFieldFails() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let json = await runner.run(name: "read_file", argumentsJSON: "{}")
     let fail = try decodeFail(json)
     #expect(fail.ok == false)

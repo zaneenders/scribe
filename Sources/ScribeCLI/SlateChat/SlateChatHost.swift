@@ -149,6 +149,8 @@ internal final class SlateChatHost {
   /// All chat events emitted from this host use this logger and the structured
   /// `event=ns.name k=v k=v` format documented in ``docs/chat-input-behavior.md``.
   private let log: Logger
+  private let toolExecutor: ToolExecutor
+  private let toolDefinitions: [Components.Schemas.ChatTool]
 
   init(
     configuration: AgentConfig,
@@ -158,7 +160,9 @@ internal final class SlateChatHost {
     sessionPersistenceURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,
-    log: Logger
+    log: Logger,
+    toolExecutor: ToolExecutor,
+    toolDefinitions: [Components.Schemas.ChatTool]
   ) {
     self.configuration = configuration
     self.client = client
@@ -168,6 +172,8 @@ internal final class SlateChatHost {
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.log = log
+    self.toolExecutor = toolExecutor
+    self.toolDefinitions = toolDefinitions
   }
 
   deinit {
@@ -259,7 +265,8 @@ internal final class SlateChatHost {
         let interruptFlag = self.modelInterruptFlag
         let sessionLog = self.log
         self.coordinatorTask = Task {
-          [configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog] in
+          [configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
+           toolExecutor, toolDefinitions] in
           defer { sink.markCoordinatorFinished() }
           do {
             try await ScribeAgentCoordinator.runInteractive(
@@ -282,7 +289,9 @@ internal final class SlateChatHost {
               onConversationPersist: persist,
               prepareModelTurnStart: { interruptFlag.clear() },
               shouldAbortTurn: { interruptFlag.peek() },
-              log: sessionLog
+              log: sessionLog,
+              toolExecutor: toolExecutor,
+              toolDefinitions: toolDefinitions
             )
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))

@@ -32,7 +32,9 @@ public enum ScribeAgentCoordinator {
     onConversationPersist: (@Sendable ([Components.Schemas.ChatMessage]) -> Void)? = nil,
     prepareModelTurnStart: @escaping @Sendable () -> Void = {},
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
-    log: Logger
+    log: Logger,
+    toolExecutor: ToolExecutor,
+    toolDefinitions: [Components.Schemas.ChatTool]
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
     onEvent(
@@ -92,18 +94,12 @@ public enum ScribeAgentCoordinator {
     let harness = AgentHarness(
       onEvent: wrappedOnEvent,
       client: client,
-      model: configuration.agentModel
+      model: configuration.agentModel,
+      tools: toolDefinitions
     )
-    let executor = ToolExecutor(
-      registry: ToolRegistry(tools: [
-        ShellTool(),
-        ReadFileTool(),
-        WriteFileTool(),
-        EditFileTool(),
-      ]))
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      executor: toolExecutor,
       maxToolRounds: configuration.agentMaxToolRounds,
       onEvent: wrappedOnEvent
     )
@@ -226,6 +222,9 @@ public enum ScribeAgentCoordinator {
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void
   ) async throws {
     let sessionId = UUID()
+    let defaultTools: [any ScribeTool] = [
+      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()
+    ]
     try await runInteractive(
       configuration: configuration,
       client: client,
@@ -238,7 +237,9 @@ public enum ScribeAgentCoordinator {
       onConversationPersist: nil,
       prepareModelTurnStart: {},
       shouldAbortTurn: { false },
-      log: configuration.makeSessionLogger(sessionId: sessionId)
+      log: configuration.makeSessionLogger(sessionId: sessionId),
+      toolExecutor: ToolExecutor(registry: ToolRegistry(tools: defaultTools)),
+      toolDefinitions: AgentTools.all()
     )
   }
 
@@ -248,7 +249,9 @@ public enum ScribeAgentCoordinator {
     client: Client,
     systemPrompt: String,
     request: ScribeAgentRequest,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
+    toolExecutor: ToolExecutor,
+    toolDefinitions: [Components.Schemas.ChatTool]
   ) async -> ScribeAgentResponse {
     var history: [Components.Schemas.ChatMessage] = [
       .init(
@@ -269,18 +272,12 @@ public enum ScribeAgentCoordinator {
     let harness = AgentHarness(
       onEvent: onEvent,
       client: client,
-      model: configuration.agentModel
+      model: configuration.agentModel,
+      tools: toolDefinitions
     )
-    let executor = ToolExecutor(
-      registry: ToolRegistry(tools: [
-        ShellTool(),
-        ReadFileTool(),
-        WriteFileTool(),
-        EditFileTool(),
-      ]))
     let loop = AgentLoop(
       harness: harness,
-      executor: executor,
+      executor: toolExecutor,
       maxToolRounds: configuration.agentMaxToolRounds,
       onEvent: onEvent
     )

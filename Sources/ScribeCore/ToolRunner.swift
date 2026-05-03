@@ -1,15 +1,13 @@
 import Foundation
 
+/// Entry point for tool execution, created in the CLI so custom tools can be
+/// registered before the agent loop starts.
 public struct ToolRunner: Sendable {
-  public init() {}
+  private let executor: ToolExecutor
 
-  private let executor = ToolExecutor(
-    registry: ToolRegistry(tools: [
-      ShellTool(),
-      ReadFileTool(),
-      WriteFileTool(),
-      EditFileTool(),
-    ]))
+  public init(tools: [any ScribeTool]) {
+    self.executor = ToolExecutor(registry: ToolRegistry(tools: tools))
+  }
 
   /// Entry point for the OpenAPI tool loop.
   public func run(name: String, argumentsJSON: String) async -> String {

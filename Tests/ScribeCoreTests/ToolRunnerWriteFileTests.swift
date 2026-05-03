@@ -5,7 +5,7 @@ import Testing
 @Suite
 struct ToolRunnerWriteFileTests {
   @Test func createsFileWithContent() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("out.txt")
       let body = "written_once\nγ\n"
@@ -27,7 +27,7 @@ struct ToolRunnerWriteFileTests {
   }
 
   @Test func overwritesExistingFile() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("overwrite.txt")
       try "old".write(to: fileURL, atomically: true, encoding: .utf8)
@@ -41,7 +41,7 @@ struct ToolRunnerWriteFileTests {
   }
 
   @Test func failsWhenParentDirectoryMissing() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let deep =
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-deep-\(UUID().uuidString)/nope/out.txt")
@@ -53,7 +53,7 @@ struct ToolRunnerWriteFileTests {
   }
 
   @Test func missingContentFieldFails() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("only_path.txt")
       let json = await runner.run(

@@ -23,9 +23,11 @@ private final class FakeHarness: @unchecked Sendable {
   var callCount = 0
   var lastMessagesCount = 0
   let outcomes: [RoundOutcome]
+  let tools: [Components.Schemas.ChatTool]
 
-  init(outcomes: [RoundOutcome]) {
+  init(outcomes: [RoundOutcome], tools: [Components.Schemas.ChatTool] = []) {
     self.outcomes = outcomes
+    self.tools = tools
   }
 
   func nextOutcome() -> RoundOutcome? {

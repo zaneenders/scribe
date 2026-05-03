@@ -5,7 +5,7 @@ import Testing
 @Suite
 struct ToolRunnerShellTests {
   @Test func echoProducesStdout() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/echo scribetest"])
     let json = await runner.run(name: "shell", argumentsJSON: args)
     let out = try decodeShell(json)
@@ -16,7 +16,7 @@ struct ToolRunnerShellTests {
   }
 
   @Test func honorsWorkingDirectory() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let marker = dir.appendingPathComponent("only_here.txt")
       try "cwd_ok".write(to: marker, atomically: true, encoding: .utf8)
@@ -32,7 +32,7 @@ struct ToolRunnerShellTests {
   }
 
   @Test func reportsNonZeroExitWithoutOkFalse() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/sh -c 'exit 7'"])
     let json = await runner.run(name: "shell", argumentsJSON: args)
     let out = try decodeShell(json)
@@ -41,7 +41,7 @@ struct ToolRunnerShellTests {
   }
 
   @Test func emptyCommandFails() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "   "])
     let json = await runner.run(name: "shell", argumentsJSON: args)
     let fail = try decodeFail(json)
@@ -50,7 +50,7 @@ struct ToolRunnerShellTests {
   }
 
   @Test func invalidWorkingDirectoryFails() async throws {
-    let runner = ToolRunner()
+    let runner = ToolRunner(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let bogusDir =
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-no-such-cwd-\(UUID().uuidString)", isDirectory: true)
