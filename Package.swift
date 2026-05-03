@@ -21,6 +21,7 @@ let package = Package(
     .package(url: "https://github.com/swiftlang/swift-subprocess.git", from: "0.4.0"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
+    .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
   ],
   targets: [
     .target(
@@ -59,6 +60,7 @@ let package = Package(
         "ScribeLLM",
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
+        .product(name: "Markdown", package: "swift-markdown"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -70,6 +72,9 @@ let package = Package(
       dependencies: [
         "ScribeCore",
         "ScribeLLM",
+        "ScribeCLI",
+        .product(name: "SlateCore", package: "slate"),
+        .product(name: "Markdown", package: "swift-markdown"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

@@ -37,4 +37,17 @@ enum ScribePalette {
   static let usageSessionSum = TerminalRGB(r: 210, g: 175, b: 255)
 
   static let usageMuted = TerminalRGB(r: 128, g: 128, b: 128)
+
+  // MARK: - Markdown styling (Vibrant Spring)
+
+  static let markdownHeading = TerminalRGB(r: 120, g: 255, b: 180)
+  static let markdownHeadingPrefix = TerminalRGB(r: 100, g: 160, b: 120)
+  static let markdownBold = TerminalRGB(r: 255, g: 200, b: 100)
+  static let markdownItalic = TerminalRGB(r: 255, g: 150, b: 200)
+  static let markdownCode = TerminalRGB(r: 255, g: 240, b: 120)
+  static let markdownCodeBlock = TerminalRGB(r: 255, g: 220, b: 80)
+  static let markdownBlockquote = TerminalRGB(r: 150, g: 220, b: 150)
+  static let markdownListMarker = TerminalRGB(r: 255, g: 130, b: 80)
+  static let markdownLink = TerminalRGB(r: 100, g: 200, b: 255)
+  static let markdownHR = TerminalRGB(r: 120, g: 180, b: 140)
 }

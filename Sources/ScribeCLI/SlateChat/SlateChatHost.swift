@@ -66,6 +66,7 @@ private struct TranscriptFlattenCache {
   var wrapWidth: Int = -1
   var completedLogicalLines: Int = 0
   var completedFlat: [TLine] = []
+  var lastGeneration: Int = -1
 }
 
 // MARK: - Host
@@ -515,12 +516,13 @@ internal final class SlateChatHost {
 
   /// Recomputes word-wrapped transcript rows, reusing flatten work for completed lines across streaming frames.
   private func syncFlattenedTranscript(sink: SlateTranscriptSink, slate: borrowing Slate) -> [TLine] {
-    let (completed, open) = sink.snapshotTranscriptForLayout()
+    let (completed, open, generation) = sink.snapshotTranscriptForLayout()
     let width = slate.cols
 
-    if width != flattenCache.wrapWidth {
+    if width != flattenCache.wrapWidth || generation != flattenCache.lastGeneration {
       flattenCache = TranscriptFlattenCache()
       flattenCache.wrapWidth = width
+      flattenCache.lastGeneration = generation
       flattenCache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
       flattenCache.completedLogicalLines = completed.count
     } else if completed.count < flattenCache.completedLogicalLines {

@@ -14,15 +14,26 @@ import Musl
 
 // MARK: - Styled transcript model
 
-internal struct StyledSpan: Equatable {
-  var fg: TerminalRGB
-  var bg: TerminalRGB
-  var bold: Bool
-  var text: String
+public struct StyledSpan: Equatable, Sendable {
+  public var fg: TerminalRGB
+  public var bg: TerminalRGB
+  public var bold: Bool
+  public var text: String
+
+  public init(fg: TerminalRGB, bg: TerminalRGB, bold: Bool, text: String) {
+    self.fg = fg
+    self.bg = bg
+    self.bold = bold
+    self.text = text
+  }
 }
 
-internal struct TLine: Equatable {
-  var spans: [StyledSpan]
+public struct TLine: Equatable, Sendable {
+  public var spans: [StyledSpan]
+
+  public init(spans: [StyledSpan]) {
+    self.spans = spans
+  }
 }
 
 private let slateUserTranscriptHeader = "you:"
@@ -91,6 +102,11 @@ internal struct BannerSnapshot: Equatable {
 private struct SinkState {
   var lines: [TLine] = []
   var assistantOpenLine: TLine?
+  var assistantOpenLineRaw: String = ""
+  /// Index in `lines` where the current assistant section begins (after headers).
+  var assistantSectionStartIndex: Int?
+  /// Bumps every time `lines` is modified in the middle (not just appended).
+  var lineGeneration: Int = 0
   var wake: ExternalWake?
   var modelBusy: Bool = false
   var coordinatorFinished: Bool = false
@@ -109,8 +125,11 @@ private struct SinkState {
 /// Slate-backed transcript sink: accumulates styled transcript lines and renders them via Slate.
 public final class SlateTranscriptSink: Sendable {
   private let state = Mutex(SinkState())
+  private let markdownRenderer: MarkdownRenderer
 
-  public init() {}
+  public init(markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()) {
+    self.markdownRenderer = markdownRenderer
+  }
 
   private func ping() {
     state.withLock { $0.wake?.requestRender() }
@@ -133,9 +152,9 @@ public final class SlateTranscriptSink: Sendable {
     state.withLock { $0.modelBusy }
   }
 
-  internal func snapshotTranscriptForLayout() -> (completed: [TLine], open: TLine?) {
+  internal func snapshotTranscriptForLayout() -> (completed: [TLine], open: TLine?, lineGeneration: Int) {
     state.withLock { sink in
-      (sink.lines, sink.assistantOpenLine)
+      (sink.lines, sink.assistantOpenLine, sink.lineGeneration)
     }
   }
 
@@ -246,28 +265,39 @@ public final class SlateTranscriptSink: Sendable {
         }
         trimIfNeeded(&sink.lines)
         sink.assistantOpenLine = TLine(spans: [])
+        sink.assistantOpenLineRaw = ""
+        sink.assistantSectionStartIndex = sink.lines.count
       }
       ping()
 
     case .appendAssistantText(let section, let text):
       let st = Self.style(for: section)
-      let parts = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-      for (i, part) in parts.enumerated() {
-        state.withLock { sink in
-          if sink.assistantOpenLine == nil {
-            sink.assistantOpenLine = TLine(spans: [])
-          }
-          Self.appendText(
-            to: &sink.assistantOpenLine!, fg: st.fg, bg: ScribePalette.black, bold: st.bold, text: part)
-          if i + 1 < parts.count {
-            if let open = sink.assistantOpenLine {
-              sink.lines.append(open)
-              sink.assistantOpenLine = TLine(spans: [])
-            }
+      state.withLock { sink in
+        if sink.assistantOpenLine == nil {
+          sink.assistantOpenLine = TLine(spans: [])
+          sink.assistantOpenLineRaw = ""
+        }
+        sink.assistantOpenLineRaw += text
+        let rendered = self.markdownRenderer.render(
+          text: sink.assistantOpenLineRaw,
+          baseFG: st.fg,
+          baseBold: st.bold
+        )
+        if let startIdx = sink.assistantSectionStartIndex {
+          let removeCount = max(0, sink.lines.count - startIdx)
+          if removeCount > 0 {
+            sink.lines.removeLast(removeCount)
+            sink.lineGeneration += 1
           }
         }
-        ping()
+        if rendered.isEmpty {
+          sink.assistantOpenLine = TLine(spans: [])
+        } else {
+          sink.lines.append(contentsOf: rendered.dropLast())
+          sink.assistantOpenLine = rendered.last!
+        }
       }
+      ping()
 
     case .finalizeAssistantStream:
       state.withLock { sink in
@@ -275,6 +305,8 @@ public final class SlateTranscriptSink: Sendable {
           sink.lines.append(open)
           sink.assistantOpenLine = nil
         }
+        sink.assistantOpenLineRaw = ""
+        sink.assistantSectionStartIndex = nil
         trimIfNeeded(&sink.lines)
       }
       ping()
@@ -403,6 +435,9 @@ public final class SlateTranscriptSink: Sendable {
                 fg: ScribePalette.gray, bg: ScribePalette.black, bold: false,
                 text: "(interrupted)")
             ]))
+        sink.assistantOpenLine = nil
+        sink.assistantOpenLineRaw = ""
+        sink.assistantSectionStartIndex = nil
         trimIfNeeded(&sink.lines)
       }
       ping()
@@ -529,18 +564,8 @@ public final class SlateTranscriptSink: Sendable {
 
   private static func style(for section: AssistantStreamSection) -> (fg: TerminalRGB, bold: Bool) {
     switch section {
-    case .reasoning: (ScribePalette.yellowBright, true)
+    case .reasoning: (ScribePalette.grayLight, false)
     case .answer: (ScribePalette.cyan, false)
-    }
-  }
-
-  private static func appendText(to line: inout TLine, fg: TerminalRGB, bg: TerminalRGB, bold: Bool, text: String) {
-    guard !text.isEmpty else { return }
-    if var last = line.spans.last, last.fg == fg, last.bg == bg, last.bold == bold {
-      last.text += text
-      line.spans[line.spans.count - 1] = last
-    } else {
-      line.spans.append(StyledSpan(fg: fg, bg: bg, bold: bold, text: text))
     }
   }
 
@@ -553,6 +578,8 @@ public final class SlateTranscriptSink: Sendable {
         }
         sink.assistantOpenLine = nil
       }
+      sink.assistantOpenLineRaw = ""
+      sink.assistantSectionStartIndex = nil
       trimIfNeeded(&sink.lines)
     }
     ping()
@@ -575,48 +602,67 @@ internal enum TranscriptLayout {
   private static func wrappedPlainLines(_ text: String, width: Int) -> [String] {
     guard width > 0 else { return [] }
     if text.isEmpty { return [""] }
+
+    // Tokenize into alternating word / space sequences so leading/trailing
+    // spaces are preserved.
+    var tokens: [String] = []
+    var i = text.startIndex
+    while i < text.endIndex {
+      if text[i] == " " {
+        var j = i
+        while j < text.endIndex && text[j] == " " {
+          j = text.index(after: j)
+        }
+        tokens.append(String(text[i..<j]))
+        i = j
+      } else {
+        var j = i
+        while j < text.endIndex && text[j] != " " {
+          j = text.index(after: j)
+        }
+        tokens.append(String(text[i..<j]))
+        i = j
+      }
+    }
+
     var lines: [String] = []
     var current = ""
 
     func flush() {
-      if !current.isEmpty {
-        lines.append(current)
-        current = ""
-      }
+      lines.append(current)
+      current = ""
     }
 
-    for word in text.split(separator: " ", omittingEmptySubsequences: false) {
-      let w = String(word)
-      let sep = current.isEmpty ? "" : " "
-      let candidate = current + sep + w
+    for token in tokens {
+      let candidate = current + token
       if candidate.count <= width {
         current = candidate
         continue
       }
 
-      flush()
-
-      if w.count <= width {
-        current = w
-        continue
+      if !current.isEmpty {
+        flush()
       }
 
-      var rest = Substring(w)
-      while !rest.isEmpty {
-        let take = min(width, rest.count)
-        lines.append(String(rest.prefix(take)))
-        rest = rest.dropFirst(take)
+      if token.count <= width {
+        current = token
+      } else {
+        // Token longer than width — must be a word (spaces are always <= width).
+        var rest = Substring(token)
+        while rest.count > width {
+          lines.append(String(rest.prefix(width)))
+          rest = rest.dropFirst(width)
+        }
+        current = String(rest)
       }
     }
 
-    flush()
-    if lines.isEmpty, !text.isEmpty {
-      var remainder = Substring(text)
-      while remainder.count > width {
-        lines.append(String(remainder.prefix(width)))
-        remainder = remainder.dropFirst(width)
-      }
-      lines.append(String(remainder))
+    if !current.isEmpty || !lines.isEmpty {
+      lines.append(current)
+    }
+
+    if lines.isEmpty {
+      lines.append("")
     }
 
     return lines
