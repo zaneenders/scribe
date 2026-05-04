@@ -243,13 +243,17 @@ internal enum SlateChatRenderer {
     return formatUsageInt(n)
   }
 
-  private static func hudSpan(_ fg: TerminalRGB, _ text: String, bg: TerminalRGB, bold: Bool = false) -> TerminalStyledSpan {
+  private static func hudSpan(_ fg: TerminalRGB, _ text: String, bg: TerminalRGB, bold: Bool = false)
+    -> TerminalStyledSpan
+  {
     TerminalStyledSpan(text, foreground: fg, background: bg, flags: bold ? .bold : [])
   }
 
   /// Up to three lines of spans for the upper-right HUD.  When `maxRows` is small the
   /// optional R/cache row is dropped first so totals stay visible.
-  private static func usageHUDSpans(from usage: UsageHUDSnapshot, maxRows: Int, theme: CLITheme) -> [[TerminalStyledSpan]] {
+  private static func usageHUDSpans(from usage: UsageHUDSnapshot, maxRows: Int, theme: CLITheme)
+    -> [[TerminalStyledSpan]]
+  {
     let sep = "  ·  "
     let bg = theme.background
 

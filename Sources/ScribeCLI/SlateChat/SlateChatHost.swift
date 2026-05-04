@@ -168,8 +168,10 @@ internal final class SlateChatHost {
         let interruptFlag = self.modelInterruptFlag
         let sessionLog = self.log
         self.coordinatorTask = Task {
-          [configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
-           tools] in
+          [
+            configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
+            tools
+          ] in
           defer { sink.markCoordinatorFinished() }
           do {
             let client = try configuration.makeClient()
@@ -243,7 +245,8 @@ internal final class SlateChatHost {
               let busy = sink.modelTurnBusy()
               if let queued = self.queuedSubmission {
                 // 1. Pull queued message back into input buffer
-                self.log.debug("""
+                self.log.debug(
+                  """
                   event=chat.user.ctrl-c \
                   action=recall-queue \
                   queue_chars=\(queued.count) \
@@ -255,7 +258,8 @@ internal final class SlateChatHost {
                 self.renderWake?.requestRender()
               } else if busy {
                 // 2. Interrupt in-flight turn
-                self.log.debug("""
+                self.log.debug(
+                  """
                   event=chat.user.ctrl-c \
                   action=interrupt-agent \
                   model_busy=true
@@ -264,7 +268,8 @@ internal final class SlateChatHost {
                 self.renderWake?.requestRender()
               } else {
                 // 3. Exit chat
-                self.log.debug("""
+                self.log.debug(
+                  """
                   event=chat.user.ctrl-c \
                   action=exit \
                   model_busy=false
@@ -300,7 +305,8 @@ internal final class SlateChatHost {
 
             case .shiftEnter:
               self.inputBuffer.append("\n")
-              self.log.debug("""
+              self.log.debug(
+                """
                 event=chat.user.input.newline \
                 source=shift-enter \
                 buffer_chars=\(self.inputBuffer.count) \
@@ -342,7 +348,8 @@ internal final class SlateChatHost {
         // Auto-flush a queued tray message when the agent finishes a turn naturally
         let nowBusy = sink.modelTurnBusy()
         if !nowBusy, self.lastObservedModelBusy, let queued = self.queuedSubmission {
-          self.log.debug("""
+          self.log.debug(
+            """
             event=chat.queue.auto-flush \
             trigger=busy-to-idle \
             chars=\(queued.count)
@@ -390,7 +397,8 @@ internal final class SlateChatHost {
         let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
         let totalMs = prepareMs &+ submitMs
         if totalMs >= 50 {
-          self.log.debug("""
+          self.log.debug(
+            """
             event=chat.render.slow \
             elapsed_ms=\(totalMs) \
             prepare_ms=\(prepareMs) \
@@ -431,7 +439,8 @@ internal final class SlateChatHost {
 
     if trimmed.isEmpty {
       guard let queued = queuedSubmission else {
-        log.debug("""
+        log.debug(
+          """
           event=chat.user.submit \
           kind=noop \
           reason=empty-buffer-no-queue \
@@ -440,7 +449,8 @@ internal final class SlateChatHost {
         return
       }
       let queuedNewlines = queued.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
-      log.debug("""
+      log.debug(
+        """
         event=chat.user.submit \
         kind=interrupt-and-send \
         chars=\(queued.count) \
@@ -459,7 +469,8 @@ internal final class SlateChatHost {
 
     if busy {
       let replacing = queuedSubmission != nil
-      log.debug("""
+      log.debug(
+        """
         event=chat.user.submit \
         kind=queue \
         chars=\(submit.count) \
@@ -471,7 +482,8 @@ internal final class SlateChatHost {
       sink.setQueuedTrayText(submit)
       renderWake?.requestRender()
     } else {
-      log.debug("""
+      log.debug(
+        """
         event=chat.user.submit \
         kind=immediate \
         chars=\(submit.count) \

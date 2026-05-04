@@ -637,9 +637,9 @@ internal enum TranscriptLayout {
             var newLine = TLine(spans: [])
             for (style, ch) in zip(sliceStyles, segment) {
               if let lastIdx = newLine.spans.indices.last,
-                 newLine.spans[lastIdx].fg == style.fg,
-                 newLine.spans[lastIdx].bg == style.bg,
-                 newLine.spans[lastIdx].bold == style.bold
+                newLine.spans[lastIdx].fg == style.fg,
+                newLine.spans[lastIdx].bg == style.bg,
+                newLine.spans[lastIdx].bold == style.bold
               {
                 newLine.spans[lastIdx].text.append(ch)
               } else {
