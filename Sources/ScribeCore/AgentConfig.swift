@@ -4,10 +4,8 @@ import Logging
 import ScribeLLM
 
 /// Dotted keys in `scribe-config.json` for ``ConfigReader`` (matches nested JSON paths).
-/// All application settings are read from that file (see ``AgentConfig/load()``); there are no separate secret lookup paths and keys are not marked `isSecret` (so configuration access logs show values as read).
-///
-/// **Note for future code:** Every key declared in this enum is treated as *required* by ``AgentConfig/load()``.
-/// If you add a new key here, make sure the corresponding `fetchRequired*` call exists in `load()` and that every test constructor and `scribe-config.json` is updated.
+/// All application settings are read from that file (see ``AgentConfig/load()``); there are no
+/// separate secret lookup paths and keys are not marked `isSecret`.
 public enum ScribeConfigBinding {
   public static let openAIBaseURL: ConfigKey = "openai.baseUrl"
   public static let openAIAPIKey: ConfigKey = "openai.apiKey"
@@ -16,9 +14,42 @@ public enum ScribeConfigBinding {
   public static let contextWindow: ConfigKey = "agent.contextWindow"
   public static let contextWindowThreshold: ConfigKey = "agent.contextWindowThreshold"
   public static let loggingLevel: ConfigKey = "logging.level"
-  /// Base directory for all Scribe storage. `logs/` and `sessions/` subdirectories are created under it automatically. Relative paths resolve against the process working directory when the config is loaded. Required.
+  /// Base directory for all Scribe storage. `logs/` and `sessions/` subdirectories are
+  /// created under it automatically. Relative paths resolve against the process working
+  /// directory when the config is loaded. Required.
   public static let loggingStorage: ConfigKey = "logging.storage"
 }
+
+// MARK: - Codable mirror for writing a default config file
+
+/// Mirror of `scribe-config.json` used only when a default must be written to disk.
+private struct ConfigTemplate: Codable {
+  struct LLMSection: Codable {
+    var baseUrl: String
+    var apiKey: String
+  }
+  struct AgentSection: Codable {
+    var model: String
+    var maxToolRounds: Int
+    var contextWindow: Int
+    var contextWindowThreshold: Double
+  }
+  struct LoggingSection: Codable {
+    var level: String
+    var storage: String
+  }
+  var llm: LLMSection
+  var agent: AgentSection
+  var logging: LoggingSection
+
+  enum CodingKeys: String, CodingKey {
+    case llm = "openai"
+    case agent
+    case logging
+  }
+}
+
+// MARK: - AgentConfig
 
 public struct AgentConfig: Sendable {
   private static let configFileName = "scribe-config.json"
@@ -30,12 +61,11 @@ public struct AgentConfig: Sendable {
   public var contextWindow: Int
   public var contextWindowThreshold: Double
   public var logLevel: ScribeLogLevel
-  /// Absolute path of the directory where ``makeSessionLogger(sessionId:)`` appends log files
-  /// (`scribe-{uuid}.log`, one per Scribe invocation; no separate diagnostics file).
+  /// Absolute path of the directory where `makeSessionLogger(sessionId:)` appends log files.
   public var logDirectoryPath: String
-  /// Absolute path of the directory used by ``ChatSessionStore`` for `scribe chat` session files.
+  /// Absolute path of the directory used by `ChatSessionStore` for `scribe chat` session files.
   public var chatSessionsDirectoryPath: String
-  /// Absolute path of the JSON file ``load()`` read (or attempted), for diagnostics.
+  /// Absolute path of the JSON file `load()` read, for diagnostics.
   public var resolvedConfigurationPath: String
 
   public init(
@@ -75,21 +105,59 @@ public struct AgentConfig: Sendable {
   }
 
   public static func load() async throws -> AgentConfig {
-    let configPath = resolveScribeConfigPath()
+    // 1. SCRIBE_CONFIG_PATH override — use exactly as given, error if missing.
+    if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
+      let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !t.isEmpty {
+        return try await loadConfig(at: ScribeFilePath(t))
+      }
+    }
 
+    // 2. Check ~/.config/scribe/scribe-config.json.
+    let homeCandidate = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".config/scribe/\(configFileName)", isDirectory: false)
+    if FileManager.default.fileExists(atPath: homeCandidate.path) {
+      return try await loadConfig(at: ScribeFilePath(homeCandidate.path))
+    }
+
+    // 3. Check cwd/scribe-config.json.
+    let cwd = FileManager.default.currentDirectoryPath
+    let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
+      .appendingPathComponent(configFileName).path
+    if FileManager.default.fileExists(atPath: cwdCandidate) {
+      return try await loadConfig(at: ScribeFilePath(cwdCandidate))
+    }
+
+    // 4. Not found — write a default config to cwd, then load it.
+    try writeDefaultConfig(to: cwdCandidate)
+    if let data = "scribe: no config found — wrote default \(configFileName) to \(cwdCandidate)\n"
+      .data(using: .utf8)
+    {
+      try? FileHandle.standardError.write(contentsOf: data)
+    }
+    return try await loadConfig(at: ScribeFilePath(cwdCandidate))
+  }
+
+  private static func loadConfig(at path: ScribeFilePath) async throws -> AgentConfig {
     let fileProvider: FileProvider<JSONSnapshot>
     do {
-      fileProvider = try await FileProvider<JSONSnapshot>(filePath: configPath.configurationFilePath)
+      fileProvider = try await FileProvider<JSONSnapshot>(
+        filePath: path.configurationFilePath)
     } catch {
       throw ScribeError.configuration(
         key: nil,
         reason:
-          "Could not load configuration at \(configPath). Create `\(configFileName)` in `~`, the current directory (or any ancestor), or set SCRIBE_CONFIG_PATH to a JSON file path. (\(error))"
+          "Could not load configuration at \(path). Create `\(configFileName)` in `~` or the current directory, or set SCRIBE_CONFIG_PATH to a JSON file path. (\(error))"
       )
     }
+    return try await parse(reader: ConfigReader(providers: [fileProvider]), configPath: path)
+  }
 
-    let reader = ConfigReader(providers: [fileProvider])
-
+  /// Shared between `load()` and tests that already have an in-memory provider.
+  static func parse(
+    reader: ConfigReader,
+    configPath: ScribeFilePath
+  ) async throws -> AgentConfig {
     let baseURL = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.openAIBaseURL)
     guard !baseURL.isEmpty else {
       throw ScribeError.configuration(
@@ -106,9 +174,11 @@ public struct AgentConfig: Sendable {
           "\(ScribeConfigBinding.agentModel.description) must be a non-empty string in `\(configFileName)`."
       )
     }
-    let maxRounds = try await reader.fetchRequiredInt(forKey: ScribeConfigBinding.agentMaxToolRounds)
+    let maxRounds = try await reader.fetchRequiredInt(
+      forKey: ScribeConfigBinding.agentMaxToolRounds)
 
-    let contextWindow = try await reader.fetchRequiredInt(forKey: ScribeConfigBinding.contextWindow)
+    let contextWindow = try await reader.fetchRequiredInt(
+      forKey: ScribeConfigBinding.contextWindow)
     guard contextWindow > 0 else {
       throw ScribeError.configuration(
         key: ScribeConfigBinding.contextWindow.description,
@@ -129,7 +199,8 @@ public struct AgentConfig: Sendable {
 
     let apiKey: String
     do {
-      apiKey = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.openAIAPIKey)
+      apiKey = try await reader.fetchRequiredString(
+        forKey: ScribeConfigBinding.openAIAPIKey)
     } catch {
       throw ScribeError.configuration(
         key: ScribeConfigBinding.openAIAPIKey.description,
@@ -140,7 +211,8 @@ public struct AgentConfig: Sendable {
     let apiKeyTrimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
 
-    let levelRaw = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.loggingLevel)
+    let levelRaw = try await reader.fetchRequiredString(
+      forKey: ScribeConfigBinding.loggingLevel)
     guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
       let allowed = ScribeLogLevel.allCases.map(\.rawValue).joined(separator: ", ")
       throw ScribeError.configuration(
@@ -150,8 +222,9 @@ public struct AgentConfig: Sendable {
       )
     }
 
-    let storageRaw = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.loggingStorage)
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let storageRaw = try await reader.fetchRequiredString(
+      forKey: ScribeConfigBinding.loggingStorage
+    ).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !storageRaw.isEmpty else {
       throw ScribeError.configuration(
         key: ScribeConfigBinding.loggingStorage.description,
@@ -159,14 +232,15 @@ public struct AgentConfig: Sendable {
           "`\(ScribeConfigBinding.loggingStorage.description)` must be a non-empty path in `\(configFileName)`."
       )
     }
-    let storagePath = Self.resolveConfigurableDirectory(configuredRelativeOrAbsolutePath: storageRaw)
+    let storagePath = resolveConfigurableDirectory(
+      configuredRelativeOrAbsolutePath: storageRaw)
     let logDirectoryPath = URL(fileURLWithPath: storagePath, isDirectory: true)
       .appendingPathComponent("logs", isDirectory: true).standardizedFileURL.path
     let chatSessionsDirectoryPath = URL(fileURLWithPath: storagePath, isDirectory: true)
       .appendingPathComponent("sessions", isDirectory: true).standardizedFileURL.path
 
     let resolvedPathString = PathResolution.fileSystemPath(configPath)
-    let config = AgentConfig(
+    return AgentConfig(
       openAIBaseURL: baseURL,
       openAIAPIKey: resolvedAPIKey,
       agentModel: model,
@@ -178,14 +252,44 @@ public struct AgentConfig: Sendable {
       chatSessionsDirectoryPath: chatSessionsDirectoryPath,
       resolvedConfigurationPath: resolvedPathString
     )
-    // Boot info is intentionally not logged here — `AgentConfig.load()` runs before any chat
-    // session id exists, so it has nowhere to write that wouldn't create a parallel
-    // diagnostics file. Callers (e.g. `Chat.run`) should mint a session logger via
-    // ``makeSessionLogger(sessionId:)`` and emit a `event=chat.session.start` line themselves.
-    return config
   }
 
-  private static func resolveConfigurableDirectory(configuredRelativeOrAbsolutePath configured: String?) -> String {
+  // MARK: - Write default config
+
+  private static func writeDefaultConfig(to path: String) throws {
+    let template = ConfigTemplate(
+      llm: ConfigTemplate.LLMSection(
+        baseUrl: "http://localhost:11434",
+        apiKey: ""
+      ),
+      agent: ConfigTemplate.AgentSection(
+        model: "gemma4:e2b",
+        maxToolRounds: 256,
+        contextWindow: 128000,
+        contextWindowThreshold: 0.8
+      ),
+      logging: ConfigTemplate.LoggingSection(
+        level: "trace",
+        storage: "."
+      )
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    let data = try encoder.encode(template)
+    let url = URL(fileURLWithPath: path)
+    let dir = url.deletingLastPathComponent()
+    if !FileManager.default.fileExists(atPath: dir.path) {
+      try FileManager.default.createDirectory(
+        at: dir, withIntermediateDirectories: true)
+    }
+    try data.write(to: url, options: .atomic)
+  }
+
+  // MARK: - Path helpers
+
+  private static func resolveConfigurableDirectory(
+    configuredRelativeOrAbsolutePath configured: String?
+  ) -> String {
     let trimmed = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let cwd = FileManager.default.currentDirectoryPath
     if trimmed.isEmpty {
@@ -198,38 +302,5 @@ public struct AgentConfig: Sendable {
     return URL(fileURLWithPath: cwd, isDirectory: true)
       .appendingPathComponent(expanded, isDirectory: true)
       .standardizedFileURL.path
-  }
-
-  private static func resolveScribeConfigPath() -> ScribeFilePath {
-    if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
-      let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !t.isEmpty {
-        return ScribeFilePath(t)
-      }
-    }
-
-    let homeCandidate = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(configFileName, isDirectory: false)
-    if FileManager.default.fileExists(atPath: homeCandidate.path) {
-      return ScribeFilePath(homeCandidate.path)
-    }
-
-    let cwd = FileManager.default.currentDirectoryPath
-    var dir = URL(fileURLWithPath: cwd, isDirectory: true).standardizedFileURL
-
-    while true {
-      let candidate = dir.appendingPathComponent(configFileName, isDirectory: false)
-      if FileManager.default.fileExists(atPath: candidate.path) {
-        return ScribeFilePath(candidate.path)
-      }
-      let parent = dir.deletingLastPathComponent()
-      if parent.path == dir.path {
-        break
-      }
-      dir = parent
-    }
-
-    return ScribeFilePath(
-      URL(fileURLWithPath: cwd, isDirectory: true).appendingPathComponent(configFileName).path)
   }
 }
