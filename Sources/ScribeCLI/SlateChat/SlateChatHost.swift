@@ -175,12 +175,13 @@ internal final class SlateChatHost {
           defer { sink.markCoordinatorFinished() }
           do {
             let client = try configuration.makeClient()
-            let toolRegistry = ToolRegistry(tools: tools)
-            let chatTools = DefaultAgentTools.chatTools(from: tools)
-            try await ScribeAgentCoordinator.runInteractive(
+            let agent = ScribeAgent(
               configuration: configuration,
               client: client,
               systemPrompt: systemPrompt,
+              tools: tools
+            )
+            try await agent.runInteractive(
               onEvent: { event in sink.emit(event) },
               readUserLine: {
                 // Record the submission in scrollback exactly when the coordinator picks it up,
@@ -197,9 +198,7 @@ internal final class SlateChatHost {
               onConversationPersist: persist,
               prepareModelTurnStart: { interruptFlag.clear() },
               shouldAbortTurn: { interruptFlag.peek() },
-              log: sessionLog,
-              toolRegistry: toolRegistry,
-              chatTools: chatTools
+              log: sessionLog
             )
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))

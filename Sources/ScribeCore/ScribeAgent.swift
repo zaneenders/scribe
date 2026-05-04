@@ -2,39 +2,91 @@ import Foundation
 import Logging
 import ScribeLLM
 
-public enum ChatHistory {
-  /// Returns the newest assistant `content`, if present.
-  public static func lastAssistantText(from messages: [Components.Schemas.ChatMessage]) -> String? {
-    for message in messages.reversed() where message.role == .assistant {
-      return message.content
-    }
-    return nil
-  }
-}
+// MARK: - ScribeAgent
 
-public enum ScribeAgentCoordinator {
+/// An agent that orchestrates LLM calls with tool execution.
+///
+/// Instantiate with configuration, an OpenAI-compatible client, a system prompt,
+/// and an array of tools, then call `runTurn`, `runInteractive`, or `runIPC`.
+///
+/// ```swift
+/// let config = try await AgentConfig.load()
+/// let client = try config.makeClient()
+/// let agent = ScribeAgent(
+///   configuration: config,
+///   client: client,
+///   systemPrompt: "You are a helpful coding assistant.",
+///   tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()]
+/// )
+///
+/// // Single turn
+/// var messages: [ChatMessage] = [.init(role: .system, content: "...")]
+/// let outcome = try await agent.runTurn(messages: &messages, ...)
+///
+/// // Full interactive session
+/// try await agent.runInteractive(onEvent: ..., readUserLine: ..., log: ...)
+/// ```
+public struct ScribeAgent: Sendable {
+  public let configuration: AgentConfig
+  public let client: Client
+  public let systemPrompt: String
+  public let toolRegistry: ToolRegistry
 
-  /// Interactive session; `systemPrompt` is supplied by the CLI (or another host).
-  ///
-  /// Supply `readUserLine` to integrate with alternate-screen TUIs (for example Slate) or stdin
-  /// that is not `readLine()`-friendly.
-  ///
-  /// `log` is the per-session logger created by the caller (typically
-  /// ``AgentConfig/makeSessionLogger(sessionId:)``); the same logger is shared across all model
-  /// turns in the session so every event lands in one `scribe-{uuid}.log` file.
-  public static func runInteractive(
+  private let chatTools: [Components.Schemas.ChatTool]
+
+  public init(
     configuration: AgentConfig,
     client: Client,
     systemPrompt: String,
+    tools: [any ScribeTool]
+  ) {
+    self.configuration = configuration
+    self.client = client
+    self.systemPrompt = systemPrompt
+    self.toolRegistry = ToolRegistry(tools: tools)
+    self.chatTools = DefaultAgentTools.chatTools(from: tools)
+  }
+
+  // MARK: - runTurn
+
+  /// Execute a single model turn (LLM call + optional tool-call rounds) against
+  /// the supplied conversation history. The caller owns `messages` and can
+  /// inspect / persist / replay it between turns.
+  public func runTurn(
+    messages: inout [Components.Schemas.ChatMessage],
+    log: Logger,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
+    shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
+  ) async throws -> ModelTurnOutcome {
+    let harness = AgentHarness(
+      onEvent: onEvent,
+      client: client,
+      model: configuration.agentModel,
+      tools: chatTools
+    )
+    let loop = AgentLoop(
+      harness: harness,
+      registry: toolRegistry,
+      maxToolRounds: configuration.agentMaxToolRounds,
+      onEvent: onEvent
+    )
+    return try await loop.runModelTurn(
+      messages: &messages,
+      logger: log,
+      shouldAbortTurn: shouldAbortTurn
+    )
+  }
+
+  // MARK: - runInteractive
+
+  public func runInteractive(
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     readUserLine: @escaping @Sendable () async -> String?,
     initialConversation: [Components.Schemas.ChatMessage]? = nil,
     onConversationPersist: (@Sendable ([Components.Schemas.ChatMessage]) -> Void)? = nil,
     prepareModelTurnStart: @escaping @Sendable () -> Void = {},
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
-    log: Logger,
-    toolRegistry: ToolRegistry,
-    chatTools: [Components.Schemas.ChatTool]
+    log: Logger
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
     onEvent(
@@ -53,9 +105,9 @@ public enum ScribeAgentCoordinator {
           event=chat.coordinator.fail \
           reason=resumed-history-no-system-prefix \
           first_role=\(String(describing: history.first?.role))
-          """
-        )
-        throw ScribeError.sessionCorrupted(reason: "Resumed conversation must begin with a system message.")
+          """)
+        throw ScribeError.sessionCorrupted(
+          reason: "Resumed conversation must begin with a system message.")
       }
     } else {
       history = [
@@ -76,8 +128,7 @@ public enum ScribeAgentCoordinator {
       event=chat.coordinator.start \
       messages=\(history.count) \
       resumed=\(initialConversation != nil)
-      """
-    )
+      """)
 
     let tracker = TokenTracker(
       contextWindow: configuration.contextWindow,
@@ -90,19 +141,6 @@ public enum ScribeAgentCoordinator {
       }
       onEvent(event)
     }
-
-    let harness = AgentHarness(
-      onEvent: wrappedOnEvent,
-      client: client,
-      model: configuration.agentModel,
-      tools: chatTools
-    )
-    let loop = AgentLoop(
-      harness: harness,
-      registry: toolRegistry,
-      maxToolRounds: configuration.agentMaxToolRounds,
-      onEvent: wrappedOnEvent
-    )
 
     var turnIndex = 0
     while true {
@@ -125,8 +163,7 @@ public enum ScribeAgentCoordinator {
         event=agent.turn.dispatch \
         turn=\(turnIndex) \
         chars=\(trimmed.count)
-        """
-      )
+        """)
 
       history.append(
         .init(
@@ -135,8 +172,7 @@ public enum ScribeAgentCoordinator {
           name: nil,
           toolCalls: nil,
           toolCallId: nil
-        )
-      )
+        ))
 
       prepareModelTurnStart()
       onEvent(.modelTurnRunning(true))
@@ -145,9 +181,10 @@ public enum ScribeAgentCoordinator {
       }
       let turnStart = Date()
       do {
-        let outcome = try await loop.runModelTurn(
+        let outcome = try await runTurn(
           messages: &history,
-          logger: log,
+          log: log,
+          onEvent: wrappedOnEvent,
           shouldAbortTurn: shouldAbortTurn
         )
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
@@ -159,8 +196,7 @@ public enum ScribeAgentCoordinator {
             turn=\(turnIndex) \
             status=completed \
             elapsed_ms=\(elapsedMs)
-            """
-          )
+            """)
         case .hitToolRoundLimit:
           log.notice(
             """
@@ -169,8 +205,7 @@ public enum ScribeAgentCoordinator {
             status=tool-round-limit \
             limit=\(configuration.agentMaxToolRounds) \
             elapsed_ms=\(elapsedMs)
-            """
-          )
+            """)
         }
         tracker.logStatus(logger: log)
       } catch is AgentTurnInterruptedError {
@@ -181,8 +216,7 @@ public enum ScribeAgentCoordinator {
           turn=\(turnIndex) \
           status=interrupted \
           elapsed_ms=\(elapsedMs)
-          """
-        )
+          """)
         onEvent(.turnInterrupted)
       } catch {
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
@@ -191,11 +225,10 @@ public enum ScribeAgentCoordinator {
           """
           event=agent.turn.end \
           turn=\(turnIndex) \
-            status=error \
-            elapsed_ms=\(elapsedMs) \
-            err="\(scribeError.errorDescription ?? String(describing: scribeError))"
-          """
-        )
+          status=error \
+          elapsed_ms=\(elapsedMs) \
+          err="\(scribeError.errorDescription ?? String(describing: scribeError))"
+          """)
         onEvent(.harnessError(scribeError))
         if history.last?.role == .user {
           history.removeLast()
@@ -209,19 +242,14 @@ public enum ScribeAgentCoordinator {
       event=chat.coordinator.end \
       transcript_messages=\(history.count) \
       turns=\(turnIndex)
-      """
-    )
+      """)
   }
 
-  /// One user turn over stdin/stdout JSON; suitable for subprocess nesting (agents calling `scribe agent`).
-  public static func runAgentIPC(
-    configuration: AgentConfig,
-    client: Client,
-    systemPrompt: String,
+  // MARK: - runIPC
+
+  public func runIPC(
     request: ScribeAgentRequest,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
-    toolRegistry: ToolRegistry,
-    chatTools: [Components.Schemas.ChatTool]
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
   ) async -> ScribeAgentResponse {
     var history: [Components.Schemas.ChatMessage] = [
       .init(
@@ -239,18 +267,6 @@ public enum ScribeAgentCoordinator {
         toolCallId: nil
       ),
     ]
-    let harness = AgentHarness(
-      onEvent: onEvent,
-      client: client,
-      model: configuration.agentModel,
-      tools: chatTools
-    )
-    let loop = AgentLoop(
-      harness: harness,
-      registry: toolRegistry,
-      maxToolRounds: configuration.agentMaxToolRounds,
-      onEvent: onEvent
-    )
     let sessionId = UUID()
     let ipcLog = configuration.makeSessionLogger(sessionId: sessionId)
     ipcLog.notice(
@@ -260,19 +276,20 @@ public enum ScribeAgentCoordinator {
       message_chars=\(request.message.count) \
       max_tool_rounds=\(configuration.agentMaxToolRounds) \
       model=\(configuration.agentModel)
-      """
-    )
+      """)
     do {
-      let outcome = try await loop.runModelTurn(
-        messages: &history, logger: ipcLog)
+      let outcome = try await runTurn(
+        messages: &history,
+        log: ipcLog,
+        onEvent: onEvent
+      )
       if outcome == .hitToolRoundLimit {
         ipcLog.notice(
           """
           event=ipc.session.end \
           status=tool-round-limit \
           limit=\(configuration.agentMaxToolRounds)
-          """
-        )
+          """)
         return .failure(
           "Stopped after reaching the configured tool round limit (\(configuration.agentMaxToolRounds))."
         )
@@ -283,8 +300,7 @@ public enum ScribeAgentCoordinator {
         event=ipc.session.end \
         status=ok \
         assistant_chars=\(text.count)
-        """
-      )
+        """)
       return .success(assistant: text)
     } catch let e as ScribeError {
       ipcLog.error(
@@ -292,8 +308,7 @@ public enum ScribeAgentCoordinator {
         event=ipc.session.end \
         status=error \
         err="\(e.errorDescription ?? String(describing: e))"
-        """
-      )
+        """)
       return .failure(e.errorDescription ?? String(describing: e))
     } catch {
       ipcLog.error(
@@ -301,8 +316,7 @@ public enum ScribeAgentCoordinator {
         event=ipc.session.end \
         status=error \
         err="\(String(describing: error))"
-        """
-      )
+        """)
       return .failure(String(describing: error))
     }
   }

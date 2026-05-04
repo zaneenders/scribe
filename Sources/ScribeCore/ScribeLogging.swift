@@ -114,7 +114,7 @@ extension AgentConfig {
   /// Returns a logger appending all events for one Scribe invocation to
   /// ``logDirectoryPath``/`scribe-{sessionId}.log`. Pass the chat session id when one exists
   /// (so the log file shares a UUID stem with the matching `{uuid}.json` transcript archive),
-  /// or a freshly-minted UUID for ephemeral / non-chat invocations (e.g. `runAgentIPC`).
+  /// or a freshly-minted UUID for ephemeral / non-chat invocations (e.g. `runIPC`).
   ///
   /// All Scribe events for a single chat session — input handling, queue transitions, model
   /// turn HTTP/SSE detail, persist, errors — are intentionally funneled into this one file
