@@ -10,7 +10,15 @@ public protocol MarkdownRenderer: Sendable {
   ///   - text: The complete markdown buffer to parse.
   ///   - baseFG: Default foreground color for unstyled text.
   ///   - baseBold: Default bold flag for unstyled text.
+  ///   - theme: Color theme for markdown elements (e.g. `.vibrant` or `.grayscale`).
   /// - Returns: An array of logical lines. The caller is responsible for
   ///   word-wrapping these lines to the terminal width.
-  func render(text: String, baseFG: TerminalRGB, baseBold: Bool) -> [TLine]
+  func render(text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> [TLine]
+}
+
+extension MarkdownRenderer {
+  /// Default implementation using the vibrant theme.
+  public func render(text: String, baseFG: TerminalRGB, baseBold: Bool) -> [TLine] {
+    render(text: text, baseFG: baseFG, baseBold: baseBold, theme: .vibrant)
+  }
 }

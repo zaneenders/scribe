@@ -13,15 +13,16 @@ public struct SwiftMarkdownRenderer: MarkdownRenderer {
     self.codeBlockHighlighter = codeBlockHighlighter
   }
 
-  public func render(text: String, baseFG: TerminalRGB, baseBold: Bool) -> [TLine] {
+  public func render(text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> [TLine] {
     let document = Document(parsing: text)
     var walker = TerminalMarkdownWalker(
       baseFG: baseFG,
       baseBold: baseBold,
-      codeBlockHighlighter: codeBlockHighlighter
+      codeBlockHighlighter: codeBlockHighlighter,
+      theme: theme
     )
     walker.visit(document)
-    return walker.lines.map { styleRemainingMarkdown(in: $0, baseFG: baseFG, baseBold: baseBold) }
+    return walker.lines.map { styleRemainingMarkdown(in: $0, baseFG: baseFG, baseBold: baseBold, theme: theme) }
   }
 }
 
@@ -30,7 +31,8 @@ public struct SwiftMarkdownRenderer: MarkdownRenderer {
 ///
 /// Processes *contiguous runs* of base-styled spans together so patterns that
 /// the parser split across multiple Text nodes are still caught.
-private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBold: Bool) -> TLine {
+private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> TLine
+{
   guard !line.spans.isEmpty else { return line }
 
   var newSpans: [StyledSpan] = []
@@ -40,7 +42,7 @@ private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBol
     var runStart = i
     while runStart < line.spans.count {
       let s = line.spans[runStart]
-      if s.fg == baseFG, s.bg == ScribePalette.black, s.bold == baseBold {
+      if s.fg == baseFG, s.bg == theme.background, s.bold == baseBold {
         break
       }
       runStart += 1
@@ -56,13 +58,13 @@ private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBol
     var concatenated = ""
     while runEnd < line.spans.count {
       let s = line.spans[runEnd]
-      guard s.fg == baseFG, s.bg == ScribePalette.black, s.bold == baseBold else { break }
+      guard s.fg == baseFG, s.bg == theme.background, s.bold == baseBold else { break }
       concatenated += s.text
       runEnd += 1
     }
 
     // Run the safety net on the concatenated text.
-    let styled = splitMarkdownPatterns(in: concatenated, baseFG: baseFG, baseBold: baseBold)
+    let styled = splitMarkdownPatterns(in: concatenated, baseFG: baseFG, baseBold: baseBold, theme: theme)
     newSpans.append(contentsOf: styled)
     i = runEnd
   }
@@ -71,7 +73,9 @@ private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBol
 }
 
 /// Splits plain text into spans, styling any inline markdown delimiters found.
-private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBold: Bool) -> [StyledSpan] {
+private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme)
+  -> [StyledSpan]
+{
   var spans: [StyledSpan] = []
   var remaining = text
 
@@ -105,21 +109,21 @@ private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBol
 
     guard let open = earliest else {
       // No more delimiters — append rest as plain text.
-      spans.append(StyledSpan(fg: baseFG, bg: ScribePalette.black, bold: baseBold, text: remaining))
+      spans.append(StyledSpan(fg: baseFG, bg: theme.background, bold: baseBold, text: remaining))
       break
     }
 
     // Append plain text before the opener.
     if open.range.lowerBound > remaining.startIndex {
       let prefix = String(remaining[..<open.range.lowerBound])
-      spans.append(StyledSpan(fg: baseFG, bg: ScribePalette.black, bold: baseBold, text: prefix))
+      spans.append(StyledSpan(fg: baseFG, bg: theme.background, bold: baseBold, text: prefix))
     }
 
     // Look for the matching closer after the opener.
     let afterOpen = open.range.upperBound
     guard let closeRange = remaining[afterOpen...].range(of: delimiterText(for: open.kind)) else {
       // No closer — treat the opener as literal text and continue after it.
-      spans.append(StyledSpan(fg: baseFG, bg: ScribePalette.black, bold: baseBold, text: delimiterText(for: open.kind)))
+      spans.append(StyledSpan(fg: baseFG, bg: theme.background, bold: baseBold, text: delimiterText(for: open.kind)))
       remaining = String(remaining[afterOpen...])
       continue
     }
@@ -128,11 +132,11 @@ private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBol
     // Style the content.
     switch open.kind {
     case .strong:
-      spans.append(StyledSpan(fg: ScribePalette.markdownBold, bg: ScribePalette.black, bold: true, text: content))
+      spans.append(StyledSpan(fg: theme.bold, bg: theme.background, bold: true, text: content))
     case .emphasis:
-      spans.append(StyledSpan(fg: ScribePalette.markdownItalic, bg: ScribePalette.black, bold: baseBold, text: content))
+      spans.append(StyledSpan(fg: theme.italic, bg: theme.background, bold: baseBold, text: content))
     case .code:
-      spans.append(StyledSpan(fg: ScribePalette.markdownCode, bg: ScribePalette.black, bold: false, text: content))
+      spans.append(StyledSpan(fg: theme.code, bg: theme.background, bold: false, text: content))
     }
 
     remaining = String(remaining[closeRange.upperBound...])
@@ -166,12 +170,14 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   var bold: Bool
 
   let codeBlockHighlighter: CodeBlockHighlighter
+  let theme: MarkdownTheme
 
-  init(baseFG: TerminalRGB, baseBold: Bool, codeBlockHighlighter: CodeBlockHighlighter) {
+  init(baseFG: TerminalRGB, baseBold: Bool, codeBlockHighlighter: CodeBlockHighlighter, theme: MarkdownTheme) {
     self.fg = baseFG
-    self.bg = ScribePalette.black
+    self.bg = theme.background
     self.bold = baseBold
     self.codeBlockHighlighter = codeBlockHighlighter
+    self.theme = theme
   }
 
   // MARK: Helpers
@@ -209,10 +215,10 @@ private struct TerminalMarkdownWalker: MarkupWalker {
 
   mutating func visitHeading(_ heading: Heading) {
     let prefix = String(repeating: "#", count: heading.level) + " "
-    appendText(prefix, fg: ScribePalette.markdownHeadingPrefix, bold: false)
+    appendText(prefix, fg: theme.headingPrefix, bold: false)
     let savedFG = fg
     let savedBold = bold
-    fg = ScribePalette.markdownHeading
+    fg = theme.heading
     bold = true
     for child in heading.inlineChildren {
       visit(child)
@@ -225,20 +231,27 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   }
 
   mutating func visitCodeBlock(_ codeBlock: CodeBlock) {
+    let cbFG = theme.codeBlock
     let fence = "```" + (codeBlock.language ?? "")
     lines.append(
       TLine(
         spans: [
-          StyledSpan(
-            fg: ScribePalette.markdownCodeBlock, bg: bg, bold: false, text: fence)
+          StyledSpan(fg: cbFG, bg: bg, bold: false, text: fence)
         ]))
-    let highlighted = codeBlockHighlighter.highlight(code: codeBlock.code, language: codeBlock.language)
+    var highlighted = codeBlockHighlighter.highlight(code: codeBlock.code, language: codeBlock.language)
+    // Remap highlighted lines to the theme's code-block color so themes
+    // like grayscale can override the highlighter's default palette.
+    highlighted = highlighted.map { line in
+      TLine(
+        spans: line.spans.map { s in
+          StyledSpan(fg: cbFG, bg: s.bg, bold: s.bold, text: s.text)
+        })
+    }
     lines.append(contentsOf: highlighted)
     lines.append(
       TLine(
         spans: [
-          StyledSpan(
-            fg: ScribePalette.markdownCodeBlock, bg: bg, bold: false, text: "```")
+          StyledSpan(fg: cbFG, bg: bg, bold: false, text: "```")
         ]))
   }
 
@@ -246,7 +259,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     lines.append(
       TLine(
         spans: [
-          StyledSpan(fg: ScribePalette.markdownHR, bg: bg, bold: false, text: "---")
+          StyledSpan(fg: theme.hr, bg: bg, bold: false, text: "---")
         ]))
   }
 
@@ -297,7 +310,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
       }
     }
 
-    let borderFG = ScribePalette.gray
+    let borderFG = theme.muted
     let pad = 1  // one space on each side of content
 
     // Top border
@@ -324,7 +337,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
         if isHeader {
           // Header: bold everything, use heading color
           for s in cell.spans {
-            rowSpans.append(StyledSpan(fg: ScribePalette.markdownHeading, bg: bg, bold: true, text: s.text))
+            rowSpans.append(StyledSpan(fg: theme.heading, bg: bg, bold: true, text: s.text))
           }
         } else {
           rowSpans.append(contentsOf: cell.spans)
@@ -368,7 +381,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   mutating func visitBlockQuote(_ blockQuote: BlockQuote) {
     let savedFG = fg
     let savedBold = bold
-    fg = ScribePalette.markdownBlockquote
+    fg = theme.blockquote
     bold = false
 
     var quoteLines: [TLine] = []
@@ -394,7 +407,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     for line in quoteLines {
       var prefixed = line
       prefixed.spans.insert(
-        StyledSpan(fg: ScribePalette.markdownBlockquote, bg: bg, bold: false, text: "> "),
+        StyledSpan(fg: theme.blockquote, bg: bg, bold: false, text: "> "),
         at: 0)
       lines.append(prefixed)
     }
@@ -435,12 +448,12 @@ private struct TerminalMarkdownWalker: MarkupWalker {
       var modified = line
       if i == 0 {
         modified.spans.insert(
-          StyledSpan(fg: ScribePalette.markdownListMarker, bg: bg, bold: false, text: bullet),
+          StyledSpan(fg: theme.listMarker, bg: bg, bold: false, text: bullet),
           at: 0)
       } else {
         let indent = String(repeating: " ", count: bullet.count)
         modified.spans.insert(
-          StyledSpan(fg: ScribePalette.markdownListMarker, bg: bg, bold: false, text: indent),
+          StyledSpan(fg: theme.listMarker, bg: bg, bold: false, text: indent),
           at: 0)
       }
       lines.append(modified)
@@ -448,7 +461,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   }
 
   mutating func visitHTMLBlock(_ html: HTMLBlock) {
-    appendText(html.rawHTML, fg: ScribePalette.gray)
+    appendText(html.rawHTML, fg: theme.muted)
     if !currentLine.spans.isEmpty {
       flushLine()
     }
@@ -459,7 +472,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   mutating func visitText(_ text: Text) {
     // Safety-net: if the parser left `**`, `*`, or `` ` `` unparsed in a
     // plain Text node, style them now before they reach the span buffer.
-    let spans = splitMarkdownPatterns(in: text.string, baseFG: fg, baseBold: bold)
+    let spans = splitMarkdownPatterns(in: text.string, baseFG: fg, baseBold: bold, theme: theme)
     for sp in spans {
       appendText(sp.text, fg: sp.fg, bold: sp.bold)
     }
@@ -467,7 +480,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
 
   mutating func visitEmphasis(_ emphasis: Emphasis) {
     let savedFG = fg
-    fg = ScribePalette.markdownItalic
+    fg = theme.italic
     for child in emphasis.inlineChildren {
       visit(child)
     }
@@ -477,7 +490,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   mutating func visitStrong(_ strong: Strong) {
     let savedFG = fg
     let savedBold = bold
-    fg = ScribePalette.markdownBold
+    fg = theme.bold
     bold = true
     for child in strong.inlineChildren {
       visit(child)
@@ -488,7 +501,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
 
   mutating func visitStrikethrough(_ strikethrough: Strikethrough) {
     let savedFG = fg
-    fg = ScribePalette.gray
+    fg = theme.muted
     for child in strikethrough.inlineChildren {
       visit(child)
     }
@@ -496,12 +509,12 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   }
 
   mutating func visitInlineCode(_ inlineCode: InlineCode) {
-    appendText(inlineCode.code, fg: ScribePalette.markdownCode)
+    appendText(inlineCode.code, fg: theme.code)
   }
 
   mutating func visitLink(_ link: Link) {
     let savedFG = fg
-    fg = ScribePalette.markdownLink
+    fg = theme.link
     for child in link.inlineChildren {
       visit(child)
     }
@@ -510,7 +523,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
 
   mutating func visitImage(_ image: Image) {
     let alt = image.plainText
-    appendText("[\(alt)]", fg: ScribePalette.markdownLink)
+    appendText("[\(alt)]", fg: theme.link)
   }
 
   mutating func visitLineBreak(_: LineBreak) {
@@ -522,6 +535,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   }
 
   mutating func visitInlineHTML(_ inlineHTML: InlineHTML) {
-    appendText(inlineHTML.rawHTML, fg: ScribePalette.gray)
+    appendText(inlineHTML.rawHTML, fg: theme.muted)
   }
 }

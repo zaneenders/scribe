@@ -118,7 +118,7 @@ internal final class SlateChatHost {
 
   func run() async throws {
     var slate = try Slate()
-    let sink = SlateTranscriptSink()
+    let sink = SlateTranscriptSink(theme: .default)
     let gate = UserLineGate()
 
     // Bracketed paste is now handled by slate itself (CSI.bracketedPasteOn/Off emitted
@@ -385,7 +385,8 @@ internal final class SlateChatHost {
             inputLine: self.inputBuffer,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: sink.modelTurnBusy(),
-            queuedTrayText: queuedTrayText))
+            queuedTrayText: queuedTrayText,
+            theme: .default))
         let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
         let totalMs = prepareMs &+ submitMs
         if totalMs >= 50 {
