@@ -1,5 +1,6 @@
 import Foundation
 import OpenAPIRuntime
+import ScribeLLM
 
 /// OpenAI-style tool definitions (aligned with ``ToolRegistry``).
 public enum AgentTools {
