@@ -2,10 +2,18 @@ import Foundation
 import OpenAPIRuntime
 import ScribeLLM
 
-/// OpenAI-style tool definitions (aligned with ``ToolRegistry``).
-public enum AgentTools {
+/// Conversions from `ScribeToolDefinition` to the `ChatTool` array the LLM sees
+/// via the OpenAI-compatible API.
+public enum DefaultAgentTools {
+
+  /// The four built-in tool definitions in raw `ChatTool` form.
   public static func all() -> [Components.Schemas.ChatTool] {
     OpenAIToolParameterSchema.all
+  }
+
+  /// Converts an array of `ScribeToolDefinition` values to the `ChatTool` array the LLM sees.
+  public static func chatTools(from definitions: [ScribeToolDefinition]) -> [Components.Schemas.ChatTool] {
+    definitions.map { $0.toChatTool() }
   }
 }
 

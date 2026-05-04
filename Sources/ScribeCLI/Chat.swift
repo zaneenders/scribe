@@ -1,7 +1,6 @@
 import ArgumentParser
 import Foundation
 import ScribeCore
-import ScribeLLM
 
 struct Chat: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -41,17 +40,15 @@ struct Chat: AsyncParsableCommand {
       return
     }
 
-    let base = config.openAIBaseURL
-    let token = config.openAIAPIKey
-    guard let serverURL = URL(string: base) else {
-      throw ScribeError.configuration(
-        key: ScribeConfigBinding.openAIBaseURL.description,
-        reason:
-          "Invalid \(ScribeConfigBinding.openAIBaseURL.description) in `scribe-config.json`. Use host only, no `/v1` (e.g. http://127.0.0.1:11434 for Ollama)."
-      )
-    }
-    let client = OpenAICompatibleClient.make(serverURL: serverURL, bearerToken: token)
     let cwd = FileManager.default.currentDirectoryPath
+
+    let tools: [any ScribeTool] = [
+      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
+    ]
+    let toolDefinitions = ScribeToolDefinition.builtIn
+    let toolNames = toolDefinitions.map(\.name).joined(separator: ", ")
+    let toolHints = toolDefinitions.compactMap(\.promptHint).joined(separator: "\n\n")
+
     let systemPrompt = """
       You are Scribe, a coding agent CLI with shell and file tools.
 
@@ -61,10 +58,10 @@ struct Chat: AsyncParsableCommand {
 
       Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way—if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
 
-      Tool names must match exactly: shell, read_file, write_file, edit_file.
+      Tool names must match exactly: \(toolNames).
       Parallel tool calls are fine when they do not depend on each other’s outputs.
 
-      For `read_file`, prefer paginating large files: pass `offset` (1-indexed start line) and `limit` (max lines, default 2000) and use the returned `end_line` + 1 as the next `offset` if `truncated` is true. This keeps the conversation history small.
+      \(toolHints)
 
       Working directory (relative paths resolve here): \(cwd)
       """
@@ -112,21 +109,14 @@ struct Chat: AsyncParsableCommand {
       )
     }
 
-    let defaultTools: [any ScribeTool] = [
-      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
-    ]
-    let toolRegistry = ToolRegistry(tools: defaultTools)
-    let toolDefinitions = AgentTools.all()
-
     try await SlateChat.runFullscreen(
       configuration: config,
-      client: client,
       systemPrompt: systemPrompt,
       resumeArchive: resumeArchive,
       sessionPersistenceURL: sessionPersistenceURL,
       sessionId: sessionId,
       log: log,
-      toolRegistry: toolRegistry,
+      tools: tools,
       toolDefinitions: toolDefinitions
     )
     log.notice("event=chat.session.end status=ok")

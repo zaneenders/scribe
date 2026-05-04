@@ -1,6 +1,5 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 import SlateCore
 import Synchronization
 
@@ -479,82 +478,6 @@ public final class SlateTranscriptSink: Sendable {
     }
   }
 
-  // MARK: - Replay
-
-  /// Replays prior turns from a persisted message list (skips system rows). Used when resuming a session.
-  public func replayPersistedConversation(_ messages: [Components.Schemas.ChatMessage]) {
-    var i = 0
-    while i < messages.count, messages[i].role == .system {
-      i += 1
-    }
-    var toolRoundCounter = 0
-    while i < messages.count {
-      let msg = messages[i]
-      switch msg.role {
-      case .system:
-        i += 1
-      case .user:
-        let t = (msg.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty {
-          recordUserSubmission(trimmedVisible: t)
-        }
-        i += 1
-      case .assistant:
-        let text = msg.content ?? ""
-        let visibleTrimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let calls = msg.toolCalls ?? []
-        let reasoning = msg.reasoningContent ?? ""
-
-        var section: AssistantStreamSection? = nil
-        if !reasoning.isEmpty {
-          emit(.enterAssistantSection(.reasoning, previous: nil))
-          emit(.appendAssistantText(.reasoning, text: reasoning))
-          section = .reasoning
-        }
-
-        if !text.isEmpty || section == nil {
-          emit(.enterAssistantSection(.answer, previous: section))
-          if !text.isEmpty {
-            emit(.appendAssistantText(.answer, text: text))
-          }
-        }
-        endReplayedAssistantSection(answerHadVisibleCharacters: !visibleTrimmed.isEmpty || !reasoning.isEmpty)
-
-        if !calls.isEmpty {
-          toolRoundCounter += 1
-          let names = calls.map { $0.function?.name ?? "(tool)" }
-          emit(.toolRoundHeader(round: toolRoundCounter, toolNames: names))
-
-          var k = i + 1
-          var toolBodies: [String: String] = [:]
-          while k < messages.count, messages[k].role == .tool {
-            if let tid = messages[k].toolCallId {
-              toolBodies[tid] = messages[k].content ?? ""
-            }
-            k += 1
-          }
-
-          for tc in calls {
-            let id = tc.id ?? ""
-            let name = tc.function?.name ?? "tool"
-            let args = tc.function?.arguments ?? "{}"
-            let jsonOut = toolBodies[id] ?? ""
-            let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: args)
-            let lines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: jsonOut)
-            emit(.toolInvocation(name: name, argumentSummary: argSummary, outputLines: lines))
-            emit(.blankLine)
-          }
-          i = k
-        } else {
-          i += 1
-        }
-        emit(.blankLine)
-      case .tool:
-        i += 1
-      }
-    }
-  }
-
   // MARK: - Private helpers
 
   private func appendLine(_ line: TLine) {
@@ -577,22 +500,6 @@ public final class SlateTranscriptSink: Sendable {
     case .reasoning: (ScribePalette.grayLight, false)
     case .answer: (ScribePalette.cyan, false)
     }
-  }
-
-  private func endReplayedAssistantSection(answerHadVisibleCharacters: Bool) {
-    state.withLock { sink in
-      if let open = sink.assistantOpenLine {
-        let hasSpanText = open.spans.contains { !$0.text.isEmpty }
-        if answerHadVisibleCharacters || hasSpanText {
-          sink.lines.append(open)
-        }
-        sink.assistantOpenLine = nil
-      }
-      sink.assistantOpenLineRaw = ""
-      sink.assistantSectionStartIndex = nil
-      trimIfNeeded(&sink.lines)
-    }
-    ping()
   }
 }
 

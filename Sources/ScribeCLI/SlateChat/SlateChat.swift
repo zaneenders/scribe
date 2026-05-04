@@ -1,7 +1,6 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
 import SlateCore
 
 #if canImport(Darwin)
@@ -42,14 +41,13 @@ enum SlateChat {
   ///     to a separate diagnostics file.
   static func runFullscreen(
     configuration: AgentConfig,
-    client: Client,
     systemPrompt: String,
     resumeArchive: ChatSessionArchive? = nil,
     sessionPersistenceURL: URL,
     sessionId: UUID,
     log: Logger,
-    toolRegistry: ToolRegistry,
-    toolDefinitions: [Components.Schemas.ChatTool]
+    tools: [any ScribeTool],
+    toolDefinitions: [ScribeToolDefinition]
   ) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
       log.error("event=chat.session.fail reason=stdin-not-tty")
@@ -65,14 +63,13 @@ enum SlateChat {
       let sessionCreatedAt = resumeArchive?.createdAt ?? Date()
       let host = SlateChatHost(
         configuration: configuration,
-        client: client,
         systemPrompt: systemPrompt,
         resumeArchive: resumeArchive,
         sessionPersistenceURL: sessionPersistenceURL,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
         log: log,
-        toolRegistry: toolRegistry,
+        tools: tools,
         toolDefinitions: toolDefinitions
       )
       do {

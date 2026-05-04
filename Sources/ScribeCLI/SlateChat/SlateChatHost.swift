@@ -1,7 +1,6 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
 import SlateCore
 import Synchronization
 
@@ -61,7 +60,6 @@ private struct TranscriptFlattenCache {
 internal final class SlateChatHost {
 
   private let configuration: AgentConfig
-  private let client: Client
   private let systemPrompt: String
   private let resumeArchive: ChatSessionArchive?
   private let sessionPersistenceURL: URL
@@ -92,30 +90,28 @@ internal final class SlateChatHost {
   private var lastObservedModelBusy: Bool = false
   /// Per-session logger threaded in from `Chat.run`; writes to `scribe-{uuid}.log`.
   private let log: Logger
-  private let toolRegistry: ToolRegistry
-  private let toolDefinitions: [Components.Schemas.ChatTool]
+  private let tools: [any ScribeTool]
+  private let toolDefinitions: [ScribeToolDefinition]
 
   init(
     configuration: AgentConfig,
-    client: Client,
     systemPrompt: String,
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,
     log: Logger,
-    toolRegistry: ToolRegistry,
-    toolDefinitions: [Components.Schemas.ChatTool]
+    tools: [any ScribeTool],
+    toolDefinitions: [ScribeToolDefinition]
   ) {
     self.configuration = configuration
-    self.client = client
     self.systemPrompt = systemPrompt
     self.resumeArchive = resumeArchive
     self.sessionPersistenceURL = sessionPersistenceURL
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.log = log
-    self.toolRegistry = toolRegistry
+    self.tools = tools
     self.toolDefinitions = toolDefinitions
   }
 
@@ -149,7 +145,11 @@ internal final class SlateChatHost {
         self.renderWake = wake
         let resumeSnapshot = self.resumeArchive
         if let resumed = resumeSnapshot {
-          sink.replayPersistedConversation(resumed.messages)
+          TranscriptReplay.replay(
+            messages: resumed.messages,
+            onEvent: { sink.emit($0) },
+            recordUserSubmission: { sink.recordUserSubmission(trimmedVisible: $0) }
+          )
           self.flattenCache = TranscriptFlattenCache()
         }
 
@@ -159,58 +159,25 @@ internal final class SlateChatHost {
         let modelSnapshot = configuration.agentModel
         let baseSnapshot = configuration.openAIBaseURL
         let persistLog = self.log
-        let persistedCount = Mutex(resumeSnapshot?.messages.count ?? 0)
-        let persist: @Sendable ([Components.Schemas.ChatMessage]) -> Void = { history in
-          let previous = persistedCount.withLock { $0 }
-          guard history.count > previous else { return }
-          let cwd = FileManager.default.currentDirectoryPath
-          do {
-            if previous == 0 {
-              try ChatSessionStore.save(
-                ChatSessionArchive(
-                  id: cid,
-                  createdAt: created,
-                  updatedAt: Date(),
-                  cwd: cwd,
-                  model: modelSnapshot,
-                  baseURL: baseSnapshot,
-                  messages: history
-                ),
-                to: persistURL
-              )
-            } else {
-              let newMessages = Array(history[previous..<history.count])
-              try ChatSessionStore.appendMessages(newMessages, to: persistURL)
-            }
-            persistedCount.withLock { $0 = history.count }
-            persistLog.trace(
-              """
-              event=chat.persist.save \
-              messages=\(history.count) \
-              previous=\(previous) \
-              path=\(persistURL.path)
-              """
-            )
-          } catch {
-            persistLog.error(
-              """
-              event=chat.persist.fail \
-              path=\(persistURL.path) \
-              err="\(error.localizedDescription)"
-              """
-            )
-          }
-        }
+        let persist = ChatSessionStore.makePersistCallback(
+          sessionId: cid,
+          createdAt: created,
+          model: modelSnapshot,
+          baseURL: baseSnapshot,
+          persistURL: persistURL,
+          logger: persistLog
+        )
 
         let interruptFlag = self.modelInterruptFlag
         let sessionLog = self.log
         self.coordinatorTask = Task {
-          [
-            configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
-            toolRegistry, toolDefinitions
-          ] in
+          [configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
+           tools, toolDefinitions] in
           defer { sink.markCoordinatorFinished() }
           do {
+            let client = try configuration.makeClient()
+            let toolRegistry = ToolRegistry(tools: tools)
+            let chatTools = DefaultAgentTools.chatTools(from: toolDefinitions)
             try await ScribeAgentCoordinator.runInteractive(
               configuration: configuration,
               client: client,
@@ -233,7 +200,7 @@ internal final class SlateChatHost {
               shouldAbortTurn: { interruptFlag.peek() },
               log: sessionLog,
               toolRegistry: toolRegistry,
-              toolDefinitions: toolDefinitions
+              toolDefinitions: chatTools
             )
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))

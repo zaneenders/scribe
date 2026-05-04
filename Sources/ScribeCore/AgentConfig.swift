@@ -1,6 +1,7 @@
 import Configuration
 import Foundation
 import Logging
+import ScribeLLM
 
 /// Dotted keys in `scribe-config.json` for ``ConfigReader`` (matches nested JSON paths).
 /// All application settings are read from that file (see ``AgentConfig/load()``); there are no separate secret lookup paths and keys are not marked `isSecret` (so configuration access logs show values as read).
@@ -59,6 +60,18 @@ public struct AgentConfig: Sendable {
     self.logDirectoryPath = logDirectoryPath
     self.chatSessionsDirectoryPath = chatSessionsDirectoryPath
     self.resolvedConfigurationPath = resolvedConfigurationPath
+  }
+
+  /// Builds the OpenAI-compatible HTTP client from this configuration.
+  public func makeClient() throws -> Client {
+    guard let serverURL = URL(string: openAIBaseURL) else {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.openAIBaseURL.description,
+        reason:
+          "Invalid \(ScribeConfigBinding.openAIBaseURL.description) in `scribe-config.json`. Use host only, no `/v1` (e.g. http://127.0.0.1:11434 for Ollama)."
+      )
+    }
+    return OpenAICompatibleClient.make(serverURL: serverURL, bearerToken: openAIAPIKey)
   }
 
   public static func load() async throws -> AgentConfig {

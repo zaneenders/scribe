@@ -239,7 +239,7 @@ public enum ScribeAgentCoordinator {
       shouldAbortTurn: { false },
       log: configuration.makeSessionLogger(sessionId: sessionId),
       toolRegistry: ToolRegistry(tools: defaultTools),
-      toolDefinitions: AgentTools.all()
+      toolDefinitions: DefaultAgentTools.all()
     )
   }
 
