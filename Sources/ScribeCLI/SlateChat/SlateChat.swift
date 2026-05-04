@@ -46,8 +46,7 @@ enum SlateChat {
     sessionPersistenceURL: URL,
     sessionId: UUID,
     log: Logger,
-    tools: [any ScribeTool],
-    toolDefinitions: [ScribeToolDefinition]
+    tools: [any ScribeTool]
   ) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
       log.error("event=chat.session.fail reason=stdin-not-tty")
@@ -69,8 +68,7 @@ enum SlateChat {
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
         log: log,
-        tools: tools,
-        toolDefinitions: toolDefinitions
+        tools: tools
       )
       do {
         try await host.run()

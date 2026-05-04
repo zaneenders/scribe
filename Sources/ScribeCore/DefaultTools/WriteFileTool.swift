@@ -7,6 +7,18 @@ struct WriteFileToolResult: Encodable, Sendable {
 
 public struct WriteFileTool: ScribeTool {
   public static var name: String { "write_file" }
+  public static var description: String { "Create or overwrite a file (parent directory must exist)." }
+  public static var parameters: [ScribeToolParameter] {
+    [
+      ScribeToolParameter(
+        name: "path", type: .string,
+        description: "Filesystem path (relative paths resolve against the process cwd).",
+        required: true),
+      ScribeToolParameter(
+        name: "content", type: .string, description: "Full file contents.", required: true),
+    ]
+  }
+  public static var promptHint: String? { nil }
 
   public init() {}
 

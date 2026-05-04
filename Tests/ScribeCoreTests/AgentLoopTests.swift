@@ -8,6 +8,9 @@ import Testing
 
 private struct FakeTool: ScribeTool {
   static var name: String { "fake_tool" }
+  static var description: String { "A fake tool for testing." }
+  static var parameters: [ScribeToolParameter] { [] }
+  static var promptHint: String? { nil }
 
   struct Result: Encodable {
     let ok: Bool

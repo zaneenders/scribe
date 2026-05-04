@@ -34,7 +34,7 @@ public enum ScribeAgentCoordinator {
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
     log: Logger,
     toolRegistry: ToolRegistry,
-    toolDefinitions: [Components.Schemas.ChatTool]
+    chatTools: [Components.Schemas.ChatTool]
   ) async throws {
     let cwd = FileManager.default.currentDirectoryPath
     onEvent(
@@ -95,7 +95,7 @@ public enum ScribeAgentCoordinator {
       onEvent: wrappedOnEvent,
       client: client,
       model: configuration.agentModel,
-      tools: toolDefinitions
+      tools: chatTools
     )
     let loop = AgentLoop(
       harness: harness,
@@ -213,36 +213,6 @@ public enum ScribeAgentCoordinator {
     )
   }
 
-  /// Cooked stdin via blocking ``readLine()`` on a detached task. Each invocation gets a fresh
-  /// session id (and matching `scribe-{uuid}.log` file).
-  public static func runInteractive(
-    configuration: AgentConfig,
-    client: Client,
-    systemPrompt: String,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
-  ) async throws {
-    let sessionId = UUID()
-    let defaultTools: [any ScribeTool] = [
-      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
-    ]
-    try await runInteractive(
-      configuration: configuration,
-      client: client,
-      systemPrompt: systemPrompt,
-      onEvent: onEvent,
-      readUserLine: {
-        await Task.detached(priority: .userInitiated) { readLine() }.value
-      },
-      initialConversation: nil,
-      onConversationPersist: nil,
-      prepareModelTurnStart: {},
-      shouldAbortTurn: { false },
-      log: configuration.makeSessionLogger(sessionId: sessionId),
-      toolRegistry: ToolRegistry(tools: defaultTools),
-      toolDefinitions: DefaultAgentTools.all()
-    )
-  }
-
   /// One user turn over stdin/stdout JSON; suitable for subprocess nesting (agents calling `scribe agent`).
   public static func runAgentIPC(
     configuration: AgentConfig,
@@ -251,7 +221,7 @@ public enum ScribeAgentCoordinator {
     request: ScribeAgentRequest,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     toolRegistry: ToolRegistry,
-    toolDefinitions: [Components.Schemas.ChatTool]
+    chatTools: [Components.Schemas.ChatTool]
   ) async -> ScribeAgentResponse {
     var history: [Components.Schemas.ChatMessage] = [
       .init(
@@ -273,7 +243,7 @@ public enum ScribeAgentCoordinator {
       onEvent: onEvent,
       client: client,
       model: configuration.agentModel,
-      tools: toolDefinitions
+      tools: chatTools
     )
     let loop = AgentLoop(
       harness: harness,

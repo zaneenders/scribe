@@ -91,7 +91,6 @@ internal final class SlateChatHost {
   /// Per-session logger threaded in from `Chat.run`; writes to `scribe-{uuid}.log`.
   private let log: Logger
   private let tools: [any ScribeTool]
-  private let toolDefinitions: [ScribeToolDefinition]
 
   init(
     configuration: AgentConfig,
@@ -101,8 +100,7 @@ internal final class SlateChatHost {
     sessionId: UUID,
     sessionCreatedAt: Date,
     log: Logger,
-    tools: [any ScribeTool],
-    toolDefinitions: [ScribeToolDefinition]
+    tools: [any ScribeTool]
   ) {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
@@ -112,7 +110,6 @@ internal final class SlateChatHost {
     self.sessionCreatedAt = sessionCreatedAt
     self.log = log
     self.tools = tools
-    self.toolDefinitions = toolDefinitions
   }
 
   deinit {
@@ -172,12 +169,12 @@ internal final class SlateChatHost {
         let sessionLog = self.log
         self.coordinatorTask = Task {
           [configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
-           tools, toolDefinitions] in
+           tools] in
           defer { sink.markCoordinatorFinished() }
           do {
             let client = try configuration.makeClient()
             let toolRegistry = ToolRegistry(tools: tools)
-            let chatTools = DefaultAgentTools.chatTools(from: toolDefinitions)
+            let chatTools = DefaultAgentTools.chatTools(from: tools)
             try await ScribeAgentCoordinator.runInteractive(
               configuration: configuration,
               client: client,
@@ -200,7 +197,7 @@ internal final class SlateChatHost {
               shouldAbortTurn: { interruptFlag.peek() },
               log: sessionLog,
               toolRegistry: toolRegistry,
-              toolDefinitions: chatTools
+              chatTools: chatTools
             )
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))

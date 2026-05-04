@@ -45,9 +45,8 @@ struct Chat: AsyncParsableCommand {
     let tools: [any ScribeTool] = [
       ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
     ]
-    let toolDefinitions = ScribeToolDefinition.builtIn
-    let toolNames = toolDefinitions.map(\.name).joined(separator: ", ")
-    let toolHints = toolDefinitions.compactMap(\.promptHint).joined(separator: "\n\n")
+    let toolNames = tools.map { type(of: $0).name }.joined(separator: ", ")
+    let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
 
     let systemPrompt = """
       You are Scribe, a coding agent CLI with shell and file tools.
@@ -116,8 +115,7 @@ struct Chat: AsyncParsableCommand {
       sessionPersistenceURL: sessionPersistenceURL,
       sessionId: sessionId,
       log: log,
-      tools: tools,
-      toolDefinitions: toolDefinitions
+      tools: tools
     )
     log.notice("event=chat.session.end status=ok")
     printExitResumeHint(
