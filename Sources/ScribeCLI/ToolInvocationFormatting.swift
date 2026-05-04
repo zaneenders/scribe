@@ -1,4 +1,5 @@
 import Foundation
+import ScribeCore
 
 /// Human-readable transcript lines for tool JSON (conversation history still receives raw JSON).
 public enum ToolInvocationFormatting {
@@ -55,42 +56,6 @@ public enum ToolInvocationFormatting {
     }
   }
 
-  /// Structured `key=value key=value` snippet describing a `read_file` result, intended for
-  /// embedding in a `Logger` line (the harness wraps it with `event=agent.tool.read_file`).
-  /// Returns `decode_failed=true` when the JSON cannot be parsed so the log still records
-  /// that something happened.
-  public static func readFileLogSummary(jsonOutput: String) -> String {
-    guard let data = jsonOutput.data(using: .utf8),
-      let decoded = try? toolJSONDecoder.decode(ToolResultBody.self, from: data)
-    else {
-      return "decode_failed=true output_chars=\(jsonOutput.count)"
-    }
-    if !decoded.ok {
-      let err = decoded.error?.replacingOccurrences(of: "\"", with: "\\\"") ?? "unknown"
-      return "ok=false err=\"\(err)\""
-    }
-    let path = decoded.path?.replacingOccurrences(of: "\"", with: "\\\"") ?? ""
-    let bytes = decoded.bytes ?? 0
-    let totalLines = decoded.totalLines ?? 0
-    let startLine = decoded.startLine ?? 1
-    let endLine = decoded.endLine ?? 0
-    let returnedLines = max(0, endLine - startLine + 1)
-    let truncated = decoded.truncated ?? false
-    let contentChars = decoded.content?.count ?? 0
-    return
-      """
-      ok=true \
-      path="\(path)" \
-      bytes=\(bytes) \
-      total_lines=\(totalLines) \
-      start_line=\(startLine) \
-      end_line=\(endLine) \
-      returned_lines=\(returnedLines) \
-      content_chars=\(contentChars) \
-      truncated=\(truncated)
-      """
-  }
-
   public static func outputLines(name: String, jsonOutput: String) -> [String] {
     guard let data = jsonOutput.data(using: .utf8),
       let decoded = try? toolJSONDecoder.decode(ToolResultBody.self, from: data)
@@ -128,9 +93,9 @@ public enum ToolInvocationFormatting {
 
     case "read_file":
       // Show only a single summary line in the transcript — the full content lives in the
-      // conversation history (visible to the model) and in the structured log line emitted
-      // from `AgentHarness`. Avoiding the (potentially thousands of) wrapped content rows
-      // here keeps the transcript flatten/render path cheap right after a big read.
+      // conversation history (visible to the model). Avoiding the (potentially thousands of)
+      // wrapped content rows here keeps the transcript flatten/render path cheap right after
+      // a big read.
       return [readFileSummaryLine(decoded: decoded)]
 
     case "edit_file":

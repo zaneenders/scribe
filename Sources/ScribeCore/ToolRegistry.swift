@@ -1,7 +1,10 @@
 import Foundation
+import Logging
 
 public struct ToolRegistry: Sendable {
   private let tools: [String: any ScribeTool]
+
+  private static let logger = Logger(label: "scribe.tool.registry")
 
   public init(tools: [any ScribeTool]) {
     var map: [String: any ScribeTool] = [:]
@@ -12,16 +15,61 @@ public struct ToolRegistry: Sendable {
     self.tools = map
   }
 
+  /// Execute a tool by name, logging start/completed/errored events
+  /// with wall-clock duration measured by `ContinuousClock`.
   public func run(name: String, arguments: String) async -> String {
     guard let tool = tools[name] else {
+      Self.logger.debug(
+        """
+        event=agent.tool.unknown \
+        tool=\(name)
+        """)
       return Self.jsonError("unknown tool \(name)")
     }
+    let clock = ContinuousClock()
+    let start = clock.now
+    Self.logger.debug(
+      """
+      event=agent.tool.start \
+      tool=\(name) \
+      args_chars=\(arguments.count)
+      """)
     do {
       let result = try await tool.run(arguments: arguments)
+      let elapsed = start.duration(to: clock.now)
+      let elapsedMs = Int(elapsed / .milliseconds(1))
       let encoder = JSONEncoder()
       encoder.keyEncodingStrategy = .convertToSnakeCase
-      return try Self.encode(result, using: encoder)
+      do {
+        let json = try Self.encode(result, using: encoder)
+        Self.logger.debug(
+          """
+          event=agent.tool.completed \
+          tool=\(name) \
+          elapsed_ms=\(elapsedMs) \
+          output_chars=\(json.count)
+          """)
+        return json
+      } catch {
+        Self.logger.warning(
+          """
+          event=agent.tool.encode_failed \
+          tool=\(name) \
+          elapsed_ms=\(elapsedMs) \
+          error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
+          """)
+        return Self.jsonError(String(describing: error))
+      }
     } catch {
+      let elapsed = start.duration(to: clock.now)
+      let elapsedMs = Int(elapsed / .milliseconds(1))
+      Self.logger.debug(
+        """
+        event=agent.tool.errored \
+        tool=\(name) \
+        elapsed_ms=\(elapsedMs) \
+        error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
+        """)
       return Self.jsonError(String(describing: error))
     }
   }

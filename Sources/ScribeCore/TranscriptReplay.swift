@@ -68,9 +68,7 @@ public enum TranscriptReplay {
             let name = tc.function?.name ?? "tool"
             let args = tc.function?.arguments ?? "{}"
             let jsonOut = toolBodies[id] ?? ""
-            let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: args)
-            let lines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: jsonOut)
-            onEvent(.toolInvocation(name: name, argumentSummary: argSummary, outputLines: lines))
+            onEvent(.toolInvocation(name: name, arguments: args, output: jsonOut))
             onEvent(.blankLine)
           }
           i = k

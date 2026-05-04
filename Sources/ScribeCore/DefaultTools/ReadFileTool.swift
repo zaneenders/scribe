@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 
 struct ReadFileToolResult: Encodable, Sendable {
   let ok = true
@@ -54,12 +55,28 @@ public struct ReadFileTool: ScribeTool {
   /// subsequent model turn re-uploads the full transcript).
   static let defaultLineLimit = 2000
 
+  private static let logger = Logger(label: "scribe.tool.read_file")
+
   public func run(arguments: String) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let offset = ToolArgumentParsing.optionalInt(obj["offset"])
     let limit = ToolArgumentParsing.optionalInt(obj["limit"])
     let result = try Self.readFile(path: path, offset: offset, limit: limit)
+    let returnedLines = max(0, result.endLine - result.startLine + 1)
+    Self.logger.debug(
+      """
+      event=agent.tool.read_file \
+      ok=true \
+      path="\(result.absolutePath.replacingOccurrences(of: "\"", with: "\\\""))" \
+      bytes=\(result.totalBytes) \
+      total_lines=\(result.totalLines) \
+      start_line=\(result.startLine) \
+      end_line=\(result.endLine) \
+      returned_lines=\(returnedLines) \
+      content_chars=\(result.content.count) \
+      truncated=\(result.truncated)
+      """)
     return ReadFileToolResult(
       path: result.absolutePath,
       content: result.content,

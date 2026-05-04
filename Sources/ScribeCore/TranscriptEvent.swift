@@ -17,7 +17,7 @@ public enum TranscriptEvent: Sendable {
   case usage(Components.Schemas.CompletionUsage, tokensPerSecond: Double?)
   case blankLine
   case toolRoundHeader(round: Int, toolNames: [String])
-  case toolInvocation(name: String, argumentSummary: String?, outputLines: [String])
+  case toolInvocation(name: String, arguments: String, output: String)
   case maxToolRoundsExceeded(max: Int)
   case skippedUnreadableStreamLine
   case harnessError(ScribeError)

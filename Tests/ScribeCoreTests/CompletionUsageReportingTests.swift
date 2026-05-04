@@ -1,4 +1,5 @@
 import Foundation
+import ScribeCLI
 import ScribeCore
 import ScribeLLM
 import Testing

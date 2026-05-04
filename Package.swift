@@ -57,6 +57,7 @@ let package = Package(
       name: "ScribeCLI",
       dependencies: [
         "ScribeCore",
+        "ScribeLLM",
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "Markdown", package: "swift-markdown"),
@@ -74,6 +75,16 @@ let package = Package(
         "ScribeCLI",
         .product(name: "SlateCore", package: "slate"),
         .product(name: "Markdown", package: "swift-markdown"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ]
+    ),
+    .testTarget(
+      name: "ScribeCLITests",
+      dependencies: [
+        "ScribeCLI",
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

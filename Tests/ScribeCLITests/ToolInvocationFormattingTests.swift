@@ -1,5 +1,5 @@
 import Foundation
-import ScribeCore
+import ScribeCLI
 import Testing
 
 /// Behaviour tests for the *transcript-display* formatting layer. The agent's conversation
@@ -189,33 +189,6 @@ struct ToolInvocationFormattingTests {
     let raw = "garbage"
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: raw)
     #expect(lines == [raw])
-  }
-
-  // MARK: - readFileLogSummary
-
-  @Test func readFileLogSummarySuccess() {
-    let json = """
-      {"ok":true,"path":"/tmp/f.txt","bytes":500,"total_lines":20,"start_line":1,"end_line":10,"truncated":true,"content":"abc"}
-      """
-    let summary = ToolInvocationFormatting.readFileLogSummary(jsonOutput: json)
-    #expect(summary.contains("ok=true"))
-    #expect(summary.contains("bytes=500"))
-    #expect(summary.contains("truncated=true"))
-    #expect(summary.contains("returned_lines=10"))
-  }
-
-  @Test func readFileLogSummaryError() {
-    let json = """
-      {"ok":false,"error":"path does not exist: /nope"}
-      """
-    let summary = ToolInvocationFormatting.readFileLogSummary(jsonOutput: json)
-    #expect(summary.contains("ok=false"))
-    #expect(summary.contains("path does not exist"))
-  }
-
-  @Test func readFileLogSummaryInvalidJSON() {
-    let summary = ToolInvocationFormatting.readFileLogSummary(jsonOutput: "{{}")
-    #expect(summary.contains("decode_failed=true"))
   }
 
   // MARK: - outputLines for shell edge cases

@@ -383,15 +383,17 @@ public final class SlateTranscriptSink: Sendable {
       ])
       appendLine(line)
 
-    case .toolInvocation(let name, let argumentSummary, let outputLines):
+    case .toolInvocation(let name, let arguments, let output):
+      let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: arguments)
+      let outputLines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: output)
       var spans: [StyledSpan] = [
         StyledSpan(fg: theme.toolInvocation, bg: theme.background, bold: false, text: "▶ \(name)")
       ]
-      if let argumentSummary {
+      if let argSummary {
         spans.append(
           StyledSpan(
             fg: theme.toolArgSummary, bg: theme.background, bold: false,
-            text: " \(argumentSummary)"))
+            text: " \(argSummary)"))
       }
       appendLine(TLine(spans: spans))
       for ol in outputLines {

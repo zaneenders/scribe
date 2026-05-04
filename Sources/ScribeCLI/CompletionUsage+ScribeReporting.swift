@@ -1,4 +1,5 @@
 import Foundation
+import ScribeCore
 import ScribeLLM
 
 /// Shared presentation helpers for token counts in the CLI.

@@ -119,24 +119,7 @@ public struct AgentLoop: Sendable {
             unknown=\(unknown)
             """
           )
-          // Tool-specific structured detail. Right now only `read_file` carries enough
-          // metadata to be worth a dedicated log line, but the same pattern can be extended
-          // to other tools (`shell` exit code, `edit_file` chars-replaced, etc.) without
-          // changing the loop's main control flow.
-          if inv.name == "read_file" {
-            let summary = ToolInvocationFormatting.readFileLogSummary(jsonOutput: jsonOutput)
-            logger.debug(
-              """
-              event=agent.tool.read_file \
-              round=\(roundNum) \
-              \(summary)
-              """
-            )
-          }
-          let argSummary = ToolInvocationFormatting.argumentSummary(
-            name: inv.name, argumentsJSON: inv.arguments)
-          let lines = ToolInvocationFormatting.outputLines(name: inv.name, jsonOutput: jsonOutput)
-          onEvent(.toolInvocation(name: inv.name, argumentSummary: argSummary, outputLines: lines))
+          onEvent(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
           onEvent(.blankLine)
           let toolMsg = Components.Schemas.ChatMessage(
             role: .tool,

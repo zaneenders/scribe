@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 
 struct WriteFileToolResult: Encodable, Sendable {
   let ok = true
@@ -22,6 +23,8 @@ public struct WriteFileTool: ScribeTool {
 
   public init() {}
 
+  private static let logger = Logger(label: "scribe.tool.write_file")
+
   public func run(arguments: String) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
@@ -30,6 +33,12 @@ public struct WriteFileTool: ScribeTool {
     let s = PathResolution.fileSystemPath(fp)
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try content.write(toFile: s, atomically: true, encoding: .utf8)
+    Self.logger.debug(
+      """
+      event=agent.tool.write_file \
+      path="\(s.replacingOccurrences(of: "\"", with: "\\\""))" \
+      bytes_written=\(content.utf8.count)
+      """)
     return WriteFileToolResult(written: true)
   }
 }
