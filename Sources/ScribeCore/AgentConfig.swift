@@ -270,7 +270,7 @@ public struct AgentConfig: Sendable {
       ),
       logging: ConfigTemplate.LoggingSection(
         level: "trace",
-        storage: "."
+        storage: "~/.local/share/scribe"
       )
     )
     let encoder = JSONEncoder()
