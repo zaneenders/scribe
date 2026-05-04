@@ -223,7 +223,7 @@ public enum ScribeAgentCoordinator {
   ) async throws {
     let sessionId = UUID()
     let defaultTools: [any ScribeTool] = [
-      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()
+      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
     ]
     try await runInteractive(
       configuration: configuration,

@@ -132,7 +132,7 @@ public enum ChatSessionStore {
     enc.dateEncodingStrategy = .iso8601
 
     if !FileManager.default.fileExists(atPath: messagesURL.path) {
-      FileManager.default.createFile(atPath: messagesURL.path, contents: nil)
+      _ = FileManager.default.createFile(atPath: messagesURL.path, contents: nil)
     }
 
     let handle = try FileHandle(forWritingTo: messagesURL)

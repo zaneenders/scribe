@@ -263,7 +263,8 @@ internal enum SlateChatRenderer {
     if let pct = usage.contextWindowUsedPercent {
       row0.append(uSpan(ScribePalette.usageMuted, sep))
       row0.append(uSpan(ScribePalette.usageLabel, "ctx "))
-      let pctColor: TerminalRGB = pct >= 90 ? ScribePalette.red : (pct >= 75 ? ScribePalette.yellow : ScribePalette.usageLabel)
+      let pctColor: TerminalRGB =
+        pct >= 90 ? ScribePalette.red : (pct >= 75 ? ScribePalette.yellow : ScribePalette.usageLabel)
       row0.append(uSpan(pctColor, "\(pct)%"))
     }
     let line0 = TLine(spans: row0)

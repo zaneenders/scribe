@@ -113,7 +113,7 @@ struct Chat: AsyncParsableCommand {
     }
 
     let defaultTools: [any ScribeTool] = [
-      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()
+      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
     ]
     let toolRegistry = ToolRegistry(tools: defaultTools)
     let toolDefinitions = AgentTools.all()

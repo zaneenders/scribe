@@ -266,8 +266,10 @@ internal final class SlateChatHost {
         let interruptFlag = self.modelInterruptFlag
         let sessionLog = self.log
         self.coordinatorTask = Task {
-          [configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
-           toolRegistry, toolDefinitions] in
+          [
+            configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
+            toolRegistry, toolDefinitions
+          ] in
           defer { sink.markCoordinatorFinished() }
           do {
             try await ScribeAgentCoordinator.runInteractive(

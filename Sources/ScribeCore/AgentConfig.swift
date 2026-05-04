@@ -104,7 +104,8 @@ public struct AgentConfig: Sendable {
       )
     }
 
-    let contextWindowThreshold = try await reader.fetchRequiredDouble(forKey: ScribeConfigBinding.contextWindowThreshold)
+    let contextWindowThreshold = try await reader.fetchRequiredDouble(
+      forKey: ScribeConfigBinding.contextWindowThreshold)
     guard contextWindowThreshold > 0 else {
       throw ScribeError.configuration(
         key: ScribeConfigBinding.contextWindowThreshold.description,
