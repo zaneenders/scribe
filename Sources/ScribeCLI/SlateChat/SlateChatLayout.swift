@@ -599,15 +599,6 @@ public final class SlateTranscriptSink: Sendable {
 // MARK: - Layout
 
 internal enum TranscriptLayout {
-  private struct RunStyle: Equatable {
-    var fg: TerminalRGB
-    var bg: TerminalRGB
-    var bold: Bool
-  }
-
-  private static func runStyle(from s: StyledSpan) -> RunStyle {
-    RunStyle(fg: s.fg, bg: s.bg, bold: s.bold)
-  }
 
   private static func wrappedPlainLines(_ text: String, width: Int) -> [String] {
     guard width > 0 else { return [] }
@@ -699,11 +690,12 @@ internal enum TranscriptLayout {
       }
 
       var plain = ""
-      var styles: [RunStyle] = []
+      var styles: [(fg: TerminalRGB, bg: TerminalRGB, bold: Bool)] = []
       for sp in line.spans {
+        let s = (fg: sp.fg, bg: sp.bg, bold: sp.bold)
         for ch in sp.text {
           plain.append(ch)
-          styles.append(runStyle(from: sp))
+          styles.append(s)
         }
       }
 
@@ -731,8 +723,16 @@ internal enum TranscriptLayout {
             charOffset += segment.count
             var newLine = TLine(spans: [])
             for (style, ch) in zip(sliceStyles, segment) {
-              SlateTranscriptSinkAppendSpan(
-                &newLine, fg: style.fg, bg: style.bg, bold: style.bold, char: ch)
+              if let lastIdx = newLine.spans.indices.last,
+                 newLine.spans[lastIdx].fg == style.fg,
+                 newLine.spans[lastIdx].bg == style.bg,
+                 newLine.spans[lastIdx].bold == style.bold
+              {
+                newLine.spans[lastIdx].text.append(ch)
+              } else {
+                newLine.spans.append(
+                  StyledSpan(fg: style.fg, bg: style.bg, bold: style.bold, text: String(ch)))
+              }
             }
             out.append(newLine)
           }
@@ -745,16 +745,5 @@ internal enum TranscriptLayout {
       }
     }
     return out
-  }
-}
-
-internal func SlateTranscriptSinkAppendSpan(
-  _ line: inout TLine, fg: TerminalRGB, bg: TerminalRGB, bold: Bool, char: Character
-) {
-  if var last = line.spans.last, last.fg == fg, last.bg == bg, last.bold == bold {
-    last.text.append(char)
-    line.spans[line.spans.count - 1] = last
-  } else {
-    line.spans.append(StyledSpan(fg: fg, bg: bg, bold: bold, text: String(char)))
   }
 }

@@ -105,11 +105,9 @@ internal enum SlateChatRenderer {
     waitingForLLM: Bool,
     queuedTrayText: String?
   ) -> TerminalCellGrid {
-    var grid = TerminalCellGrid(
-      cols: cols,
-      rows: rows,
-      filling: TerminalCell(
-        glyph: " ", foreground: ScribePalette.white, background: ScribePalette.black, flags: []))
+    let fill = TerminalCell(
+      glyph: " ", foreground: ScribePalette.white, background: ScribePalette.black, flags: [])
+    var grid = TerminalCellGrid(cols: cols, rows: rows, filling: fill)
 
     let headerRows: Int = {
       if banner != nil {
@@ -181,17 +179,20 @@ internal enum SlateChatRenderer {
     let trayTextWidth = max(0, cols &- queuedTrayGutterColumns)
     let rawTrayLines = queuedTrayVisualLines(
       queuedTrayText: queuedTrayText, textWidth: trayTextWidth)
-    // Cap tray rows so an oversized tray on a tiny terminal can't overpaint the input strip.
     let availableTrayRows = max(0, firstInputRow &- headerRows)
     let trayVisualLines = Array(rawTrayLines.prefix(availableTrayRows))
     let trayRowCount = trayVisualLines.count
     let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
-    let wrapW = cols
 
-    fillInputBackground(
-      into: &grid, startRow: firstTrayRow, rowCount: trayRowCount &+ inputRowCount, cols: cols,
-      background: ScribePalette.inputAreaBg
-    )
+    // Fill input/tray background region in one blit
+    let inputBgRowCount = trayRowCount &+ inputRowCount
+    if inputBgRowCount > 0 {
+      grid.blit(
+        column: 0, row: firstTrayRow, width: cols, height: inputBgRowCount,
+        repeating: TerminalCell(
+          glyph: " ", foreground: ScribePalette.white,
+          background: ScribePalette.inputAreaBg, flags: []))
+    }
 
     if contentRows > 0 {
       let flat = flattenedTranscript
@@ -203,7 +204,7 @@ internal enum SlateChatRenderer {
       var y = headerRows &+ topPad
       for line in visible {
         guard y < firstTrayRow else { break }
-        blit(line: line, into: &grid, column: 0, row: y, width: wrapW)
+        grid.blitSpans(column: 0, row: y, maxWidth: cols, line.toSlateSpans)
         y &+= 1
       }
     }
@@ -239,84 +240,78 @@ internal enum SlateChatRenderer {
     return formatUsageInt(n)
   }
 
-  private static func uSpan(_ fg: TerminalRGB, _ text: String, bold: Bool = false) -> StyledSpan {
-    StyledSpan(fg: fg, bg: ScribePalette.black, bold: bold, text: text)
+  private static let hudBG = ScribePalette.black
+
+  private static func hudSpan(_ fg: TerminalRGB, _ text: String, bold: Bool = false) -> TerminalStyledSpan {
+    TerminalStyledSpan(text, foreground: fg, background: hudBG, flags: bold ? .bold : [])
   }
 
-  /// Up to three lines, aligned with the three-row config banner: (1) last request in/out/rate, (2) optional R+cache, (3) turn and session Σ.
-  /// When ``maxRows`` is smaller than the full set, the optional R/cache row is dropped first so totals stay visible.
-  private static func usageHUDLines(from usage: UsageHUDSnapshot, maxRows: Int) -> [TLine] {
+  /// Up to three lines of spans for the upper-right HUD.  When `maxRows` is small the
+  /// optional R/cache row is dropped first so totals stay visible.
+  private static func usageHUDSpans(from usage: UsageHUDSnapshot, maxRows: Int) -> [[TerminalStyledSpan]] {
     let sep = "  ·  "
 
-    var row0: [StyledSpan] = [
-      uSpan(ScribePalette.usageLabel, "in "),
-      uSpan(ScribePalette.usagePrompt, formatUsageIntOpt(usage.roundPrompt)),
-      uSpan(ScribePalette.usageMuted, sep),
-      uSpan(ScribePalette.usageLabel, "out "),
-      uSpan(ScribePalette.usageCompletion, formatUsageIntOpt(usage.roundCompletion)),
+    var row0: [TerminalStyledSpan] = [
+      hudSpan(ScribePalette.usageLabel, "in "),
+      hudSpan(ScribePalette.usagePrompt, formatUsageIntOpt(usage.roundPrompt)),
+      hudSpan(ScribePalette.usageMuted, sep),
+      hudSpan(ScribePalette.usageLabel, "out "),
+      hudSpan(ScribePalette.usageCompletion, formatUsageIntOpt(usage.roundCompletion)),
     ]
     if let tps = usage.outputTokensPerSecond {
-      row0.append(uSpan(ScribePalette.usageMuted, sep))
-      row0.append(uSpan(ScribePalette.usageLabel, "rate "))
-      row0.append(uSpan(ScribePalette.usageRate, String(format: "%.1f/s", tps)))
+      row0.append(hudSpan(ScribePalette.usageMuted, sep))
+      row0.append(hudSpan(ScribePalette.usageLabel, "rate "))
+      row0.append(hudSpan(ScribePalette.usageRate, String(format: "%.1f/s", tps)))
     }
     if let pct = usage.contextWindowUsedPercent {
-      row0.append(uSpan(ScribePalette.usageMuted, sep))
-      row0.append(uSpan(ScribePalette.usageLabel, "ctx "))
+      row0.append(hudSpan(ScribePalette.usageMuted, sep))
+      row0.append(hudSpan(ScribePalette.usageLabel, "ctx "))
       let pctColor: TerminalRGB =
         pct >= 90 ? ScribePalette.red : (pct >= 75 ? ScribePalette.yellow : ScribePalette.usageLabel)
-      row0.append(uSpan(pctColor, "\(pct)%"))
+      row0.append(hudSpan(pctColor, "\(pct)%"))
     }
-    let line0 = TLine(spans: row0)
 
     let hasR = (usage.reasoningTokens ?? 0) > 0
     let hasCache = (usage.cachedPromptTokens ?? 0) > 0
-    let lineDetail: TLine? = {
+    let lineDetail: [TerminalStyledSpan]? = {
       guard hasR || hasCache else { return nil }
-      var row1: [StyledSpan] = []
+      var row1: [TerminalStyledSpan] = []
       if hasR {
-        row1.append(uSpan(ScribePalette.usageLabel, "reasoning "))
-        row1.append(uSpan(ScribePalette.usageReasoning, formatUsageInt(usage.reasoningTokens!)))
+        row1.append(hudSpan(ScribePalette.usageLabel, "reasoning "))
+        row1.append(hudSpan(ScribePalette.usageReasoning, formatUsageInt(usage.reasoningTokens!)))
       }
       if hasR && hasCache {
-        row1.append(uSpan(ScribePalette.usageMuted, sep))
+        row1.append(hudSpan(ScribePalette.usageMuted, sep))
       }
       if hasCache {
-        row1.append(uSpan(ScribePalette.usageLabel, "cache "))
-        row1.append(uSpan(ScribePalette.usageCache, formatUsageInt(usage.cachedPromptTokens!)))
+        row1.append(hudSpan(ScribePalette.usageLabel, "cache "))
+        row1.append(hudSpan(ScribePalette.usageCache, formatUsageInt(usage.cachedPromptTokens!)))
       }
-      return TLine(spans: row1)
+      return row1
     }()
 
-    /// Third row of the HUD: turn Σ (tokens for the current user message, including any
-    /// tool-call rounds) and all Σ (cumulative session total, never reset).
-    let lineSums = TLine(spans: [
-      uSpan(ScribePalette.usageLabel, "turn Σ "),
-      uSpan(ScribePalette.usageTurnSum, formatUsageInt(usage.turnTotal), bold: true),
-      uSpan(ScribePalette.usageMuted, sep),
-      uSpan(ScribePalette.usageLabel, "all Σ "),
-      uSpan(ScribePalette.usageSessionSum, formatUsageInt(usage.sessionTotal), bold: true),
-    ])
+    let lineSums: [TerminalStyledSpan] = [
+      hudSpan(ScribePalette.usageLabel, "turn Σ "),
+      hudSpan(ScribePalette.usageTurnSum, formatUsageInt(usage.turnTotal), bold: true),
+      hudSpan(ScribePalette.usageMuted, sep),
+      hudSpan(ScribePalette.usageLabel, "all Σ "),
+      hudSpan(ScribePalette.usageSessionSum, formatUsageInt(usage.sessionTotal), bold: true),
+    ]
 
-    var full: [TLine] = [line0]
-    if let lineDetail {
-      full.append(lineDetail)
-    }
+    var full: [[TerminalStyledSpan]] = [row0]
+    if let lineDetail { full.append(lineDetail) }
     full.append(lineSums)
 
     guard maxRows > 0 else { return [] }
     if full.count <= maxRows { return full }
-    if maxRows == 1 { return [line0] }
-    // maxRows == 2 and we have 3 logical lines: drop the middle (detail) band.
-    if maxRows == 2, full.count == 3 {
-      return [line0, lineSums]
-    }
+    if maxRows == 1 { return [row0] }
+    if maxRows == 2, full.count == 3 { return [row0, lineSums] }
     return Array(full.prefix(maxRows))
   }
 
   private static func usageHUDCharCount(_ usage: UsageHUDSnapshot, maxRows: Int) -> Int {
-    let ls = usageHUDLines(from: usage, maxRows: maxRows)
-    return ls.map { $0.spans.reduce(0) { $0 + $1.text.count } }.max() ?? 0
+    usageHUDSpans(from: usage, maxRows: maxRows)
+      .map { $0.reduce(0) { $0 + $1.text.count } }.max() ?? 0
   }
 
   private static func paintBannerKV(
@@ -328,8 +323,6 @@ internal enum SlateChatRenderer {
     value: String
   ) {
     guard row >= 0, row < grid.rows else { return }
-    let dk = ScribePalette.grayDark
-    let lt = ScribePalette.grayLight
     let bg = ScribePalette.black
     let cap = min(max(0, maxWidth), cols)
     let maxValueChars = max(0, cap &- label.count)
@@ -337,11 +330,12 @@ internal enum SlateChatRenderer {
     if v.count > maxValueChars {
       v = String(v.prefix(max(0, maxValueChars &- 1))) + "…"
     }
-    let line = TLine(spans: [
-      StyledSpan(fg: dk, bg: bg, bold: false, text: label),
-      StyledSpan(fg: lt, bg: bg, bold: false, text: v),
-    ])
-    blit(line: line, into: &grid, column: 0, row: row, width: cap)
+    grid.blitSpans(
+      column: 0, row: row, maxWidth: cap,
+      [
+        TerminalStyledSpan(label, foreground: ScribePalette.grayDark, background: bg),
+        TerminalStyledSpan(v, foreground: ScribePalette.grayLight, background: bg),
+      ])
   }
 
   private static func paintUsageHUD(
@@ -351,31 +345,12 @@ internal enum SlateChatRenderer {
     maxRows: Int
   ) {
     guard let usage, maxRows > 0 else { return }
-    let lines = usageHUDLines(from: usage, maxRows: maxRows)
-    for (row, line) in lines.enumerated() {
+    let lines = usageHUDSpans(from: usage, maxRows: maxRows)
+    for (row, spans) in lines.enumerated() {
       guard row >= 0, row < grid.rows else { break }
-      let w = line.spans.reduce(0) { $0 + $1.text.count }
+      let w = spans.reduce(0) { $0 + $1.text.count }
       let startCol = max(0, cols &- w)
-      blit(line: line, into: &grid, column: startCol, row: row, width: cols &- startCol)
-    }
-  }
-
-  private static func fillInputBackground(
-    into grid: inout TerminalCellGrid,
-    startRow: Int,
-    rowCount: Int,
-    cols: Int,
-    background: TerminalRGB
-  ) {
-    guard rowCount > 0 else { return }
-    let endRow = min(grid.rows, startRow &+ rowCount)
-    var r = max(0, startRow)
-    while r < endRow {
-      for c in 0..<min(cols, grid.cols) {
-        grid[column: c, row: r] = TerminalCell(
-          glyph: " ", foreground: ScribePalette.white, background: background, flags: [])
-      }
-      r &+= 1
+      grid.blitSpans(column: startCol, row: row, maxWidth: cols &- startCol, spans)
     }
   }
 
@@ -396,51 +371,37 @@ internal enum SlateChatRenderer {
     while lineIdx < rowCount {
       let row = startRow &+ lineIdx
       guard row >= 0, row < grid.rows else { break }
-      var col = 0
-      func paint(
-        _ text: String,
-        foreground: TerminalRGB,
-        flags: TerminalCellFlags = []
-      ) {
-        for ch in text {
-          guard col < cols else { return }
-          grid[column: col, row: row] = TerminalCell(
-            glyph: ch, foreground: foreground, background: bg, flags: flags)
-          col += 1
-        }
-      }
-
       let onLastInputRow = lineIdx == rowCount &- 1
 
+      var spans: [TerminalStyledSpan] = []
       if showSpinner, onLastInputRow {
-        paint("scribe: ", foreground: ScribePalette.purple)
+        spans.append(TerminalStyledSpan("scribe: ", foreground: ScribePalette.purple, background: bg))
         let frames = llmWaitSpinner
         let ch = frames[llmWaitAnimationFrame % frames.count]
-        paint(String(ch), foreground: ScribePalette.yellowBright)
-        paint("▏", foreground: ScribePalette.white)
+        spans.append(TerminalStyledSpan(String(ch), foreground: ScribePalette.yellowBright, background: bg))
+        spans.append(TerminalStyledSpan("▏", foreground: ScribePalette.white, background: bg))
       } else if lineIdx == 0 {
-        paint("you: ", foreground: ScribePalette.orange)
+        spans.append(TerminalStyledSpan("you: ", foreground: ScribePalette.orange, background: bg))
         if lineIdx < visualLines.count, textWidth > 0 {
-          paint(String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.white)
+          spans.append(
+            TerminalStyledSpan(
+              String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.white, background: bg))
         }
         if onLastInputRow {
-          paint("▏", foreground: ScribePalette.white)
+          spans.append(TerminalStyledSpan("▏", foreground: ScribePalette.white, background: bg))
         }
       } else {
-        paint(gutter, foreground: ScribePalette.gray)
+        spans.append(TerminalStyledSpan(gutter, foreground: ScribePalette.gray, background: bg))
         if lineIdx < visualLines.count, textWidth > 0 {
-          paint(String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.white)
+          spans.append(
+            TerminalStyledSpan(
+              String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.white, background: bg))
         }
         if onLastInputRow {
-          paint("▏", foreground: ScribePalette.white)
+          spans.append(TerminalStyledSpan("▏", foreground: ScribePalette.white, background: bg))
         }
       }
-
-      while col < cols {
-        grid[column: col, row: row] = TerminalCell(
-          glyph: " ", foreground: ScribePalette.white, background: bg, flags: [])
-        col += 1
-      }
+      grid.blitSpans(column: 0, row: row, maxWidth: cols, spans)
       lineIdx &+= 1
     }
   }
@@ -462,49 +423,37 @@ internal enum SlateChatRenderer {
     while lineIdx < visualLines.count {
       let row = startRow &+ lineIdx
       guard row >= 0, row < grid.rows else { break }
-      var col = 0
-      func paint(
-        _ text: String,
-        foreground: TerminalRGB,
-        flags: TerminalCellFlags = []
-      ) {
-        for ch in text {
-          guard col < cols else { return }
-          grid[column: col, row: row] = TerminalCell(
-            glyph: ch, foreground: foreground, background: bg, flags: flags)
-          col += 1
-        }
-      }
 
+      var spans: [TerminalStyledSpan] = []
       if lineIdx == 0 {
-        paint("queued: ", foreground: ScribePalette.orange)
+        spans.append(TerminalStyledSpan("queued: ", foreground: ScribePalette.orange, background: bg))
       } else {
-        paint(gutterText, foreground: ScribePalette.gray)
+        spans.append(TerminalStyledSpan(gutterText, foreground: ScribePalette.gray, background: bg))
       }
       if textWidth > 0 {
-        paint(String(visualLines[lineIdx].prefix(textWidth)), foreground: ScribePalette.grayLight)
+        spans.append(
+          TerminalStyledSpan(
+            String(visualLines[lineIdx].prefix(textWidth)),
+            foreground: ScribePalette.grayLight, background: bg))
       }
-
-      while col < cols {
-        grid[column: col, row: row] = TerminalCell(
-          glyph: " ", foreground: ScribePalette.white, background: bg, flags: [])
-        col += 1
-      }
+      grid.blitSpans(column: 0, row: row, maxWidth: cols, spans)
       lineIdx &+= 1
     }
   }
+}
 
-  private static func blit(line: TLine, into grid: inout TerminalCellGrid, column: Int, row: Int, width: Int) {
-    guard row >= 0, row < grid.rows else { return }
-    var x = column
-    for span in line.spans {
-      let flags: TerminalCellFlags = span.bold ? .bold : []
-      for ch in span.text {
-        guard x < column &+ width, x < grid.cols else { return }
-        grid[column: x, row: row] = TerminalCell(
-          glyph: ch, foreground: span.fg, background: span.bg, flags: flags)
-        x &+= 1
-      }
+// MARK: - TLine → slate span conversion
+
+extension TLine {
+  /// Converts scribe-style ``StyledSpan``s into slate-native ``TerminalStyledSpan``s
+  /// for use with ``TerminalCellGrid/blitSpans(column:row:maxWidth:_:)``.
+  var toSlateSpans: [TerminalStyledSpan] {
+    spans.map { s in
+      TerminalStyledSpan(
+        s.text,
+        foreground: s.fg,
+        background: s.bg,
+        flags: s.bold ? .bold : [])
     }
   }
 }
