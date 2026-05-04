@@ -122,6 +122,37 @@ public enum ChatSessionStore {
     try messagesData.write(to: messagesURL, options: [.atomic])
   }
 
+  /// Append messages to `messages.jsonl` inside a session directory.
+  public static func appendMessages(
+    _ messages: [Components.Schemas.ChatMessage],
+    to directory: URL
+  ) throws {
+    let messagesURL = directory.appendingPathComponent("messages.jsonl", isDirectory: false)
+    let enc = JSONEncoder()
+    enc.outputFormatting = [.sortedKeys]
+    enc.dateEncodingStrategy = .iso8601
+
+    if !FileManager.default.fileExists(atPath: messagesURL.path) {
+      _ = FileManager.default.createFile(atPath: messagesURL.path, contents: nil)
+    }
+
+    let handle = try FileHandle(forWritingTo: messagesURL)
+    defer { try? handle.close() }
+    try handle.seekToEnd()
+
+    for message in messages {
+      var data = try enc.encode(message)
+      data.append(UInt8(ascii: "\n"))
+      try handle.write(contentsOf: data)
+    }
+
+    // Touch the directory so listSessionFiles reflects recent activity.
+    try? FileManager.default.setAttributes(
+      [.modificationDate: Date()],
+      ofItemAtPath: directory.path
+    )
+  }
+
   /// Read a session directory (`metadata.json` + `messages.jsonl`) into a ``ChatSessionArchive``.
   public static func load(from directory: URL) throws -> ChatSessionArchive {
     let metaURL = directory.appendingPathComponent("metadata.json", isDirectory: false)
