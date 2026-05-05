@@ -211,6 +211,7 @@ internal final class SlateChatHost {
           createdAt: created,
           model: modelSnapshot,
           baseURL: baseSnapshot,
+          scribeVersion: GitVersion.hash,
           persistURL: persistURL,
           logger: persistLog
         )

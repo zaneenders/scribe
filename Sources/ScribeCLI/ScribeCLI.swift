@@ -40,7 +40,7 @@ import ScribeCore
         let when = relativeTime(from: archive.updatedAt)
         let cwd = archive.cwd.replacingOccurrences(of: home, with: "~")
 
-        print(formatSessionLine(shortId: shortId, msgCount: msgCount, when: when, cwd: cwd))
+        print(formatSessionLine(shortId: shortId, msgCount: msgCount, when: when, cwd: cwd, version: archive.scribeVersion))
       }
       return
     }
@@ -93,6 +93,7 @@ import ScribeCore
       event=chat.session.start \
       session_id=\(sessionId.uuidString) \
       mode=\(mode) \
+      scribe_version=\(GitVersion.hash) \
       model=\(loaded.agentConfig.agentModel) \
       base_url=\(loaded.agentConfig.serverURL) \
       api_key=\(loaded.agentConfig.bearerToken == nil ? "none" : "set") \
@@ -175,12 +176,13 @@ extension ScribeCLI {
     shortId: String,
     msgCount: Int,
     when: String,
-    cwd: String
+    cwd: String,
+    version: String
   ) -> String {
     let msgLabel = msgCount == 1 ? "msg" : "msgs"
     let timeCol = when.padding(toLength: 9, withPad: " ", startingAt: 0)
     let msgCol = "\(msgCount) \(msgLabel)".padding(toLength: 8, withPad: " ", startingAt: 0)
     return
-      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \u{001B}[2m\(msgCol)\u{001B}[0m  \(cwd)"
+      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \u{001B}[2m\(msgCol)\u{001B}[0m  \(cwd)  \u{001B}[2m(\(version))\u{001B}[0m"
   }
 }

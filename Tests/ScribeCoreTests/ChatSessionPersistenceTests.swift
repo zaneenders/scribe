@@ -19,6 +19,7 @@ struct ChatSessionPersistenceTests {
       cwd: "/tmp/scribe",
       model: "test-model",
       baseURL: "http://127.0.0.1:11434",
+      scribeVersion: "test",
       messages: messages
     )
 
@@ -49,7 +50,7 @@ struct ChatSessionPersistenceTests {
     try ChatSessionStore.save(
       ChatSessionArchive(
         id: id, createdAt: stem, updatedAt: stem,
-        cwd: "/", model: "m", baseURL: nil, messages: [sys]),
+        cwd: "/", model: "m", baseURL: nil, scribeVersion: "test", messages: [sys]),
       to: ChatSessionStore.sessionDirectoryURL(sessionId: id, sessionsDirectoryPath: tempRoot.path))
 
     let files = try ChatSessionStore.listSessionFiles(sessionsDirectoryPath: tempRoot.path)
@@ -107,7 +108,7 @@ struct ChatSessionPersistenceTests {
     try ChatSessionStore.save(
       ChatSessionArchive(
         id: id, createdAt: stem, updatedAt: stem,
-        cwd: "/", model: "m", baseURL: nil, messages: [sys]),
+        cwd: "/", model: "m", baseURL: nil, scribeVersion: "test", messages: [sys]),
       to: dir)
 
     let user = Components.Schemas.ChatMessage(
@@ -131,7 +132,7 @@ struct ChatSessionPersistenceTests {
     try ChatSessionStore.save(
       ChatSessionArchive(
         id: id, createdAt: stem, updatedAt: stem,
-        cwd: "/", model: "m", baseURL: nil, messages: [sys]),
+        cwd: "/", model: "m", baseURL: nil, scribeVersion: "test", messages: [sys]),
       to: ChatSessionStore.sessionDirectoryURL(sessionId: id, sessionsDirectoryPath: tempRoot.path))
 
     let resolved = try ChatSessionStore.resolveResumeURL(
