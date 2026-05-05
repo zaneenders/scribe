@@ -2,7 +2,7 @@
 
 Ai Agent written in Swift
 
-## Config
+## Configuration
 
 Scribe looks for `scribe-config.json` in this order:
 
@@ -14,7 +14,7 @@ If no config is found, a default is written to `<cwd>/scribe-config.json` and lo
 
 > `cwd` current working directory
 
-### Config values
+### Configuration values
 
 | Key | Description |
 |-----|-------------|
@@ -56,5 +56,39 @@ sudo mv .build/release/scribe ~/.local/bin/scribe
 ```
 swift build -c release --swift-sdk x86_64-swift-linux-musl
 sudo mv .build/release/scribe ~/.local/bin/scribe
+```
+
+## Testing
+
+You can use the following commands to view current test coverage.
+
+**macOS**
+```bash
+swift test --enable-code-coverage
+PROFDATA=$(find .build -name '*.profdata' -print -quit)
+BIN=$(find .build -name 'scribePackageTests' -type f -not -path '*.dSYM*' -print -quit)
+xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
+```
+
+**Linux**
+```bash
+swift test --enable-code-coverage
+PROFDATA=$(find .build -name '*.profdata' -print -quit)
+BIN=$(find .build -name 'scribePackageTests' -type f -print -quit)
+llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
+```
+
+## Documentation
+
+Preview generated documentation with Swift DocC (included in the Swift toolchain):
+
+### Core
+```bash
+docc preview Sources/ScribeCore/ScribeCore.docc
+```
+
+### CLI
+```bash
+docc preview Sources/ScribeCLI/ScribeCLI.docc
 ```
 

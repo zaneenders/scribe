@@ -355,11 +355,13 @@ public enum ConfigLoader {
       .appendingPathComponent("sessions", isDirectory: true).standardizedFileURL.path
 
     let resolvedPathString = PathResolution.fileSystemPath(configPath)
-    let agentConfig = AgentConfig(
+    var agentConfig = AgentConfig(
       agentModel: model,
       contextWindow: contextWindow,
       contextWindowThreshold: contextWindowThreshold
     )
+    agentConfig.serverURL = baseURL
+    agentConfig.bearerToken = resolvedAPIKey
     return LoadedConfig(
       agentConfig: agentConfig,
       apiBaseURL: baseURL,
