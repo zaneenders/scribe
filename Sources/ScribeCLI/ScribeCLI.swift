@@ -7,7 +7,8 @@ import ScribeCore
     commandName: "scribe",
     abstract: "Scribe coding agent",
     discussion: "",
-    version: "0.0.1"
+    version: "0.0.1",
+    subcommands: [_ScribeEditCommand.self]
   )
 
   @Flag(name: .long, help: "List saved chat sessions (newest first) and exit.")
