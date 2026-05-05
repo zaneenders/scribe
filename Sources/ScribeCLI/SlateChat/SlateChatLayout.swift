@@ -201,6 +201,9 @@ public final class SlateTranscriptSink: Sendable {
     ping()
   }
 
+  /// Thread-safe setter for the queued tray text — the pipe between the host's
+  /// queue state and the renderer.  Called from `SlateChatHost`'s `onEvent`
+  /// callback on `@MainActor`.
   public func setQueuedTrayText(_ text: String?) {
     state.withLock { sink in
       sink.queuedTrayText = text
@@ -208,6 +211,7 @@ public final class SlateTranscriptSink: Sendable {
     ping()
   }
 
+  /// Thread-safe snapshot of the current queued tray text for the renderer.
   internal func queuedTrayTextSnapshot() -> String? {
     state.withLock { $0.queuedTrayText }
   }

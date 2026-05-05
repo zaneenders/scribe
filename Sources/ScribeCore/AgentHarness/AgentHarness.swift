@@ -5,6 +5,32 @@ import ScribeLLM
 
 // MARK: - AgentHarness
 
+/// Orchestrates a single model turn: sends messages to the LLM, streams the
+/// response, and executes tool calls in a loop until the assistant produces a
+/// final answer or the tool-round limit is reached.
+///
+/// ## Agent events
+///
+/// | Event | Sample fields | When it fires |
+/// |---|---|---|
+/// | `agent.turn.dispatch` | `turn chars` | Coordinator pulled a non-empty user line from the gate and is starting a model turn. |
+/// | `agent.turn.start` | `model messages max_tool_rounds` | First action inside `runModelTurn`. |
+/// | `agent.http.request` | `round payload_messages` | Streaming POST to `chat/completions` was issued. |
+/// | `agent.http.response` | `round status elapsed_ms [body_snippet]` | HTTP response received. `status=200` for success; non-200 includes `body_snippet`. |
+/// | `agent.stream.first-chunk` | `round ttfb_ms` | First decoded SSE chunk arrived. `ttfb_ms` is wall time since the request was issued. |
+/// | `agent.stream.progress` | `round chunks elapsed_ms chunks_per_s` | Periodic progress every 200 chunks. (Per-chunk lines are intentionally not emitted — they drown the signal during long streams.) |
+/// | `agent.stream.end` | `round chunks skipped elapsed_ms prompt_tokens completion_tokens tps` | Stream finished cleanly; usage block included when the server provided one. |
+/// | `agent.stream.empty` | `chunks` | Stream produced no tokens and no tool calls. |
+/// | `agent.stream.unreadable-chunk` | `chunk_index err raw_prefix` | An SSE event failed JSON decoding (decoder skipped). |
+/// | `agent.stream.abort` | `where chunks had_visible_tokens` | Turn was aborted while streaming. `where` is `mid-stream` or `post-stream`. |
+/// | `agent.assistant.final` | `round answer_chars reasoning_chars` | Assistant produced a final reply with no tool calls. |
+/// | `agent.tool.round` | `round tool_count tools` | Assistant requested tool calls; runner is about to execute them. |
+/// | `agent.tool.invoke` | `round tool args_chars output_chars elapsed_ms unknown` | A single tool call completed. |
+/// | `agent.tool.unknown` | `round tool` | Tool runner reported the call name as unknown. |
+/// | `agent.tool.round.end` | `round messages` | All tool calls in a round done; loop will request the next model response. |
+/// | `agent.turn.end` | `turn status [elapsed_ms limit err]` | Coordinator's outcome line per turn. `status` is `completed`, `tool-round-limit`, `interrupted`, or `error`. |
+/// | `agent.turn.tool-round-limit` | `max` | Hit the configured tool-round ceiling without a clean reply. |
+/// | `agent.abort` | `where round [tool]` | Cooperative abort fired between phases (`before-http`, `post-stream-pre-tools`, `pre-tool`). |
 public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public var client: Client
   public var model: String

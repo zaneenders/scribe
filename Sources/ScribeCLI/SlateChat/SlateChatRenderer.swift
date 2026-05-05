@@ -4,6 +4,55 @@ import SlateCore
 
 // MARK: - Grid render
 
+/// Renders the full-screen chat grid: transcript, queued tray, input strip, banner, and usage HUD.
+///
+/// ## Render pipeline & input responsiveness
+///
+/// Slate's renderer runs on `@MainActor` — the same actor that drains stdin events
+/// through the wake pump's `onEvent`. Every render builds a cell grid, encodes it
+/// into a single contiguous byte run, and submits it to the controlling tty.
+///
+/// To keep keystrokes responsive while the model is busy:
+///
+/// 1. **Slate ships frames through an async writer.** `Slate.enscribe` builds the
+///    grid synchronously on the main actor, copies the encoded bytes into an
+///    owned `[UInt8]`, and submits them to a detached writer task that performs
+///    the actual blocking `write(2)` call(s). The main actor never waits on tty
+///    drain. See `Sources/SlateCore/AsyncFrameWriter.swift`.
+/// 2. **Frames coalesce on the writer side.** The writer's input stream uses
+///    `bufferingPolicy: .bufferingNewest(1)`: while a frame is being written, an
+///    incoming frame replaces any older pending frame (latest wins). During a
+///    typing burst or fast SSE stream the user always converges to the latest
+///    visible state with bounded memory.
+/// 3. **External wakes are throttled.** `SlateChat.runFullscreen` configures the
+///    pump with `externalCoalesceMaxFramesPerSecond: 60`, so SSE chunks /
+///    persistence saves / usage updates produce at most ~60 main-actor renders
+///    per second regardless of how busy the producer is.
+/// 4. **Slow-frame log line.** `event=chat.render.slow elapsed_ms=… prepare_ms=…
+///    submit_ms=… …` fires when the on-actor portion of a render exceeds 50 ms.
+///    `prepare_ms` covers transcript flatten + layout (CPU on main actor),
+///    `submit_ms` covers grid build + encode + writer submission (also on main
+///    actor; the actual tty drain is off-actor and **not** included).
+/// 5. **Tool output truncation in the transcript.** `read_file` results render as
+///    a single summary line, and shell `stdout` / `stderr` results larger than
+///    200 lines render as a head + truncation marker + tail (120 + marker + 60).
+///    The full content is preserved in the conversation history sent to the
+///    model — the cap only affects the rendered scrollback to keep flatten +
+///    layout cost bounded after a verbose tool call.
+///
+/// ## Queued tray
+///
+/// The tray sits between the transcript and the input strip, shares the input
+/// strip background, indents continuation rows under an 8-space gutter (matching
+/// the width of `queued: `), and is hard-capped at 4 rows with trailing `…`
+/// truncation so a long queued paste cannot push the transcript off screen.
+///
+/// - ``queuedTrayRowCount(queuedTrayText:cols:)`` returns the number of rows to
+///   reserve for the queued tray strip (0 when no queued message).
+/// - ``paintQueuedTrayRows(into:startRow:cols:textWidth:visualLines:theme:)``
+///   paints the tray rows: first row prefixed with `queued: ` (orange) plus the
+///   message in dimmed white; continuation rows align under the message with an
+///   8-space gutter.
 @MainActor
 internal enum SlateChatRenderer {
   /// Braille spinner (common in TUIs); one cell, advances while waiting for the first token.
