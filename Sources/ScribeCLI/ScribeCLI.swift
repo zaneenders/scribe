@@ -6,8 +6,8 @@ import ScribeCore
   static let configuration = CommandConfiguration(
     commandName: "scribe",
     abstract: "Scribe coding agent",
-    discussion: "",
-    version: "0.0.1"
+    discussion: "Version: \(GitVersion.hash)",
+    version: "\(GitVersion.hash)"
   )
 
   @Flag(name: .long, help: "List saved chat sessions (newest first) and exit.")
@@ -160,8 +160,8 @@ extension ScribeCLI {
   func relativeTime(from date: Date) -> String {
     let delta = date.timeIntervalSinceNow * -1  // seconds ago
     switch delta {
-    case ..<1:   return "just now"
-    case ..<60:  return "\(Int(delta))s ago"
+    case ..<1: return "just now"
+    case ..<60: return "\(Int(delta))s ago"
     case ..<3600: return "\(Int(delta / 60))m ago"
     case ..<86400: return "\(Int(delta / 3600))h ago"
     case ..<604800: return "\(Int(delta / 86400))d ago"
@@ -180,6 +180,7 @@ extension ScribeCLI {
     let msgLabel = msgCount == 1 ? "msg" : "msgs"
     let timeCol = when.padding(toLength: 9, withPad: " ", startingAt: 0)
     let msgCol = "\(msgCount) \(msgLabel)".padding(toLength: 8, withPad: " ", startingAt: 0)
-    return "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \u{001B}[2m\(msgCol)\u{001B}[0m  \(cwd)"
+    return
+      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \u{001B}[2m\(msgCol)\u{001B}[0m  \(cwd)"
   }
 }
