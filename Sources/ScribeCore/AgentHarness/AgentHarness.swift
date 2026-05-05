@@ -94,11 +94,11 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
         let d = detail.lowercased()
         if d.contains("model"), d.contains("not found") {
           return
-            " Unset `\(ScribeConfigBinding.agentModel.description)` in `scribe-config.json` to use the first model from /v1/models, set it to an installed name, or run e.g. `ollama pull llama3.2`."
+            " The configured model was not found. Set `agent.model` in `scribe-config.json` to an installed model, or run e.g. `ollama pull llama3.2`."
         }
         if code == 404 {
           return
-            " Set `\(ScribeConfigBinding.openAIBaseURL.description)` in `scribe-config.json` to the host only (no `/v1`), e.g. http://127.0.0.1:11434 for Ollama."
+            " Set `api.baseUrl` in `scribe-config.json` to the host only (no `/v1`), e.g. http://127.0.0.1:11434 for Ollama."
         }
         return ""
       }()

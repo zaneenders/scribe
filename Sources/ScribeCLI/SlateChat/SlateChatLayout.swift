@@ -218,16 +218,17 @@ public final class SlateTranscriptSink: Sendable {
     }
   }
 
+  public func setBanner(baseURL: String, model: String, cwd: String) {
+    state.withLock { sink in
+      sink.banner = BannerSnapshot(baseURL: baseURL, model: model, cwd: cwd)
+    }
+    ping()
+  }
+
   // MARK: - Event dispatch
 
   public func emit(_ event: TranscriptEvent) {
     switch event {
-    case .configBanner(let baseURL, let model, let cwd):
-      state.withLock { sink in
-        sink.banner = BannerSnapshot(baseURL: baseURL, model: model, cwd: cwd)
-      }
-      ping()
-
     case .enterAssistantSection(let section, let previous):
       state.withLock { sink in
         if previous != nil {
@@ -405,15 +406,6 @@ public final class SlateTranscriptSink: Sendable {
           ])
         appendLine(indented)
       }
-
-    case .maxToolRoundsExceeded(let max):
-      appendLine(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.maxRoundsExceeded, bg: theme.background, bold: false,
-              text: "Stopped: max tool rounds (\(max)) exceeded.")
-          ]))
 
     case .skippedUnreadableStreamLine:
       appendLine(

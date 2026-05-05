@@ -8,7 +8,7 @@ struct ScribeErrorTests {
   // MARK: - Configuration errors
 
   @Test func configurationErrorDescriptionIncludesReason() {
-    let error = ScribeError.configuration(key: "openai.baseUrl", reason: "Base URL must be non-empty.")
+    let error = ScribeError.configuration(key: "api.baseUrl", reason: "Base URL must be non-empty.")
     #expect(error.errorDescription == "Base URL must be non-empty.")
   }
 
@@ -58,13 +58,6 @@ struct ScribeErrorTests {
   @Test func invalidInputDescription() {
     let error = ScribeError.invalidInput(message: "Empty --resume value.")
     #expect(error.errorDescription == "Empty --resume value.")
-  }
-
-  // MARK: - Tool round limit
-
-  @Test func toolRoundLimitDescription() {
-    let error = ScribeError.toolRoundLimit(max: 16)
-    #expect(error.errorDescription == "Stopped after reaching the configured tool round limit (16).")
   }
 
   // MARK: - Generic errors

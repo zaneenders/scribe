@@ -6,7 +6,6 @@ public struct AgentTurnInterruptedError: Error, Sendable {}
 /// Result of ``AgentLoop/runModelTurn(messages:logger:shouldAbortTurn:)``.
 public enum ModelTurnOutcome: Sendable, Equatable {
   case completed
-  case hitToolRoundLimit
 }
 
 /// Result of a single LLM round from ``AgentHarness/runRound(messages:logger:shouldAbortTurn:)``.

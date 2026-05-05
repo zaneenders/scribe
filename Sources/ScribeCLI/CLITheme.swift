@@ -37,8 +37,6 @@ public struct CLITheme: Sendable {
   public var toolArgSummary: TerminalRGB
   /// Indented tool output lines.
   public var toolOutput: TerminalRGB
-  /// "Stopped: max tool rounds exceeded" message.
-  public var maxRoundsExceeded: TerminalRGB
   /// "(skipped one stream line…)" notice.
   public var skippedStreamLine: TerminalRGB
   /// Error messages.
@@ -115,7 +113,6 @@ public struct CLITheme: Sendable {
     toolInvocation: ScribePalette.yellow,
     toolArgSummary: ScribePalette.gray,
     toolOutput: ScribePalette.grayLight,
-    maxRoundsExceeded: ScribePalette.yellow,
     skippedStreamLine: ScribePalette.gray,
     errorFG: ScribePalette.red,
     interruptedFG: ScribePalette.gray,

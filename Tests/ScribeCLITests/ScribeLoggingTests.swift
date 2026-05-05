@@ -1,5 +1,5 @@
 import Foundation
-import ScribeCore
+import ScribeCLI
 import Testing
 
 /// Tests for `ScribeLogLevel` parsing and LogHandler behavior.

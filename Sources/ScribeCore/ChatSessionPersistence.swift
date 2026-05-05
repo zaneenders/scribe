@@ -48,17 +48,16 @@ private struct ChatSessionMetadata: Codable, Sendable {
 
 public enum ChatSessionStore {
 
-  /// Resolved session root (creates directories). Reads ``AgentConfig/chatSessionsDirectoryPath``.
-  public static func sessionsDirectoryURL(configuration: AgentConfig) throws -> URL {
-    let path = configuration.chatSessionsDirectoryPath
-    let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+  /// Resolved session root (creates directories).
+  public static func sessionsDirectoryURL(sessionsDirectoryPath: String) throws -> URL {
+    let url = URL(fileURLWithPath: sessionsDirectoryPath, isDirectory: true).standardizedFileURL
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
   }
 
   /// All session directories under the configured sessions directory (newest first by modification time).
-  public static func listSessionFiles(configuration: AgentConfig) throws -> [URL] {
-    let root = try sessionsDirectoryURL(configuration: configuration)
+  public static func listSessionFiles(sessionsDirectoryPath: String) throws -> [URL] {
+    let root = try sessionsDirectoryURL(sessionsDirectoryPath: sessionsDirectoryPath)
     guard FileManager.default.fileExists(atPath: root.path) else {
       return []
     }
@@ -86,8 +85,8 @@ public enum ChatSessionStore {
     }
   }
 
-  public static func sessionDirectoryURL(sessionId: UUID, configuration: AgentConfig) throws -> URL {
-    try sessionsDirectoryURL(configuration: configuration)
+  public static func sessionDirectoryURL(sessionId: UUID, sessionsDirectoryPath: String) throws -> URL {
+    try sessionsDirectoryURL(sessionsDirectoryPath: sessionsDirectoryPath)
       .appendingPathComponent(sessionId.uuidString, isDirectory: true)
   }
 
@@ -197,14 +196,14 @@ public enum ChatSessionStore {
   }
 
   /// Resolves `path`, `UUID` / prefix, or the token `latest` (most recently modified directory in the session directory).
-  public static func resolveResumeURL(specifier: String, configuration: AgentConfig) throws -> URL {
+  public static func resolveResumeURL(specifier: String, sessionsDirectoryPath: String) throws -> URL {
     let trimmed = specifier.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       throw ScribeError.invalidInput(message: "Empty --resume value.")
     }
 
     if trimmed.lowercased() == "latest" {
-      let files = try listSessionFiles(configuration: configuration)
+      let files = try listSessionFiles(sessionsDirectoryPath: sessionsDirectoryPath)
       guard let first = files.first else {
         throw ScribeError.resumeNotFound(specifier: "latest")
       }
@@ -224,7 +223,7 @@ public enum ChatSessionStore {
       }
     }
 
-    let root = try sessionsDirectoryURL(configuration: configuration)
+    let root = try sessionsDirectoryURL(sessionsDirectoryPath: sessionsDirectoryPath)
     let lower = trimmed.lowercased()
     if let u = UUID(uuidString: lower) {
       let candidate = root.appendingPathComponent(u.uuidString, isDirectory: true)

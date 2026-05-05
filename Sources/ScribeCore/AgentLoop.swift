@@ -7,18 +7,15 @@ import ScribeLLM
 public struct AgentLoop: Sendable {
   private let harness: any AgentHarnessProtocol
   private let registry: ToolRegistry
-  private let maxToolRounds: Int
   private let onEvent: @Sendable (TranscriptEvent) -> Void
 
   public init(
     harness: any AgentHarnessProtocol,
     registry: ToolRegistry,
-    maxToolRounds: Int,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void
   ) {
     self.harness = harness
     self.registry = registry
-    self.maxToolRounds = maxToolRounds
     self.onEvent = onEvent
   }
 
@@ -31,18 +28,18 @@ public struct AgentLoop: Sendable {
       """
       event=agent.turn.start \
       model=\(harness.model) \
-      messages=\(messages.count) \
-      max_tool_rounds=\(maxToolRounds)
+      messages=\(messages.count)
       """
     )
-    for round in 0..<maxToolRounds {
-      let roundNum = round + 1
+    var round = 0
+    while true {
+      round += 1
       if shouldAbortTurn() {
         logger.debug(
           """
           event=agent.abort \
           where=before-http \
-          round=\(roundNum)
+          round=\(round)
           """
         )
         throw AgentTurnInterruptedError()
@@ -61,7 +58,7 @@ public struct AgentLoop: Sendable {
           """
           event=agent.abort \
           where=post-stream-pre-tools \
-          round=\(roundNum)
+          round=\(round)
           """
         )
         throw AgentTurnInterruptedError()
@@ -75,12 +72,12 @@ public struct AgentLoop: Sendable {
         logger.info(
           """
           event=agent.tool.round \
-          round=\(roundNum) \
+          round=\(round) \
           tool_count=\(invocations.count) \
           tools=\(invocations.map(\.name).joined(separator: ","))
           """
         )
-        onEvent(.toolRoundHeader(round: roundNum, toolNames: invocations.map(\.name)))
+        onEvent(.toolRoundHeader(round: round, toolNames: invocations.map(\.name)))
 
         for inv in invocations {
           if shouldAbortTurn() {
@@ -89,7 +86,7 @@ public struct AgentLoop: Sendable {
               event=agent.abort \
               where=pre-tool \
               tool=\(inv.name) \
-              round=\(roundNum)
+              round=\(round)
               """
             )
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
@@ -104,14 +101,14 @@ public struct AgentLoop: Sendable {
               """
               event=agent.tool.unknown \
               tool=\(inv.name) \
-              round=\(roundNum)
+              round=\(round)
               """
             )
           }
           logger.debug(
             """
             event=agent.tool.invoke \
-            round=\(roundNum) \
+            round=\(round) \
             tool=\(inv.name) \
             args_chars=\(inv.arguments.count) \
             output_chars=\(jsonOutput.count) \
@@ -133,19 +130,11 @@ public struct AgentLoop: Sendable {
         logger.trace(
           """
           event=agent.tool.round.end \
-          round=\(roundNum) \
+          round=\(round) \
           messages=\(messages.count)
           """
         )
       }
     }
-    logger.notice(
-      """
-      event=agent.turn.tool-round-limit \
-      max=\(maxToolRounds)
-      """
-    )
-    onEvent(.maxToolRoundsExceeded(max: maxToolRounds))
-    return .hitToolRoundLimit
   }
 }

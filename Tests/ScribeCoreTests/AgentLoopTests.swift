@@ -99,7 +99,6 @@ struct AgentLoopTests {
     let loop = AgentLoop(
       harness: harness,
       registry: registry,
-      maxToolRounds: 5,
       onEvent: { _ in }
     )
     var messages: [Components.Schemas.ChatMessage] = []
@@ -120,7 +119,6 @@ struct AgentLoopTests {
     let loop = AgentLoop(
       harness: harness,
       registry: registry,
-      maxToolRounds: 5,
       onEvent: { _ in }
     )
     var messages: [Components.Schemas.ChatMessage] = []
@@ -137,35 +135,12 @@ struct AgentLoopTests {
     #expect(messages[1].toolCallId == "call_1")
   }
 
-  @Test func hitToolRoundLimitWhenMaxRoundsExceeded() async throws {
-    let harness = FakeHarness(
-      outcomes: Array(
-        repeating: .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{}")]), count: 10))
-    let registry = ToolRegistry(tools: [FakeTool()])
-    let collector = EventCollector()
-    let loop = AgentLoop(
-      harness: harness,
-      registry: registry,
-      maxToolRounds: 2,
-      onEvent: { collector.append($0) }
-    )
-    var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await loop.runModelTurn(
-      messages: &messages,
-      logger: Logger(label: "test")
-    )
-    #expect(outcome == .hitToolRoundLimit)
-    #expect(harness.callCount == 2)
-    #expect(collector.contains(where: { if case .maxToolRoundsExceeded = $0 { true } else { false } }))
-  }
-
   @Test func abortBeforeRoundThrowsInterrupted() async throws {
     let harness = FakeHarness(outcomes: [.completed])
     let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
       registry: registry,
-      maxToolRounds: 5,
       onEvent: { _ in }
     )
     var messages: [Components.Schemas.ChatMessage] = []
@@ -190,7 +165,6 @@ struct AgentLoopTests {
     let loop = AgentLoop(
       harness: harness,
       registry: registry,
-      maxToolRounds: 5,
       onEvent: { _ in }
     )
     var messages: [Components.Schemas.ChatMessage] = []
@@ -224,7 +198,6 @@ struct AgentLoopTests {
     let loop = AgentLoop(
       harness: harness,
       registry: registry,
-      maxToolRounds: 5,
       onEvent: { collector.append($0) }
     )
     var messages: [Components.Schemas.ChatMessage] = []

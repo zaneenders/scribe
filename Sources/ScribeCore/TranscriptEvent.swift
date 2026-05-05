@@ -9,7 +9,6 @@ public enum AssistantStreamSection: Sendable, Equatable {
 /// Events emitted by the agent harness and coordinator so a host can render transcript updates.
 /// Replaces the previous ``ScribeAgentOutput`` protocol with a single closure boundary.
 public enum TranscriptEvent: Sendable {
-  case configBanner(baseURL: String, model: String, cwd: String)
   case enterAssistantSection(AssistantStreamSection, previous: AssistantStreamSection?)
   case appendAssistantText(AssistantStreamSection, text: String)
   case finalizeAssistantStream
@@ -18,7 +17,6 @@ public enum TranscriptEvent: Sendable {
   case blankLine
   case toolRoundHeader(round: Int, toolNames: [String])
   case toolInvocation(name: String, arguments: String, output: String)
-  case maxToolRoundsExceeded(max: Int)
   case skippedUnreadableStreamLine
   case harnessError(ScribeError)
   case turnInterrupted

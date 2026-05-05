@@ -21,11 +21,13 @@ import ScribeCore
   var resume: String?
 
   func run() async throws {
-    let config = try await AgentConfig.load()
+    let loaded = try await ConfigLoader.load()
 
     if listSessions {
-      let root = try ChatSessionStore.sessionsDirectoryURL(configuration: config)
-      let files = try ChatSessionStore.listSessionFiles(configuration: config)
+      let root = try ChatSessionStore.sessionsDirectoryURL(
+        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
+      let files = try ChatSessionStore.listSessionFiles(
+        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
       guard !files.isEmpty else {
         print("No saved sessions under \(root.path)")
         return
@@ -73,46 +75,48 @@ import ScribeCore
     let sessionId: UUID
     if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
       sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
-        specifier: spec, configuration: config)
+        specifier: spec, sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
       let archived = try ChatSessionStore.load(from: sessionPersistenceURL)
       resumeArchive = archived
       sessionId = archived.id
     } else {
       sessionId = UUID()
       sessionPersistenceURL = try ChatSessionStore.sessionDirectoryURL(
-        sessionId: sessionId, configuration: config)
+        sessionId: sessionId, sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
       resumeArchive = nil
     }
 
-    let log = config.makeSessionLogger(sessionId: sessionId)
+    let log = loaded.makeSessionLogger(sessionId: sessionId)
+    let client = try loaded.makeClient()
     let mode = resumeArchive == nil ? "new" : "resume"
     log.notice(
       """
       event=chat.session.start \
       session_id=\(sessionId.uuidString) \
       mode=\(mode) \
-      model=\(config.agentModel) \
-      base_url=\(config.openAIBaseURL) \
-      api_key=\(config.openAIAPIKey == nil ? "none" : "set") \
-      max_tool_rounds=\(config.agentMaxToolRounds) \
-      log_level=\(config.logLevel.rawValue) \
+      model=\(loaded.agentConfig.agentModel) \
+      base_url=\(loaded.apiBaseURL) \
+      api_key=\(loaded.apiKey == nil ? "none" : "set") \
+      log_level=\(loaded.logLevel.rawValue) \
       cwd=\(cwd) \
       session_file=\(sessionPersistenceURL.path) \
-      config_file=\(config.resolvedConfigurationPath)
+      config_file=\(loaded.resolvedConfigurationPath)
       """
     )
-    if let archived = resumeArchive, archived.model != config.agentModel {
+    if let archived = resumeArchive, archived.model != loaded.agentConfig.agentModel {
       log.warning(
         """
         event=chat.session.resume.model-mismatch \
         archived_model=\(archived.model) \
-        current_model=\(config.agentModel)
+        current_model=\(loaded.agentConfig.agentModel)
         """
       )
     }
 
     try await SlateChat.runFullscreen(
-      configuration: config,
+      configuration: loaded.agentConfig,
+      client: client,
+      apiBaseURL: loaded.apiBaseURL,
       systemPrompt: systemPrompt,
       resumeArchive: resumeArchive,
       sessionPersistenceURL: sessionPersistenceURL,
@@ -129,12 +133,12 @@ import ScribeCore
 }
 
 extension ScribeCLI {
-  /// Printed after a normal chat exit regardless of configured ``logging.level`` (stdout hint only — structured logs stay in log files).
+  /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only — structured logs stay in log files).
   fileprivate func printExitResumeHint(
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL
   ) {
-    let stemUUID = UUID(uuidString: sessionPersistenceURL.deletingPathExtension().lastPathComponent)
+    let stemUUID = UUID(uuidString: sessionPersistenceURL.lastPathComponent)
     let specifier: String
     if let archived = resumeArchive {
       specifier = archived.id.uuidString

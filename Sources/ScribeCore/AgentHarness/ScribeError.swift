@@ -9,7 +9,6 @@ public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
   case resumeNotFound(specifier: String)
   case resumeAmbiguous(specifier: String)
   case invalidInput(message: String)
-  case toolRoundLimit(max: Int)
   case generic(String)
 
   public var errorDescription: String? {
@@ -33,8 +32,6 @@ public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
       return "Ambiguous session prefix \"\(specifier)\"; use a longer id or a full path."
     case .invalidInput(let message):
       return message
-    case .toolRoundLimit(let max):
-      return "Stopped after reaching the configured tool round limit (\(max))."
     case .generic(let message):
       return message
     }

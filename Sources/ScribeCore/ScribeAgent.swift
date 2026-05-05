@@ -10,8 +10,8 @@ import ScribeLLM
 /// and an array of tools, then call `runTurn`, `runInteractive`, or `runIPC`.
 ///
 /// ```swift
-/// let config = try await AgentConfig.load()
-/// let client = try config.makeClient()
+/// let config = AgentConfig(agentModel: "llama3.2")
+/// let client = OpenAICompatibleClient.make(serverURL: serverURL, bearerToken: nil)
 /// let agent = ScribeAgent(
 ///   configuration: config,
 ///   client: client,
@@ -67,7 +67,6 @@ public struct ScribeAgent: Sendable {
     let loop = AgentLoop(
       harness: harness,
       registry: toolRegistry,
-      maxToolRounds: configuration.agentMaxToolRounds,
       onEvent: onEvent
     )
     return try await loop.runModelTurn(
@@ -88,14 +87,6 @@ public struct ScribeAgent: Sendable {
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
     log: Logger
   ) async throws {
-    let cwd = FileManager.default.currentDirectoryPath
-    onEvent(
-      .configBanner(
-        baseURL: configuration.openAIBaseURL,
-        model: configuration.agentModel,
-        cwd: cwd
-      ))
-
     var history: [Components.Schemas.ChatMessage]
     if let initialConversation, !initialConversation.isEmpty {
       history = initialConversation
@@ -181,32 +172,20 @@ public struct ScribeAgent: Sendable {
       }
       let turnStart = Date()
       do {
-        let outcome = try await runTurn(
+        let _ = try await runTurn(
           messages: &history,
           log: log,
           onEvent: wrappedOnEvent,
           shouldAbortTurn: shouldAbortTurn
         )
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
-        switch outcome {
-        case .completed:
-          log.info(
-            """
-            event=agent.turn.end \
-            turn=\(turnIndex) \
-            status=completed \
-            elapsed_ms=\(elapsedMs)
-            """)
-        case .hitToolRoundLimit:
-          log.notice(
-            """
-            event=agent.turn.end \
-            turn=\(turnIndex) \
-            status=tool-round-limit \
-            limit=\(configuration.agentMaxToolRounds) \
-            elapsed_ms=\(elapsedMs)
-            """)
-        }
+        log.info(
+          """
+          event=agent.turn.end \
+          turn=\(turnIndex) \
+          status=completed \
+          elapsed_ms=\(elapsedMs)
+          """)
         tracker.logStatus(logger: log)
       } catch is AgentTurnInterruptedError {
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
@@ -249,7 +228,8 @@ public struct ScribeAgent: Sendable {
 
   public func runIPC(
     request: ScribeAgentRequest,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
+    log: Logger
   ) async -> ScribeAgentResponse {
     var history: [Components.Schemas.ChatMessage] = [
       .init(
@@ -267,35 +247,20 @@ public struct ScribeAgent: Sendable {
         toolCallId: nil
       ),
     ]
-    let sessionId = UUID()
-    let ipcLog = configuration.makeSessionLogger(sessionId: sessionId)
-    ipcLog.notice(
+    log.notice(
       """
       event=ipc.session.start \
-      session_id=\(sessionId.uuidString) \
       message_chars=\(request.message.count) \
-      max_tool_rounds=\(configuration.agentMaxToolRounds) \
       model=\(configuration.agentModel)
       """)
     do {
-      let outcome = try await runTurn(
+      let _ = try await runTurn(
         messages: &history,
-        log: ipcLog,
+        log: log,
         onEvent: onEvent
       )
-      if outcome == .hitToolRoundLimit {
-        ipcLog.notice(
-          """
-          event=ipc.session.end \
-          status=tool-round-limit \
-          limit=\(configuration.agentMaxToolRounds)
-          """)
-        return .failure(
-          "Stopped after reaching the configured tool round limit (\(configuration.agentMaxToolRounds))."
-        )
-      }
       let text = ChatHistory.lastAssistantText(from: history) ?? ""
-      ipcLog.notice(
+      log.notice(
         """
         event=ipc.session.end \
         status=ok \
@@ -303,7 +268,7 @@ public struct ScribeAgent: Sendable {
         """)
       return .success(assistant: text)
     } catch let e as ScribeError {
-      ipcLog.error(
+      log.error(
         """
         event=ipc.session.end \
         status=error \
@@ -311,7 +276,7 @@ public struct ScribeAgent: Sendable {
         """)
       return .failure(e.errorDescription ?? String(describing: e))
     } catch {
-      ipcLog.error(
+      log.error(
         """
         event=ipc.session.end \
         status=error \

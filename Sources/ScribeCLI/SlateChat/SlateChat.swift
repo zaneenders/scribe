@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
+import ScribeLLM
 import SlateCore
 
 #if canImport(Darwin)
@@ -41,6 +42,8 @@ enum SlateChat {
   ///     to a separate diagnostics file.
   static func runFullscreen(
     configuration: AgentConfig,
+    client: Client,
+    apiBaseURL: String,
     systemPrompt: String,
     resumeArchive: ChatSessionArchive? = nil,
     sessionPersistenceURL: URL,
@@ -62,6 +65,8 @@ enum SlateChat {
       let sessionCreatedAt = resumeArchive?.createdAt ?? Date()
       let host = SlateChatHost(
         configuration: configuration,
+        client: client,
+        apiBaseURL: apiBaseURL,
         systemPrompt: systemPrompt,
         resumeArchive: resumeArchive,
         sessionPersistenceURL: sessionPersistenceURL,
