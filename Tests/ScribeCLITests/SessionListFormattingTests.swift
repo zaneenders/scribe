@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ScribeCLI
 
 /// Tests for `--list-sessions` output formatting: relative time strings and
@@ -205,7 +206,10 @@ struct SessionListFormattingTests {
 
   @Test func formatSessionLineMsgColAlwaysEightChars() {
     // The msg column should always occupy exactly 8 visible characters.
-    let cases = [(0, "0 msgs"), (1, "1 msg"), (9, "9 msgs"), (10, "10 msgs"), (99, "99 msgs"), (100, "100 msgs"), (9999, "9999 ms")]
+    let cases = [
+      (0, "0 msgs"), (1, "1 msg"), (9, "9 msgs"), (10, "10 msgs"), (99, "99 msgs"), (100, "100 msgs"),
+      (9999, "9999 ms"),
+    ]
 
     for (count, _) in cases {
       let line = ScribeCLI().formatSessionLine(

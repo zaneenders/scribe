@@ -1,8 +1,27 @@
-import _RopeModule
+import Logging
 import SlateCore
+import _RopeModule
 
 // MARK: - Edit mode
 
+/// The two modal states of the scratch-buffer editor.
+///
+/// ## Mode transitions
+///
+/// ```
+/// ┌──────┐  Ctrl+C / Escape   ┌──────┐
+/// │ edit │ ──────────────────→ │ read │
+/// │      │ ←────────────────── │      │
+/// └──┬───┘       Enter         └──┬───┘
+///    │ Ctrl+D                     │ Ctrl+C / Ctrl+D
+///    ▼                            ▼
+///   quit                        quit
+/// ```
+///
+/// - **edit**: keystrokes insert characters, `Backspace` deletes backward,
+///   `Enter` / `Shift+Enter` insert newlines.
+/// - **read**: navigation-only mode. Arrow keys and `d`/`k`/`f`/`j` will
+///   move the cursor (not yet wired). `Enter` re-enters edit mode.
 enum EditMode {
   /// Navigation mode: keys move the cursor, Enter switches to edit mode,
   /// Ctrl+C quits.
@@ -26,14 +45,23 @@ internal final class SlateEditHost {
   private var cursor: BigString.Index
   private var keyDecoder = TerminalKeyDecoder()
   private var mode = EditMode.edit
+  private let log: Logger
 
   // MARK: - Init
 
-  init() {
+  init(log: Logger) {
+    self.log = log
     cursor = buffer.startIndex
   }
 
   // MARK: - Run loop
+
+  /// Boots a fullscreen Slate session for the scratch-buffer editor.
+  static func runFullscreen(log: Logger) async throws {
+    try await Task { @MainActor in
+      try await SlateEditHost(log: log).run()
+    }.value
+  }
 
   func run() async throws {
     var slate = try Slate()
@@ -57,6 +85,8 @@ internal final class SlateEditHost {
 
             // ── Always-available keys ──
             case (_, .ctrl(4)):  // Ctrl+D — quit from either mode
+              self.log.debug(
+                "event=edit.quit source=ctrl-d mode=\(self.mode == .edit ? "edit" : "read")")
               stop = true
 
             // ── Edit mode ──
@@ -68,13 +98,19 @@ internal final class SlateEditHost {
               self.insertChar("\n")
             case (.edit, .enter):
               self.insertChar("\n")
+            case (.edit, .escape):
+              self.log.debug("event=edit.mode.to-read source=escape")
+              self.mode = .read
             case (.edit, .ctrl(3)):  // Ctrl+C → switch to read mode
+              self.log.debug("event=edit.mode.to-read source=ctrl-c")
               self.mode = .read
 
             // ── Read mode ──
             case (.read, .enter):
+              self.log.debug("event=edit.mode.to-edit source=enter")
               self.mode = .edit
             case (.read, .ctrl(3)):  // Ctrl+C → quit
+              self.log.debug("event=edit.quit source=ctrl-c mode=read")
               stop = true
 
             default:
@@ -100,7 +136,7 @@ internal final class SlateEditHost {
   private func deleteBackward() {
     guard cursor > buffer.startIndex else { return }
     let prev = buffer.index(before: cursor)
-    buffer.removeSubrange(prev ..< cursor)
+    buffer.removeSubrange(prev..<cursor)
     cursor = prev
   }
 
@@ -155,7 +191,7 @@ internal final class SlateEditHost {
     let gutter = String(repeating: " ", count: inputGutterColumns)
     let bg = theme.inputAreaBg
 
-    for lineIdx in 0 ..< inputRowCount {
+    for lineIdx in 0..<inputRowCount {
       let row = firstInputRow &+ lineIdx
       guard row >= 0, row < grid.rows else { break }
       let onLastRow = lineIdx == inputRowCount &- 1
@@ -191,8 +227,9 @@ internal final class SlateEditHost {
 
     // Paint a top-bar hint line on row 0 if there's room
     if rows > inputRowCount {
-      let hint = mode == .edit
-        ? " Ctrl+C → read   Ctrl+D → quit"
+      let hint =
+        mode == .edit
+        ? " Ctrl+C/Esc → read   Ctrl+D → quit"
         : " Enter → edit   Ctrl+C → quit"
       let hintSpan = TerminalStyledSpan(
         hint, foreground: theme.bannerLabel, background: theme.background)

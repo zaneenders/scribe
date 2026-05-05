@@ -208,6 +208,8 @@ Most of the editor logic is pure functions — testable without a TTY.
 - **Handle `.unknown` in the host** — match the byte pattern and treat as forward-delete. Quick but fragile.
 - **Contribute `.delete` to slate** — add the case to the enum and decode `\e[3~` in `emitCSI`. Cleaner long-term. The slate source lives at `../slate` relative to the scribe project; it's the same author's repo and can be updated in parallel.
 
+> **First draft:** `scribe#edit` branch on slate (pushed). Adds `.delete` case to `TerminalKeyEvent` + decodes `\e[3~` in `emitCSI`. Also drops `.swiftLanguageMode(.v6)` from Package.swift targets (build fix) and removes LICENSE.
+
 ### Bracketed paste
 
 Slate enables bracketed paste by default (`CSI.bracketedPasteOn` in `writeRedrawBootstrapCSI`). The decoder emits `.bracketedPasteStart` / `.bracketedPasteEnd`. Our editor host should track `inPaste` (like `SlateChatHost` does) and:
