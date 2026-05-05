@@ -96,6 +96,8 @@ internal struct BannerSnapshot: Equatable {
   var baseURL: String
   var model: String
   var cwd: String
+  var scribeVersion: String
+  var gitBranch: String?
 }
 
 private struct SinkState {
@@ -222,9 +224,10 @@ public final class SlateTranscriptSink: Sendable {
     }
   }
 
-  public func setBanner(baseURL: String, model: String, cwd: String) {
+  public func setBanner(baseURL: String, model: String, cwd: String, scribeVersion: String, gitBranch: String?) {
     state.withLock { sink in
-      sink.banner = BannerSnapshot(baseURL: baseURL, model: model, cwd: cwd)
+      sink.banner = BannerSnapshot(
+        baseURL: baseURL, model: model, cwd: cwd, scribeVersion: scribeVersion, gitBranch: gitBranch)
     }
     ping()
   }

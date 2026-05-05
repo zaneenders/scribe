@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ScribeCLI
 
 /// Tests for `--list-sessions` output formatting: relative time strings and
@@ -123,7 +124,9 @@ struct SessionListFormattingTests {
     let stripped = rows.map {
       stripANSI(
         ScribeCLI().formatSessionLine(
-          shortId: $0.id, msgCount: $0.count, when: $0.when, cwd: $0.cwd)
+          shortId: $0.id, msgCount: $0.count, when: $0.when, cwd: $0.cwd,
+          version: "test"
+        )
       )
     }
 
@@ -159,14 +162,16 @@ struct SessionListFormattingTests {
 
   @Test func formatSessionLineContainsShortId() {
     let line = ScribeCLI().formatSessionLine(
-      shortId: "DEADBEEF", msgCount: 5, when: "1h ago", cwd: "~/proj")
+      shortId: "DEADBEEF", msgCount: 5, when: "1h ago", cwd: "~/proj",
+      version: "test")
     let stripped = stripANSI(line)
     #expect(stripped.contains("DEADBEEF"))
   }
 
   @Test func formatSessionLineUsesSingularMsg() {
     let line = ScribeCLI().formatSessionLine(
-      shortId: "AAAAAAAA", msgCount: 1, when: "1m ago", cwd: "~")
+      shortId: "AAAAAAAA", msgCount: 1, when: "1m ago", cwd: "~",
+      version: "test")
     let stripped = stripANSI(line)
     #expect(stripped.contains("1 msg"))
     #expect(!stripped.contains("1 msgs"))
@@ -174,7 +179,8 @@ struct SessionListFormattingTests {
 
   @Test func formatSessionLineUsesPluralMsgs() {
     let line = ScribeCLI().formatSessionLine(
-      shortId: "AAAAAAAA", msgCount: 0, when: "1m ago", cwd: "~")
+      shortId: "AAAAAAAA", msgCount: 0, when: "1m ago", cwd: "~",
+      version: "test")
     let stripped = stripANSI(line)
     #expect(stripped.contains("0 msgs"))
   }
@@ -186,7 +192,8 @@ struct SessionListFormattingTests {
 
     for when in cases {
       let line = ScribeCLI().formatSessionLine(
-        shortId: "BBBBBBBB", msgCount: 1, when: when, cwd: "~")
+        shortId: "BBBBBBBB", msgCount: 1, when: when, cwd: "~",
+        version: "test")
       let stripped = stripANSI(line)
 
       // The time column is the first 9 chars. After stripping ANSI,
@@ -205,11 +212,15 @@ struct SessionListFormattingTests {
 
   @Test func formatSessionLineMsgColAlwaysEightChars() {
     // The msg column should always occupy exactly 8 visible characters.
-    let cases = [(0, "0 msgs"), (1, "1 msg"), (9, "9 msgs"), (10, "10 msgs"), (99, "99 msgs"), (100, "100 msgs"), (9999, "9999 ms")]
+    let cases = [
+      (0, "0 msgs"), (1, "1 msg"), (9, "9 msgs"), (10, "10 msgs"), (99, "99 msgs"), (100, "100 msgs"),
+      (9999, "9999 ms"),
+    ]
 
     for (count, _) in cases {
       let line = ScribeCLI().formatSessionLine(
-        shortId: "CCCCCCCC", msgCount: count, when: "1m ago", cwd: "~")
+        shortId: "CCCCCCCC", msgCount: count, when: "1m ago", cwd: "~",
+        version: "test")
       let stripped = stripANSI(line)
 
       // After 9 (time) + 2 (gap) + 8 (uuid) + 2 (gap) = 21 chars, the msg column starts.

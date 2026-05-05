@@ -185,7 +185,10 @@ internal enum SlateChatRenderer {
       if let banner {
         paintBannerKV(
           into: &grid, row: 0, cols: cols, maxWidth: bannerMaxWithUsage, label: "LLM: ",
-          value: banner.baseURL, theme: theme)
+          valueSpans: [
+            TerminalStyledSpan(
+              banner.baseURL, foreground: theme.bannerValue, background: theme.background)
+          ], theme: theme)
       }
       if let u = usage {
         paintUsageHUD(into: &grid, cols: cols, usage: u, maxRows: headerRows, theme: theme)
@@ -193,13 +196,26 @@ internal enum SlateChatRenderer {
     }
 
     if headerRows >= 2, let banner {
+      let modelWithVersion = "\(banner.model)  v:\(banner.scribeVersion)"
       paintBannerKV(
         into: &grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage, label: "Model: ",
-        value: banner.model, theme: theme)
+        valueSpans: [
+          TerminalStyledSpan(
+            modelWithVersion, foreground: theme.bannerValue, background: theme.background)
+        ], theme: theme)
     }
     if headerRows >= 3, let banner {
+      let bg = theme.background
+      var cwdSpans: [TerminalStyledSpan] = [
+        TerminalStyledSpan(banner.cwd, foreground: theme.bannerValue, background: bg)
+      ]
+      if let branch = banner.gitBranch {
+        cwdSpans.append(
+          TerminalStyledSpan("@\(branch)", foreground: theme.bannerLabel, background: bg))
+      }
       paintBannerKV(
-        into: &grid, row: 2, cols: cols, maxWidth: bannerMaxWithUsage, label: "CWD: ", value: banner.cwd, theme: theme)
+        into: &grid, row: 2, cols: cols, maxWidth: bannerMaxWithUsage, label: "CWD: ",
+        valueSpans: cwdSpans, theme: theme)
     }
 
     let showSpinner = waitingForLLM && inputLine.isEmpty
@@ -375,23 +391,40 @@ internal enum SlateChatRenderer {
     cols: Int,
     maxWidth: Int,
     label: String,
-    value: String,
+    valueSpans: [TerminalStyledSpan],
     theme: CLITheme
   ) {
-    guard row >= 0, row < grid.rows else { return }
+    guard row >= 0, row < grid.rows, !valueSpans.isEmpty else { return }
     let bg = theme.background
     let cap = min(max(0, maxWidth), cols)
     let maxValueChars = max(0, cap &- label.count)
-    var v = value
-    if v.count > maxValueChars {
-      v = String(v.prefix(max(0, maxValueChars &- 1))) + "…"
+
+    var spans = valueSpans
+    let totalChars = spans.reduce(0) { $0 + $1.text.count }
+    if totalChars > maxValueChars {
+      var budget = maxValueChars
+      var trimmed: [TerminalStyledSpan] = []
+      for span in spans {
+        guard budget > 0 else { break }
+        if span.text.count <= budget {
+          trimmed.append(span)
+          budget -= span.text.count
+        } else {
+          trimmed.append(
+            TerminalStyledSpan(
+              String(span.text.prefix(max(0, budget &- 1))) + "…",
+              foreground: span.foreground,
+              background: span.background,
+              flags: span.flags))
+          budget = 0
+        }
+      }
+      spans = trimmed
     }
+
     grid.blitSpans(
       column: 0, row: row, maxWidth: cap,
-      [
-        TerminalStyledSpan(label, foreground: theme.bannerLabel, background: bg),
-        TerminalStyledSpan(v, foreground: theme.bannerValue, background: bg),
-      ])
+      [TerminalStyledSpan(label, foreground: theme.bannerLabel, background: bg)] + spans)
   }
 
   private static func paintUsageHUD(

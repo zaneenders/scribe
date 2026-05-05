@@ -13,6 +13,7 @@ public struct ChatSessionArchive: Codable, Sendable, Equatable {
   public var cwd: String
   public var model: String
   public var baseURL: String?
+  public var scribeVersion: String
   public var messages: [Components.Schemas.ChatMessage]
 
   public init(
@@ -23,6 +24,7 @@ public struct ChatSessionArchive: Codable, Sendable, Equatable {
     cwd: String,
     model: String,
     baseURL: String?,
+    scribeVersion: String,
     messages: [Components.Schemas.ChatMessage]
   ) {
     self.schemaVersion = schemaVersion
@@ -32,6 +34,7 @@ public struct ChatSessionArchive: Codable, Sendable, Equatable {
     self.cwd = cwd
     self.model = model
     self.baseURL = baseURL
+    self.scribeVersion = scribeVersion
     self.messages = messages
   }
 }
@@ -44,6 +47,7 @@ private struct ChatSessionMetadata: Codable, Sendable {
   var model: String
   var cwd: String
   var baseURL: String?
+  var scribeVersion: String?
 }
 
 public enum ChatSessionStore {
@@ -100,7 +104,8 @@ public enum ChatSessionStore {
       createdAt: archive.createdAt,
       model: archive.model,
       cwd: archive.cwd,
-      baseURL: archive.baseURL
+      baseURL: archive.baseURL,
+      scribeVersion: archive.scribeVersion
     )
 
     let enc = JSONEncoder()
@@ -191,6 +196,7 @@ public enum ChatSessionStore {
       cwd: metadata.cwd,
       model: metadata.model,
       baseURL: metadata.baseURL,
+      scribeVersion: metadata.scribeVersion ?? "unknown",
       messages: messages
     )
   }
@@ -254,6 +260,7 @@ public enum ChatSessionStore {
     createdAt: Date,
     model: String,
     baseURL: String?,
+    scribeVersion: String,
     persistURL: URL,
     logger: Logger
   ) -> @Sendable ([Components.Schemas.ChatMessage]) -> Void {
@@ -268,6 +275,7 @@ public enum ChatSessionStore {
             cwd: cwd,
             model: model,
             baseURL: baseURL,
+            scribeVersion: scribeVersion,
             messages: history
           ),
           to: persistURL
