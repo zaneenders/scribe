@@ -40,7 +40,8 @@ import ScribeCore
         let when = relativeTime(from: archive.updatedAt)
         let cwd = archive.cwd.replacingOccurrences(of: home, with: "~")
 
-        print(formatSessionLine(shortId: shortId, msgCount: msgCount, when: when, cwd: cwd, version: archive.scribeVersion))
+        print(
+          formatSessionLine(shortId: shortId, msgCount: msgCount, when: when, cwd: cwd, version: archive.scribeVersion))
       }
       return
     }

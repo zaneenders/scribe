@@ -67,7 +67,7 @@ let package = Package(
         .treatAllWarnings(as: .error),
       ],
       plugins: [
-        "GitVersionPlugin",
+        "GitVersionPlugin"
       ]
     ),
     .testTarget(
