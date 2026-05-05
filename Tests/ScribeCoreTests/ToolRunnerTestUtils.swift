@@ -15,6 +15,12 @@ struct FailPayload: Decodable {
 struct ReadPayload: Decodable {
   let ok: Bool
   let content: String?
+  let path: String?
+  let bytes: Int?
+  let totalLines: Int?
+  let startLine: Int?
+  let endLine: Int?
+  let truncated: Bool?
 }
 
 struct WritePayload: Decodable {

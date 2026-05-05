@@ -1,7 +1,7 @@
 import Foundation
 
 /// Resolves agent/tool path strings into ``ScribeFilePath`` instances with consistent rules.
-enum PathResolution {
+public enum PathResolution {
   struct PathError: Error, CustomStringConvertible {
     let description: String
   }
@@ -54,7 +54,7 @@ enum PathResolution {
   }
 
   /// Produces a filesystem path string suitable for `URL(fileURLWithPath:)` and `FileManager`.
-  static func fileSystemPath(_ path: ScribeFilePath) -> String {
+  public static func fileSystemPath(_ path: ScribeFilePath) -> String {
     path.withCString { String(cString: $0) }
   }
 }
