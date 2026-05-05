@@ -348,6 +348,119 @@ public struct ChatSessionArchive: Codable, Sendable, Equatable {
 
 ---
 
+## Exploration: Rope as the in-memory session history data structure
+
+Both the TUI windowing fix and upcoming context-editing features would benefit from replacing `[ChatMessage]` with a `Rope`-backed conversation store. The rope (`swift-collections`) is a balanced tree of chunks — structurally similar to a piece table — that gives O(log n) insert, delete, and slice at arbitrary positions.
+
+### Current state: flat array
+
+```swift
+// ScribeAgent.runInteractive
+var history: [Components.Schemas.ChatMessage] = [...]
+
+// Operations:
+history.append(userMsg)              // O(1) amortized
+history.append(assistantMsg)         // O(1) amortized
+messages.append(toolResultMsg)       // O(1) amortized
+let request = buildRequest(messages: history)  // O(n) — serialize all
+persistConversation(history)         // O(n) — write all JSONL
+```
+
+Problems at scale (400+ messages, 2+ MB):
+
+- **Context editing** — deleting or replacing message 47 shifts elements 48..434, O(n). Same for insertion.
+- **Context window trimming** — dropping oldest messages (when prompt tokens exceed the window) is `removeFirst(k)`, O(n) shift.
+- **Serialization for every API call** — `buildRequest` eats the full array, O(n). Only the front (system prompt + recent messages) changes most turns, but we pay for all of it.
+- **Persist rewrites entire file** — `ChatSessionStore.save` writes every message every time. With atomic writes (write to temp, rename), that's 2.1 MB of I/O per persist, hundreds of times per session.
+
+### With a rope
+
+```swift
+import Collections
+
+/// The conversation as a rope of message chunks.
+/// Each chunk is a small array of ChatMessage (e.g., one turn's worth).
+var history: Rope<[Components.Schemas.ChatMessage]> = Rope()
+
+// Appending (same ergonomics):
+history.append([userMsg])            // O(log n)
+history.append([assistantMsg])       // O(log n)
+
+// Context editing — delete message at position 47:
+var iter = history.makeIterator()
+var pos = 0
+while let chunk = iter.next() {
+    if pos + chunk.count > 47 {
+        let localIdx = 47 - pos
+        var modified = chunk
+        modified.remove(at: localIdx)
+        // Replace just this chunk: O(log n) rebalance
+        break
+    }
+    pos += chunk.count
+}
+
+// Context window trimming — drop oldest N messages:
+let dropCount = countToDrop
+// Split the rope at the byte/chunk boundary, keep the suffix: O(log n)
+
+// Serialization for API call:
+// Only materialize changed chunks; cache serialized prefix
+```
+
+### What this unlocks
+
+#### 1. Context editing (delete/replace/inject messages mid-history)
+
+The user edits a past message. With the array, that's O(n) shift. With the rope, it's O(log n) to find the chunk containing the message, modify the chunk, and rebalance. If chunks are sized ~one turn (user + assistant + tools), editing within a turn only touches one chunk.
+
+#### 2. Incremental persistence
+
+Instead of rewriting 2.1 MB on every persist:
+
+```
+On persist:
+  → track which chunks are dirty since last save
+  → append only dirty chunks to messages.jsonl (already supported
+    via ChatSessionStore.appendMessages)
+  → periodically compact by rewriting the full file
+```
+
+The rope's chunk structure maps naturally to the append-only JSONL format. Each chunk is a contiguous slice of the file. Editing a message mid-history invalidates that chunk; it gets rewritten and appended. A background compaction pass merges small chunks and removes superseded ones.
+
+#### 3. Lazy serialization for API requests
+
+`buildRequest(messages:)` currently serializes the entire history array. Most of it hasn't changed since the last turn. With the rope:
+
+- Cache serialized JSON for each chunk
+- On request, concatenate cached chunk serializations — O(num chunks), not O(total bytes)
+- Only re-serialize chunks that changed (the last few turns)
+- For context window trimming: just skip the first K chunks, O(1)
+
+#### 4. Shared between TUI and agent
+
+The rope can be the single source of truth:
+
+```
+Rope<[ChatMessage]>
+  ├── Agent reads full history for API calls (with cached serialization)
+  ├── Persist writes dirty chunks to JSONL
+  ├── TranscriptReplay reads from rope (no separate [ChatMessage] array)
+  └── Context editor mutates chunks in-place
+```
+
+### Chunk sizing
+
+Too small (one message per chunk) → overhead of many tree nodes, negates the structural benefits. Too large (all messages in one chunk) → degrades to array behavior on edit.
+
+A natural chunk is **one user turn**: `[userMessage, assistantMessage?, toolResult*, ...]`. This is typically 2–10 messages, aligns with the turn boundary concept already present in `TranscriptReplay`, and means edits within a turn are O(turn size) while edits that cross turns are O(log n).
+
+### Relationship to the TUI windowing fix
+
+The rope for session history is orthogonal to the visual-row windowing for rendering — they solve different problems. But they share the same dependency (`swift-collections`), the same pattern (replace flat array with a tree-structured collection), and both move the codebase toward O(log n) operations where it's currently O(n). Doing the rope for history first might even simplify the TUI side, since the transcript sink currently receives events from a separate replay loop that walks a flat `[ChatMessage]` array — a rope-native iterator would be more natural.
+
+---
+
 ## Artifacts
 
 - Log file: `scribe-A27E19B2-A772-4663-949B-5C2B1C68936D.log` (1,824 lines)
