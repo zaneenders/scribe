@@ -3,3 +3,5 @@
 /logs
 /sessions
 /scribe-config.json
+*.docc-build
+

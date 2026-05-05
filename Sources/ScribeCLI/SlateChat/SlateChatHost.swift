@@ -61,8 +61,6 @@ private struct TranscriptFlattenCache {
 internal final class SlateChatHost {
 
   private let configuration: AgentConfig
-  private let client: Client
-  private let apiBaseURL: String
   private let systemPrompt: String
   private let resumeArchive: ChatSessionArchive?
   private let sessionPersistenceURL: URL
@@ -97,8 +95,6 @@ internal final class SlateChatHost {
 
   init(
     configuration: AgentConfig,
-    client: Client,
-    apiBaseURL: String,
     systemPrompt: String,
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL,
@@ -108,8 +104,6 @@ internal final class SlateChatHost {
     tools: [any ScribeTool]
   ) {
     self.configuration = configuration
-    self.client = client
-    self.apiBaseURL = apiBaseURL
     self.systemPrompt = systemPrompt
     self.resumeArchive = resumeArchive
     self.sessionPersistenceURL = sessionPersistenceURL
@@ -161,7 +155,7 @@ internal final class SlateChatHost {
         let cid = self.sessionId
         let created = self.sessionCreatedAt
         let modelSnapshot = self.configuration.agentModel
-        let baseSnapshot = self.apiBaseURL
+        let baseSnapshot = self.configuration.serverURL
         let persistLog = self.log
         let persist = ChatSessionStore.makePersistCallback(
           sessionId: cid,
@@ -173,21 +167,19 @@ internal final class SlateChatHost {
         )
 
         let cwd = FileManager.default.currentDirectoryPath
-        sink.setBanner(baseURL: self.apiBaseURL, model: self.configuration.agentModel, cwd: cwd)
+        sink.setBanner(baseURL: self.configuration.serverURL, model: self.configuration.agentModel, cwd: cwd)
 
         let interruptFlag = self.modelInterruptFlag
         let sessionLog = self.log
-        let client = self.client
         self.coordinatorTask = Task {
           [
-            configuration, client, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
+            configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
             tools
           ] in
           defer { sink.markCoordinatorFinished() }
           do {
             let agent = ScribeAgent(
               configuration: configuration,
-              client: client,
               systemPrompt: systemPrompt,
               tools: tools
             )

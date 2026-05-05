@@ -6,15 +6,16 @@ import ScribeLLM
 
 /// An agent that orchestrates LLM calls with tool execution.
 ///
-/// Instantiate with configuration, an OpenAI-compatible client, a system prompt,
-/// and an array of tools, then call `runTurn`, `runInteractive`, or `runIPC`.
+/// Instantiate with configuration, a system prompt, and an array of tools,
+/// then call `runTurn`, `runInteractive`, or `runIPC`.
 ///
 /// ```swift
-/// let config = AgentConfig(agentModel: "llama3.2")
-/// let client = OpenAICompatibleClient.make(serverURL: serverURL, bearerToken: nil)
+/// let config = AgentConfig(
+///   agentModel: "llama3.2",
+///   serverURL: "http://localhost:11434"
+/// )
 /// let agent = ScribeAgent(
 ///   configuration: config,
-///   client: client,
 ///   systemPrompt: "You are a helpful coding assistant.",
 ///   tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()]
 /// )
@@ -34,6 +35,27 @@ public struct ScribeAgent: Sendable {
 
   private let chatTools: [Components.Schemas.ChatTool]
 
+  /// Primary initializer: provide an `AgentConfig` that includes the server URL
+  /// and optional bearer token; the HTTP client is created internally.
+  public init(
+    configuration: AgentConfig,
+    systemPrompt: String,
+    tools: [any ScribeTool]
+  ) {
+    guard let serverURL = URL(string: configuration.serverURL) else {
+      fatalError("Invalid serverURL in AgentConfig: \(configuration.serverURL)")
+    }
+    self.init(
+      configuration: configuration,
+      client: OpenAICompatibleClient.make(
+        serverURL: serverURL, bearerToken: configuration.bearerToken),
+      systemPrompt: systemPrompt,
+      tools: tools
+    )
+  }
+
+  /// Escape hatch: provide a pre-configured `Client` directly (e.g. for testing
+  /// with a custom transport).
   public init(
     configuration: AgentConfig,
     client: Client,

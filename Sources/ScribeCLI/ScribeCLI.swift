@@ -87,7 +87,6 @@ import ScribeCore
     }
 
     let log = loaded.makeSessionLogger(sessionId: sessionId)
-    let client = try loaded.makeClient()
     let mode = resumeArchive == nil ? "new" : "resume"
     log.notice(
       """
@@ -95,8 +94,8 @@ import ScribeCore
       session_id=\(sessionId.uuidString) \
       mode=\(mode) \
       model=\(loaded.agentConfig.agentModel) \
-      base_url=\(loaded.apiBaseURL) \
-      api_key=\(loaded.apiKey == nil ? "none" : "set") \
+      base_url=\(loaded.agentConfig.serverURL) \
+      api_key=\(loaded.agentConfig.bearerToken == nil ? "none" : "set") \
       log_level=\(loaded.logLevel.rawValue) \
       cwd=\(cwd) \
       session_file=\(sessionPersistenceURL.path) \
@@ -115,8 +114,6 @@ import ScribeCore
 
     try await SlateChat.runFullscreen(
       configuration: loaded.agentConfig,
-      client: client,
-      apiBaseURL: loaded.apiBaseURL,
       systemPrompt: systemPrompt,
       resumeArchive: resumeArchive,
       sessionPersistenceURL: sessionPersistenceURL,
