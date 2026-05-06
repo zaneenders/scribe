@@ -48,7 +48,8 @@ struct AgentHarnessTests {
   }
 
   @Test func exactlyAtLimitReturnsAllMessages() {
-    let msgs = [msg(role: .system, content: "sys")]
+    let msgs =
+      [msg(role: .system, content: "sys")]
       + (0..<4).map { msg(role: .user, content: "u\($0)") }
     let messages = rope(msgs)
     #expect(messages.count == 5)
@@ -59,7 +60,8 @@ struct AgentHarnessTests {
   // MARK: - Over limit
 
   @Test func overLimitPreservesSystemMessageAndTruncatesOldest() {
-    let msgs = [msg(role: .system, content: "sys")]
+    let msgs =
+      [msg(role: .system, content: "sys")]
       + (0..<100).map { msg(role: .user, content: "u\($0)") }
     let messages = rope(msgs)
     #expect(messages.count == 101)
@@ -82,13 +84,18 @@ struct AgentHarnessTests {
       msgs.append(msg(role: .assistant, content: "a\(i)"))
       if i % 5 == 0 {
         msgs.append(
-          .init(role: .assistant, content: "", name: nil,
-                toolCalls: [.init(id: "t\(i)", _type: "function",
-                                   function: .init(name: "shell", arguments: "{}"))],
-                toolCallId: nil, reasoningContent: nil))
+          .init(
+            role: .assistant, content: "", name: nil,
+            toolCalls: [
+              .init(
+                id: "t\(i)", _type: "function",
+                function: .init(name: "shell", arguments: "{}"))
+            ],
+            toolCallId: nil, reasoningContent: nil))
         msgs.append(
-          .init(role: .tool, content: "out\(i)", name: nil,
-                toolCalls: nil, toolCallId: "t\(i)", reasoningContent: nil))
+          .init(
+            role: .tool, content: "out\(i)", name: nil,
+            toolCalls: nil, toolCallId: "t\(i)", reasoningContent: nil))
         msgs.append(msg(role: .assistant, content: "final\(i)"))
       }
     }

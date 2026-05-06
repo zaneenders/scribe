@@ -322,41 +322,24 @@ struct AgentLoopTests {
     #expect(counts.last == messages.count)
   }
 
-  // MARK: - onRopeUpdate callback
+  // MARK: - bootstrap / history ownership
 
-  @Test func onRopeUpdateFiresAfterInitialHistorySetup() async throws {
-    // Use a real Client (never contacted because readUserLine returns nil).
+  @Test func bootstrapSeedsHistoryWithSystemPrompt() async throws {
+    // Use a real Client (never contacted).
     let client = OpenAICompatibleClient.make(
       serverURL: URL(string: "http://127.0.0.1:1")!,
       bearerToken: nil
     )
-    let agent = ScribeAgent(
+    let agent = try ScribeAgent(
       configuration: AgentConfig(agentModel: "test"),
       client: client,
       systemPrompt: "You are a test assistant.",
       tools: [FakeTool()]
     )
 
-    let snapshots = Mutex<[MessageRope]>([])
-    let onRopeUpdate: @Sendable (MessageRope) -> Void = { rope in
-      snapshots.withLock { $0.append(rope) }
-    }
-
-    // readUserLine returns nil → loop exits immediately, no HTTP calls.
-    try await agent.runInteractive(
-      onEvent: { _ in },
-      readUserLine: { nil },
-      onRopeUpdate: onRopeUpdate,
-      log: Logger(label: "test")
-    )
-
-    let ropes = snapshots.withLock { $0 }
-    // onRopeUpdate should have fired exactly once: after initial history setup.
-    #expect(ropes.count == 1)
-    let rope = ropes[0]
     // The rope should contain exactly one message: the system prompt.
-    #expect(rope.count == 1)
-    #expect(rope.first?.role == Components.Schemas.ChatMessage.RolePayload.system)
-    #expect(rope.first?.content == "You are a test assistant.")
+    #expect(agent.history.count == 1)
+    #expect(agent.history.first?.role == Components.Schemas.ChatMessage.RolePayload.system)
+    #expect(agent.history.first?.content == "You are a test assistant.")
   }
 }
