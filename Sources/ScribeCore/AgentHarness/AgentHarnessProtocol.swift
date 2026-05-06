@@ -7,7 +7,7 @@ public protocol AgentHarnessProtocol: Sendable {
   var model: String { get }
 
   func runRound(
-    messages: inout [Components.Schemas.ChatMessage],
+    messages: inout MessageRope,
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool
   ) async throws -> RoundOutcome

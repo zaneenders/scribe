@@ -51,7 +51,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   }
 
   public func runRound(
-    messages: inout [Components.Schemas.ChatMessage],
+    messages: inout MessageRope,
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> RoundOutcome {
@@ -72,11 +72,11 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   // MARK: - Private helpers
 
   private func buildRequest(
-    messages: [Components.Schemas.ChatMessage]
+    messages: MessageRope
   ) -> Components.Schemas.CreateChatCompletionRequest {
     Components.Schemas.CreateChatCompletionRequest(
       model: model,
-      messages: messages,
+      messages: messages.window(from: 0, count: messages.count),
       stream: true,
       temperature: 0,
       maxTokens: nil,
@@ -284,7 +284,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   private func finalizeTurn(
     _ turn: StreamedAssistantTurn,
     result: StreamProcessingResult,
-    messages: inout [Components.Schemas.ChatMessage],
+    messages: inout MessageRope,
     logger: Logger
   ) -> RoundOutcome {
     let streamElapsedMs = elapsedMs(since: result.streamWallStart)

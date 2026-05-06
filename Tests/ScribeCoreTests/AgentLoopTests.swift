@@ -44,7 +44,7 @@ extension FakeHarness: AgentHarnessProtocol {
   nonisolated var model: String { "fake-model" }
 
   func runRound(
-    messages: inout [Components.Schemas.ChatMessage],
+    messages: inout MessageRope,
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool
   ) async throws -> RoundOutcome {
@@ -101,7 +101,7 @@ struct AgentLoopTests {
       registry: registry,
       onEvent: { _ in }
     )
-    var messages: [Components.Schemas.ChatMessage] = []
+    var messages = MessageRope()
     let outcome = try await loop.runModelTurn(
       messages: &messages,
       logger: Logger(label: "test")
@@ -121,7 +121,7 @@ struct AgentLoopTests {
       registry: registry,
       onEvent: { _ in }
     )
-    var messages: [Components.Schemas.ChatMessage] = []
+    var messages = MessageRope()
     let outcome = try await loop.runModelTurn(
       messages: &messages,
       logger: Logger(label: "test")
@@ -130,9 +130,10 @@ struct AgentLoopTests {
     #expect(harness.callCount == 2)
     // One assistant message + one tool message should have been appended.
     #expect(messages.count == 2)
-    #expect(messages[0].role == .assistant)
-    #expect(messages[1].role == .tool)
-    #expect(messages[1].toolCallId == "call_1")
+    let msgs = messages.window(from: 0, count: 2)
+    #expect(msgs[0].role == .assistant)
+    #expect(msgs[1].role == .tool)
+    #expect(msgs[1].toolCallId == "call_1")
   }
 
   @Test func abortBeforeRoundThrowsInterrupted() async throws {
@@ -143,7 +144,7 @@ struct AgentLoopTests {
       registry: registry,
       onEvent: { _ in }
     )
-    var messages: [Components.Schemas.ChatMessage] = []
+    var messages = MessageRope()
     do {
       _ = try await loop.runModelTurn(
         messages: &messages,
@@ -167,7 +168,7 @@ struct AgentLoopTests {
       registry: registry,
       onEvent: { _ in }
     )
-    var messages: [Components.Schemas.ChatMessage] = []
+    var messages = MessageRope()
     let state = AbortState()
     do {
       _ = try await loop.runModelTurn(
@@ -200,7 +201,7 @@ struct AgentLoopTests {
       registry: registry,
       onEvent: { collector.append($0) }
     )
-    var messages: [Components.Schemas.ChatMessage] = []
+    var messages = MessageRope()
     let outcome = try await loop.runModelTurn(
       messages: &messages,
       logger: Logger(label: "test")

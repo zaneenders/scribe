@@ -22,6 +22,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
+    .package(url: "https://github.com/apple/swift-collections", from: "1.4.0"),
   ],
   targets: [
     .target(
@@ -41,6 +42,7 @@ let package = Package(
     .target(
       name: "ScribeCore",
       dependencies: [
+        .product(name: "_RopeModule", package: "swift-collections"),
         "ScribeLLM",
         .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
         .product(name: "SystemPackage", package: "swift-system"),

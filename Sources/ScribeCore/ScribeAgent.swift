@@ -75,7 +75,7 @@ public struct ScribeAgent: Sendable {
   /// the supplied conversation history. The caller owns `messages` and can
   /// inspect / persist / replay it between turns.
   public func runTurn(
-    messages: inout [Components.Schemas.ChatMessage],
+    messages: inout MessageRope,
     log: Logger,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
@@ -109,9 +109,9 @@ public struct ScribeAgent: Sendable {
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
     log: Logger
   ) async throws {
-    var history: [Components.Schemas.ChatMessage]
+    var history: MessageRope
     if let initialConversation, !initialConversation.isEmpty {
-      history = initialConversation
+      history = MessageRope(initialConversation)
       if history.first?.role != .system {
         log.error(
           """
@@ -123,7 +123,8 @@ public struct ScribeAgent: Sendable {
           reason: "Resumed conversation must begin with a system message.")
       }
     } else {
-      history = [
+      history = MessageRope()
+      history.append(
         .init(
           role: .system,
           content: systemPrompt,
@@ -131,11 +132,11 @@ public struct ScribeAgent: Sendable {
           toolCalls: nil,
           toolCallId: nil
         )
-      ]
+      )
     }
 
     let persistConversation = onConversationPersist
-    persistConversation?(history)
+    persistConversation?(extractArray(from: history))
     log.debug(
       """
       event=chat.coordinator.start \
@@ -232,12 +233,12 @@ public struct ScribeAgent: Sendable {
           """)
         onEvent(.harnessError(scribeError))
         if history.last?.role == .user {
-          history.removeLast()
+          history.truncate(to: history.count - 1)
         }
       }
-      persistConversation?(history)
+      persistConversation?(extractArray(from: history))
     }
-    persistConversation?(history)
+    persistConversation?(extractArray(from: history))
     log.debug(
       """
       event=chat.coordinator.end \
@@ -253,22 +254,23 @@ public struct ScribeAgent: Sendable {
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     log: Logger
   ) async -> ScribeAgentResponse {
-    var history: [Components.Schemas.ChatMessage] = [
+    var history = MessageRope()
+    history.append(
       .init(
         role: .system,
         content: systemPrompt,
         name: nil,
         toolCalls: nil,
         toolCallId: nil
-      ),
+      ))
+    history.append(
       .init(
         role: .user,
         content: request.message,
         name: nil,
         toolCalls: nil,
         toolCallId: nil
-      ),
-    ]
+      ))
     log.notice(
       """
       event=ipc.session.start \
@@ -281,7 +283,7 @@ public struct ScribeAgent: Sendable {
         log: log,
         onEvent: onEvent
       )
-      let text = ChatHistory.lastAssistantText(from: history) ?? ""
+      let text = lastAssistantText(from: history)
       log.notice(
         """
         event=ipc.session.end \
@@ -306,5 +308,22 @@ public struct ScribeAgent: Sendable {
         """)
       return .failure(String(describing: error))
     }
+  }
+
+  // MARK: - Helpers
+
+  private func extractArray(from rope: MessageRope) -> [Components.Schemas.ChatMessage] {
+    rope.window(from: 0, count: rope.count)
+  }
+
+  private func lastAssistantText(from rope: MessageRope) -> String {
+    // Walk backward through the rope to find the last assistant message.
+    var lastText = ""
+    rope.forEach { msg in
+      if msg.role == .assistant, let content = msg.content, !content.isEmpty {
+        lastText = content
+      }
+    }
+    return lastText
   }
 }

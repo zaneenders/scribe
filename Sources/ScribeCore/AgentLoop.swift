@@ -20,7 +20,7 @@ public struct AgentLoop: Sendable {
   }
 
   public func runModelTurn(
-    messages: inout [Components.Schemas.ChatMessage],
+    messages: inout MessageRope,
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
@@ -89,7 +89,7 @@ public struct AgentLoop: Sendable {
               round=\(round)
               """
             )
-            messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
+            messages.truncate(to: messagesCountBeforeRound)
             throw AgentTurnInterruptedError()
           }
           let toolStarted = Date()
