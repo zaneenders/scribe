@@ -4,6 +4,7 @@ import ScribeCore
 import ScribeLLM
 import SlateCore
 import Synchronization
+import _RopeModule
 
 // MARK: - User input
 
@@ -60,26 +61,55 @@ private struct TranscriptFlattenCache {
 /// The Slate chat host manages all user input routing — `Enter`, `Ctrl+C`, and the
 /// queued-tray strip — relative to the agent's busy/idle state.
 ///
-/// ## Behavior table
+/// ## Edit / Read mode
+///
+/// The input box has two modes toggled with `Escape` / `i` / `Enter`:
+///
+/// ```
+/// ┌──────┐  Escape / Ctrl+C   ┌──────┐
+/// │ edit │ ──────────────────→ │ read │
+/// │      │ ←────────────────── │      │
+/// └──┬───┘    i / Enter        └──┬───┘
+///    │ Enter (submit)             │ Ctrl+C (ladder)
+///    ▼                            ▼
+///   send                        interrupt / exit
+/// ```
+///
+/// ### Key bindings
+///
+/// | Key | Edit mode | Read mode |
+/// |-----|-----------|-----------|
+/// | Printable chars | Insert at cursor | `i` enters edit mode; others ignored |
+/// | `Backspace` | Delete char before cursor | — |
+/// | `Enter` | Submit message (with queue logic) | Enter edit mode |
+/// | `Shift+Enter` | Insert newline at cursor | — |
+/// | `Escape` | Switch to read mode | — |
+/// | `Ctrl+C` | Switch to read mode | Ladder: recall queue → interrupt → exit |
+/// | `Ctrl+D` | Quit chat | Quit chat |
+/// | `←` / `→` | Move cursor left / right | — |
+/// | `↑` / `↓` | — (TODO: visual-line movement) | Scroll transcript one row |
+/// | `Home` | Move cursor to start of buffer | Jump to top of transcript |
+/// | `End` | Move cursor to end of buffer | Jump to live tail |
+/// | `Page Up` / `Page Down` | — | Scroll transcript one page |
+/// | `Tab` | Insert 4 spaces (paste only) | — |
+///
+/// ### Submit / queue logic (edit mode only)
 ///
 /// | Situation | Result |
 /// |---|---|
-/// | Agent **idle** + Enter (non-empty buffer) | Message is sent **immediately** to the agent (no tray, no delay). Recorded in scrollback as orange `you:`. |
-/// | Agent **busy** + Enter (non-empty buffer) | Buffer text goes into the **queued tray** above the input box (orange `queued:` label, light-gray text on the input strip background). Not in scrollback yet. |
-/// | Agent busy + queue exists + Enter on **empty** buffer | **Interrupts** the in-flight turn and **sends** the queued message. Recorded in scrollback at the moment the coordinator picks it up. |
-/// | Agent busy + queue exists + types more + Enter | New buffer text **replaces** the queued message in the tray (single-slot queue). |
-/// | Queue exists + **Ctrl+C** (1st press) | Queued message is moved back into the **input box** for editing. **The agent keeps running.** |
-/// | No queue + agent busy + **Ctrl+C** (2nd press of the ladder) | Interrupts the agent. |
-/// | No queue + agent idle + **Ctrl+C** (3rd press of the ladder) | Exits the chat. |
-/// | Agent finishes a turn **naturally** with queue non-empty | Queued message is **auto-flushed** to the coordinator on the busy → idle transition. |
+/// | Agent **idle** + Enter (non-empty buffer) | Message sent **immediately**. |
+/// | Agent **busy** + Enter (non-empty buffer) | Buffer text goes into the **queued tray**. |
+/// | Agent busy + queue exists + Enter on **empty** buffer | **Interrupts** the in-flight turn and sends the queued message. |
+/// | Agent busy + queue exists + types more + Enter | New text **replaces** the queued message. |
+/// | Agent finishes a turn with queue non-empty | Queued message **auto-flushes** on the busy → idle transition. |
 ///
-/// ### Ctrl+C ladder
+/// ### Ctrl+C ladder (read mode only)
 ///
-/// When a queued message exists, three taps of Ctrl+C walk through three distinct states:
+/// When a queued message exists, three taps of Ctrl+C walk through three states:
 ///
-/// 1. **Recall** — first press pulls the queued message back into the input box so
-///    you can edit it. The agent is unaffected and keeps streaming.
-/// 2. **Interrupt** — second press (queue now empty, agent still busy) interrupts
+/// 1. **Recall** — first press pulls the queued message back into the input box
+///    (switching to edit mode). The agent keeps running.
+/// 2. **Interrupt** — second press (queue empty, agent still busy) interrupts
 ///    the in-flight model turn.
 /// 3. **Exit** — third press (queue empty, agent idle) exits the chat.
 ///
@@ -115,7 +145,9 @@ internal final class SlateChatHost {
   private let sessionPersistenceURL: URL
   private let sessionId: UUID
   private let sessionCreatedAt: Date
-  private var inputBuffer = ""
+  private var buffer = BigString()
+  private var cursor: BigString.Index
+  private var mode = EditMode.edit
   /// Index into the flattened transcript of the top row of the transcript viewport (used when ``followingLiveTranscript`` is false).
   private var transcriptFirstVisibleRow: Int = 0
   /// When true, the viewport follows the live tail (new tokens stay at the bottom). When false, ``transcriptFirstVisibleRow`` is fixed so streaming does not move the view.
@@ -160,11 +192,15 @@ internal final class SlateChatHost {
     self.sessionCreatedAt = sessionCreatedAt
     self.log = log
     self.tools = tools
+    self.cursor = buffer.startIndex
   }
 
   deinit {
     spinnerTask?.cancel()
   }
+
+  /// The input text as a plain String (derived from the BigString buffer).
+  private var inputText: String { String(buffer) }
 
   func run() async throws {
     var slate = try Slate()
@@ -289,9 +325,99 @@ internal final class SlateChatHost {
           }
           var shouldStop = false
           self.keyDecoder.decode(chunk) { key in
-            switch key {
-            case .ctrl(3):
-              // Ctrl+C: three-step ladder
+            switch (self.mode, key) {
+
+            // ── Always-available keys ──
+            case (_, .ctrl(4)):  // Ctrl+D — quit from either mode
+              self.log.debug(
+                "event=chat.user.ctrl-d action=exit mode=\(self.mode == .edit ? "edit" : "read")")
+              shouldStop = true
+
+            case (_, .bracketedPasteStart):
+              self.inPaste = true
+
+            case (_, .bracketedPasteEnd):
+              self.inPaste = false
+
+            // ── Edit mode ──
+            case (.edit, .character(let ch)):
+              self.buffer.insert(contentsOf: String(ch), at: self.cursor)
+              self.cursor = self.buffer.index(after: self.cursor)
+
+            case (.edit, .backspace):
+              if !self.inPaste, self.cursor > self.buffer.startIndex {
+                let prev = self.buffer.index(before: self.cursor)
+                self.buffer.removeSubrange(prev..<self.cursor)
+                self.cursor = prev
+              }
+
+            case (.edit, .shiftEnter):
+              self.buffer.insert(contentsOf: "\n", at: self.cursor)
+              self.cursor = self.buffer.index(after: self.cursor)
+              self.log.debug(
+                """
+                event=chat.user.input.newline \
+                source=shift-enter \
+                buffer_chars=\(self.buffer.count) \
+                has_queue=\(self.queuedSubmission != nil)
+                """)
+
+            case (.edit, .enter):
+              if self.inPaste {
+                self.buffer.insert(contentsOf: "\n", at: self.cursor)
+                self.cursor = self.buffer.index(after: self.cursor)
+              } else {
+                self.submitUserLine(sink: sink, gate: gate)
+              }
+
+            case (.edit, .tab):
+              if self.inPaste {
+                self.buffer.insert(contentsOf: "    ", at: self.cursor)
+                self.cursor = self.buffer.index(after: self.cursor)
+              }
+
+            case (.edit, .escape):
+              self.log.debug("event=chat.mode.to-read source=escape")
+              self.mode = .read
+
+            case (.edit, .ctrl(3)):  // Ctrl+C → switch to read mode
+              self.log.debug("event=chat.mode.to-read source=ctrl-c")
+              self.mode = .read
+
+            // Cursor movement in edit mode
+            case (.edit, .arrowLeft):
+              if self.cursor > self.buffer.startIndex {
+                self.cursor = self.buffer.index(before: self.cursor)
+              }
+            case (.edit, .arrowRight):
+              if self.cursor < self.buffer.endIndex {
+                self.cursor = self.buffer.index(after: self.cursor)
+              }
+            case (.edit, .arrowUp):
+              // TODO: visual-line-aware vertical cursor movement (Step 3)
+              break
+            case (.edit, .arrowDown):
+              // TODO: visual-line-aware vertical cursor movement (Step 3)
+              break
+            case (.edit, .home):
+              self.cursor = self.buffer.startIndex
+            case (.edit, .end):
+              self.cursor = self.buffer.endIndex
+
+            // ── Read mode ──
+            case (.read, .enter):
+              self.log.debug("event=chat.mode.to-edit source=enter")
+              self.mode = .edit
+
+            case (.read, .character(let ch)):
+              // Only 'i' enters edit mode; other chars are ignored in read mode
+              if ch == "i" && !self.inPaste {
+                self.log.debug("event=chat.mode.to-edit source=i")
+                self.mode = .edit
+              }
+
+            case (.read, .ctrl(3)):
+              // Ctrl+C ladder in read mode
               let busy = sink.modelTurnBusy()
               if let queued = self.queuedSubmission {
                 // 1. Pull queued message back into input buffer
@@ -304,7 +430,10 @@ internal final class SlateChatHost {
                   """)
                 self.queuedSubmission = nil
                 sink.setQueuedTrayText(nil)
-                self.inputBuffer = queued
+                self.buffer = BigString()
+                self.buffer.insert(contentsOf: queued, at: self.buffer.startIndex)
+                self.cursor = self.buffer.endIndex
+                self.mode = .edit
                 self.renderWake?.requestRender()
               } else if busy {
                 // 2. Interrupt in-flight turn
@@ -327,61 +456,20 @@ internal final class SlateChatHost {
                 shouldStop = true
               }
 
-            case .ctrl(4):
-              self.log.debug("event=chat.user.ctrl-d action=exit")
-              shouldStop = true
-
-            case .bracketedPasteStart:
-              self.inPaste = true
-
-            case .bracketedPasteEnd:
-              self.inPaste = false
-
-            case .character(let ch):
-              self.inputBuffer.append(ch)
-
-            case .backspace:
-              if !self.inPaste, !self.inputBuffer.isEmpty {
-                self.inputBuffer.removeLast()
-              }
-
-            case .enter:
-              if self.inPaste {
-                // Pasted newlines stay literal
-                self.inputBuffer.append("\n")
-              } else {
-                self.submitUserLine(sink: sink, gate: gate)
-              }
-
-            case .shiftEnter:
-              self.inputBuffer.append("\n")
-              self.log.debug(
-                """
-                event=chat.user.input.newline \
-                source=shift-enter \
-                buffer_chars=\(self.inputBuffer.count) \
-                has_queue=\(self.queuedSubmission != nil)
-                """)
-
-            case .tab:
-              if self.inPaste {
-                self.inputBuffer.append("    ")
-              }
-
-            // Transcript scroll-back
-            case .arrowUp:
+            // Transcript scroll-back (read mode only)
+            case (.read, .arrowUp):
               self.applyTranscriptScroll(delta: -1, sink: sink, slate: slate)
-            case .arrowDown:
+            case (.read, .arrowDown):
               self.applyTranscriptScroll(delta: +1, sink: sink, slate: slate)
-            case .pageUp, .ctrl(2):
+            case (.read, .pageUp), (.read, .ctrl(2)):
               self.applyTranscriptScrollPage(up: true, sink: sink, slate: slate)
-            case .pageDown, .ctrl(6):
+            case (.read, .pageDown), (.read, .ctrl(6)):
               self.applyTranscriptScrollPage(up: false, sink: sink, slate: slate)
-            case .home:
+            case (.read, .home):
               self.followingLiveTranscript = false
               self.transcriptFirstVisibleRow = 0
               self.renderWake?.requestRender()
-            case .end:
+            case (.read, .end):
               self.followingLiveTranscript = true
               self.renderWake?.requestRender()
 
@@ -418,7 +506,7 @@ internal final class SlateChatHost {
           rows: slate.rows,
           banner: sink.bannerSnapshot(),
           usage: sink.usageHUDSnapshot(),
-          inputLine: self.inputBuffer,
+          inputLine: self.inputText,
           waitingForLLM: sink.modelTurnBusy(),
           queuedTrayText: queuedTrayText
         )
@@ -439,7 +527,8 @@ internal final class SlateChatHost {
             transcriptTailStart: transcriptTailStart,
             banner: sink.bannerSnapshot(),
             usage: sink.usageHUDSnapshot(),
-            inputLine: self.inputBuffer,
+            inputLine: self.inputText,
+            inputMode: self.mode,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: sink.modelTurnBusy(),
             queuedTrayText: queuedTrayText,
@@ -458,7 +547,7 @@ internal final class SlateChatHost {
             rows=\(slate.rows) \
             model_busy=\(nowBusy) \
             queue_chars=\(self.queuedSubmission?.count ?? 0) \
-            buffer_chars=\(self.inputBuffer.count)
+            buffer_chars=\(self.buffer.count)
             """)
         }
         return sink.coordinatorFinished() ? .stop : .continue
@@ -481,8 +570,9 @@ internal final class SlateChatHost {
   private func submitUserLine(sink: SlateTranscriptSink, gate: UserLineGate) {
     followingLiveTranscript = true
     transcriptFirstVisibleRow = 0
-    let submit = inputBuffer
-    inputBuffer = ""
+    let submit = inputText
+    buffer = BigString()
+    cursor = buffer.startIndex
     let trimmed = submit.trimmingCharacters(in: .whitespacesAndNewlines)
     let busy = sink.modelTurnBusy()
     let newlines = submit.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
@@ -585,7 +675,7 @@ internal final class SlateChatHost {
     let contentRows = SlateChatRenderer.transcriptContentRows(
       cols: slate.cols, rows: slate.rows,
       banner: sink.bannerSnapshot(), usage: sink.usageHUDSnapshot(),
-      inputLine: inputBuffer, waitingForLLM: sink.modelTurnBusy(),
+      inputLine: inputText, waitingForLLM: sink.modelTurnBusy(),
       queuedTrayText: sink.queuedTrayTextSnapshot())
     let maxTailStart = max(0, flat.count &- contentRows)
 
@@ -613,7 +703,7 @@ internal final class SlateChatHost {
     let contentRows = SlateChatRenderer.transcriptContentRows(
       cols: slate.cols, rows: slate.rows,
       banner: sink.bannerSnapshot(), usage: sink.usageHUDSnapshot(),
-      inputLine: inputBuffer, waitingForLLM: sink.modelTurnBusy(),
+      inputLine: inputText, waitingForLLM: sink.modelTurnBusy(),
       queuedTrayText: sink.queuedTrayTextSnapshot())
     let page = max(1, contentRows)
     let delta = up ? -page : page

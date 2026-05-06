@@ -60,7 +60,7 @@ internal enum SlateChatRenderer {
     "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷",
   ]
 
-  private static let inputGutterColumns = 5
+  private static let inputGutterColumns = 6
   /// Width of `queued: ` prefix; continuation rows under the queued tray indent to align under text.
   private static let queuedTrayGutterColumns = 8
   /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
@@ -150,6 +150,7 @@ internal enum SlateChatRenderer {
     banner: BannerSnapshot?,
     usage: UsageHUDSnapshot?,
     inputLine: String,
+    inputMode: EditMode = .edit,
     llmWaitAnimationFrame: Int,
     waitingForLLM: Bool,
     queuedTrayText: String?,
@@ -276,6 +277,7 @@ internal enum SlateChatRenderer {
       textWidth: textWidth,
       visualLines: visualLines,
       rowCount: inputRowCount,
+      inputMode: inputMode,
       llmWaitAnimationFrame: llmWaitAnimationFrame,
       showSpinner: showSpinner,
       theme: theme)
@@ -411,7 +413,8 @@ internal enum SlateChatRenderer {
     }
   }
 
-  /// Paints the input stack: first row `you: `, continuation rows gutter-indented; caret on the last row.
+  /// Paints the input stack: first row shows mode label (`EDIT: ` / `READ: `),
+  /// continuation rows gutter-indented; caret on the last row.
   private static func paintInputRows(
     into grid: inout TerminalCellGrid,
     startRow: Int,
@@ -419,12 +422,16 @@ internal enum SlateChatRenderer {
     textWidth: Int,
     visualLines: [String],
     rowCount: Int,
+    inputMode: EditMode = .edit,
     llmWaitAnimationFrame: Int,
     showSpinner: Bool,
     theme: CLITheme
   ) {
     let bg = theme.inputAreaBg
     let gutter = String(repeating: " ", count: min(inputGutterColumns, cols))
+    // Mode label: "EDIT: " in userPrefix (orange), "READ: " in scribePrefix (white)
+    let modeLabel = inputMode == .edit ? "EDIT: " : "READ: "
+    let modeColor = inputMode == .edit ? theme.userPrefix : theme.scribePrefix
     var lineIdx = 0
     while lineIdx < rowCount {
       let row = startRow &+ lineIdx
@@ -439,7 +446,7 @@ internal enum SlateChatRenderer {
         spans.append(TerminalStyledSpan(String(ch), foreground: theme.spinnerGlyph, background: bg))
         spans.append(TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))
       } else if lineIdx == 0 {
-        spans.append(TerminalStyledSpan("you: ", foreground: theme.userPrefix, background: bg))
+        spans.append(TerminalStyledSpan(modeLabel, foreground: modeColor, background: bg))
         if lineIdx < visualLines.count, textWidth > 0 {
           spans.append(
             TerminalStyledSpan(
