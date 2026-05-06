@@ -114,7 +114,10 @@ private struct TranscriptFlattenCache {
 ///
 /// - **FIFO queue.** Submitting while busy appends to the queue.  Ctrl+C (recall)
 ///   or Enter-on-empty (interrupt-and-send) pops the oldest message.  Auto-flush
-///   drains all queued messages when the agent finishes naturally.
+///   drains all queued messages when the agent finishes naturally.  Each queued
+///   message is dispatched one at a time — the coordinator (`ScribeAgent.runInteractive`)
+///   processes exactly one user line per turn (LLM call + tool-call rounds), so
+///   auto-flushed messages become separate, sequential turns.
 /// - **Scrollback recording is deferred to pickup.** ``readUserLine`` is wrapped so
 ///   the orange `you:` block is appended to scrollback exactly when the coordinator
 ///   consumes the line. This gives the right ordering for the interrupt-and-send
@@ -444,7 +447,10 @@ internal final class SlateChatHost {
           }
         }
 
-        // Auto-flush all queued tray messages when the agent finishes a turn naturally
+        // Auto-flush all queued tray messages when the agent finishes a turn naturally.
+        // Each message is dispatched one at a time via gate.complete(); the coordinator
+        // (ScribeAgent.runInteractive) processes exactly one line per turn, so even though
+        // we drain the entire queue here, each message becomes a separate, sequential turn.
         let nowBusy = sink.modelTurnBusy()
         if !nowBusy, self.lastObservedModelBusy, !self.queuedSubmissions.isEmpty {
           let drained = self.queuedSubmissions
