@@ -40,14 +40,32 @@ public struct ChatSessionArchive: Codable, Sendable, Equatable {
 }
 
 /// Metadata stored separately from messages so the archive can be updated incrementally.
-private struct ChatSessionMetadata: Codable, Sendable {
-  var schemaVersion: Int
-  var id: UUID
-  var createdAt: Date
-  var model: String
-  var cwd: String
-  var baseURL: String?
-  var scribeVersion: String?
+public struct ChatSessionMetadata: Codable, Sendable {
+  public var schemaVersion: Int
+  public var id: UUID
+  public var createdAt: Date
+  public var model: String
+  public var cwd: String
+  public var baseURL: String?
+  public var scribeVersion: String?
+
+  public init(
+    schemaVersion: Int,
+    id: UUID,
+    createdAt: Date,
+    model: String,
+    cwd: String,
+    baseURL: String?,
+    scribeVersion: String?
+  ) {
+    self.schemaVersion = schemaVersion
+    self.id = id
+    self.createdAt = createdAt
+    self.model = model
+    self.cwd = cwd
+    self.baseURL = baseURL
+    self.scribeVersion = scribeVersion
+  }
 }
 
 public enum ChatSessionStore {
@@ -199,6 +217,15 @@ public enum ChatSessionStore {
       scribeVersion: metadata.scribeVersion ?? "unknown",
       messages: messages
     )
+  }
+
+  /// Read only `metadata.json` from a session directory — avoids loading `messages.jsonl`.
+  public static func loadMetadata(from directory: URL) throws -> ChatSessionMetadata {
+    let metaURL = directory.appendingPathComponent("metadata.json", isDirectory: false)
+    let metaData = try Data(contentsOf: metaURL)
+    let dec = JSONDecoder()
+    dec.dateDecodingStrategy = .iso8601
+    return try dec.decode(ChatSessionMetadata.self, from: metaData)
   }
 
   /// Resolves `path`, `UUID` / prefix, or the token `latest` (most recently modified directory in the session directory).
