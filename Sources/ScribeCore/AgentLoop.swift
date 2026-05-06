@@ -126,6 +126,7 @@ public struct AgentLoop: Sendable {
             toolCallId: inv.id
           )
           messages.append(toolMsg)
+          onEvent(.messageCountChanged(messages.count))
         }
         logger.trace(
           """

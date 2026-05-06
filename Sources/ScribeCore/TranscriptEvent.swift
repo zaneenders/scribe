@@ -21,4 +21,7 @@ public enum TranscriptEvent: Sendable {
   case harnessError(ScribeError)
   case turnInterrupted
   case modelTurnRunning(Bool)
+  /// Fired after a message is appended to the canonical rope so the viewport
+  /// trimmer can track the live message count without holding a stale rope copy.
+  case messageCountChanged(Int)
 }

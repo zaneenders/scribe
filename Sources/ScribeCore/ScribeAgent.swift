@@ -7,7 +7,7 @@ import ScribeLLM
 /// An agent that orchestrates LLM calls with tool execution.
 ///
 /// Instantiate with configuration, a system prompt, and an array of tools,
-/// then call `runTurn`, `runInteractive`, or `runIPC`.
+/// then call `runTurn` or `runInteractive`.
 ///
 /// ```swift
 /// let config = AgentConfig(
@@ -84,7 +84,8 @@ public struct ScribeAgent: Sendable {
       onEvent: onEvent,
       client: client,
       model: configuration.agentModel,
-      tools: chatTools
+      tools: chatTools,
+      maxContextMessages: configuration.maxContextMessages
     )
     let loop = AgentLoop(
       harness: harness,
@@ -105,6 +106,7 @@ public struct ScribeAgent: Sendable {
     readUserLine: @escaping @Sendable () async -> String?,
     initialConversation: [Components.Schemas.ChatMessage]? = nil,
     onConversationPersist: (@Sendable ([Components.Schemas.ChatMessage]) -> Void)? = nil,
+    onRopeUpdate: (@Sendable (MessageRope) -> Void)? = nil,
     prepareModelTurnStart: @escaping @Sendable () -> Void = {},
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
     log: Logger
@@ -137,6 +139,7 @@ public struct ScribeAgent: Sendable {
 
     let persistConversation = onConversationPersist
     persistConversation?(extractArray(from: history))
+    onRopeUpdate?(history)
     log.debug(
       """
       event=chat.coordinator.start \
@@ -187,6 +190,7 @@ public struct ScribeAgent: Sendable {
           toolCalls: nil,
           toolCallId: nil
         ))
+      onRopeUpdate?(history)
 
       prepareModelTurnStart()
       onEvent(.modelTurnRunning(true))
@@ -236,6 +240,7 @@ public struct ScribeAgent: Sendable {
           history.truncate(to: history.count - 1)
         }
       }
+      onRopeUpdate?(history)
       persistConversation?(extractArray(from: history))
     }
     persistConversation?(extractArray(from: history))
@@ -247,83 +252,9 @@ public struct ScribeAgent: Sendable {
       """)
   }
 
-  // MARK: - runIPC
-
-  public func runIPC(
-    request: ScribeAgentRequest,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
-    log: Logger
-  ) async -> ScribeAgentResponse {
-    var history = MessageRope()
-    history.append(
-      .init(
-        role: .system,
-        content: systemPrompt,
-        name: nil,
-        toolCalls: nil,
-        toolCallId: nil
-      ))
-    history.append(
-      .init(
-        role: .user,
-        content: request.message,
-        name: nil,
-        toolCalls: nil,
-        toolCallId: nil
-      ))
-    log.notice(
-      """
-      event=ipc.session.start \
-      message_chars=\(request.message.count) \
-      model=\(configuration.agentModel)
-      """)
-    do {
-      let _ = try await runTurn(
-        messages: &history,
-        log: log,
-        onEvent: onEvent
-      )
-      let text = lastAssistantText(from: history)
-      log.notice(
-        """
-        event=ipc.session.end \
-        status=ok \
-        assistant_chars=\(text.count)
-        """)
-      return .success(assistant: text)
-    } catch let e as ScribeError {
-      log.error(
-        """
-        event=ipc.session.end \
-        status=error \
-        err="\(e.errorDescription ?? String(describing: e))"
-        """)
-      return .failure(e.errorDescription ?? String(describing: e))
-    } catch {
-      log.error(
-        """
-        event=ipc.session.end \
-        status=error \
-        err="\(String(describing: error))"
-        """)
-      return .failure(String(describing: error))
-    }
-  }
-
   // MARK: - Helpers
 
   private func extractArray(from rope: MessageRope) -> [Components.Schemas.ChatMessage] {
     rope.window(from: 0, count: rope.count)
-  }
-
-  private func lastAssistantText(from rope: MessageRope) -> String {
-    // Walk backward through the rope to find the last assistant message.
-    var lastText = ""
-    rope.forEach { msg in
-      if msg.role == .assistant, let content = msg.content, !content.isEmpty {
-        lastText = content
-      }
-    }
-    return lastText
   }
 }

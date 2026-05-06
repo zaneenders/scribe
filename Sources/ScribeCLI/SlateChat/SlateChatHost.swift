@@ -254,6 +254,7 @@ internal final class SlateChatHost {
               },
               initialConversation: resumeSnapshot?.messages,
               onConversationPersist: persist,
+              onRopeUpdate: { [weak sink] rope in sink?.setMessageCount(rope.count) },
               prepareModelTurnStart: { interruptFlag.clear() },
               shouldAbortTurn: { interruptFlag.peek() },
               log: sessionLog

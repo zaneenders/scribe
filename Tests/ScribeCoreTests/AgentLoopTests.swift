@@ -2,6 +2,7 @@ import Foundation
 import Logging
 import ScribeCore
 import ScribeLLM
+import Synchronization
 import Testing
 
 // MARK: - Fakes
@@ -27,10 +28,18 @@ private final class FakeHarness: @unchecked Sendable {
   var lastMessagesCount = 0
   let outcomes: [RoundOutcome]
   let tools: [Components.Schemas.ChatTool]
+  /// Optional callback so the harness can emit events the real harness would
+  /// (e.g. `.messageCountChanged`).
+  var onEvent: (@Sendable (TranscriptEvent) -> Void)?
 
-  init(outcomes: [RoundOutcome], tools: [Components.Schemas.ChatTool] = []) {
+  init(
+    outcomes: [RoundOutcome],
+    tools: [Components.Schemas.ChatTool] = [],
+    onEvent: (@Sendable (TranscriptEvent) -> Void)? = nil
+  ) {
     self.outcomes = outcomes
     self.tools = tools
+    self.onEvent = onEvent
   }
 
   func nextOutcome() -> RoundOutcome? {
@@ -64,6 +73,7 @@ extension FakeHarness: AgentHarnessProtocol {
         reasoningContent: nil
       )
       messages.append(assistantMessage)
+      onEvent?(.messageCountChanged(messages.count))
     }
     return outcome
   }
@@ -212,5 +222,121 @@ struct AgentLoopTests {
       return false
     })
     #expect(hasToolEvent)
+  }
+
+  // MARK: - messageCountChanged events
+
+  @Test func emitsMessageCountChangedAfterToolMessageAppend() async throws {
+    let collector = EventCollector()
+    let harness = FakeHarness(
+      outcomes: [
+        .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{}")]),
+        .completed,
+      ],
+      onEvent: { collector.append($0) }
+    )
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let loop = AgentLoop(
+      harness: harness,
+      registry: registry,
+      onEvent: { collector.append($0) }
+    )
+    var messages = MessageRope()
+    _ = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test")
+    )
+
+    // The harness fired .messageCountChanged when it appended the assistant
+    // message with tool calls (count becomes 1).
+    let harnessFired = collector.contains(where: {
+      if case .messageCountChanged(let c) = $0, c == 1 { return true }
+      return false
+    })
+    #expect(harnessFired, "Harness should emit .messageCountChanged after appending assistant message")
+
+    // AgentLoop fired .messageCountChanged after appending the tool result
+    // message (count becomes 2).
+    let loopFired = collector.contains(where: {
+      if case .messageCountChanged(let c) = $0, c == 2 { return true }
+      return false
+    })
+    #expect(loopFired, "AgentLoop should emit .messageCountChanged after appending tool message")
+  }
+
+  @Test func messageCountChangedReflectsRopeCountAfterEachAppend() async throws {
+    let collector = EventCollector()
+    let harness = FakeHarness(
+      outcomes: [
+        .toolCalls([
+          ToolInvocation(id: "c1", name: "fake_tool", arguments: "{}"),
+          ToolInvocation(id: "c2", name: "fake_tool", arguments: "{}"),
+        ]),
+        .completed,
+      ],
+      onEvent: { collector.append($0) }
+    )
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let loop = AgentLoop(
+      harness: harness,
+      registry: registry,
+      onEvent: { collector.append($0) }
+    )
+    var messages = MessageRope()
+    _ = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test")
+    )
+
+    // Extract .messageCountChanged values in order.
+    let counts: [Int] = collector.events.compactMap {
+      if case .messageCountChanged(let c) = $0 { return c }
+      return nil
+    }
+    #expect(!counts.isEmpty)
+    // Counts should be non-decreasing.
+    for i in 1..<counts.count {
+      #expect(counts[i] > counts[i - 1], "messageCountChanged counts must increase monotonically")
+    }
+    // Final count should match the rope.
+    #expect(counts.last == messages.count)
+  }
+
+  // MARK: - onRopeUpdate callback
+
+  @Test func onRopeUpdateFiresAfterInitialHistorySetup() async throws {
+    // Use a real Client (never contacted because readUserLine returns nil).
+    let client = OpenAICompatibleClient.make(
+      serverURL: URL(string: "http://127.0.0.1:1")!,
+      bearerToken: nil
+    )
+    let agent = ScribeAgent(
+      configuration: AgentConfig(agentModel: "test"),
+      client: client,
+      systemPrompt: "You are a test assistant.",
+      tools: [FakeTool()]
+    )
+
+    let snapshots = Mutex<[MessageRope]>([])
+    let onRopeUpdate: @Sendable (MessageRope) -> Void = { rope in
+      snapshots.withLock { $0.append(rope) }
+    }
+
+    // readUserLine returns nil → loop exits immediately, no HTTP calls.
+    try await agent.runInteractive(
+      onEvent: { _ in },
+      readUserLine: { nil },
+      onRopeUpdate: onRopeUpdate,
+      log: Logger(label: "test")
+    )
+
+    let ropes = snapshots.withLock { $0 }
+    // onRopeUpdate should have fired exactly once: after initial history setup.
+    #expect(ropes.count == 1)
+    let rope = ropes[0]
+    // The rope should contain exactly one message: the system prompt.
+    #expect(rope.count == 1)
+    #expect(rope.first?.role == Components.Schemas.ChatMessage.RolePayload.system)
+    #expect(rope.first?.content == "You are a test assistant.")
   }
 }
