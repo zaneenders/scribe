@@ -23,14 +23,28 @@ private struct FakeTool: ScribeTool {
   }
 }
 
-private final class FakeHarness: @unchecked Sendable {
-  var callCount = 0
-  var lastMessagesCount = 0
+private final class FakeHarness: Sendable {
+  private let _state = Mutex(FakeHarness.State())
   let outcomes: [RoundOutcome]
   let tools: [Components.Schemas.ChatTool]
-  /// Optional callback so the harness can emit events the real harness would
-  /// (e.g. `.messageCountChanged`).
-  var onEvent: (@Sendable (TranscriptEvent) -> Void)?
+
+  private struct State {
+    var callCount = 0
+    var lastMessagesCount = 0
+    /// Optional callback so the harness can emit events the real harness would
+    /// (e.g. `.messageCountChanged`).
+    var onEvent: (@Sendable (TranscriptEvent) -> Void)?
+  }
+
+  var callCount: Int { _state.withLock { $0.callCount } }
+  var lastMessagesCount: Int {
+    get { _state.withLock { $0.lastMessagesCount } }
+    set { _state.withLock { $0.lastMessagesCount = newValue } }
+  }
+  var onEvent: (@Sendable (TranscriptEvent) -> Void)? {
+    get { _state.withLock { $0.onEvent } }
+    set { _state.withLock { $0.onEvent = newValue } }
+  }
 
   init(
     outcomes: [RoundOutcome],
@@ -43,9 +57,11 @@ private final class FakeHarness: @unchecked Sendable {
   }
 
   func nextOutcome() -> RoundOutcome? {
-    guard callCount < outcomes.count else { return nil }
-    defer { callCount += 1 }
-    return outcomes[callCount]
+    _state.withLock { state in
+      guard state.callCount < outcomes.count else { return nil }
+      defer { state.callCount += 1 }
+      return outcomes[state.callCount]
+    }
   }
 }
 
@@ -79,23 +95,27 @@ extension FakeHarness: AgentHarnessProtocol {
   }
 }
 
-private final class EventCollector: @unchecked Sendable {
-  var events: [TranscriptEvent] = []
+private final class EventCollector: Sendable {
+  private let _events = Mutex<[TranscriptEvent]>([])
+
+  var events: [TranscriptEvent] { _events.withLock { $0 } }
 
   func append(_ event: TranscriptEvent) {
-    events.append(event)
+    _events.withLock { $0.append(event) }
   }
 
   func contains(where predicate: (TranscriptEvent) -> Bool) -> Bool {
-    events.contains(where: predicate)
+    _events.withLock { $0.contains(where: predicate) }
   }
 }
 
-private final class AbortState: @unchecked Sendable {
-  var value = false
+private final class AbortState: Sendable {
+  private let _value = Mutex(false)
+
+  var value: Bool { _value.withLock { $0 } }
 
   func set(_ newValue: Bool) {
-    value = newValue
+    _value.withLock { $0 = newValue }
   }
 }
 
