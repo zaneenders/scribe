@@ -93,7 +93,40 @@ public struct AgentLoop: Sendable {
             throw AgentTurnInterruptedError()
           }
           let toolStarted = Date()
-          let jsonOutput = await registry.run(name: inv.name, arguments: inv.arguments)
+          // Run the tool in a task group that polls shouldAbortTurn so
+          // long-running commands (e.g. shell builds) can be cancelled
+          // cooperatively.  The abort task throws AgentTurnInterruptedError,
+          // which cancels the tool task.  Shell.run responds to cancellation
+          // by sending SIGINT to the child process.
+          let jsonOutput: String
+          do {
+            jsonOutput = try await withThrowingTaskGroup(of: String.self) { group in
+              group.addTask {
+                await registry.run(name: inv.name, arguments: inv.arguments)
+              }
+              group.addTask {
+                while true {
+                  if shouldAbortTurn() {
+                    throw AgentTurnInterruptedError()
+                  }
+                  try await Task.sleep(for: .milliseconds(100))
+                }
+              }
+              defer { group.cancelAll() }
+              return try await group.next()!
+            }
+          } catch is AgentTurnInterruptedError {
+            logger.notice(
+              """
+              event=agent.abort \
+              where=mid-tool \
+              tool=\(inv.name) \
+              round=\(round)
+              """
+            )
+            messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
+            throw AgentTurnInterruptedError()
+          }
           let elapsedMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
           let unknown = jsonOutput.contains("unknown tool")
           if unknown {
