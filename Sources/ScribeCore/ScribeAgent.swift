@@ -35,8 +35,8 @@ public struct ScribeAgent: Sendable {
 
   // MARK: - Init
 
-  /// Primary initializer: provide an `AgentConfig` that includes the server URL
-  /// and optional bearer token; the HTTP client is created internally.
+  /// Provide an `AgentConfig` that includes the server URL and optional bearer
+  /// token; the HTTP client is created internally.
   ///
   /// If `resumeFrom` is supplied its first message must be a system message;
   /// otherwise the history is seeded with `systemPrompt`.
@@ -49,27 +49,9 @@ public struct ScribeAgent: Sendable {
     guard let serverURL = URL(string: configuration.serverURL) else {
       fatalError("Invalid serverURL in AgentConfig: \(configuration.serverURL)")
     }
-    try self.init(
-      configuration: configuration,
-      client: OpenAICompatibleClient.make(
-        serverURL: serverURL, bearerToken: configuration.bearerToken),
-      systemPrompt: systemPrompt,
-      tools: tools,
-      resumeFrom: messages
-    )
-  }
-
-  /// Escape hatch: provide a pre-configured `Client` directly (e.g. for testing
-  /// with a custom transport).
-  internal init(
-    configuration: AgentConfig,
-    client: Client,
-    systemPrompt: String,
-    tools: [any ScribeTool],
-    resumeFrom messages: [Components.Schemas.ChatMessage]? = nil
-  ) throws {
     self.configuration = configuration
-    self.client = client
+    self.client = OpenAICompatibleClient.make(
+      serverURL: serverURL, bearerToken: configuration.bearerToken)
     self.systemPrompt = systemPrompt
     self.toolRegistry = ToolRegistry(tools: tools)
     self.chatTools = DefaultAgentTools.chatTools(from: tools)

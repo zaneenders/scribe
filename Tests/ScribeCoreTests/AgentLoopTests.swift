@@ -325,14 +325,8 @@ struct AgentLoopTests {
   // MARK: - bootstrap / history ownership
 
   @Test func bootstrapSeedsHistoryWithSystemPrompt() async throws {
-    // Use a real Client (never contacted).
-    let client = OpenAICompatibleClient.make(
-      serverURL: URL(string: "http://127.0.0.1:1")!,
-      bearerToken: nil
-    )
     let agent = try ScribeAgent(
-      configuration: AgentConfig(agentModel: "test"),
-      client: client,
+      configuration: AgentConfig(agentModel: "test", serverURL: "http://127.0.0.1:1"),
       systemPrompt: "You are a test assistant.",
       tools: [FakeTool()]
     )
