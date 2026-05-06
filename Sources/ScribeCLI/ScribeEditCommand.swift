@@ -21,6 +21,7 @@ struct _ScribeEditCommand: AsyncParsableCommand {
       throw ScribeError.generic("Failed to open log file: \(logFile.path)")
     }
     _ = try? handle.seekToEnd()
+    defer { try? handle.close() }
 
     let log = Logger(label: "scribe._edit") { _ in
       ScribeLineLogHandler(

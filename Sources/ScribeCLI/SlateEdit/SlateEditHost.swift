@@ -2,34 +2,6 @@ import Logging
 import SlateCore
 import _RopeModule
 
-// MARK: - Edit mode
-
-/// The two modal states of the scratch-buffer editor.
-///
-/// ## Mode transitions
-///
-/// ```
-/// ┌──────┐  Ctrl+C / Escape   ┌──────┐
-/// │ edit │ ──────────────────→ │ read │
-/// │      │ ←────────────────── │      │
-/// └──┬───┘       Enter         └──┬───┘
-///    │ Ctrl+D                     │ Ctrl+C / Ctrl+D
-///    ▼                            ▼
-///   quit                        quit
-/// ```
-///
-/// - **edit**: keystrokes insert characters, `Backspace` deletes backward,
-///   `Enter` / `Shift+Enter` insert newlines.
-/// - **read**: navigation-only mode. Arrow keys and `d`/`k`/`f`/`j` will
-///   move the cursor (not yet wired). `Enter` re-enters edit mode.
-enum EditMode {
-  /// Navigation mode: keys move the cursor, Enter switches to edit mode,
-  /// Ctrl+C quits.
-  case read
-  /// Typing mode: keys insert characters, Ctrl+C switches to read mode.
-  case edit
-}
-
 // MARK: - Host
 
 /// A minimal Slate host for the `scribe _edit` scratch buffer.
@@ -58,9 +30,7 @@ internal final class SlateEditHost {
 
   /// Boots a fullscreen Slate session for the scratch-buffer editor.
   static func runFullscreen(log: Logger) async throws {
-    try await Task { @MainActor in
-      try await SlateEditHost(log: log).run()
-    }.value
+    try await SlateEditHost(log: log).run()
   }
 
   func run() async throws {
@@ -142,38 +112,18 @@ internal final class SlateEditHost {
 
   // MARK: - Grid rendering
 
-  private let inputGutterColumns = 6  // "EDIT: " / "READ: " width
-
   private func renderGrid(cols: Int, rows: Int) -> TerminalCellGrid {
     let theme = CLITheme.default
     let fill = TerminalCell(
       glyph: " ", foreground: theme.inputText, background: theme.background, flags: [])
     var grid = TerminalCellGrid(cols: cols, rows: rows, filling: fill)
 
+    let gutterCols = SlateChatRenderer.inputGutterColumns
     let text = String(buffer)
-    let textWidth = max(0, cols &- inputGutterColumns)
-    let allVisualLines = TranscriptLayout.inputVisualLines(from: text, textWidth: textWidth)
-
+    let textWidth = max(0, cols &- gutterCols)
     let maxInputRows = min(8, max(1, rows &- 1))
-    let inputRowCount: Int
-    let visualLines: [String]
-
-    if allVisualLines.isEmpty {
-      visualLines = [""]
-      inputRowCount = 1
-    } else {
-      let needsExtraCursorRow =
-        allVisualLines.last.map({ $0.count >= textWidth && textWidth > 0 }) ?? false
-      var lines = allVisualLines
-      if needsExtraCursorRow {
-        lines.append("")
-      }
-      inputRowCount = min(maxInputRows, max(1, lines.count))
-      visualLines =
-        lines.count > inputRowCount
-        ? Array(lines.suffix(inputRowCount))
-        : lines + Array(repeating: "", count: max(0, inputRowCount &- lines.count))
-    }
+    let (visualLines, inputRowCount) = SlateChatRenderer.prepareInputRows(
+      text: text, textWidth: textWidth, maxRows: maxInputRows)
 
     let firstInputRow = rows &- inputRowCount
 
@@ -184,46 +134,19 @@ internal final class SlateEditHost {
         glyph: " ", foreground: theme.inputText,
         background: theme.inputAreaBg, flags: []))
 
-    // Paint input rows
-    let modeLabel = mode == .edit ? "EDIT: " : "READ: "
-    let modeColor =
-      mode == .edit ? theme.userPrefix : theme.scribePrefix
-    let gutter = String(repeating: " ", count: inputGutterColumns)
-    let bg = theme.inputAreaBg
-
-    for lineIdx in 0..<inputRowCount {
-      let row = firstInputRow &+ lineIdx
-      guard row >= 0, row < grid.rows else { break }
-      let onLastRow = lineIdx == inputRowCount &- 1
-
-      var spans: [TerminalStyledSpan] = []
-      if lineIdx == 0 {
-        spans.append(TerminalStyledSpan(modeLabel, foreground: modeColor, background: bg))
-        if lineIdx < visualLines.count, textWidth > 0 {
-          spans.append(
-            TerminalStyledSpan(
-              String(visualLines[lineIdx].prefix(textWidth)),
-              foreground: theme.inputText, background: bg))
-        }
-        if onLastRow {
-          spans.append(
-            TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))
-        }
-      } else {
-        spans.append(TerminalStyledSpan(gutter, foreground: theme.inputGutter, background: bg))
-        if lineIdx < visualLines.count, textWidth > 0 {
-          spans.append(
-            TerminalStyledSpan(
-              String(visualLines[lineIdx].prefix(textWidth)),
-              foreground: theme.inputText, background: bg))
-        }
-        if onLastRow {
-          spans.append(
-            TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))
-        }
-      }
-      grid.blitSpans(column: 0, row: row, maxWidth: cols, spans)
-    }
+    // Delegate to shared input-row painter
+    SlateChatRenderer.paintInputRows(
+      into: &grid,
+      startRow: firstInputRow,
+      cols: cols,
+      textWidth: textWidth,
+      visualLines: visualLines,
+      rowCount: inputRowCount,
+      inputMode: mode,
+      llmWaitAnimationFrame: 0,
+      showSpinner: false,
+      agentBusy: false,
+      theme: theme)
 
     // Paint a top-bar hint line on row 0 if there's room
     if rows > inputRowCount {

@@ -53,18 +53,43 @@ import SlateCore
 ///   paints the tray rows: first row prefixed with `queued: ` (orange) plus the
 ///   message in dimmed white; continuation rows align under the message with an
 ///   8-space gutter.
-@MainActor
 internal enum SlateChatRenderer {
   /// Braille spinner (common in TUIs); one cell, advances while waiting for the first token.
   private static let llmWaitSpinner: [Character] = [
     "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷",
   ]
 
-  private static let inputGutterColumns = 6
+  static let inputGutterColumns = 6
   /// Width of `queued: ` prefix; continuation rows under the queued tray indent to align under text.
   private static let queuedTrayGutterColumns = 8
   /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
   private static let queuedTrayMaxRows = 4
+
+  /// Wraps input text into visual lines, adding an extra cursor row when the
+  /// last line fills the available width, then clamps to `maxRows` with suffix
+  /// truncation or padding as needed.
+  static func prepareInputRows(
+    text: String,
+    textWidth: Int,
+    maxRows: Int
+  ) -> (visualLines: [String], rowCount: Int) {
+    guard textWidth > 0, !text.isEmpty else {
+      return ([""], 1)
+    }
+    var lines = TranscriptLayout.inputVisualLines(from: text, textWidth: textWidth)
+    let needsExtraCursorRow = lines.last.map({ $0.count >= textWidth }) ?? false
+    if needsExtraCursorRow {
+      lines.append("")
+    }
+    let rowCount = min(maxRows, max(1, lines.count))
+    let visualLines: [String]
+    if lines.count > rowCount {
+      visualLines = Array(lines.suffix(rowCount))
+    } else {
+      visualLines = lines + Array(repeating: "", count: max(0, rowCount &- lines.count))
+    }
+    return (visualLines, rowCount)
+  }
 
   /// Wrapped tray rows for an optional queued submission, capped by ``queuedTrayMaxRows``.
   /// Returns an empty array when ``queuedTrayText`` is nil/empty.
@@ -126,14 +151,10 @@ internal enum SlateChatRenderer {
     if showSpinner || textWidth == 0 {
       inputRowCount = 1
     } else {
-      var lines = TranscriptLayout.inputVisualLines(from: inputLine, textWidth: textWidth)
-      let needsExtraCursorRow =
-        lines.last.map { $0.count >= textWidth && textWidth > 0 } ?? false
-      if needsExtraCursorRow {
-        lines.append("")
-      }
-      let capped = min(maxInputRows, max(1, lines.count))
-      inputRowCount = capped
+      inputRowCount =
+        Self.prepareInputRows(
+          text: inputLine, textWidth: textWidth, maxRows: maxInputRows
+        ).rowCount
     }
 
     let trayRowCount = queuedTrayRowCount(queuedTrayText: queuedTrayText, cols: cols)
@@ -228,18 +249,8 @@ internal enum SlateChatRenderer {
       visualLines = []
       inputRowCount = 1
     } else {
-      var lines = TranscriptLayout.inputVisualLines(from: inputLine, textWidth: textWidth)
-      let needsExtraCursorRow =
-        lines.last.map { $0.count >= textWidth && textWidth > 0 } ?? false
-      if needsExtraCursorRow {
-        lines.append("")
-      }
-      let capped = min(maxInputRows, max(1, lines.count))
-      inputRowCount = capped
-      visualLines =
-        lines.count > capped
-        ? Array(lines.suffix(capped))
-        : lines + Array(repeating: "", count: max(0, capped &- lines.count))
+      (visualLines, inputRowCount) = Self.prepareInputRows(
+        text: inputLine, textWidth: textWidth, maxRows: maxInputRows)
     }
 
     let firstInputRow = rows &- inputRowCount
@@ -296,6 +307,7 @@ internal enum SlateChatRenderer {
       inputMode: inputMode,
       llmWaitAnimationFrame: llmWaitAnimationFrame,
       showSpinner: showSpinner,
+      agentBusy: waitingForLLM,
       theme: theme)
 
     return grid
@@ -448,7 +460,9 @@ internal enum SlateChatRenderer {
 
   /// Paints the input stack: first row shows mode label (`EDIT: ` / `READ: `),
   /// continuation rows gutter-indented; caret on the last row.
-  private static func paintInputRows(
+  /// When `agentBusy` is true a braille spinner glyph appears after the mode label
+  /// regardless of whether the buffer is empty.
+  static func paintInputRows(
     into grid: inout TerminalCellGrid,
     startRow: Int,
     cols: Int,
@@ -458,6 +472,7 @@ internal enum SlateChatRenderer {
     inputMode: EditMode = .edit,
     llmWaitAnimationFrame: Int,
     showSpinner: Bool,
+    agentBusy: Bool,
     theme: CLITheme
   ) {
     let bg = theme.inputAreaBg
@@ -473,17 +488,25 @@ internal enum SlateChatRenderer {
 
       var spans: [TerminalStyledSpan] = []
       if showSpinner, onLastInputRow {
-        spans.append(TerminalStyledSpan("scribe: ", foreground: theme.scribePrefix, background: bg))
+        spans.append(TerminalStyledSpan(modeLabel, foreground: modeColor, background: bg))
         let frames = llmWaitSpinner
         let ch = frames[llmWaitAnimationFrame % frames.count]
         spans.append(TerminalStyledSpan(String(ch), foreground: theme.spinnerGlyph, background: bg))
         spans.append(TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))
       } else if lineIdx == 0 {
         spans.append(TerminalStyledSpan(modeLabel, foreground: modeColor, background: bg))
+        // When the agent is busy, show the spinner after the mode label (even while typing)
+        if agentBusy {
+          let frames = llmWaitSpinner
+          let ch = frames[llmWaitAnimationFrame % frames.count]
+          spans.append(TerminalStyledSpan(String(ch), foreground: theme.spinnerGlyph, background: bg))
+        }
         if lineIdx < visualLines.count, textWidth > 0 {
+          let spinnerPad = agentBusy ? 1 : 0
+          let avail = max(0, textWidth &- spinnerPad)
           spans.append(
             TerminalStyledSpan(
-              String(visualLines[lineIdx].prefix(textWidth)), foreground: theme.inputText, background: bg))
+              String(visualLines[lineIdx].prefix(avail)), foreground: theme.inputText, background: bg))
         }
         if onLastInputRow {
           spans.append(TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))

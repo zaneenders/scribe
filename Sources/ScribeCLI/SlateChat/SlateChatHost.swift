@@ -63,13 +63,13 @@ private struct TranscriptFlattenCache {
 ///
 /// ## Edit / Read mode
 ///
-/// The input box has two modes toggled with `Escape` / `i` / `Enter`:
+/// The input box has two modes toggled with `Escape` / `Enter`:
 ///
 /// ```
 /// ┌──────┐  Escape / Ctrl+C   ┌──────┐
 /// │ edit │ ──────────────────→ │ read │
 /// │      │ ←────────────────── │      │
-/// └──┬───┘    i / Enter        └──┬───┘
+/// └──┬───┘       Enter         └──┬───┘
 ///    │ Enter (submit)             │ Ctrl+C (ladder)
 ///    ▼                            ▼
 ///   send                        interrupt / exit
@@ -79,19 +79,13 @@ private struct TranscriptFlattenCache {
 ///
 /// | Key | Edit mode | Read mode |
 /// |-----|-----------|-----------|
-/// | Printable chars | Insert at cursor | `i` enters edit mode; others ignored |
+/// | Printable chars | Insert at cursor | Ignored |
 /// | `Backspace` | Delete char before cursor | — |
 /// | `Enter` | Submit message (with queue logic) | Enter edit mode |
 /// | `Shift+Enter` | Insert newline at cursor | — |
 /// | `Escape` | Switch to read mode | — |
 /// | `Ctrl+C` | Switch to read mode | Ladder: recall queue → interrupt → exit |
 /// | `Ctrl+D` | Quit chat | Quit chat |
-/// | `←` / `→` | Move cursor left / right | — |
-/// | `↑` / `↓` | — (TODO: visual-line movement) | Scroll transcript one row |
-/// | `Home` | Move cursor to start of buffer | Jump to top of transcript |
-/// | `End` | Move cursor to end of buffer | Jump to live tail |
-/// | `Page Up` / `Page Down` | — | Scroll transcript one page |
-/// | `Tab` | Insert 4 spaces (paste only) | — |
 ///
 /// ### Submit / queue logic (edit mode only)
 ///
@@ -346,6 +340,12 @@ internal final class SlateChatHost {
             case (_, .bracketedPasteEnd):
               self.inPaste = false
 
+            // Scroll transcript (both modes)
+            case (_, .arrowUp):
+              self.applyTranscriptScroll(delta: -1, sink: sink, slate: slate)
+            case (_, .arrowDown):
+              self.applyTranscriptScroll(delta: +1, sink: sink, slate: slate)
+
             // ── Edit mode ──
             case (.edit, .character(let ch)):
               self.buffer.insert(contentsOf: String(ch), at: self.cursor)
@@ -377,12 +377,6 @@ internal final class SlateChatHost {
                 self.submitUserLine(sink: sink, gate: gate)
               }
 
-            case (.edit, .tab):
-              if self.inPaste {
-                self.buffer.insert(contentsOf: "    ", at: self.cursor)
-                self.cursor = self.buffer.index(after: self.cursor)
-              }
-
             case (.edit, .escape):
               self.log.debug("event=chat.mode.to-read source=escape")
               self.mode = .read
@@ -391,37 +385,14 @@ internal final class SlateChatHost {
               self.log.debug("event=chat.mode.to-read source=ctrl-c")
               self.mode = .read
 
-            // Cursor movement in edit mode
-            case (.edit, .arrowLeft):
-              if self.cursor > self.buffer.startIndex {
-                self.cursor = self.buffer.index(before: self.cursor)
-              }
-            case (.edit, .arrowRight):
-              if self.cursor < self.buffer.endIndex {
-                self.cursor = self.buffer.index(after: self.cursor)
-              }
-            case (.edit, .arrowUp):
-              // TODO: visual-line-aware vertical cursor movement (Step 3)
-              break
-            case (.edit, .arrowDown):
-              // TODO: visual-line-aware vertical cursor movement (Step 3)
-              break
-            case (.edit, .home):
-              self.cursor = self.buffer.startIndex
-            case (.edit, .end):
-              self.cursor = self.buffer.endIndex
-
             // ── Read mode ──
             case (.read, .enter):
               self.log.debug("event=chat.mode.to-edit source=enter")
               self.mode = .edit
 
-            case (.read, .character(let ch)):
-              // Only 'i' enters edit mode; other chars are ignored in read mode
-              if ch == "i" && !self.inPaste {
-                self.log.debug("event=chat.mode.to-edit source=i")
-                self.mode = .edit
-              }
+            case (.read, .character):
+              // Printable characters are ignored in read mode
+              break
 
             case (.read, .ctrl(3)):
               // Ctrl+C ladder in read mode
@@ -462,23 +433,6 @@ internal final class SlateChatHost {
                   """)
                 shouldStop = true
               }
-
-            // Transcript scroll-back (read mode only)
-            case (.read, .arrowUp):
-              self.applyTranscriptScroll(delta: -1, sink: sink, slate: slate)
-            case (.read, .arrowDown):
-              self.applyTranscriptScroll(delta: +1, sink: sink, slate: slate)
-            case (.read, .pageUp), (.read, .ctrl(2)):
-              self.applyTranscriptScrollPage(up: true, sink: sink, slate: slate)
-            case (.read, .pageDown), (.read, .ctrl(6)):
-              self.applyTranscriptScrollPage(up: false, sink: sink, slate: slate)
-            case (.read, .home):
-              self.followingLiveTranscript = false
-              self.transcriptFirstVisibleRow = 0
-              self.renderWake?.requestRender()
-            case (.read, .end):
-              self.followingLiveTranscript = true
-              self.renderWake?.requestRender()
 
             default:
               break
@@ -701,20 +655,6 @@ internal final class SlateChatHost {
       }
     }
     renderWake?.requestRender()
-  }
-
-  /// Move transcript viewport by one page (up or down).
-  private func applyTranscriptScrollPage(
-    up: Bool, sink: SlateTranscriptSink, slate: borrowing Slate
-  ) {
-    let contentRows = SlateChatRenderer.transcriptContentRows(
-      cols: slate.cols, rows: slate.rows,
-      banner: sink.bannerSnapshot(), usage: sink.usageHUDSnapshot(),
-      inputLine: inputText, waitingForLLM: sink.modelTurnBusy(),
-      queuedTrayText: sink.queuedTrayTextSnapshot())
-    let page = max(1, contentRows)
-    let delta = up ? -page : page
-    applyTranscriptScroll(delta: delta, sink: sink, slate: slate)
   }
 
   /// Runs `git branch --show-current` in `cwd` and returns the branch name, or nil if not in a git repo.
