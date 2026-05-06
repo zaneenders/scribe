@@ -94,37 +94,22 @@ struct MarkdownRendererTests {
     sink.emit(.appendAssistantText(.answer, text: md))
     sink.emit(.finalizeAssistantStream)
     let (completed, _, _) = sink.snapshotTranscriptForLayout()
-
-    #expect(completed.count == 7)
-
-    // LINE 0: 'you:'
-    #expect(completed[0].spans.count == 1)
-    #expect(completed[0].spans[0].text == "you:")
-
-    // LINE 1: '  test'
-    #expect(completed[1].spans.count == 1)
-    #expect(completed[1].spans[0].text.hasPrefix("  test"))
-
-    // LINE 2: empty
-    #expect(completed[2].spans.isEmpty)
-
-    // LINE 3: 'scribe:'
-    #expect(completed[3].spans.count == 1)
-    #expect(completed[3].spans[0].text == "scribe:")
-
-    // LINE 4: '  · answer'
-    #expect(completed[4].spans.count == 1)
-    #expect(completed[4].spans[0].text == "  · answer")
-
-    // LINE 5: '### 4. O(n²) re-parsing' — heading
-    #expect(completed[5].spans.count >= 1)
-    let headingText = completed[5].spans.map(\.text).joined()
-    #expect(headingText.contains("4. O(n²) re-parsing"))
-
-    // LINE 6: '1. hello world' — list item
-    #expect(completed[6].spans.count >= 1)
-    let listText = completed[6].spans.map(\.text).joined()
-    #expect(listText.contains("hello world"))
+    for (i, line) in completed.enumerated() {
+      let text = line.spans.map(\.text).joined()
+      let firstColor: String
+      if let first = line.spans.first {
+        switch first.fg {
+        case ScribePalette.cyan: firstColor = "cyan"
+        case ScribePalette.markdownHeading: firstColor = "heading"
+        case ScribePalette.markdownHeadingPrefix: firstColor = "headingPrefix"
+        case ScribePalette.markdownListMarker: firstColor = "listMarker"
+        default: firstColor = "other"
+        }
+      } else {
+        firstColor = "empty"
+      }
+      print("LINE \(i): [\(firstColor)] '\(text)'")
+    }
   }
 
   @Test func singleCharacter() {

@@ -121,11 +121,6 @@ private struct SinkState {
   var contextWindow: Int?
   var banner: BannerSnapshot?
   var queuedTrayText: String? = nil
-  /// Live message count mirrored from the canonical rope so the viewport
-  /// trimmer can consult it without holding a stale rope copy.
-  var messageCount: Int? = nil
-  /// TLine indices where new messages start (used for viewport trimming).
-  var messageBoundaryIndices: [Int] = []
 }
 
 /// Slate-backed transcript sink: accumulates styled transcript lines and renders them via Slate.
@@ -163,7 +158,7 @@ public final class SlateTranscriptSink: Sendable {
     state.withLock { $0.modelBusy }
   }
 
-  public func snapshotTranscriptForLayout() -> (completed: [TLine], open: TLine?, lineGeneration: Int) {
+  internal func snapshotTranscriptForLayout() -> (completed: [TLine], open: TLine?, lineGeneration: Int) {
     state.withLock { sink in
       (sink.lines, sink.assistantOpenLine, sink.lineGeneration)
     }
@@ -183,8 +178,6 @@ public final class SlateTranscriptSink: Sendable {
     let logicalLines =
       trimmedVisible.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     state.withLock { sink in
-      // Track message boundary: `you:` starts a new message.
-      sink.messageBoundaryIndices.append(sink.lines.count)
       sink.lines.append(
         TLine(
           spans: [
@@ -205,7 +198,7 @@ public final class SlateTranscriptSink: Sendable {
                 text: slateUserTranscriptBodyPrefix + row)
             ]))
       }
-      trimIfNeeded(sink: &sink)
+      trimIfNeeded(&sink.lines)
     }
     ping()
   }
@@ -228,14 +221,6 @@ public final class SlateTranscriptSink: Sendable {
   public func setContextWindow(_ value: Int?) {
     state.withLock { sink in
       sink.contextWindow = value
-    }
-  }
-
-  /// Mirrors the live message count from the canonical rope so the viewport
-  /// trimmer can consult it without holding a stale rope copy.
-  public func setMessageCount(_ count: Int) {
-    state.withLock { sink in
-      sink.messageCount = count
     }
   }
 
@@ -271,9 +256,6 @@ public final class SlateTranscriptSink: Sendable {
             StyledSpan(
               fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:")
           ])
-        if previous == nil {
-          sink.messageBoundaryIndices.append(sink.lines.count)
-        }
         sink.lines.append(header)
         switch section {
         case .reasoning:
@@ -293,7 +275,7 @@ public final class SlateTranscriptSink: Sendable {
                   text: "  · answer")
               ]))
         }
-        trimIfNeeded(sink: &sink)
+        trimIfNeeded(&sink.lines)
         sink.assistantOpenLine = TLine(spans: [])
         sink.assistantOpenLineRaw = ""
         sink.assistantSectionStartIndex = sink.lines.count
@@ -338,7 +320,7 @@ public final class SlateTranscriptSink: Sendable {
         }
         sink.assistantOpenLineRaw = ""
         sink.assistantSectionStartIndex = nil
-        trimIfNeeded(sink: &sink)
+        trimIfNeeded(&sink.lines)
       }
       ping()
 
@@ -354,10 +336,9 @@ public final class SlateTranscriptSink: Sendable {
             fg: theme.emptyTurn, bg: theme.background, bold: false, text: "(empty turn)")
         ])
       state.withLock { sink in
-        sink.messageBoundaryIndices.append(sink.lines.count)
         sink.lines.append(lineA)
         sink.lines.append(lineB)
-        trimIfNeeded(sink: &sink)
+        trimIfNeeded(&sink.lines)
       }
       ping()
 
@@ -463,7 +444,7 @@ public final class SlateTranscriptSink: Sendable {
         sink.assistantOpenLine = nil
         sink.assistantOpenLineRaw = ""
         sink.assistantSectionStartIndex = nil
-        trimIfNeeded(sink: &sink)
+        trimIfNeeded(&sink.lines)
       }
       ping()
 
@@ -501,19 +482,6 @@ public final class SlateTranscriptSink: Sendable {
           }
         }
       }
-
-    case .messageCountChanged(let count):
-      state.withLock { sink in
-        sink.messageCount = count
-        // Ensure boundary array stays in sync with the rope so the
-        // trimmer can locate cut points for every message.
-        while sink.messageBoundaryIndices.count < count {
-          sink.messageBoundaryIndices.append(sink.lines.count)
-        }
-        // Fire the trim check now that the count may have crossed
-        // the maxRenderedMessages threshold.
-        trimIfNeeded(sink: &sink)
-      }
     }
   }
 
@@ -521,59 +489,16 @@ public final class SlateTranscriptSink: Sendable {
 
   private func appendLine(_ line: TLine) {
     state.withLock { sink in
-      // Track message boundaries: a `you:` header starts a new message.
-      // (`scribe:` headers are tracked directly in enterAssistantSection /
-      // emptyAssistantTurn.)
-      if let firstSpan = line.spans.first, firstSpan.text == slateUserTranscriptHeader {
-        sink.messageBoundaryIndices.append(sink.lines.count)
-      }
       sink.lines.append(line)
-      trimIfNeeded(sink: &sink)
+      trimIfNeeded(&sink.lines)
     }
     ping()
   }
 
-  /// Caps re-parse cost to ~34 messages regardless of session length.
-  /// For an 80 × 24 terminal: 24 viewport messages + 10 scroll buffer
-  /// (5 above and 5 below).
-  private static let maxRenderedMessages = 34
-
-  private func trimIfNeeded(sink: inout SinkState) {
-    // Primary path: rope-driven viewport trimming.  The canonical rope is the
-    // source of truth for message count; boundaries track where each message
-    // starts in the TLine array (synced on every `.messageCountChanged`).
-    if let totalMessages = sink.messageCount,
-      totalMessages > Self.maxRenderedMessages
-    {
-      // Drop the oldest messages so we keep at most maxRenderedMessages.
-      let dropMessageCount = totalMessages - Self.maxRenderedMessages
-      let boundaries = sink.messageBoundaryIndices
-      // Use the boundary array to find the line-level cut point.
-      // (boundaries may lag by one event; clamp to available entries.)
-      let dropIdx = min(dropMessageCount, boundaries.count)
-      if dropIdx > 0, dropIdx <= boundaries.count {
-        let dropLineIdx = boundaries[dropIdx - 1]
-        sink.lines = Array(sink.lines[dropLineIdx...])
-        // Adjust remaining boundary indices.
-        sink.messageBoundaryIndices = Array(
-          sink.messageBoundaryIndices[dropIdx...].map { $0 - dropLineIdx }
-        )
-        sink.lineGeneration += 1
-        return
-      }
-    }
-
-    // Fallback: hard line cap.
+  private func trimIfNeeded(_ lines: inout [TLine]) {
     let cap = 4_000
-    if sink.lines.count > cap {
-      let drop = sink.lines.count - cap
-      sink.lines = Array(sink.lines[drop...])
-      // Shift boundary indices.
-      sink.messageBoundaryIndices = sink.messageBoundaryIndices.compactMap {
-        let shifted = $0 - drop
-        return shifted >= 0 ? shifted : nil
-      }
-      sink.lineGeneration += 1
+    if lines.count > cap {
+      lines.removeFirst(lines.count - cap)
     }
   }
 

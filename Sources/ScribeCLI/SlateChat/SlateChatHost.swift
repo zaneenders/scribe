@@ -234,112 +234,30 @@ internal final class SlateChatHost {
           ] in
           defer { sink.markCoordinatorFinished() }
           do {
-            var agent = try ScribeAgent(
+            let agent = ScribeAgent(
               configuration: configuration,
               systemPrompt: systemPrompt,
-              tools: tools,
-              resumeFrom: resumeSnapshot?.messages
+              tools: tools
             )
-            sink.setMessageCount(agent.history.count)
-            persist(agent.extractMessages())
-
-            var turnIndex = 0
-            while true {
-              guard let line = await gate.nextLine() else {
-                sessionLog.info("event=chat.user.eof reason=stdin-closed")
-                break
-              }
-              let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-              if trimmed == "exit" {
-                sessionLog.notice("event=chat.user.exit-command")
-                break
-              }
-              if trimmed.isEmpty {
-                sessionLog.trace("event=chat.user.empty-skip")
-                continue
-              }
-
-              // Record in scrollback when the coordinator actually picks up the line.
-              sink.recordUserSubmission(trimmedVisible: trimmed)
-              agent.appendUserMessage(trimmed)
-              sink.setMessageCount(agent.history.count)
-
-              turnIndex += 1
-              sessionLog.debug(
-                """
-                event=agent.turn.dispatch \
-                turn=\(turnIndex) \
-                chars=\(trimmed.count)
-                """)
-
-              interruptFlag.clear()
-              sink.emit(.modelTurnRunning(true))
-              defer { sink.emit(.modelTurnRunning(false)) }
-
-              let tracker = TokenTracker(
-                contextWindow: configuration.contextWindow,
-                threshold: configuration.contextWindowThreshold
-              )
-              let wrappedOnEvent: @Sendable (TranscriptEvent) -> Void = { event in
-                if case .usage(let usage, _) = event {
-                  tracker.accumulate(usage: usage)
+            try await agent.runInteractive(
+              onEvent: { event in sink.emit(event) },
+              readUserLine: {
+                // Record the submission in scrollback exactly when the coordinator picks it up,
+                // so messages held in the queued-tray (during a busy turn) appear in scrollback
+                // only at the moment they're dispatched—not while they sit in the tray.
+                guard let line = await gate.nextLine() else { return nil }
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                  sink.recordUserSubmission(trimmedVisible: trimmed)
                 }
-                sink.emit(event)
-              }
-
-              let turnStart = Date()
-              do {
-                let _ = try await agent.runTurn(
-                  onEvent: wrappedOnEvent,
-                  shouldAbortTurn: { interruptFlag.peek() },
-                  log: sessionLog
-                )
-                let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
-                sessionLog.info(
-                  """
-                  event=agent.turn.end \
-                  turn=\(turnIndex) \
-                  status=completed \
-                  elapsed_ms=\(elapsedMs)
-                  """)
-                tracker.logStatus(logger: sessionLog)
-              } catch is AgentTurnInterruptedError {
-                let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
-                sessionLog.notice(
-                  """
-                  event=agent.turn.end \
-                  turn=\(turnIndex) \
-                  status=interrupted \
-                  elapsed_ms=\(elapsedMs)
-                  """)
-                sink.emit(.turnInterrupted)
-              } catch {
-                let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
-                let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-                sessionLog.error(
-                  """
-                  event=agent.turn.end \
-                  turn=\(turnIndex) \
-                  status=error \
-                  elapsed_ms=\(elapsedMs) \
-                  err="\(scribeError.errorDescription ?? String(describing: scribeError))"
-                  """)
-                sink.emit(.harnessError(scribeError))
-                if agent.history.last?.role == .user {
-                  agent.history.truncate(to: agent.history.count - 1)
-                }
-              }
-
-              sink.setMessageCount(agent.history.count)
-              persist(agent.extractMessages())
-            }
-            persist(agent.extractMessages())
-            sessionLog.debug(
-              """
-              event=chat.coordinator.end \
-              transcript_messages=\(agent.history.count) \
-              turns=\(turnIndex)
-              """)
+                return line
+              },
+              initialConversation: resumeSnapshot?.messages,
+              onConversationPersist: persist,
+              prepareModelTurnStart: { interruptFlag.clear() },
+              shouldAbortTurn: { interruptFlag.peek() },
+              log: sessionLog
+            )
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
             sink.emit(.harnessError(scribeError))
@@ -347,7 +265,8 @@ internal final class SlateChatHost {
               """
               event=chat.coordinator.fail \
               err="\(scribeError.errorDescription ?? String(describing: scribeError))"
-              """)
+              """
+            )
           }
         }
         self.spinnerTask?.cancel()

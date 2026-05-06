@@ -37,24 +37,21 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   private let onEvent: @Sendable (TranscriptEvent) -> Void
   private let tools: [Components.Schemas.ChatTool]
   private let clock = ContinuousClock()
-  private let maxContextMessages: Int?
 
   public init(
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     client: Client,
     model: String,
-    tools: [Components.Schemas.ChatTool],
-    maxContextMessages: Int? = nil
+    tools: [Components.Schemas.ChatTool]
   ) {
     self.onEvent = onEvent
     self.client = client
     self.model = model
     self.tools = tools
-    self.maxContextMessages = maxContextMessages
   }
 
   public func runRound(
-    messages: inout MessageRope,
+    messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> RoundOutcome {
@@ -74,29 +71,12 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
 
   // MARK: - Private helpers
 
-  /// Builds the message payload for an LLM request, respecting
-  /// `maxContextMessages` when set.  Extracted as a static method so tests
-  /// can exercise the limiting logic without a full HTTP round-trip.
-  public static func buildPayload(
-    messages: MessageRope,
-    maxContextMessages: Int?
-  ) -> [Components.Schemas.ChatMessage] {
-    if let limit = maxContextMessages, messages.count > limit {
-      // Always include system message (index 0), then last (limit - 1) messages.
-      let system = messages.window(from: 0, count: 1)
-      let recent = messages.window(from: messages.count - (limit - 1), count: limit - 1)
-      return system + recent
-    }
-    return messages.window(from: 0, count: messages.count)
-  }
-
   private func buildRequest(
-    messages: MessageRope
+    messages: [Components.Schemas.ChatMessage]
   ) -> Components.Schemas.CreateChatCompletionRequest {
-    let payload = Self.buildPayload(messages: messages, maxContextMessages: maxContextMessages)
-    return Components.Schemas.CreateChatCompletionRequest(
+    Components.Schemas.CreateChatCompletionRequest(
       model: model,
-      messages: payload,
+      messages: messages,
       stream: true,
       temperature: 0,
       maxTokens: nil,
@@ -304,7 +284,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   private func finalizeTurn(
     _ turn: StreamedAssistantTurn,
     result: StreamProcessingResult,
-    messages: inout MessageRope,
+    messages: inout [Components.Schemas.ChatMessage],
     logger: Logger
   ) -> RoundOutcome {
     let streamElapsedMs = elapsedMs(since: result.streamWallStart)
@@ -362,7 +342,6 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       reasoningContent: assistantReasoning
     )
     messages.append(assistantMessage)
-    onEvent(.messageCountChanged(messages.count))
 
     if toolInvocations.isEmpty {
       logger.info(

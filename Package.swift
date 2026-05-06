@@ -42,8 +42,8 @@ let package = Package(
     .target(
       name: "ScribeCore",
       dependencies: [
-        .product(name: "_RopeModule", package: "swift-collections"),
         "ScribeLLM",
+        .product(name: "_RopeModule", package: "swift-collections"),
         .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
         .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "Configuration", package: "swift-configuration"),

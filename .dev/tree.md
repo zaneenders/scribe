@@ -8,42 +8,6 @@ Scribe sessions are flat directories (`sessions/{uuid}/` with `metadata.json` +
 full independent copy of the session directory. Lineage is tracked via small
 pointers in `metadata.json`.
 
-### In-memory storage: `MessageRope`
-
-The canonical in-memory representation of a session's conversation is a
-`MessageRope` (wrapping Apple's `swift-collections` `Rope<Message>`).  Each
-leaf node holds up to 32 `ChatMessage` values in a B-tree, giving O(log n)
-append, indexed access, and window extraction.
-
-This enables two things immediately:
-
-1. **Viewport windowing** — the TUI renderer only materialises the visible
-   portion of the transcript (terminal viewport ± 5 messages of scroll buffer)
-   into styled `TLine` objects.  The markdown renderer never sees the full
-   history, bounding the O(n²) re-parse cost to ~34 messages regardless of
-   session length.
-2. **Structural sharing for forks** — when a session is forked, the in-memory
-   `Rope` can share unchanged subtrees with the parent.  (The on-disk
-   representation remains a full directory copy; see Phase 2.)
-
-```
-MessageRope (all messages, O(log n) access)
-  ├── cold zone:  messages outside viewport ± buffer
-  │     stored as raw ChatMessage in tree leaves, not rendered
-  ├── warm zone:  viewport ± 5 messages
-  │     flattened into TLine, ready for the renderer
-  └── hot zone:   visible viewport
-        the slice actually sent to makeGrid()
-```
-
-For an 80×24 terminal the window sizes are:
-
-| Scroll position | Messages rendered |
-|-----------------|-------------------|
-| Bottom (live)   | 24 viewport + 5 above buffer = 29 |
-| Middle          | 24 viewport + 5 above + 5 below = 34 |
-| Top             | 24 viewport + 5 below buffer = 29 |
-
 ---
 
 ## Phase 1 — Slash Commands + `/switch`

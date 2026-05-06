@@ -112,19 +112,19 @@ struct SessionListFormattingTests {
   }
 
   @Test func formatSessionLineColumnAlignment() {
-    // Rows with varying time widths and msg counts — columns must stay aligned.
-    let rows: [(id: String, count: Int, when: String, cwd: String)] = [
-      ("8FFC6215", 87, "2m ago", "~/.scribe/Code/scribe"),
-      ("ECAAB88F", 1, "20m ago", "~/.config/scribe"),
-      ("885E2CFB", 42, "25m ago", "~"),
-      ("78327AE7", 100, "6h ago", "~/.scribe/Code/scribe"),
-      ("CFDF75D4", 1, "10h ago", "~/.scribe/Code/scribe"),
+    // Rows with varying time widths — columns must stay aligned.
+    let rows: [(id: String, when: String, cwd: String)] = [
+      ("8FFC6215", "2m ago", "~/.scribe/Code/scribe"),
+      ("ECAAB88F", "20m ago", "~/.config/scribe"),
+      ("885E2CFB", "25m ago", "~"),
+      ("78327AE7", "6h ago", "~/.scribe/Code/scribe"),
+      ("CFDF75D4", "10h ago", "~/.scribe/Code/scribe"),
     ]
 
     let stripped = rows.map {
       stripANSI(
         ScribeCLI().formatSessionLine(
-          shortId: $0.id, msgCount: $0.count, when: $0.when, cwd: $0.cwd,
+          shortId: $0.id, when: $0.when, cwd: $0.cwd,
           version: "test"
         )
       )
@@ -162,27 +162,10 @@ struct SessionListFormattingTests {
 
   @Test func formatSessionLineContainsShortId() {
     let line = ScribeCLI().formatSessionLine(
-      shortId: "DEADBEEF", msgCount: 5, when: "1h ago", cwd: "~/proj",
+      shortId: "DEADBEEF", when: "1h ago", cwd: "~/proj",
       version: "test")
     let stripped = stripANSI(line)
     #expect(stripped.contains("DEADBEEF"))
-  }
-
-  @Test func formatSessionLineUsesSingularMsg() {
-    let line = ScribeCLI().formatSessionLine(
-      shortId: "AAAAAAAA", msgCount: 1, when: "1m ago", cwd: "~",
-      version: "test")
-    let stripped = stripANSI(line)
-    #expect(stripped.contains("1 msg"))
-    #expect(!stripped.contains("1 msgs"))
-  }
-
-  @Test func formatSessionLineUsesPluralMsgs() {
-    let line = ScribeCLI().formatSessionLine(
-      shortId: "AAAAAAAA", msgCount: 0, when: "1m ago", cwd: "~",
-      version: "test")
-    let stripped = stripANSI(line)
-    #expect(stripped.contains("0 msgs"))
   }
 
   @Test func formatSessionLineTimeColAlwaysNineChars() {
@@ -192,7 +175,7 @@ struct SessionListFormattingTests {
 
     for when in cases {
       let line = ScribeCLI().formatSessionLine(
-        shortId: "BBBBBBBB", msgCount: 1, when: when, cwd: "~",
+        shortId: "BBBBBBBB", when: when, cwd: "~",
         version: "test")
       let stripped = stripANSI(line)
 
@@ -210,29 +193,25 @@ struct SessionListFormattingTests {
     }
   }
 
-  @Test func formatSessionLineMsgColAlwaysEightChars() {
-    // The msg column should always occupy exactly 8 visible characters.
-    let cases = [
-      (0, "0 msgs"), (1, "1 msg"), (9, "9 msgs"), (10, "10 msgs"), (99, "99 msgs"), (100, "100 msgs"),
-      (9999, "9999 ms"),
-    ]
+  @Test func formatSessionLineCwdAlwaysSameColumn() {
+    // The cwd should start at the same column regardless of time width.
+    let cases = ["just now", "5s ago", "1m ago", "1h ago"]
 
-    for (count, _) in cases {
+    for when in cases {
       let line = ScribeCLI().formatSessionLine(
-        shortId: "CCCCCCCC", msgCount: count, when: "1m ago", cwd: "~",
+        shortId: "CCCCCCCC", when: when, cwd: "~",
         version: "test")
       let stripped = stripANSI(line)
 
-      // After 9 (time) + 2 (gap) + 8 (uuid) + 2 (gap) = 21 chars, the msg column starts.
-      // The cwd "~" should start at 21 + 8 (msg) + 2 (gap) = 31.
+      // After 9 (time) + 2 (gap) + 8 (uuid) + 2 (gap) = 21 chars, cwd starts.
       guard let cwdRange = stripped.range(of: "~") else {
         #expect(Bool(false), "Missing cwd in: \(stripped)")
         continue
       }
       let cwdStart = stripped.distance(from: stripped.startIndex, to: cwdRange.lowerBound)
       #expect(
-        cwdStart == 31,
-        "Msg count \(count) → cwd starts at \(cwdStart), expected 31: '\(stripped)'"
+        cwdStart == 21,
+        "Time '\(when)' → cwd starts at \(cwdStart), expected 21: '\(stripped)'"
       )
     }
   }

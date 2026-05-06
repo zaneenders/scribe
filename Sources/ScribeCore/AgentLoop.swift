@@ -20,7 +20,7 @@ public struct AgentLoop: Sendable {
   }
 
   public func runModelTurn(
-    messages: inout MessageRope,
+    messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
@@ -89,7 +89,7 @@ public struct AgentLoop: Sendable {
               round=\(round)
               """
             )
-            messages.truncate(to: messagesCountBeforeRound)
+            messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
             throw AgentTurnInterruptedError()
           }
           let toolStarted = Date()
@@ -126,7 +126,6 @@ public struct AgentLoop: Sendable {
             toolCallId: inv.id
           )
           messages.append(toolMsg)
-          onEvent(.messageCountChanged(messages.count))
         }
         logger.trace(
           """

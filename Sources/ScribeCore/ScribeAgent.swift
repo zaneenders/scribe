@@ -6,105 +6,85 @@ import ScribeLLM
 
 /// An agent that orchestrates LLM calls with tool execution.
 ///
-/// The agent owns the conversation history (`MessageRope`) and the system prompt.
-/// The caller drives the turn loop — the history is seeded on init, append user
-/// messages, call `runTurn()`, inspect `history` at any time.
+/// Instantiate with configuration, a system prompt, and an array of tools,
+/// then call `runTurn`, `runInteractive`, or `runIPC`.
 ///
 /// ```swift
-/// let agent = try ScribeAgent(
-///     configuration: config,
-///     systemPrompt: "You are a helpful coding assistant.",
-///     tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()]
+/// let config = AgentConfig(
+///   agentModel: "llama3.2",
+///   serverURL: "http://localhost:11434"
+/// )
+/// let agent = ScribeAgent(
+///   configuration: config,
+///   systemPrompt: "You are a helpful coding assistant.",
+///   tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()]
 /// )
 ///
+/// // Single turn
+/// var messages: [ChatMessage] = [.init(role: .system, content: "...")]
+/// let outcome = try await agent.runTurn(messages: &messages, ...)
+///
 /// // Full interactive session
-/// while let line = await readLine() {
-///     agent.appendUserMessage(line)
-///     let outcome = try await agent.runTurn(onEvent: ..., log: ...)
-///     persist(agent.history.window(from: 0, count: agent.history.count))
-/// }
+/// try await agent.runInteractive(onEvent: ..., readUserLine: ..., log: ...)
 /// ```
 public struct ScribeAgent: Sendable {
   public let configuration: AgentConfig
   public let client: Client
   public let systemPrompt: String
   public let toolRegistry: ToolRegistry
-  public var history: MessageRope
 
   private let chatTools: [Components.Schemas.ChatTool]
 
-  // MARK: - Init
-
-  /// Provide an `AgentConfig` that includes the server URL and optional bearer
-  /// token; the HTTP client is created internally.
-  ///
-  /// If `resumeFrom` is supplied its first message must be a system message;
-  /// otherwise the history is seeded with `systemPrompt`.
+  /// Primary initializer: provide an `AgentConfig` that includes the server URL
+  /// and optional bearer token; the HTTP client is created internally.
   public init(
     configuration: AgentConfig,
     systemPrompt: String,
-    tools: [any ScribeTool],
-    resumeFrom messages: [Components.Schemas.ChatMessage]? = nil
-  ) throws {
+    tools: [any ScribeTool]
+  ) {
     guard let serverURL = URL(string: configuration.serverURL) else {
       fatalError("Invalid serverURL in AgentConfig: \(configuration.serverURL)")
     }
+    self.init(
+      configuration: configuration,
+      client: OpenAICompatibleClient.make(
+        serverURL: serverURL, bearerToken: configuration.bearerToken),
+      systemPrompt: systemPrompt,
+      tools: tools
+    )
+  }
+
+  /// Escape hatch: provide a pre-configured `Client` directly (e.g. for testing
+  /// with a custom transport).
+  public init(
+    configuration: AgentConfig,
+    client: Client,
+    systemPrompt: String,
+    tools: [any ScribeTool]
+  ) {
     self.configuration = configuration
-    self.client = OpenAICompatibleClient.make(
-      serverURL: serverURL, bearerToken: configuration.bearerToken)
+    self.client = client
     self.systemPrompt = systemPrompt
     self.toolRegistry = ToolRegistry(tools: tools)
     self.chatTools = DefaultAgentTools.chatTools(from: tools)
-
-    if let messages, !messages.isEmpty {
-      guard messages.first?.role == .system else {
-        throw ScribeError.sessionCorrupted(
-          reason: "Resumed conversation must begin with a system message.")
-      }
-      self.history = MessageRope(messages)
-    } else {
-      self.history = MessageRope()
-      self.history.append(
-        .init(
-          role: .system,
-          content: systemPrompt,
-          name: nil,
-          toolCalls: nil,
-          toolCallId: nil
-        )
-      )
-    }
-  }
-
-  /// Append a user message to the conversation history.
-  public mutating func appendUserMessage(_ text: String) {
-    history.append(
-      .init(
-        role: .user,
-        content: text,
-        name: nil,
-        toolCalls: nil,
-        toolCallId: nil
-      )
-    )
   }
 
   // MARK: - runTurn
 
   /// Execute a single model turn (LLM call + optional tool-call rounds) against
-  /// `self.history`.  The caller owns the loop and can inspect / persist / replay
-  /// `history` between turns.
-  public mutating func runTurn(
+  /// the supplied conversation history. The caller owns `messages` and can
+  /// inspect / persist / replay it between turns.
+  public func runTurn(
+    messages: inout [Components.Schemas.ChatMessage],
+    log: Logger,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
-    shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
-    log: Logger
+    shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
     let harness = AgentHarness(
       onEvent: onEvent,
       client: client,
       model: configuration.agentModel,
-      tools: chatTools,
-      maxContextMessages: configuration.maxContextMessages
+      tools: chatTools
     )
     let loop = AgentLoop(
       harness: harness,
@@ -112,16 +92,219 @@ public struct ScribeAgent: Sendable {
       onEvent: onEvent
     )
     return try await loop.runModelTurn(
-      messages: &history,
+      messages: &messages,
       logger: log,
       shouldAbortTurn: shouldAbortTurn
     )
   }
 
-  // MARK: - Helpers
+  // MARK: - runInteractive
 
-  /// Extract the full conversation history as a flat array.
-  public func extractMessages() -> [Components.Schemas.ChatMessage] {
-    history.window(from: 0, count: history.count)
+  public func runInteractive(
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
+    readUserLine: @escaping @Sendable () async -> String?,
+    initialConversation: [Components.Schemas.ChatMessage]? = nil,
+    onConversationPersist: (@Sendable ([Components.Schemas.ChatMessage]) -> Void)? = nil,
+    prepareModelTurnStart: @escaping @Sendable () -> Void = {},
+    shouldAbortTurn: @escaping @Sendable () -> Bool = { false },
+    log: Logger
+  ) async throws {
+    var history: [Components.Schemas.ChatMessage]
+    if let initialConversation, !initialConversation.isEmpty {
+      history = initialConversation
+      if history.first?.role != .system {
+        log.error(
+          """
+          event=chat.coordinator.fail \
+          reason=resumed-history-no-system-prefix \
+          first_role=\(String(describing: history.first?.role))
+          """)
+        throw ScribeError.sessionCorrupted(
+          reason: "Resumed conversation must begin with a system message.")
+      }
+    } else {
+      history = [
+        .init(
+          role: .system,
+          content: systemPrompt,
+          name: nil,
+          toolCalls: nil,
+          toolCallId: nil
+        )
+      ]
+    }
+
+    let persistConversation = onConversationPersist
+    persistConversation?(history)
+    log.debug(
+      """
+      event=chat.coordinator.start \
+      messages=\(history.count) \
+      resumed=\(initialConversation != nil)
+      """)
+
+    let tracker = TokenTracker(
+      contextWindow: configuration.contextWindow,
+      threshold: configuration.contextWindowThreshold
+    )
+
+    let wrappedOnEvent: @Sendable (TranscriptEvent) -> Void = { event in
+      if case .usage(let usage, _) = event {
+        tracker.accumulate(usage: usage)
+      }
+      onEvent(event)
+    }
+
+    var turnIndex = 0
+    while true {
+      guard let line = await readUserLine() else {
+        log.info("event=chat.user.eof reason=stdin-closed")
+        break
+      }
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed == "exit" {
+        log.notice("event=chat.user.exit-command")
+        break
+      }
+      if trimmed.isEmpty {
+        log.trace("event=chat.user.empty-skip")
+        continue
+      }
+      turnIndex += 1
+      log.debug(
+        """
+        event=agent.turn.dispatch \
+        turn=\(turnIndex) \
+        chars=\(trimmed.count)
+        """)
+
+      history.append(
+        .init(
+          role: .user,
+          content: trimmed,
+          name: nil,
+          toolCalls: nil,
+          toolCallId: nil
+        ))
+
+      prepareModelTurnStart()
+      onEvent(.modelTurnRunning(true))
+      defer {
+        onEvent(.modelTurnRunning(false))
+      }
+      let turnStart = Date()
+      do {
+        let _ = try await runTurn(
+          messages: &history,
+          log: log,
+          onEvent: wrappedOnEvent,
+          shouldAbortTurn: shouldAbortTurn
+        )
+        let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
+        log.info(
+          """
+          event=agent.turn.end \
+          turn=\(turnIndex) \
+          status=completed \
+          elapsed_ms=\(elapsedMs)
+          """)
+        tracker.logStatus(logger: log)
+      } catch is AgentTurnInterruptedError {
+        let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
+        log.notice(
+          """
+          event=agent.turn.end \
+          turn=\(turnIndex) \
+          status=interrupted \
+          elapsed_ms=\(elapsedMs)
+          """)
+        onEvent(.turnInterrupted)
+      } catch {
+        let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
+        let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
+        log.error(
+          """
+          event=agent.turn.end \
+          turn=\(turnIndex) \
+          status=error \
+          elapsed_ms=\(elapsedMs) \
+          err="\(scribeError.errorDescription ?? String(describing: scribeError))"
+          """)
+        onEvent(.harnessError(scribeError))
+        if history.last?.role == .user {
+          history.removeLast()
+        }
+      }
+      persistConversation?(history)
+    }
+    persistConversation?(history)
+    log.debug(
+      """
+      event=chat.coordinator.end \
+      transcript_messages=\(history.count) \
+      turns=\(turnIndex)
+      """)
+  }
+
+  // MARK: - runIPC
+
+  public func runIPC(
+    request: ScribeAgentRequest,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
+    log: Logger
+  ) async -> ScribeAgentResponse {
+    var history: [Components.Schemas.ChatMessage] = [
+      .init(
+        role: .system,
+        content: systemPrompt,
+        name: nil,
+        toolCalls: nil,
+        toolCallId: nil
+      ),
+      .init(
+        role: .user,
+        content: request.message,
+        name: nil,
+        toolCalls: nil,
+        toolCallId: nil
+      ),
+    ]
+    log.notice(
+      """
+      event=ipc.session.start \
+      message_chars=\(request.message.count) \
+      model=\(configuration.agentModel)
+      """)
+    do {
+      let _ = try await runTurn(
+        messages: &history,
+        log: log,
+        onEvent: onEvent
+      )
+      let text = ChatHistory.lastAssistantText(from: history) ?? ""
+      log.notice(
+        """
+        event=ipc.session.end \
+        status=ok \
+        assistant_chars=\(text.count)
+        """)
+      return .success(assistant: text)
+    } catch let e as ScribeError {
+      log.error(
+        """
+        event=ipc.session.end \
+        status=error \
+        err="\(e.errorDescription ?? String(describing: e))"
+        """)
+      return .failure(e.errorDescription ?? String(describing: e))
+    } catch {
+      log.error(
+        """
+        event=ipc.session.end \
+        status=error \
+        err="\(String(describing: error))"
+        """)
+      return .failure(String(describing: error))
+    }
   }
 }
