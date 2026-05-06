@@ -34,14 +34,16 @@ import ScribeCore
       }
       let home = FileManager.default.homeDirectoryForCurrentUser.path
       for url in files {
-        guard let archive = try? ChatSessionStore.load(from: url) else { continue }
-        let shortId = String(archive.id.uuidString.prefix(8))
-        let msgCount = archive.messages.count
-        let when = relativeTime(from: archive.updatedAt)
-        let cwd = archive.cwd.replacingOccurrences(of: home, with: "~")
+        guard let meta = try? ChatSessionStore.loadMetadata(from: url) else { continue }
+        let shortId = String(meta.id.uuidString.prefix(8))
+        let updatedAt =
+          (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+          ?? meta.createdAt
+        let when = relativeTime(from: updatedAt)
+        let cwd = meta.cwd.replacingOccurrences(of: home, with: "~")
 
         print(
-          formatSessionLine(shortId: shortId, msgCount: msgCount, when: when, cwd: cwd, version: archive.scribeVersion))
+          formatSessionLine(shortId: shortId, when: when, cwd: cwd, version: meta.scribeVersion ?? "unknown"))
       }
       return
     }
@@ -175,15 +177,12 @@ extension ScribeCLI {
   /// verify alignment and content without capturing real stdout.
   func formatSessionLine(
     shortId: String,
-    msgCount: Int,
     when: String,
     cwd: String,
     version: String
   ) -> String {
-    let msgLabel = msgCount == 1 ? "msg" : "msgs"
     let timeCol = when.padding(toLength: 9, withPad: " ", startingAt: 0)
-    let msgCol = "\(msgCount) \(msgLabel)".padding(toLength: 8, withPad: " ", startingAt: 0)
     return
-      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \u{001B}[2m\(msgCol)\u{001B}[0m  \(cwd)  \u{001B}[2m(\(version))\u{001B}[0m"
+      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m(\(version))\u{001B}[0m"
   }
 }
