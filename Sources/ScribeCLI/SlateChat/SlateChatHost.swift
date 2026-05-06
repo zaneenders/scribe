@@ -247,12 +247,19 @@ internal final class SlateChatHost {
           createdAt: created,
           model: modelSnapshot,
           baseURL: baseSnapshot,
+          scribeVersion: GitVersion.hash,
           persistURL: persistURL,
           logger: persistLog
         )
 
         let cwd = FileManager.default.currentDirectoryPath
-        sink.setBanner(baseURL: self.configuration.serverURL, model: self.configuration.agentModel, cwd: cwd)
+        let gitBranch = SlateChatHost.detectGitBranch(cwd: cwd)
+        sink.setBanner(
+          baseURL: self.configuration.serverURL,
+          model: self.configuration.agentModel,
+          cwd: cwd,
+          scribeVersion: GitVersion.hash,
+          gitBranch: gitBranch)
 
         let interruptFlag = self.modelInterruptFlag
         let sessionLog = self.log
@@ -708,5 +715,27 @@ internal final class SlateChatHost {
     let page = max(1, contentRows)
     let delta = up ? -page : page
     applyTranscriptScroll(delta: delta, sink: sink, slate: slate)
+  }
+
+  /// Runs `git branch --show-current` in `cwd` and returns the branch name, or nil if not in a git repo.
+  private static func detectGitBranch(cwd: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["branch", "--show-current"]
+    process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+      guard process.terminationStatus == 0 else { return nil }
+      let data = try pipe.fileHandleForReading.readToEnd() ?? Data()
+      let branch = String(data: data, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      return branch?.isEmpty == true ? nil : branch
+    } catch {
+      return nil
+    }
   }
 }

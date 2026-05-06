@@ -67,6 +67,9 @@ let package = Package(
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
+      ],
+      plugins: [
+        "GitVersionPlugin"
       ]
     ),
     .testTarget(
@@ -92,6 +95,10 @@ let package = Package(
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
       ]
+    ),
+    .plugin(
+      name: "GitVersionPlugin",
+      capability: .buildTool()
     ),
   ]
 )
