@@ -533,7 +533,9 @@ public final class SlateTranscriptSink: Sendable {
     ping()
   }
 
-  /// Maximum rendered messages: 24 viewport + 10 buffer (5 above + 5 below).
+  /// Caps re-parse cost to ~34 messages regardless of session length.
+  /// For an 80 × 24 terminal: 24 viewport messages + 10 scroll buffer
+  /// (5 above and 5 below).
   private static let maxRenderedMessages = 34
 
   private func trimIfNeeded(sink: inout SinkState) {
