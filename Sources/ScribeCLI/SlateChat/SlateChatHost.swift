@@ -94,7 +94,7 @@ private struct TranscriptFlattenCache {
 /// | Agent **idle** + Enter (non-empty buffer) | Message sent **immediately**. |
 /// | Agent **busy** + Enter (non-empty buffer) | Buffer text goes into the **queued tray**. |
 /// | Agent busy + queue exists + Enter on **empty** buffer | **Interrupts** the in-flight turn and sends the queued message. |
-/// | Agent busy + queue exists + types more + Enter | New text **replaces** the queued message. |
+/// | Agent busy + queue exists + types more + Enter | New text **appends** to the queued messages (FIFO). |
 /// | Agent finishes a turn with queue non-empty | Queued message **auto-flushes** on the busy → idle transition. |
 ///
 /// ### Ctrl+C ladder (read mode only)
@@ -112,9 +112,9 @@ private struct TranscriptFlattenCache {
 ///
 /// ## Key design notes
 ///
-/// - **Single-slot queue.** Submitting again while busy replaces the previous queued
-///   message rather than appending; recall it with Ctrl+C if you want to edit
-///   instead of overwrite.
+/// - **FIFO queue.** Submitting while busy appends to the queue.  Ctrl+C (recall)
+///   or Enter-on-empty (interrupt-and-send) pops the oldest message.  Auto-flush
+///   drains all queued messages when the agent finishes naturally.
 /// - **Scrollback recording is deferred to pickup.** ``readUserLine`` is wrapped so
 ///   the orange `you:` block is appended to scrollback exactly when the coordinator
 ///   consumes the line. This gives the right ordering for the interrupt-and-send
@@ -156,13 +156,12 @@ internal final class SlateChatHost {
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
   private let modelInterruptFlag = ModelTurnInterruptFlag()
-  /// Holds a user submission that arrived while the agent was busy. The text lives in the queued
-  /// tray UI strip above the input; it is delivered to the coordinator when the user explicitly
-  /// hits Enter again (interrupting the agent), recalls it with Ctrl+C, or when the current model
-  /// turn finishes naturally.
-  private var queuedSubmission: String? = nil
+  /// Holds user submissions that arrived while the agent was busy.  FIFO-ordered:
+  /// the oldest (first queued) is shown in the tray strip and delivered first on
+  /// interrupt/recall/auto-flush.
+  private var queuedSubmissions: [String] = []
   /// Previous-render snapshot of `sink.modelTurnBusy()`, used to detect busy → idle transitions
-  /// in `onEvent` and auto-flush a queued submission to the coordinator at that moment.
+  /// in `onEvent` and auto-flush queued submissions to the coordinator at that moment.
   private var lastObservedModelBusy: Bool = false
   /// Per-session logger threaded in from `Chat.run`; writes to `scribe-{uuid}.log`.
   private let log: Logger
@@ -366,7 +365,7 @@ internal final class SlateChatHost {
                 event=chat.user.input.newline \
                 source=shift-enter \
                 buffer_chars=\(self.buffer.count) \
-                has_queue=\(self.queuedSubmission != nil)
+                has_queue=\(!self.queuedSubmissions.isEmpty)
                 """)
 
             case (.edit, .enter):
@@ -397,17 +396,18 @@ internal final class SlateChatHost {
             case (.read, .ctrl(3)):
               // Ctrl+C ladder in read mode
               let busy = sink.modelTurnBusy()
-              if let queued = self.queuedSubmission {
-                // 1. Pull queued message back into input buffer
+              if !self.queuedSubmissions.isEmpty {
+                // 1. Pull oldest queued message back into input buffer
+                let queued = self.queuedSubmissions.removeFirst()
                 self.log.debug(
                   """
                   event=chat.user.ctrl-c \
                   action=recall-queue \
                   queue_chars=\(queued.count) \
+                  remaining=\(self.queuedSubmissions.count) \
                   model_busy=\(busy)
                   """)
-                self.queuedSubmission = nil
-                sink.setQueuedTrayText(nil)
+                sink.setQueuedTrayTexts(self.queuedSubmissions)
                 self.buffer = BigString()
                 self.buffer.insert(contentsOf: queued, at: self.buffer.startIndex)
                 self.cursor = self.buffer.endIndex
@@ -444,24 +444,27 @@ internal final class SlateChatHost {
           }
         }
 
-        // Auto-flush a queued tray message when the agent finishes a turn naturally
+        // Auto-flush all queued tray messages when the agent finishes a turn naturally
         let nowBusy = sink.modelTurnBusy()
-        if !nowBusy, self.lastObservedModelBusy, let queued = self.queuedSubmission {
-          self.log.debug(
-            """
-            event=chat.queue.auto-flush \
-            trigger=busy-to-idle \
-            chars=\(queued.count)
-            """)
-          self.queuedSubmission = nil
-          sink.setQueuedTrayText(nil)
-          Task { await gate.complete(queued) }
+        if !nowBusy, self.lastObservedModelBusy, !self.queuedSubmissions.isEmpty {
+          let drained = self.queuedSubmissions
+          self.queuedSubmissions = []
+          sink.setQueuedTrayTexts([])
+          for q in drained {
+            self.log.debug(
+              """
+              event=chat.queue.auto-flush \
+              trigger=busy-to-idle \
+              chars=\(q.count)
+              """)
+            Task { await gate.complete(q) }
+          }
         }
         self.lastObservedModelBusy = nowBusy
 
         let prepareStart = Date()
         let flatTranscript = self.syncFlattenedTranscript(sink: sink, slate: slate)
-        let queuedTrayText = sink.queuedTrayTextSnapshot()
+        let queuedTrayTexts = sink.queuedTrayTextsSnapshot()
         let contentRows = SlateChatRenderer.transcriptContentRows(
           cols: slate.cols,
           rows: slate.rows,
@@ -469,7 +472,7 @@ internal final class SlateChatHost {
           usage: sink.usageHUDSnapshot(),
           inputLine: self.inputText,
           waitingForLLM: sink.modelTurnBusy(),
-          queuedTrayText: queuedTrayText
+          queuedTrayTexts: queuedTrayTexts
         )
         let maxTailStart = max(0, flatTranscript.count &- contentRows)
         if self.followingLiveTranscript {
@@ -492,7 +495,7 @@ internal final class SlateChatHost {
             inputMode: self.mode,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: sink.modelTurnBusy(),
-            queuedTrayText: queuedTrayText,
+            queuedTrayTexts: queuedTrayTexts,
             theme: .default))
         let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
         let totalMs = prepareMs &+ submitMs
@@ -507,7 +510,7 @@ internal final class SlateChatHost {
             cols=\(slate.cols) \
             rows=\(slate.rows) \
             model_busy=\(nowBusy) \
-            queue_chars=\(self.queuedSubmission?.count ?? 0) \
+            queue_count=\(self.queuedSubmissions.count) \
             buffer_chars=\(self.buffer.count)
             """)
         }
@@ -523,11 +526,11 @@ internal final class SlateChatHost {
   }
 
   /// Handles Enter in the input box:
-  /// - **Empty buffer + no queued tray message** → no-op.
-  /// - **Empty buffer + queued tray message** → interrupt the in-flight model turn (if any)
-  ///   and dispatch the queued message to the coordinator.
+  /// - **Empty buffer + no queued tray messages** → no-op.
+  /// - **Empty buffer + queued tray messages** → interrupt the in-flight model turn (if any)
+  ///   and dispatch the oldest queued message to the coordinator.
   /// - **Non-empty buffer + agent idle** → dispatch immediately.
-  /// - **Non-empty buffer + agent busy** → place into queued tray.
+  /// - **Non-empty buffer + agent busy** → append to queued tray (FIFO).
   private func submitUserLine(sink: SlateTranscriptSink, gate: UserLineGate) {
     followingLiveTranscript = true
     transcriptFirstVisibleRow = 0
@@ -539,7 +542,7 @@ internal final class SlateChatHost {
     let newlines = submit.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
 
     if trimmed.isEmpty {
-      guard let queued = queuedSubmission else {
+      guard !queuedSubmissions.isEmpty else {
         log.debug(
           """
           event=chat.user.submit \
@@ -549,6 +552,8 @@ internal final class SlateChatHost {
           """)
         return
       }
+      let queued = queuedSubmissions.removeFirst()
+      sink.setQueuedTrayTexts(queuedSubmissions)
       let queuedNewlines = queued.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
       log.debug(
         """
@@ -556,10 +561,9 @@ internal final class SlateChatHost {
         kind=interrupt-and-send \
         chars=\(queued.count) \
         newlines=\(queuedNewlines) \
+        remaining=\(queuedSubmissions.count) \
         model_busy=\(busy)
         """)
-      queuedSubmission = nil
-      sink.setQueuedTrayText(nil)
       if busy {
         modelInterruptFlag.request()
       }
@@ -569,18 +573,18 @@ internal final class SlateChatHost {
     }
 
     if busy {
-      let replacing = queuedSubmission != nil
+      let queueLen = queuedSubmissions.count
       log.debug(
         """
         event=chat.user.submit \
         kind=queue \
         chars=\(submit.count) \
         newlines=\(newlines) \
-        replacing=\(replacing) \
+        queue_len=\(queueLen) \
         model_busy=true
         """)
-      queuedSubmission = submit
-      sink.setQueuedTrayText(submit)
+      queuedSubmissions.append(submit)
+      sink.setQueuedTrayTexts(queuedSubmissions)
       renderWake?.requestRender()
     } else {
       log.debug(
@@ -637,7 +641,7 @@ internal final class SlateChatHost {
       cols: slate.cols, rows: slate.rows,
       banner: sink.bannerSnapshot(), usage: sink.usageHUDSnapshot(),
       inputLine: inputText, waitingForLLM: sink.modelTurnBusy(),
-      queuedTrayText: sink.queuedTrayTextSnapshot())
+      queuedTrayTexts: sink.queuedTrayTextsSnapshot())
     let maxTailStart = max(0, flat.count &- contentRows)
 
     if delta < 0 {

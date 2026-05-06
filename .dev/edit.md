@@ -1,148 +1,18 @@
-# Plan: Trivial Text Editing Movement + Modes
+# Plan: Modal Text Editing for Chat Input
 
 ## Current State
 
-The input system in `SlateChatHost` is minimal:
+The input system in `SlateChatHost` now has modal editing (edit/read modes) integrated directly into the chat input box. The standalone `_edit` subcommand has been removed — all editing happens in-place during chat sessions.
 
-- **`inputBuffer`** — a flat `String`, characters appended at the end, backspace only removes the last char
-- **Cursor** — always rendered at end-of-input via a `▏` glyph (no cursor position tracking)
-- **Arrow Up/Down** — hard-wired to transcript scroll-back (not input editing)
-- **Arrow Left/Right** — completely ignored (falls into `default: break`)
-- **Escape** — not handled
-- **Home/End** — control transcript viewport following, not cursor position
-- No concept of editing "modes" at all
+### Mode toggling
 
-## Step 1: Scaffold `scribe _edit` with a copy of the current input UI
-
-**Goal:** `scribe _edit` boots a Slate fullscreen session that renders *only* the input box from the chat UI — no transcript, no LLM, no tools. Start in edit mode: type, backspace, Shift+Enter for newlines. Ctrl+C exits to read mode; Enter from read mode re-enters edit mode. Ctrl+C in read mode (or Ctrl+D anywhere) quits. This proves the subcommand wiring, Slate lifecycle, render loop, and modal key routing are correct before any editor logic lands.
-
-### 1a. `ScribeCLI.swift` — add the subcommand
-
-```swift
-// New file: Sources/ScribeCLI/ScribeEditCommand.swift
-import ArgumentParser
-import ScribeCore
-
-struct _ScribeEditCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "_edit",
-        abstract: "Experimental scratch buffer editor.",
-        discussion: "Underscore prefix = internal/testing surface."
-    )
-
-    func run() async throws {
-        try await SlateEdit.runFullscreen()
-    }
-}
-```
-
-Then register it in `ScribeCLI`:
-
-```swift
-@main struct ScribeCLI: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "scribe",
-        abstract: "Scribe coding agent",
-        subcommands: [_ScribeEditCommand.self],
-        defaultSubcommand: nil,  // no default; `scribe` alone still runs the implicit chat
-        version: "0.0.1"
-    )
-    // ... existing run() unchanged
-}
-```
-
-**Design note:** `ScribeCLI.run()` is the implicit default command when no subcommand is given. ArgumentParser handles this — the `_edit` subcommand only fires when `scribe _edit` is typed. The existing `scribe` chat path is untouched.
-
-### 1b. `SlateEdit.swift` — bootstrap the Slate session
-
-This is a minimal analogue of `SlateChat.runFullscreen()`:
-
-```swift
-// New file: Sources/ScribeCLI/SlateEdit/SlateEdit.swift
-import SlateCore
-
-enum SlateEdit {
-    static func runFullscreen() async throws {
-        try await Task { @MainActor in
-            try await SlateEditHost().run()
-        }.value
-    }
-}
-```
-
-### 1c. `SlateEditHost.swift` — the editor host
-
-```swift
-// New file: Sources/ScribeCLI/SlateEdit/SlateEditHost.swift
-import SlateCore
-import _RopeModule
-
-enum EditMode {
-    case read    // d=left, f=up, j=down, k=right, Enter→edit, Ctrl+C→quit
-    case edit    // typing inserts, arrows move, Ctrl+C→read
-}
-
-@MainActor
-final class SlateEditHost {
-    private var buffer = BigString()
-    private var cursor = BigString.Index.startOfFirstChunk  // or buffer.startIndex
-    private var keyDecoder = TerminalKeyDecoder()
-    private var mode = EditMode.edit
-
-    init() {}
-
-    func run() async throws {
-        var slate = try Slate()
-        await slate.start(
-            prepare: { $0.requestRender() },
-            onEvent: { slate, event in
-                switch event {
-                case .resize:  slate.refreshWindowSize()
-                case .external: break
-                case .stdinBytes(let chunk):
-                    if chunk.isEmpty { return .stop }
-                    var stop = false
-                    self.keyDecoder.decode(chunk) { key in
-                        switch (self.mode, key) {
-                        case (_, .ctrl(4)):                     stop = true
-                        case (.edit, .character(let ch)):       self.insertChar(ch)
-                        case (.edit, .backspace):               self.deleteBackward()
-                        case (.edit, .shiftEnter):              self.insertChar("\n")
-                        case (.edit, .ctrl(3)):                 self.mode = .read
-                        case (.read, .enter):                   self.mode = .edit
-                        case (.read, .ctrl(3)):                 stop = true
-                        default: break
-                        }
-                    }
-                    if stop { return .stop }
-                    slate.enscribe(grid: self.renderGrid(cols: slate.cols, rows: slate.rows))
-                }
-                return .continue
-            }
-        )
-    }
-}
-```
-
-**Buffer ops** are cursor-relative from day one: `insertChar` inserts at `cursor` and advances it, `deleteBackward` moves cursor back then removes. The `renderGrid` helper builds the same `you: ` input box as `SlateChatRenderer.paintInputRows`, with the mode label prepended and the `▏` cursor placed at the computed visual position rather than always at end.
-
-**New dependency:** `_RopeModule` from swift-collections (add to `Package.swift` dependencies + ScribeCLI target).
-
-### 1d. What this gives us
-
-```
-$ swift run scribe _edit
-┌─────────────────────────────────────────────┐
-│                                             │  ← full terminal, no transcript
-│                                             │
-│                                             │
-│                                             │
-│                                             │
-│ you: hello world▏                           │  ← just the input box
-└─────────────────────────────────────────────┘
-```
-
-Mode toggling works: Ctrl+C exits edit → read, Enter enters edit, Ctrl+C in read (or Ctrl+D anywhere) quits. The entire thing is ~70 lines of host code with no edits to `SlateChatHost` or `SlateChatRenderer`.
+| Key | From | To | Notes |
+|-----|------|----|-------|
+| `Ctrl+C` | edit | read | Switch to read (navigation) mode |
+| `Escape` | edit | read | Same as `Ctrl+C` |
+| `Enter` | read | edit | Enter typing mode at the current cursor |
+| `Ctrl+C` | read | — | Quit |
+| `Ctrl+D` | either | — | Quit from anywhere |
 
 ---
 
@@ -171,9 +41,9 @@ Up/Down arrows (and `f`/`j` in read mode) move the cursor to the previous/next v
 
 ---
 
-## Step 4: Merge into chat input
+## Step 4: Polish chat input integration
 
-Once the editor core is stable, `SlateChatHost` adopts the same buffer/mode primitives for its input box. Arrow keys in the chat become mode-dependent (edit→cursor movement, read→transcript scrolling). The `_edit` subcommand remains as a standalone testbed.
+The modal editor is now directly integrated into `SlateChatHost`'s input box. Arrow keys in the chat are mode-dependent (edit→cursor movement, read→transcript scrolling).
 
 ---
 

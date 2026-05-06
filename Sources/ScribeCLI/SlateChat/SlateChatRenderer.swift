@@ -47,11 +47,11 @@ import SlateCore
 /// the width of `queued: `), and is hard-capped at 4 rows with trailing `…`
 /// truncation so a long queued paste cannot push the transcript off screen.
 ///
-/// - ``queuedTrayRowCount(queuedTrayText:cols:)`` returns the number of rows to
-///   reserve for the queued tray strip (0 when no queued message).
+/// - ``queuedTrayRowCount(queuedTrayTexts:cols:)`` returns the number of rows to
+///   reserve for the queued tray strip (0 when no queued messages).
 /// - ``paintQueuedTrayRows(into:startRow:cols:textWidth:visualLines:theme:)``
-///   paints the tray rows: first row prefixed with `queued: ` (orange) plus the
-///   message in dimmed white; continuation rows align under the message with an
+///   paints the tray rows: first row prefixed with `queued (N): ` (orange) plus the
+///   next message in dimmed white; continuation rows align under the message with an
 ///   8-space gutter.
 internal enum SlateChatRenderer {
   /// Braille spinner (common in TUIs); one cell, advances while waiting for the first token.
@@ -91,13 +91,13 @@ internal enum SlateChatRenderer {
     return (visualLines, rowCount)
   }
 
-  /// Wrapped tray rows for an optional queued submission, capped by ``queuedTrayMaxRows``.
-  /// Returns an empty array when ``queuedTrayText`` is nil/empty.
-  private static func queuedTrayVisualLines(
-    queuedTrayText: String?,
+  /// Wrapped tray rows for the next queued submission, capped by ``queuedTrayMaxRows``.
+  /// Returns an empty array when ``queuedTrayTexts`` is empty.
+  static func queuedTrayVisualLines(
+    queuedTrayTexts: [String],
     textWidth: Int
   ) -> [String] {
-    guard let raw = queuedTrayText, !raw.isEmpty, textWidth > 0 else { return [] }
+    guard let raw = queuedTrayTexts.first, !raw.isEmpty, textWidth > 0 else { return [] }
     let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
     let lines = TranscriptLayout.inputVisualLines(from: normalized, textWidth: textWidth)
     if lines.count <= queuedTrayMaxRows { return lines }
@@ -114,13 +114,13 @@ internal enum SlateChatRenderer {
     return capped
   }
 
-  /// Number of rows to reserve for the queued tray strip (0 when no queued message).
+  /// Number of rows to reserve for the queued tray strip (0 when no queued messages).
   static func queuedTrayRowCount(
-    queuedTrayText: String?,
+    queuedTrayTexts: [String],
     cols: Int
   ) -> Int {
     let textWidth = max(0, cols &- queuedTrayGutterColumns)
-    let lines = queuedTrayVisualLines(queuedTrayText: queuedTrayText, textWidth: textWidth)
+    let lines = queuedTrayVisualLines(queuedTrayTexts: queuedTrayTexts, textWidth: textWidth)
     return lines.count
   }
 
@@ -132,7 +132,7 @@ internal enum SlateChatRenderer {
     usage: UsageHUDSnapshot?,
     inputLine: String,
     waitingForLLM: Bool,
-    queuedTrayText: String?
+    queuedTrayTexts: [String]
   ) -> Int {
     let headerRows: Int = {
       if banner != nil {
@@ -157,7 +157,7 @@ internal enum SlateChatRenderer {
         ).rowCount
     }
 
-    let trayRowCount = queuedTrayRowCount(queuedTrayText: queuedTrayText, cols: cols)
+    let trayRowCount = queuedTrayRowCount(queuedTrayTexts: queuedTrayTexts, cols: cols)
     let firstInputRow = rows &- inputRowCount
     let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
     return max(0, firstTrayRow &- headerRows)
@@ -174,7 +174,7 @@ internal enum SlateChatRenderer {
     inputMode: EditMode = .edit,
     llmWaitAnimationFrame: Int,
     waitingForLLM: Bool,
-    queuedTrayText: String?,
+    queuedTrayTexts: [String],
     theme: CLITheme
   ) -> TerminalCellGrid {
     let fill = TerminalCell(
@@ -194,7 +194,7 @@ internal enum SlateChatRenderer {
     let contentRows = transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: usage,
       inputLine: inputLine, waitingForLLM: waitingForLLM,
-      queuedTrayText: queuedTrayText)
+      queuedTrayTexts: queuedTrayTexts)
 
     let usageReserve: Int = {
       guard let u = usage else { return 0 }
@@ -256,7 +256,7 @@ internal enum SlateChatRenderer {
     let firstInputRow = rows &- inputRowCount
     let trayTextWidth = max(0, cols &- queuedTrayGutterColumns)
     let rawTrayLines = queuedTrayVisualLines(
-      queuedTrayText: queuedTrayText, textWidth: trayTextWidth)
+      queuedTrayTexts: queuedTrayTexts, textWidth: trayTextWidth)
     let availableTrayRows = max(0, firstInputRow &- headerRows)
     let trayVisualLines = Array(rawTrayLines.prefix(availableTrayRows))
     let trayRowCount = trayVisualLines.count
@@ -294,6 +294,7 @@ internal enum SlateChatRenderer {
         cols: cols,
         textWidth: trayTextWidth,
         visualLines: trayVisualLines,
+        queueCount: queuedTrayTexts.count,
         theme: theme)
     }
 
@@ -528,19 +529,22 @@ internal enum SlateChatRenderer {
   }
 
   /// Paints the queued-tray strip that sits between the transcript and the input area:
-  /// first row prefixed with `queued: ` (orange) plus the message in dimmed white;
+  /// first row prefixed with `queued (N): ` (orange) plus the next message in dimmed white;
   /// continuation rows align under the message with an 8-space gutter.
-  private static func paintQueuedTrayRows(
+  static func paintQueuedTrayRows(
     into grid: inout TerminalCellGrid,
     startRow: Int,
     cols: Int,
     textWidth: Int,
     visualLines: [String],
+    queueCount: Int,
     theme: CLITheme
   ) {
     guard !visualLines.isEmpty else { return }
     let bg = theme.inputAreaBg
-    let gutterText = String(repeating: " ", count: min(queuedTrayGutterColumns, cols))
+    let bufferLabel = "queued (\(queueCount)): "
+    let labelLen = bufferLabel.count
+    let gutterText = String(repeating: " ", count: min(labelLen, cols))
     var lineIdx = 0
     while lineIdx < visualLines.count {
       let row = startRow &+ lineIdx
@@ -548,7 +552,7 @@ internal enum SlateChatRenderer {
 
       var spans: [TerminalStyledSpan] = []
       if lineIdx == 0 {
-        spans.append(TerminalStyledSpan("queued: ", foreground: theme.queuedPrefix, background: bg))
+        spans.append(TerminalStyledSpan(bufferLabel, foreground: theme.queuedPrefix, background: bg))
       } else {
         spans.append(TerminalStyledSpan(gutterText, foreground: theme.queuedGutter, background: bg))
       }

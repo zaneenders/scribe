@@ -120,7 +120,7 @@ private struct SinkState {
   var usageSessionTotal: Int = 0
   var contextWindow: Int?
   var banner: BannerSnapshot?
-  var queuedTrayText: String? = nil
+  var queuedTrayTexts: [String] = []
 }
 
 /// Slate-backed transcript sink: accumulates styled transcript lines and renders them via Slate.
@@ -203,19 +203,19 @@ public final class SlateTranscriptSink: Sendable {
     ping()
   }
 
-  /// Thread-safe setter for the queued tray text — the pipe between the host's
+  /// Thread-safe setter for the queued tray texts — the pipe between the host's
   /// queue state and the renderer.  Called from `SlateChatHost`'s `onEvent`
   /// callback on `@MainActor`.
-  public func setQueuedTrayText(_ text: String?) {
+  public func setQueuedTrayTexts(_ texts: [String]) {
     state.withLock { sink in
-      sink.queuedTrayText = text
+      sink.queuedTrayTexts = texts
     }
     ping()
   }
 
-  /// Thread-safe snapshot of the current queued tray text for the renderer.
-  internal func queuedTrayTextSnapshot() -> String? {
-    state.withLock { $0.queuedTrayText }
+  /// Thread-safe snapshot of the current queued tray texts for the renderer.
+  internal func queuedTrayTextsSnapshot() -> [String] {
+    state.withLock { $0.queuedTrayTexts }
   }
 
   public func setContextWindow(_ value: Int?) {
