@@ -4,8 +4,8 @@ import Testing
 import _RopeModule
 
 /// Tests for `BigString` cursor-relative operations (insert, backspace, cursor
-/// navigation) — these are the building blocks used by both `SlateChatHost` and
-/// `SlateEditHost` for edit-mode text manipulation.
+/// navigation) — the building blocks used by `SlateChatHost` for edit-mode
+/// text manipulation.
 @Suite
 struct BigStringCursorTests {
 
