@@ -1,7 +1,7 @@
 import Foundation
+import HTTPTypes
 import Logging
 import OpenAPIRuntime
-import HTTPTypes
 import ScribeCore
 import ScribeLLM
 import Testing

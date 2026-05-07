@@ -59,14 +59,14 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     let (httpBody, httpStart) = try await sendStreamingRequest(requestBody, logger: logger)
 
     var turn = StreamedAssistantTurn()
-    let streamResult = try await processStreamChunks(
-      httpBody,
-      httpStart: httpStart,
-      turn: &turn,
+    var processor = StreamProcessor(
+      onEvent: onEvent,
       logger: logger,
-      shouldAbortTurn: shouldAbortTurn
+      shouldAbortTurn: shouldAbortTurn,
+      streamWallStart: clock.now
     )
-    return finalizeTurn(turn, result: streamResult, messages: &messages, logger: logger)
+    try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
+    return finalizeTurn(turn, processor: processor, messages: &messages, logger: logger)
   }
 
   // MARK: - Private helpers
@@ -148,147 +148,15 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     }
   }
 
-  /// Accumulated metadata from processing a single SSE stream.
-  private struct StreamProcessingResult {
-    var lastUsage: Components.Schemas.CompletionUsage?
-    var streamStarted: Bool = false
-    var streamSection: AssistantStreamSection?
-    var firstStreamContentAt: ContinuousClock.Instant?
-    var decodedChunkCount: Int = 0
-    var skippedChunkCount: Int = 0
-    let streamWallStart: ContinuousClock.Instant
-  }
-
-  private func processStreamChunks(
-    _ httpBody: HTTPBody,
-    httpStart: ContinuousClock.Instant,
-    turn: inout StreamedAssistantTurn,
-    logger: Logger,
-    shouldAbortTurn: @escaping @Sendable () -> Bool
-  ) async throws -> StreamProcessingResult {
-    let sseStream = httpBody.asDecodedServerSentEvents(
-      while: { $0 != HTTPBody.ByteChunk("[DONE]".utf8) }
-    )
-    let jsonDecoder = JSONDecoder()
-
-    var result = StreamProcessingResult(streamWallStart: clock.now)
-    var loggedFirstChunk = false
-    // Periodic progress log every N decoded chunks. We deliberately do NOT log every chunk
-    // (high-throughput streams produce hundreds per turn — per-chunk lines drown out the
-    // signal). The first/last events plus periodic progress give a trace of stream health.
-    let streamProgressEvery = 200
-
-    for try await sse in sseStream {
-      if shouldAbortTurn() {
-        logger.notice(
-          """
-          event=agent.stream.abort \
-          where=mid-stream \
-          chunks=\(result.decodedChunkCount) \
-          had_visible_tokens=\(result.streamStarted)
-          """
-        )
-        if result.streamStarted {
-          onEvent(.finalizeAssistantStream)
-        }
-        throw AgentTurnInterruptedError()
-      }
-      guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
-      else { continue }
-      if raw == "[DONE]" { break }
-      let chunk: Components.Schemas.ChatCompletionChunk
-      do {
-        chunk = try jsonDecoder.decode(
-          Components.Schemas.ChatCompletionChunk.self,
-          from: Data(raw.utf8)
-        )
-      } catch {
-        result.skippedChunkCount += 1
-        logger.warning(
-          """
-          event=agent.stream.unreadable-chunk \
-          chunk_index=\(result.decodedChunkCount + 1) \
-          err="\(error.localizedDescription)" \
-          raw_prefix="\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))"
-          """
-        )
-        onEvent(.skippedUnreadableStreamLine)
-        continue
-      }
-      result.decodedChunkCount += 1
-      if !loggedFirstChunk {
-        loggedFirstChunk = true
-        logger.debug(
-          """
-          event=agent.stream.first-chunk \
-          ttfb_ms=\((clock.now - httpStart) / .milliseconds(1))
-          """
-        )
-      } else if result.decodedChunkCount % streamProgressEvery == 0 {
-        let elapsedMs = Int((clock.now - result.streamWallStart) / .milliseconds(1))
-        let chunksPerSec = Double(result.decodedChunkCount) / (Double(elapsedMs) / 1000.0)
-        logger.trace(
-          """
-          event=agent.stream.progress \
-          chunks=\(result.decodedChunkCount) \
-          elapsed=\(elapsedMs) \
-          chunks_per_s=\(String(format: "%.1f", chunksPerSec))
-          """
-        )
-      }
-      if let u = chunk.usage {
-        result.lastUsage = u
-      }
-      for choice in chunk.choices ?? [] {
-        guard let delta = choice.delta else { continue }
-        for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
-          if result.firstStreamContentAt == nil { result.firstStreamContentAt = clock.now }
-          result.streamStarted = true
-          if case .some(.reasoning) = result.streamSection {
-          } else {
-            onEvent(.enterAssistantSection(.reasoning, previous: result.streamSection))
-            result.streamSection = .reasoning
-          }
-          onEvent(.appendAssistantText(.reasoning, text: r))
-        }
-        if let t = delta.content, !t.isEmpty {
-          if result.firstStreamContentAt == nil { result.firstStreamContentAt = clock.now }
-          result.streamStarted = true
-          if case .some(.answer) = result.streamSection {
-          } else {
-            onEvent(.enterAssistantSection(.answer, previous: result.streamSection))
-            result.streamSection = .answer
-          }
-          onEvent(.appendAssistantText(.answer, text: t))
-        }
-      }
-      turn.apply(chunk: chunk)
-    }
-
-    if result.streamStarted {
-      onEvent(.finalizeAssistantStream)
-    } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
-      logger.notice(
-        """
-        event=agent.stream.empty \
-        chunks=\(result.decodedChunkCount)
-        """
-      )
-      onEvent(.emptyAssistantTurn)
-    }
-
-    return result
-  }
-
   private func finalizeTurn(
     _ turn: StreamedAssistantTurn,
-    result: StreamProcessingResult,
+    processor: StreamProcessor,
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger
   ) -> RoundOutcome {
-    let streamElapsedMs = Int((clock.now - result.streamWallStart) / .milliseconds(1))
-    if let u = result.lastUsage {
-      let genStart = result.firstStreamContentAt ?? result.streamWallStart
+    let streamElapsedMs = Int((clock.now - processor.streamWallStart) / .milliseconds(1))
+    if let u = processor.lastUsage {
+      let genStart = processor.firstStreamContentAt ?? processor.streamWallStart
       let genSec = (clock.now - genStart) / .seconds(1)
       let tps: Double? = {
         guard let c = u.completionTokens, c > 0 else { return nil }
@@ -297,8 +165,8 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       logger.debug(
         """
         event=agent.stream.end \
-        chunks=\(result.decodedChunkCount) \
-        skipped=\(result.skippedChunkCount) \
+        chunks=\(processor.decodedChunkCount) \
+        skipped=\(processor.skippedChunkCount) \
         elapsed=\(streamElapsedMs) \
         prompt_tokens=\(u.promptTokens.map(String.init(describing:)) ?? "nil") \
         completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
@@ -310,8 +178,8 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       logger.debug(
         """
         event=agent.stream.end \
-        chunks=\(result.decodedChunkCount) \
-        skipped=\(result.skippedChunkCount) \
+        chunks=\(processor.decodedChunkCount) \
+        skipped=\(processor.skippedChunkCount) \
         elapsed=\(streamElapsedMs) \
         usage=missing
         """
