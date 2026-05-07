@@ -164,11 +164,53 @@ The `chat.render.slow` log line should disappear (or at least drop to
 
 ## Verification
 
-1. Start `scribe chat` with a streaming model.
-2. Tail the log: `tail -f ~/.local/share/scribe/logs/scribe-*.log | grep render.slow`.
-3. Before the fix, `chat.render.slow` fires every ~80 ms.
-4. After Step A, `chat.render.slow` should fire rarely (only on new logical
-   lines produced by the markdown renderer, typically < 1/s).
-5. After Step B, it should be absent entirely for streams under ~200 lines.
-6. `top` / `ps` should show scribe CPU drop from 60%+ to < 10% during
-   streaming.
+Scribe ships with an [in-process sampling profiler](https://github.com/apple/swift-profile-recorder)
+(see [DEVELOPMENT.md](./DEVELOPMENT.md#profiling) for setup). Use it to
+confirm the fix — before and after profiles tell the story far better than
+log scraping.
+
+### Before‑fix baseline
+
+1. Launch scribe with the profiler enabled:
+   ```bash
+   PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' \
+     swift run scribe chat
+   ```
+2. Start a streaming model request (a long code-gen prompt works well).
+3. While the model streams, capture a profile from another terminal:
+   ```bash
+   curl --unix-socket /tmp/scribe-$(ls /tmp/scribe-*.sock | head -1 | sed 's/.*scribe-//;s/\.sock//').sock \
+     -sd '{"numberOfSamples":500,"timeInterval":"10ms"}' \
+     http://localhost/sample > ./before.perf
+   ```
+4. Drag `before.perf` onto [speedscope.app](https://speedscope.app).
+
+**Expected before picture:** `speedscope` shows the main actor saturated in
+`syncFlattenedTranscript` → `Document(parsing:)` → `requestRender()` — a
+wide band of the same call stack at ~100 Hz, aligning with the ~77 ms
+`prepare_ms` logged by `chat.render.slow`.
+
+### After‑fix verification (repeat after each Step)
+
+1. Rebuild, relaunch with the same profiler env var, re-run the same prompt.
+2. Capture a matching profile:
+   ```bash
+   curl --unix-socket … > ./after-step-A.perf
+   ```
+3. Compare in speedscope:
+   - **After Step A:** The `syncFlattenedTranscript` band should collapse to
+     narrow spikes (only when a new logical line is emitted). Main-actor
+     saturation should drop from ~100% to well under 30%.
+   - **After Step B:** `Document(parsing:)` should shrink to ~15 Hz or less.
+     Combined with Step A, main-actor CPU should be ~10–15%.
+   - **After Step C:** The idle-thread samples from the spinner task (GCD
+     timer firing every 90 ms → `requestRender`) should disappear from the
+     trace — no `requestRender` calls without an SSE chunk preceding them.
+
+### Coarse health signals (still useful)
+
+- `tail -f ~/.local/share/scribe/logs/scribe-*.log | grep render.slow` —
+  should fire rarely or not at all post‑fix.
+- `top` / `ps` — scribe CPU should drop from 60%+ to < 10% during streaming.
+- The `chat.render.slow` log line itself records `prepare_ms`; if it still
+  fires, inspect the value to gauge remaining work.
