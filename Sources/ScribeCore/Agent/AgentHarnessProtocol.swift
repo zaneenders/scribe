@@ -6,11 +6,12 @@ import ScribeLLM
 public protocol AgentHarnessProtocol: Sendable {
   var model: String { get }
 
-  func runRound(
-    messages: inout [Components.Schemas.ChatMessage],
+  /// Execute a single LLM round, returning a live stream of events plus a
+  /// deferred result with the outcome and updated messages.
+  func runStreamingRound(
+    messages: [Components.Schemas.ChatMessage],
     logger: Logger,
     temperature: Double,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool
-  ) async throws -> RoundOutcome
+  ) -> RoundStream
 }

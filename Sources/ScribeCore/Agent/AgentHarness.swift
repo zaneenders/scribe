@@ -47,25 +47,39 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     self.tools = tools
   }
 
-  public func runRound(
-    messages: inout [Components.Schemas.ChatMessage],
+  public func runStreamingRound(
+    messages: [Components.Schemas.ChatMessage],
     logger: Logger,
     temperature: Double,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
-  ) async throws -> RoundOutcome {
-    let requestBody = buildRequest(messages: messages, temperature: temperature)
-    let (httpBody, httpStart) = try await sendStreamingRequest(requestBody, logger: logger)
+  ) -> RoundStream {
+    let (stream, continuation) = AsyncStream<TranscriptEvent>.makeStream()
+    var mutable = messages
 
-    var turn = StreamedAssistantTurn()
-    var processor = StreamProcessor(
-      onEvent: onEvent,
-      logger: logger,
-      shouldAbortTurn: shouldAbortTurn,
-      streamWallStart: clock.now
-    )
-    try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
-    return finalizeTurn(turn, processor: processor, messages: &messages, logger: logger, onEvent: onEvent)
+    let task = Task { [self] in
+      defer { continuation.finish() }
+      let requestBody = buildRequest(messages: mutable, temperature: temperature)
+      let (httpBody, httpStart) = try await sendStreamingRequest(
+        requestBody, logger: logger
+      )
+
+      var turn = StreamedAssistantTurn()
+      var processor = StreamProcessor(
+        onEvent: { continuation.yield($0) },
+        logger: logger,
+        shouldAbortTurn: shouldAbortTurn,
+        streamWallStart: clock.now
+      )
+      try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
+      let outcome = finalizeTurn(
+        turn, processor: processor,
+        messages: &mutable, logger: logger,
+        onEvent: { continuation.yield($0) }
+      )
+      return RoundResult(messages: mutable, outcome: outcome)
+    }
+
+    return RoundStream(events: stream, result: task)
   }
 
   // MARK: - Private helpers

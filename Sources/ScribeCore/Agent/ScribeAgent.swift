@@ -7,7 +7,7 @@ import ScribeLLM
 /// An agent that orchestrates LLM calls with tool execution.
 ///
 /// Instantiate with configuration, a system prompt, and an array of tools,
-/// then call `runTurn`, `runInteractive`, or `runIPC`.
+/// then call `streamTurn`, `runInteractive`, or `runIPC`.
 ///
 /// ```swift
 /// let config = AgentConfig(
@@ -20,9 +20,10 @@ import ScribeLLM
 ///   tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()]
 /// )
 ///
-/// // Single turn
-/// var messages: [ChatMessage] = [.init(role: .system, content: "...")]
-/// let outcome = try await agent.runTurn(messages: &messages, ...)
+/// // Single turn (streaming)
+/// let ts = agent.streamTurn(messages: messages, log: log)
+/// for await event in ts.events { /* render */ }
+/// let result = try await ts.result.value
 ///
 /// // Full interactive session
 /// try await agent.runInteractive(onEvent: ..., readUserLine: ..., log: ...)
@@ -79,24 +80,29 @@ public struct ScribeAgent: Sendable {
     )
   }
 
-  // MARK: - runTurn
+  // MARK: - streamTurn
 
-  /// Execute a single model turn (LLM call + optional tool-call rounds) against
-  /// the supplied conversation history. The caller owns `messages` and can
-  /// inspect / persist / replay it between turns.
-  public func runTurn(
-    messages: inout [Components.Schemas.ChatMessage],
+  /// The single execution primitive. Takes an owned copy of messages, returns
+  /// a live stream of ``TranscriptEvent`` values plus a `Task` that resolves
+  /// with the final messages and ``ModelTurnOutcome`` when the turn completes.
+  ///
+  /// ```swift
+  /// let ts = agent.streamTurn(messages: history, log: log)
+  /// for await event in ts.events { render(event) }
+  /// let result = try await ts.result.value
+  /// history = result.messages
+  /// ```
+  public func streamTurn(
+    messages: [Components.Schemas.ChatMessage],
     log: Logger,
     temperature: Double = 0,
     maxToolRounds: Int = .max,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
-  ) async throws -> ModelTurnOutcome {
-    return try await loop.runModelTurn(
-      messages: &messages,
+  ) -> TurnStream {
+    loop.runModelStreamingTurn(
+      messages: messages,
       logger: log,
       temperature: temperature,
-      onEvent: onEvent,
       maxToolRounds: maxToolRounds,
       shouldAbortTurn: shouldAbortTurn
     )
@@ -153,13 +159,6 @@ public struct ScribeAgent: Sendable {
       threshold: configuration.contextWindowThreshold
     )
 
-    let wrappedOnEvent: @Sendable (TranscriptEvent) -> Void = { event in
-      if case .usage(let usage, _) = event {
-        tracker.accumulate(usage: usage)
-      }
-      onEvent(event)
-    }
-
     var turnIndex = 0
     while true {
       guard let line = await readUserLine() else {
@@ -199,15 +198,23 @@ public struct ScribeAgent: Sendable {
       }
       let turnStart = Date()
       do {
-        let outcome = try await runTurn(
-          messages: &history,
+        let ts = streamTurn(
+          messages: history,
           log: log,
           temperature: temperature,
-          onEvent: wrappedOnEvent,
+          maxToolRounds: .max,
           shouldAbortTurn: shouldAbortTurn
         )
+        for await event in ts.events {
+          if case .usage(let usage, _) = event {
+            tracker.accumulate(usage: usage)
+          }
+          onEvent(event)
+        }
+        let result = try await ts.result.value
+        history = result.messages
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
-        switch outcome {
+        switch result.outcome {
         case .completed:
           log.info(
             """
@@ -295,14 +302,16 @@ public struct ScribeAgent: Sendable {
       model=\(configuration.agentModel)
       """)
     do {
-      let outcome = try await runTurn(
-        messages: &history,
+      let ts = streamTurn(
+        messages: history,
         log: log,
-        temperature: temperature,
-        onEvent: onEvent
+        temperature: temperature
       )
+      Task { for await event in ts.events { onEvent(event) } }
+      let result = try await ts.result.value
+      history = result.messages
       let text = ChatHistory.lastAssistantText(from: history) ?? ""
-      switch outcome {
+      switch result.outcome {
       case .completed:
         log.notice(
           """

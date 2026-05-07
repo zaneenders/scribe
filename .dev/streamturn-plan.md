@@ -201,10 +201,11 @@ Three methods, one execution path. No `inout`, no `onEvent` callback on the prim
 
 ## Implementation order
 
-1. **Add `TurnStream` + `TurnResult`** — new file `Sources/ScribeCore/Agent/TurnStream.swift`
-2. **Add `streamTurn` to `ScribeAgent`** — calls existing `loop.runModelTurn` internally
-3. **Delete `runTurn`** — remove the method and its doc comment
-4. **Rewrite `runInteractive`** — replace `runTurn(&history, onEvent:)` with `streamTurn` + `for await`
-5. **Rewrite `runIPC`** — same pattern
-6. **Update tests** — `AgentLoopTests`, `AgentHarnessTests`, `ScribeAgentTests` use `streamTurn` instead of `runTurn`
-7. **Update shape-tree** — `ShapeTreeHandler.runCompletion` uses `streamTurn` + SSE byte stream
+1. ✅ **Add `TurnStream` + `TurnResult`** — new file `Sources/ScribeCore/Agent/TurnStream.swift`
+2. ✅ **Add `streamTurn` to `ScribeAgent`** — calls existing `loop.runModelTurn` internally
+3. ✅ **Delete `runTurn`** — removed the method and its doc comment
+4. ✅ **Rewrite `runInteractive`** — replaced `runTurn(&history, onEvent:)` with `streamTurn` + `for await`
+5. ✅ **Rewrite `runIPC`** — same pattern
+6. ✅ **Update tests** — `ScribeAgentTests` uses `streamTurn` instead of `runTurn`; `AgentLoopTests` and `AgentHarnessTests` unchanged (they call lower-level APIs directly)
+7. ✅ **Update shape-tree** — `ShapeTreeHandler.runCompletion` uses `streamTurn` (batch mode — drains events, awaits result)
+8. **Future: shape-tree streaming endpoint** — new SSE endpoint that iterates `ts.events` and serializes to `text/event-stream` bytes

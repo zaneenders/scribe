@@ -4,6 +4,9 @@ import ScribeLLM
 
 /// Orchestrates the interaction between ``AgentHarness`` (LLM loop) and ``ToolRegistry`` (tool
 /// execution), driving multi-round model turns.
+///
+/// Consumes ``RoundStream`` values from the harness and emits tool events
+/// into a combined ``TurnStream``.
 public struct AgentLoop: Sendable {
   private let harness: any AgentHarnessProtocol
   private let registry: ToolRegistry
@@ -16,176 +19,135 @@ public struct AgentLoop: Sendable {
     self.registry = registry
   }
 
-  public func runModelTurn(
-    messages: inout [Components.Schemas.ChatMessage],
+  public func runModelStreamingTurn(
+    messages: [Components.Schemas.ChatMessage],
     logger: Logger,
     temperature: Double,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     maxToolRounds: Int = .max,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
-  ) async throws -> ModelTurnOutcome {
-    let clock = ContinuousClock()
-    logger.debug(
-      "agent.turn.start",
-      metadata: [
-        "model": "\(harness.model)",
-        "messages": "\(messages.count)",
-      ])
-    var round = 0
-    while true {
-      round += 1
-      if shouldAbortTurn() {
-        logger.debug(
-          "agent.abort",
-          metadata: [
-            "where": "before-http",
-            "round": "\(round)",
-          ])
-        return .interrupted
-      }
+  ) -> TurnStream {
+    let (stream, continuation) = AsyncStream<TranscriptEvent>.makeStream()
+    var mutable = messages
 
-      let messagesCountBeforeRound = messages.count
+    let task = Task {
+      defer { continuation.finish() }
+      let clock = ContinuousClock()
+      logger.debug(
+        "agent.turn.start",
+        metadata: [
+          "model": "\(harness.model)",
+          "messages": "\(mutable.count)",
+        ])
+      var round = 0
+      while true {
+        round += 1
+        if shouldAbortTurn() {
+          logger.debug("agent.abort", metadata: ["where": "before-http", "round": "\(round)"])
+          return TurnResult(messages: mutable, outcome: .interrupted)
+        }
 
-      let roundOutcome: RoundOutcome
-      do {
-        roundOutcome = try await harness.runRound(
-          messages: &messages,
+        let messagesCountBeforeRound = mutable.count
+
+        let roundStream = harness.runStreamingRound(
+          messages: mutable,
           logger: logger,
           temperature: temperature,
-          onEvent: onEvent,
           shouldAbortTurn: shouldAbortTurn
         )
-      } catch is AgentTurnInterruptedError {
-        return .interrupted
-      }
 
-      if shouldAbortTurn() {
-        logger.debug(
-          "agent.abort",
-          metadata: [
-            "where": "post-stream-pre-tools",
-            "round": "\(round)",
-          ])
-        messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
-        return .interrupted
-      }
-
-      switch roundOutcome {
-      case .completed:
-        return .completed
-
-      case .toolCalls(let invocations):
-        if round >= maxToolRounds {
-          logger.notice(
-            """
-            event=agent.turn.tool-round-limit \
-            max=\(maxToolRounds)
-            """
-          )
-          messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
-          return .toolRoundLimit(rounds: maxToolRounds)
+        // Forward all harness events
+        for await event in roundStream.events {
+          continuation.yield(event)
         }
 
-        logger.info(
-          "agent.tool.round",
-          metadata: [
-            "round": "\(round)",
-            "tool_count": "\(invocations.count)",
-            "tools": "\(invocations.map(\.name).joined(separator: ","))",
-          ])
-        onEvent(.toolRoundHeader(round: round, toolNames: invocations.map(\.name)))
+        let roundResult: RoundResult
+        do {
+          roundResult = try await roundStream.result.value
+        } catch is AgentTurnInterruptedError {
+          return TurnResult(messages: mutable, outcome: .interrupted)
+        } catch {
+          throw error
+        }
 
-        for inv in invocations {
-          if shouldAbortTurn() {
-            logger.notice(
-              "agent.abort",
-              metadata: [
-                "where": "pre-tool",
-                "tool": "\(inv.name)",
-                "round": "\(round)",
-              ])
-            messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
-            return .interrupted
-          }
-          let toolStarted = clock.now
-          // ToolRegistry.run(name:arguments:abortVia:) wraps the
-          // tool in a task group that polls shouldAbortTurn so long-running
-          // commands (e.g. shell builds) can be cancelled cooperatively.
-          let jsonOutput: String
-          do {
-            logger.trace(
-              "agent.tool.invoking",
-              metadata: [
-                "tool": "\(inv.name)",
-                "round": "\(round)",
-                "args_chars": "\(inv.arguments.count)",
-              ])
-            jsonOutput = try await registry.run(
-              name: inv.name,
-              arguments: inv.arguments,
-              abortVia: shouldAbortTurn
-            )
-            let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
-            logger.trace(
-              "agent.tool.invoked",
-              metadata: [
-                "tool": "\(inv.name)",
-                "round": "\(round)",
-                "elapsed_ms": "\(elapsedMs)",
-                "output_chars": "\(jsonOutput.count)",
-              ])
-          } catch is AgentTurnInterruptedError {
-            let abortMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
-            logger.notice(
-              "agent.abort",
-              metadata: [
-                "where": "mid-tool",
-                "tool": "\(inv.name)",
-                "round": "\(round)",
-                "until_abort_ms": "\(abortMs)",
-              ])
-            messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
-            return .interrupted
-          }
-          let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
-          let unknown = jsonOutput.contains("unknown tool")
-          if unknown {
-            logger.warning(
-              "agent.tool.unknown",
-              metadata: [
-                "tool": "\(inv.name)",
-                "round": "\(round)",
-              ])
-          }
+        mutable = roundResult.messages
+
+        if shouldAbortTurn() {
           logger.debug(
-            "agent.tool.invoke",
+            "agent.abort",
+            metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
+          mutable.removeSubrange(messagesCountBeforeRound..<mutable.endIndex)
+          return TurnResult(messages: mutable, outcome: .interrupted)
+        }
+
+        switch roundResult.outcome {
+        case .completed:
+          return TurnResult(messages: mutable, outcome: .completed)
+
+        case .toolCalls(let invocations):
+          if round >= maxToolRounds {
+            logger.notice("event=agent.turn.tool-round-limit max=\(maxToolRounds)")
+            mutable.removeSubrange(messagesCountBeforeRound..<mutable.endIndex)
+            return TurnResult(messages: mutable, outcome: .toolRoundLimit(rounds: maxToolRounds))
+          }
+
+          logger.info(
+            "agent.tool.round",
             metadata: [
               "round": "\(round)",
-              "tool": "\(inv.name)",
-              "args_chars": "\(inv.arguments.count)",
-              "args": "\(inv.arguments.logSafe())",
-              "output_chars": "\(jsonOutput.count)",
-              "elapsed_ms": "\(elapsedMs)",
-              "unknown": "\(unknown)",
+              "tool_count": "\(invocations.count)",
+              "tools": "\(invocations.map(\.name).joined(separator: ","))",
             ])
-          onEvent(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
-          onEvent(.blankLine)
-          let toolMsg = Components.Schemas.ChatMessage(
-            role: .tool,
-            content: jsonOutput,
-            name: nil,
-            toolCalls: nil,
-            toolCallId: inv.id
-          )
-          messages.append(toolMsg)
+          continuation.yield(.toolRoundHeader(round: round, toolNames: invocations.map(\.name)))
+
+          for inv in invocations {
+            // TODO: Parallel tool calls?
+            if shouldAbortTurn() {
+              logger.notice(
+                "agent.abort",
+                metadata: ["where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)"])
+              mutable.removeSubrange(messagesCountBeforeRound..<mutable.endIndex)
+              return TurnResult(messages: mutable, outcome: .interrupted)
+            }
+            let toolStarted = clock.now
+            let jsonOutput: String
+            do {
+              jsonOutput = try await registry.run(
+                name: inv.name,
+                arguments: inv.arguments,
+                abortVia: shouldAbortTurn
+              )
+            } catch is AgentTurnInterruptedError {
+              mutable.removeSubrange(messagesCountBeforeRound..<mutable.endIndex)
+              return TurnResult(messages: mutable, outcome: .interrupted)
+            }
+            let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
+            let unknown = jsonOutput.contains("unknown tool")
+            if unknown {
+              logger.warning("agent.tool.unknown", metadata: ["tool": "\(inv.name)", "round": "\(round)"])
+            }
+            logger.debug(
+              "agent.tool.invoke",
+              metadata: [
+                "round": "\(round)", "tool": "\(inv.name)",
+                "args_chars": "\(inv.arguments.count)",
+                "output_chars": "\(jsonOutput.count)",
+                "elapsed_ms": "\(elapsedMs)", "unknown": "\(unknown)",
+              ])
+            continuation.yield(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
+            continuation.yield(.blankLine)
+            let toolMsg = Components.Schemas.ChatMessage(
+              role: .tool,
+              content: jsonOutput,
+              name: nil,
+              toolCalls: nil,
+              toolCallId: inv.id
+            )
+            mutable.append(toolMsg)
+          }
         }
-        logger.trace(
-          "agent.tool.round.end",
-          metadata: [
-            "round": "\(round)",
-            "messages": "\(messages.count)",
-          ])
       }
     }
+
+    return TurnStream(events: stream, result: task)
   }
 }
