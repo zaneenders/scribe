@@ -49,10 +49,10 @@ private final class ModelTurnInterruptFlag: Sendable {
   func logState(_ logger: Logger, tag: String) {
     let val = peek()
     logger.trace(
-      """
-      event=chat.interrupt-flag.\(tag) \
-      value=\(val)
-      """)
+      "chat.interrupt-flag.\(tag)",
+      metadata: [
+        "value": "\(val)"
+      ])
   }
 }
 
@@ -272,10 +272,10 @@ internal final class SlateChatHost {
                 let v = interruptFlag.peek()
                 if v {
                   sessionLog.trace(
-                    """
-                    event=chat.interrupt-flag.polled \
-                    value=true
-                    """)
+                    "chat.interrupt-flag.polled",
+                    metadata: [
+                      "value": "true"
+                    ])
                 }
                 return v
               },
@@ -285,11 +285,10 @@ internal final class SlateChatHost {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
             sink.emit(.harnessError(scribeError))
             sessionLog.error(
-              """
-              event=chat.coordinator.fail \
-              err="\(scribeError.errorDescription ?? String(describing: scribeError))"
-              """
-            )
+              "chat.coordinator.fail",
+              metadata: [
+                "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
+              ])
           }
         }
         self.spinnerTask?.cancel()
@@ -326,12 +325,12 @@ internal final class SlateChatHost {
               if let queued = self.queuedSubmission {
                 // 1. Pull queued message back into input buffer
                 self.log.debug(
-                  """
-                  event=chat.user.ctrl-c \
-                  action=recall-queue \
-                  queue_chars=\(queued.count) \
-                  model_busy=\(busy)
-                  """)
+                  "chat.user.ctrl-c",
+                  metadata: [
+                    "action": "recall-queue",
+                    "queue_chars": "\(queued.count)",
+                    "model_busy": "\(busy)",
+                  ])
                 self.queuedSubmission = nil
                 sink.setQueuedTrayText(nil)
                 self.inputBuffer = queued
@@ -339,27 +338,29 @@ internal final class SlateChatHost {
               } else if busy {
                 // 2. Interrupt in-flight turn
                 self.log.debug(
-                  """
-                  event=chat.user.ctrl-c \
-                  action=interrupt-agent \
-                  model_busy=true
-                  """)
+                  "chat.user.ctrl-c",
+                  metadata: [
+                    "action": "interrupt-agent",
+                    "model_busy": "true",
+                  ])
                 self.modelInterruptFlag.request()
                 self.modelInterruptFlag.logState(self.log, tag: "requested-by-ctrl-c")
                 self.renderWake?.requestRender()
               } else {
                 // 3. Exit chat
                 self.log.debug(
-                  """
-                  event=chat.user.ctrl-c \
-                  action=exit \
-                  model_busy=false
-                  """)
+                  "chat.user.ctrl-c",
+                  metadata: [
+                    "action": "exit",
+                    "model_busy": "false",
+                  ])
                 shouldStop = true
               }
 
             case .ctrl(4):
-              self.log.debug("event=chat.user.ctrl-d action=exit")
+              self.log.debug(
+                "chat.user.ctrl-d",
+                metadata: ["action": "exit"])
               shouldStop = true
 
             case .bracketedPasteStart:
@@ -387,12 +388,12 @@ internal final class SlateChatHost {
             case .shiftEnter:
               self.inputBuffer.append("\n")
               self.log.debug(
-                """
-                event=chat.user.input.newline \
-                source=shift-enter \
-                buffer_chars=\(self.inputBuffer.count) \
-                has_queue=\(self.queuedSubmission != nil)
-                """)
+                "chat.user.input.newline",
+                metadata: [
+                  "source": "shift-enter",
+                  "buffer_chars": "\(self.inputBuffer.count)",
+                  "has_queue": "\(self.queuedSubmission != nil)",
+                ])
 
             case .tab:
               if self.inPaste {
@@ -430,11 +431,11 @@ internal final class SlateChatHost {
         let nowBusy = sink.modelTurnBusy()
         if !nowBusy, self.lastObservedModelBusy, let queued = self.queuedSubmission {
           self.log.debug(
-            """
-            event=chat.queue.auto-flush \
-            trigger=busy-to-idle \
-            chars=\(queued.count)
-            """)
+            "chat.queue.auto-flush",
+            metadata: [
+              "trigger": "busy-to-idle",
+              "chars": "\(queued.count)",
+            ])
           self.queuedSubmission = nil
           sink.setQueuedTrayText(nil)
           Task { await gate.complete(queued) }
@@ -479,18 +480,18 @@ internal final class SlateChatHost {
         let totalMs = prepareMs &+ submitMs
         if totalMs >= 50 {
           self.log.debug(
-            """
-            event=chat.render.slow \
-            elapsed_ms=\(totalMs) \
-            prepare_ms=\(prepareMs) \
-            submit_ms=\(submitMs) \
-            flat_rows=\(flatTranscript.count) \
-            cols=\(slate.cols) \
-            rows=\(slate.rows) \
-            model_busy=\(nowBusy) \
-            queue_chars=\(self.queuedSubmission?.count ?? 0) \
-            buffer_chars=\(self.inputBuffer.count)
-            """)
+            "chat.render.slow",
+            metadata: [
+              "elapsed_ms": "\(totalMs)",
+              "prepare_ms": "\(prepareMs)",
+              "submit_ms": "\(submitMs)",
+              "flat_rows": "\(flatTranscript.count)",
+              "cols": "\(slate.cols)",
+              "rows": "\(slate.rows)",
+              "model_busy": "\(nowBusy)",
+              "queue_chars": "\(self.queuedSubmission?.count ?? 0)",
+              "buffer_chars": "\(self.inputBuffer.count)",
+            ])
         }
         return sink.coordinatorFinished() ? .stop : .continue
       })
@@ -521,23 +522,23 @@ internal final class SlateChatHost {
     if trimmed.isEmpty {
       guard let queued = queuedSubmission else {
         log.debug(
-          """
-          event=chat.user.submit \
-          kind=noop \
-          reason=empty-buffer-no-queue \
-          model_busy=\(busy)
-          """)
+          "chat.user.submit",
+          metadata: [
+            "kind": "noop",
+            "reason": "empty-buffer-no-queue",
+            "model_busy": "\(busy)",
+          ])
         return
       }
       let queuedNewlines = queued.reduce(0) { $0 + ($1 == "\n" ? 1 : 0) }
       log.debug(
-        """
-        event=chat.user.submit \
-        kind=interrupt-and-send \
-        chars=\(queued.count) \
-        newlines=\(queuedNewlines) \
-        model_busy=\(busy)
-        """)
+        "chat.user.submit",
+        metadata: [
+          "kind": "interrupt-and-send",
+          "chars": "\(queued.count)",
+          "newlines": "\(queuedNewlines)",
+          "model_busy": "\(busy)",
+        ])
       queuedSubmission = nil
       sink.setQueuedTrayText(nil)
       if busy {
@@ -551,26 +552,26 @@ internal final class SlateChatHost {
     if busy {
       let replacing = queuedSubmission != nil
       log.debug(
-        """
-        event=chat.user.submit \
-        kind=queue \
-        chars=\(submit.count) \
-        newlines=\(newlines) \
-        replacing=\(replacing) \
-        model_busy=true
-        """)
+        "chat.user.submit",
+        metadata: [
+          "kind": "queue",
+          "chars": "\(submit.count)",
+          "newlines": "\(newlines)",
+          "replacing": "\(replacing)",
+          "model_busy": "true",
+        ])
       queuedSubmission = submit
       sink.setQueuedTrayText(submit)
       renderWake?.requestRender()
     } else {
       log.debug(
-        """
-        event=chat.user.submit \
-        kind=immediate \
-        chars=\(submit.count) \
-        newlines=\(newlines) \
-        model_busy=false
-        """)
+        "chat.user.submit",
+        metadata: [
+          "kind": "immediate",
+          "chars": "\(submit.count)",
+          "newlines": "\(newlines)",
+          "model_busy": "false",
+        ])
       Task { await gate.complete(submit) }
     }
   }

@@ -56,7 +56,8 @@ enum Shell {
       workingDirectory = nil
     }
 
-    logger.trace("Starting shell[\(id)]: \(command), in:\(workingDirectory ?? "nil")")
+    logger.trace(
+      "starting", metadata: ["shell_id": "\(id)", "command": "\(command)", "cwd": "\(workingDirectory ?? "nil")"])
 
     // Use the body-based Subprocess API to get an Execution handle so we can
     // send SIGKILL to the process group on cancellation.  Output is collected
@@ -71,50 +72,57 @@ enum Shell {
       platformOptions: platformOptions
     ) { execution, _, outputSequence, errorSequence in
       let pid = execution.processIdentifier.value
-      logger.trace("shell[\(id)] pid=\(pid) spawned")
-      logger.trace("shell[\(id)] pid=\(pid) registering-cancellation-handler")
+      logger.trace("spawned", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
+      logger.trace("registering-cancellation-handler", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
       return try await withTaskCancellationHandler {
-        logger.trace("shell[\(id)] pid=\(pid) draining-streams-start")
+        logger.trace("draining-streams-start", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
         // Collect stdout and stderr concurrently.
         async let out = collectString(from: outputSequence, label: "\(id)/stdout", pid: pid)
         async let err = collectString(from: errorSequence, label: "\(id)/stderr", pid: pid)
         let result = try await (pid, out, err)
-        logger.trace("shell[\(id)] pid=\(pid) draining-streams-end out_chars=\(result.1.count) err_chars=\(result.2.count)")
+        logger.trace(
+          "draining-streams-end",
+          metadata: [
+            "shell_id": "\(id)", "pid": "\(pid)", "out_chars": "\(result.1.count)", "err_chars": "\(result.2.count)",
+          ])
         return result
       } onCancel: {
-        logger.trace("shell[\(id)] pid=\(pid) onCancel-fired task-cancelled=true")
+        logger.trace("onCancel-fired", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
         do {
           #if os(Windows)
-          logger.trace("shell[\(id)] pid=\(pid) sending-Windows-terminate")
+          logger.trace("sending-Windows-terminate", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
           try execution.terminate(withExitCode: 0)
-          logger.trace("shell[\(id)] pid=\(pid) Windows-terminate-succeeded")
+          logger.trace("Windows-terminate-succeeded", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
           #elseif os(Linux)
           // swiftc creates its own process groups on Linux, so a simple
           // kill(-pgid) misses compiler children.  Walk /proc to recursively
           // kill every descendant regardless of process group.
-          logger.trace("shell[\(id)] pid=\(pid) killing-process-tree-start")
+          logger.trace("killing-process-tree-start", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
           let killed = Self.killProcessTree(pid: pid, id: id.uuidString)
-          logger.trace("shell[\(id)] pid=\(pid) process-tree-killed count=\(killed)")
+          logger.trace("process-tree-killed", metadata: ["shell_id": "\(id)", "pid": "\(pid)", "count": "\(killed)"])
           #else
           // macOS / other Unix: process-group kill is sufficient.
-          logger.trace("shell[\(id)] pid=\(pid) sending-SIGKILL-to-process-group")
+          logger.trace("sending-SIGKILL-to-process-group", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
           try execution.send(signal: .kill, toProcessGroup: true)
-          logger.trace("shell[\(id)] pid=\(pid) SIGKILL-succeeded")
+          logger.trace("SIGKILL-succeeded", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
           #endif
         } catch {
-          logger.trace("shell[\(id)] pid=\(pid) process-kill-failed err=\"\(String(describing: error))\"")
+          logger.trace(
+            "process-kill-failed",
+            metadata: ["shell_id": "\(id)", "pid": "\(pid)", "err": "\(String(describing: error))"])
         }
       }
     }
 
     logger.trace(
-      """
-      shell[\(id)] run-returning \
-      pid=\(outcome.value.0) \
-      termination=\(String(describing: outcome.terminationStatus)) \
-      out_chars=\(outcome.value.1.count) \
-      err_chars=\(outcome.value.2.count)
-      """)
+      "run-returning",
+      metadata: [
+        "shell_id": "\(id)",
+        "pid": "\(outcome.value.0)",
+        "termination": "\(String(describing: outcome.terminationStatus))",
+        "out_chars": "\(outcome.value.1.count)",
+        "err_chars": "\(outcome.value.2.count)",
+      ])
     return Result(
       exitCode: outcome.terminationStatus,
       stdout: outcome.value.1,
@@ -148,12 +156,14 @@ enum Shell {
     for victim in pids.reversed() {
       if kill(victim, SIGKILL) == 0 {
         killed += 1
-        logger.trace("shell[\(id)] process-tree-kill pid=\(victim) ok")
+        logger.trace("process-tree-kill", metadata: ["shell_id": "\(id)", "pid": "\(victim)", "status": "ok"])
       } else {
         let e = errno
         // ESRCH: already exited, EPERM: not ours (shouldn't happen).
         if e != ESRCH {
-          logger.trace("shell[\(id)] process-tree-kill pid=\(victim) failed errno=\(e)")
+          logger.trace(
+            "process-tree-kill",
+            metadata: ["shell_id": "\(id)", "pid": "\(victim)", "status": "failed", "errno": "\(e)"])
         }
       }
     }
@@ -185,19 +195,21 @@ enum Shell {
       chunkCount += 1
       totalBytes += buffer.count
       if chunkCount == 1 {
-        logger.trace("shell[\(label)] pid=\(pid) first-chunk bytes=\(buffer.count)")
+        logger.trace("first-chunk", metadata: ["stream": "\(label)", "pid": "\(pid)", "bytes": "\(buffer.count)"])
       }
       result += buffer.withUnsafeBytes { raw in
         String(decoding: raw, as: UTF8.self)
       }
     }
     logger.trace(
-      """
-      shell[\(label)] pid=\(pid) collect-done \
-      chunks=\(chunkCount) \
-      total_bytes=\(totalBytes) \
-      result_chars=\(result.count)
-      """)
+      "collect-done",
+      metadata: [
+        "stream": "\(label)",
+        "pid": "\(pid)",
+        "chunks": "\(chunkCount)",
+        "total_bytes": "\(totalBytes)",
+        "result_chars": "\(result.count)",
+      ])
     return result
   }
 }

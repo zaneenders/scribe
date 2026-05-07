@@ -25,23 +25,21 @@ public struct AgentLoop: Sendable {
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
     logger.debug(
-      """
-      event=agent.turn.start \
-      model=\(harness.model) \
-      messages=\(messages.count)
-      """
-    )
+      "agent.turn.start",
+      metadata: [
+        "model": "\(harness.model)",
+        "messages": "\(messages.count)",
+      ])
     var round = 0
     while true {
       round += 1
       if shouldAbortTurn() {
         logger.debug(
-          """
-          event=agent.abort \
-          where=before-http \
-          round=\(round)
-          """
-        )
+          "agent.abort",
+          metadata: [
+            "where": "before-http",
+            "round": "\(round)",
+          ])
         throw AgentTurnInterruptedError()
       }
 
@@ -55,12 +53,11 @@ public struct AgentLoop: Sendable {
 
       if shouldAbortTurn() {
         logger.debug(
-          """
-          event=agent.abort \
-          where=post-stream-pre-tools \
-          round=\(round)
-          """
-        )
+          "agent.abort",
+          metadata: [
+            "where": "post-stream-pre-tools",
+            "round": "\(round)",
+          ])
         throw AgentTurnInterruptedError()
       }
 
@@ -70,25 +67,23 @@ public struct AgentLoop: Sendable {
 
       case .toolCalls(let invocations):
         logger.info(
-          """
-          event=agent.tool.round \
-          round=\(round) \
-          tool_count=\(invocations.count) \
-          tools=\(invocations.map(\.name).joined(separator: ","))
-          """
-        )
+          "agent.tool.round",
+          metadata: [
+            "round": "\(round)",
+            "tool_count": "\(invocations.count)",
+            "tools": "\(invocations.map(\.name).joined(separator: ","))",
+          ])
         onEvent(.toolRoundHeader(round: round, toolNames: invocations.map(\.name)))
 
         for inv in invocations {
           if shouldAbortTurn() {
             logger.notice(
-              """
-              event=agent.abort \
-              where=pre-tool \
-              tool=\(inv.name) \
-              round=\(round)
-              """
-            )
+              "agent.abort",
+              metadata: [
+                "where": "pre-tool",
+                "tool": "\(inv.name)",
+                "round": "\(round)",
+              ])
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
             throw AgentTurnInterruptedError()
           }
@@ -99,12 +94,12 @@ public struct AgentLoop: Sendable {
           let jsonOutput: String
           do {
             logger.trace(
-              """
-              event=agent.tool.invoking \
-              tool=\(inv.name) \
-              round=\(round) \
-              args_chars=\(inv.arguments.count)
-              """)
+              "agent.tool.invoking",
+              metadata: [
+                "tool": "\(inv.name)",
+                "round": "\(round)",
+                "args_chars": "\(inv.arguments.count)",
+              ])
             jsonOutput = try await registry.run(
               name: inv.name,
               arguments: inv.arguments,
@@ -112,24 +107,23 @@ public struct AgentLoop: Sendable {
             )
             let elapsedMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
             logger.trace(
-              """
-              event=agent.tool.invoked \
-              tool=\(inv.name) \
-              round=\(round) \
-              elapsed_ms=\(elapsedMs) \
-              output_chars=\(jsonOutput.count)
-              """)
+              "agent.tool.invoked",
+              metadata: [
+                "tool": "\(inv.name)",
+                "round": "\(round)",
+                "elapsed_ms": "\(elapsedMs)",
+                "output_chars": "\(jsonOutput.count)",
+              ])
           } catch is AgentTurnInterruptedError {
             let abortMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
             logger.notice(
-              """
-              event=agent.abort \
-              where=mid-tool \
-              tool=\(inv.name) \
-              round=\(round) \
-              until_abort_ms=\(abortMs)
-              """
-            )
+              "agent.abort",
+              metadata: [
+                "where": "mid-tool",
+                "tool": "\(inv.name)",
+                "round": "\(round)",
+                "until_abort_ms": "\(abortMs)",
+              ])
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
             throw AgentTurnInterruptedError()
           }
@@ -137,25 +131,23 @@ public struct AgentLoop: Sendable {
           let unknown = jsonOutput.contains("unknown tool")
           if unknown {
             logger.warning(
-              """
-              event=agent.tool.unknown \
-              tool=\(inv.name) \
-              round=\(round)
-              """
-            )
+              "agent.tool.unknown",
+              metadata: [
+                "tool": "\(inv.name)",
+                "round": "\(round)",
+              ])
           }
           logger.debug(
-            """
-            event=agent.tool.invoke \
-            round=\(round) \
-            tool=\(inv.name) \
-            args_chars=\(inv.arguments.count) \
-            args="\(inv.arguments.logSafe())" \
-            output_chars=\(jsonOutput.count) \
-            elapsed_ms=\(elapsedMs) \
-            unknown=\(unknown)
-            """
-          )
+            "agent.tool.invoke",
+            metadata: [
+              "round": "\(round)",
+              "tool": "\(inv.name)",
+              "args_chars": "\(inv.arguments.count)",
+              "args": "\(inv.arguments.logSafe())",
+              "output_chars": "\(jsonOutput.count)",
+              "elapsed_ms": "\(elapsedMs)",
+              "unknown": "\(unknown)",
+            ])
           onEvent(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
           onEvent(.blankLine)
           let toolMsg = Components.Schemas.ChatMessage(
@@ -168,12 +160,11 @@ public struct AgentLoop: Sendable {
           messages.append(toolMsg)
         }
         logger.trace(
-          """
-          event=agent.tool.round.end \
-          round=\(round) \
-          messages=\(messages.count)
-          """
-        )
+          "agent.tool.round.end",
+          metadata: [
+            "round": "\(round)",
+            "messages": "\(messages.count)",
+          ])
       }
     }
   }

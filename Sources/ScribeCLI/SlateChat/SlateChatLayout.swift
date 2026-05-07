@@ -225,7 +225,9 @@ public final class SlateTranscriptSink: Sendable {
     }
   }
 
-  public func setBanner(baseURL: String, model: String, cwd: String, scribeVersion: String, gitBranch: String?, sessionId: String) {
+  public func setBanner(
+    baseURL: String, model: String, cwd: String, scribeVersion: String, gitBranch: String?, sessionId: String
+  ) {
     state.withLock { sink in
       sink.banner = BannerSnapshot(
         baseURL: baseURL, model: model, cwd: cwd, scribeVersion: scribeVersion, gitBranch: gitBranch,

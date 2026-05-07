@@ -112,11 +112,11 @@ struct ToolRunnerShellTests {
     // kill(-pgid) would miss it.  Our recursive /proc walk must catch it.
     let args = try jsonArguments([
       "command": """
-        setsid sh -c 'while true; do sleep 0.1; done' &
-        CHILD=$!
-        echo "CHILD=$CHILD"
-        wait $CHILD
-        """
+      setsid sh -c 'while true; do sleep 0.1; done' &
+      CHILD=$!
+      echo "CHILD=$CHILD"
+      wait $CHILD
+      """
     ])
 
     let abortState = AbortState()

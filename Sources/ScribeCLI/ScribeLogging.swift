@@ -7,9 +7,11 @@ import Synchronization
 /// file is created; all `scribe.*` loggers start writing to it immediately.
 public enum SharedLogWriter {
   private static let lock = Mutex<(writer: LockedDataWriter, level: Logger.Level)>(
-    (LockedDataWriter { data in
-      try? FileHandle.standardError.write(contentsOf: data)
-    }, .trace))
+    (
+      LockedDataWriter { data in
+        try? FileHandle.standardError.write(contentsOf: data)
+      }, .trace
+    ))
 
   /// Replace the writer and log level for all `scribe.*` loggers.
   public static func swap(to writer: LockedDataWriter, level: Logger.Level) {
@@ -58,7 +60,7 @@ private struct SharedLogLineHandler: LogHandler {
 
   var logLevel: Logger.Level {
     get { SharedLogWriter.logLevel }
-    set { /* no-op — level is driven by SharedLogWriter.swap() */ }
+    set { /* no-op — level is driven by SharedLogWriter.swap() */  }
   }
 
   init(label: String) {
@@ -69,6 +71,12 @@ private struct SharedLogLineHandler: LogHandler {
     var text = "\(event.message)"
     if let error = event.error {
       text += " err=\"\(error)\""
+    }
+    if let metadata = event.metadata, !metadata.isEmpty {
+      let pairs = metadata.map { key, value in
+        "\(key)=\(value)"
+      }.sorted().joined(separator: " ")
+      text += " \(pairs)"
     }
     let timestamp = timestampFormatter.withLock { $0.string(from: Date()) }
     let line = "\(timestamp) [\(event.level.rawValue)] \(text)\n"

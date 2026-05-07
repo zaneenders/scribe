@@ -93,22 +93,20 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   ) async throws -> (HTTPBody, ContinuousClock.Instant) {
     let httpStart = clock.now
     logger.info(
-      """
-      event=agent.http.request \
-      messages=\(requestBody.messages.count)
-      """
-    )
+      "agent.http.request",
+      metadata: [
+        "messages": "\(requestBody.messages.count)"
+      ])
     let response = try await client.createChatCompletion(body: .json(requestBody))
     let httpElapsedMs = elapsedMs(since: httpStart)
     switch response {
     case .ok(let ok):
       logger.debug(
-        """
-        event=agent.http.response \
-        status=200 \
-        elapsed_ms=\(httpElapsedMs)
-        """
-      )
+        "agent.http.response",
+        metadata: [
+          "status": "200",
+          "elapsed_ms": "\(httpElapsedMs)",
+        ])
       return (try ok.body.textEventStream, httpStart)
     case .undocumented(statusCode: let code, let payload):
       var detail = ""
@@ -133,13 +131,12 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       let level: Logger.Level = code >= 500 ? .error : .warning
       logger.log(
         level: level,
-        """
-        event=agent.http.response \
-        status=\(code) \
-        elapsed_ms=\(httpElapsedMs) \
-        body_snippet="\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))"
-        """
-      )
+        "agent.http.response",
+        metadata: [
+          "status": "\(code)",
+          "elapsed_ms": "\(httpElapsedMs)",
+          "body_snippet": "\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))",
+        ])
       throw ScribeError.apiHTTPError(
         statusCode: code,
         detail: detail,
@@ -181,13 +178,12 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     for try await sse in sseStream {
       if shouldAbortTurn() {
         logger.notice(
-          """
-          event=agent.stream.abort \
-          where=mid-stream \
-          chunks=\(result.decodedChunkCount) \
-          had_visible_tokens=\(result.streamStarted)
-          """
-        )
+          "agent.stream.abort",
+          metadata: [
+            "where": "mid-stream",
+            "chunks": "\(result.decodedChunkCount)",
+            "had_visible_tokens": "\(result.streamStarted)",
+          ])
         if result.streamStarted {
           onEvent(.finalizeAssistantStream)
         }
@@ -205,13 +201,12 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       } catch {
         result.skippedChunkCount += 1
         logger.warning(
-          """
-          event=agent.stream.unreadable-chunk \
-          chunk_index=\(result.decodedChunkCount + 1) \
-          err="\(error.localizedDescription)" \
-          raw_prefix="\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))"
-          """
-        )
+          "agent.stream.unreadable-chunk",
+          metadata: [
+            "chunk_index": "\(result.decodedChunkCount + 1)",
+            "err": "\(error.localizedDescription)",
+            "raw_prefix": "\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))",
+          ])
         onEvent(.skippedUnreadableStreamLine)
         continue
       }
@@ -220,22 +215,20 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
         loggedFirstChunk = true
         let firstChunkMs = elapsedMs(since: httpStart)
         logger.debug(
-          """
-          event=agent.stream.first-chunk \
-          ttfb_ms=\(firstChunkMs)
-          """
-        )
+          "agent.stream.first-chunk",
+          metadata: [
+            "ttfb_ms": "\(firstChunkMs)"
+          ])
       } else if result.decodedChunkCount % streamProgressEvery == 0 {
         let elapsedMs = elapsedMs(since: result.streamWallStart)
         let chunksPerSec = Double(result.decodedChunkCount) / (Double(elapsedMs) / 1000.0)
         logger.trace(
-          """
-          event=agent.stream.progress \
-          chunks=\(result.decodedChunkCount) \
-          elapsed_ms=\(elapsedMs) \
-          chunks_per_s=\(String(format: "%.1f", chunksPerSec))
-          """
-        )
+          "agent.stream.progress",
+          metadata: [
+            "chunks": "\(result.decodedChunkCount)",
+            "elapsed_ms": "\(elapsedMs)",
+            "chunks_per_s": "\(String(format: "%.1f", chunksPerSec))",
+          ])
       }
       if let u = chunk.usage {
         result.lastUsage = u
@@ -270,11 +263,10 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       onEvent(.finalizeAssistantStream)
     } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
       logger.notice(
-        """
-        event=agent.stream.empty \
-        chunks=\(result.decodedChunkCount)
-        """
-      )
+        "agent.stream.empty",
+        metadata: [
+          "chunks": "\(result.decodedChunkCount)"
+        ])
       onEvent(.emptyAssistantTurn)
     }
 
@@ -296,27 +288,25 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
         return Double(c) / max(0.001, genSec)
       }()
       logger.debug(
-        """
-        event=agent.stream.end \
-        chunks=\(result.decodedChunkCount) \
-        skipped=\(result.skippedChunkCount) \
-        elapsed_ms=\(streamElapsedMs) \
-        prompt_tokens=\(u.promptTokens.map(String.init(describing:)) ?? "nil") \
-        completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
-        tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
-        """
-      )
+        "agent.stream.end",
+        metadata: [
+          "chunks": "\(result.decodedChunkCount)",
+          "skipped": "\(result.skippedChunkCount)",
+          "elapsed_ms": "\(streamElapsedMs)",
+          "prompt_tokens": "\(u.promptTokens.map(String.init(describing:)) ?? "nil")",
+          "completion_tokens": "\(u.completionTokens.map(String.init(describing:)) ?? "nil")",
+          "tps": "\(tps.map { String(format: "%.1f", $0) } ?? "nil")",
+        ])
       onEvent(.usage(u, tokensPerSecond: tps))
     } else {
       logger.debug(
-        """
-        event=agent.stream.end \
-        chunks=\(result.decodedChunkCount) \
-        skipped=\(result.skippedChunkCount) \
-        elapsed_ms=\(streamElapsedMs) \
-        usage=missing
-        """
-      )
+        "agent.stream.end",
+        metadata: [
+          "chunks": "\(result.decodedChunkCount)",
+          "skipped": "\(result.skippedChunkCount)",
+          "elapsed_ms": "\(streamElapsedMs)",
+          "usage": "missing",
+        ])
     }
 
     let toolInvocations = turn.resolvedToolCalls()
@@ -345,12 +335,11 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
 
     if toolInvocations.isEmpty {
       logger.info(
-        """
-        event=agent.assistant.final \
-        answer_chars=\(assistantText.count) \
-        reasoning_chars=\(assistantReasoning?.count ?? 0)
-        """
-      )
+        "agent.assistant.final",
+        metadata: [
+          "answer_chars": "\(assistantText.count)",
+          "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
+        ])
       onEvent(.blankLine)
       return .completed
     }

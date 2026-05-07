@@ -308,20 +308,18 @@ public enum ChatSessionStore {
           to: persistURL
         )
         logger.trace(
-          """
-          event=chat.persist.save \
-          messages=\(history.count) \
-          path=\(persistURL.path)
-          """
-        )
+          "chat.persist.save",
+          metadata: [
+            "messages": "\(history.count)",
+            "path": "\(persistURL.path)",
+          ])
       } catch {
         logger.error(
-          """
-          event=chat.persist.fail \
-          path=\(persistURL.path) \
-          err="\(error.localizedDescription)"
-          """
-        )
+          "chat.persist.fail",
+          metadata: [
+            "path": "\(persistURL.path)",
+            "err": "\(error.localizedDescription)",
+          ])
       }
     }
   }

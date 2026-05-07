@@ -32,21 +32,21 @@ public struct ToolRegistry: Sendable {
   ) async throws -> String {
     guard let tool = tools[name] else {
       Self.logger.debug(
-        """
-        event=agent.tool.unknown \
-        tool=\(name)
-        """)
+        "agent.tool.unknown",
+        metadata: [
+          "tool": "\(name)"
+        ])
       return Self.jsonError("unknown tool \(name)")
     }
     let clock = ContinuousClock()
     let start = clock.now
     Self.logger.debug(
-      """
-      event=agent.tool.start \
-      tool=\(name) \
-      args_chars=\(arguments.count) \
-      args="\(arguments.logSafe())"
-      """)
+      "agent.tool.start",
+      metadata: [
+        "tool": "\(name)",
+        "args_chars": "\(arguments.count)",
+        "args": "\(arguments.logSafe())",
+      ])
 
     let json: String
     do {
@@ -62,52 +62,52 @@ public struct ToolRegistry: Sendable {
               encoder.keyEncodingStrategy = .convertToSnakeCase
               let encoded = try Self.encode(value, using: encoder)
               Self.logger.debug(
-                """
-                event=agent.tool.completed \
-                tool=\(name) \
-                elapsed_ms=\(elapsedMs) \
-                output_chars=\(encoded.count) \
-                args="\(arguments.logSafe())"
-                """)
+                "agent.tool.completed",
+                metadata: [
+                  "tool": "\(name)",
+                  "elapsed_ms": "\(elapsedMs)",
+                  "output_chars": "\(encoded.count)",
+                  "args": "\(arguments.logSafe())",
+                ])
               return encoded
             } catch {
               Self.logger.warning(
-                """
-                event=agent.tool.encode_failed \
-                tool=\(name) \
-                elapsed_ms=\(elapsedMs) \
-                args="\(arguments.logSafe())" \
-                error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
-                """)
+                "agent.tool.encode_failed",
+                metadata: [
+                  "tool": "\(name)",
+                  "elapsed_ms": "\(elapsedMs)",
+                  "args": "\(arguments.logSafe())",
+                  "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+                ])
               return Self.jsonError(String(describing: error))
             }
           } catch {
             let elapsed = start.duration(to: clock.now)
             let elapsedMs = Int(elapsed / .milliseconds(1))
             Self.logger.trace(
-              """
-              event=agent.tool.task.exited \
-              tool=\(name) \
-              elapsed_ms=\(elapsedMs) \
-              args="\(arguments.logSafe())" \
-              error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
-              """)
+              "agent.tool.task.exited",
+              metadata: [
+                "tool": "\(name)",
+                "elapsed_ms": "\(elapsedMs)",
+                "args": "\(arguments.logSafe())",
+                "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+              ])
             return Self.jsonError(String(describing: error))
           }
         }
         group.addTask {
           Self.logger.trace(
-            """
-            event=agent.tool.polling.start \
-            tool=\(name)
-            """)
+            "agent.tool.polling.start",
+            metadata: [
+              "tool": "\(name)"
+            ])
           while true {
             if shouldAbortTurn() {
               Self.logger.trace(
-                """
-                event=agent.tool.polling.abort-detected \
-                tool=\(name)
-                """)
+                "agent.tool.polling.abort-detected",
+                metadata: [
+                  "tool": "\(name)"
+                ])
               throw AgentTurnInterruptedError()
             }
             try await Task.sleep(for: .milliseconds(100))
@@ -116,53 +116,53 @@ public struct ToolRegistry: Sendable {
         defer {
           let deferMs = Int(start.duration(to: clock.now) / .milliseconds(1))
           Self.logger.trace(
-            """
-            event=agent.tool.taskgroup.cancelAll \
-            tool=\(name) \
-            elapsed_ms=\(deferMs)
-            """)
+            "agent.tool.taskgroup.cancelAll",
+            metadata: [
+              "tool": "\(name)",
+              "elapsed_ms": "\(deferMs)",
+            ])
           group.cancelAll()
         }
         let winner = try await group.next()!
         let winnerMs = Int(groupStart.duration(to: clock.now) / .milliseconds(1))
         Self.logger.trace(
-          """
-          event=agent.tool.taskgroup.first-completed \
-          tool=\(name) \
-          elapsed_ms=\(winnerMs) \
-          result_chars=\(winner.count)
-          """)
+          "agent.tool.taskgroup.first-completed",
+          metadata: [
+            "tool": "\(name)",
+            "elapsed_ms": "\(winnerMs)",
+            "result_chars": "\(winner.count)",
+          ])
         return winner
       }
       let cleanupMs = Int(start.duration(to: clock.now) / .milliseconds(1))
       Self.logger.trace(
-        """
-        event=agent.tool.taskgroup.all-completed \
-        tool=\(name) \
-        cleanup_elapsed_ms=\(cleanupMs)
-        """)
+        "agent.tool.taskgroup.all-completed",
+        metadata: [
+          "tool": "\(name)",
+          "cleanup_elapsed_ms": "\(cleanupMs)",
+        ])
     } catch is AgentTurnInterruptedError {
       let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
       Self.logger.debug(
-        """
-        event=agent.tool.errored \
-        tool=\(name) \
-        elapsed_ms=\(elapsedMs) \
-        args="\(arguments.logSafe())" \
-        error="AgentTurnInterruptedError"
-        """)
+        "agent.tool.errored",
+        metadata: [
+          "tool": "\(name)",
+          "elapsed_ms": "\(elapsedMs)",
+          "args": "\(arguments.logSafe())",
+          "error": "AgentTurnInterruptedError",
+        ])
       throw AgentTurnInterruptedError()
     } catch {
       let elapsed = start.duration(to: clock.now)
       let elapsedMs = Int(elapsed / .milliseconds(1))
       Self.logger.debug(
-        """
-        event=agent.tool.errored \
-        tool=\(name) \
-        elapsed_ms=\(elapsedMs) \
-        args="\(arguments.logSafe())" \
-        error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
-        """)
+        "agent.tool.errored",
+        metadata: [
+          "tool": "\(name)",
+          "elapsed_ms": "\(elapsedMs)",
+          "args": "\(arguments.logSafe())",
+          "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+        ])
       return Self.jsonError(String(describing: error))
     }
 
