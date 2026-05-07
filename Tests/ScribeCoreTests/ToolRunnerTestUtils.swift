@@ -5,6 +5,7 @@ struct ShellPayload: Decodable {
   let exitCode: Int?
   let stdout: String?
   let stderr: String?
+  let pid: Int?
 }
 
 struct FailPayload: Decodable {

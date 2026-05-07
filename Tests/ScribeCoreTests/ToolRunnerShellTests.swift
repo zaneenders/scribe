@@ -13,6 +13,8 @@ struct ToolRunnerShellTests {
     #expect(out.exitCode == 0)
     #expect(out.stderr == "")
     #expect(out.stdout?.trimmingCharacters(in: .whitespacesAndNewlines) == "scribetest")
+    #expect(out.pid != nil)
+    #expect(out.pid! > 0)
   }
 
   @Test func honorsWorkingDirectory() async throws {

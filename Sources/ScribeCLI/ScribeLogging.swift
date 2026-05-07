@@ -34,8 +34,10 @@ public enum SharedLogWriter {
 /// `SharedLogWriter`.  Defaults to stderr until `swap(to:)` is called with a
 /// session file writer.
 ///
-/// Call this once at program start, before any `Logger` is created.
+/// Safe to call multiple times — only the first call bootstraps.
 public func bootstrapScribeLogging() {
+  let already = bootstrapped.exchange(true, ordering: .relaxed)
+  guard !already else { return }
   LoggingSystem.bootstrap { label in
     guard label.hasPrefix("scribe.") || label == "scribe" else {
       return StreamLogHandler.standardError(label: label)
@@ -43,6 +45,8 @@ public func bootstrapScribeLogging() {
     return SharedLogLineHandler(label: label)
   }
 }
+
+private let bootstrapped = Atomic<Bool>(false)
 
 // MARK: - Timestamp formatter
 

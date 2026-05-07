@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import ScribeCLI
 import ScribeCore
 import ScribeLLM
 import Testing
@@ -211,5 +212,23 @@ struct AgentLoopTests {
       return false
     })
     #expect(hasToolEvent)
+  }
+
+  // MARK: - Logging metadata flow
+
+  @Test func loggersCreatedForAgentLoopDoNotCrash() async throws {
+    // Just verify that running an agent loop with a real logger (via
+    // bootstrapScribeLogging) does not crash. The metadata rendering
+    // is verified in ScribeLoggingTests.
+    bootstrapScribeLogging()
+    let harness = FakeHarness(outcomes: [.completed])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    var messages: [Components.Schemas.ChatMessage] = []
+    let loop = AgentLoop(harness: harness, registry: registry, onEvent: { _ in })
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "scribe.test.agentloop")
+    )
+    #expect(outcome == .completed)
   }
 }
