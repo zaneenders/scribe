@@ -24,6 +24,7 @@ public struct AgentLoop: Sendable {
     logger: Logger,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
+    let clock = ContinuousClock()
     logger.debug(
       "agent.turn.start",
       metadata: [
@@ -87,7 +88,7 @@ public struct AgentLoop: Sendable {
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
             throw AgentTurnInterruptedError()
           }
-          let toolStarted = Date()
+          let toolStarted = clock.now
           // ToolRegistry.run(name:arguments:abortVia:) wraps the
           // tool in a task group that polls shouldAbortTurn so long-running
           // commands (e.g. shell builds) can be cancelled cooperatively.
@@ -105,7 +106,7 @@ public struct AgentLoop: Sendable {
               arguments: inv.arguments,
               abortVia: shouldAbortTurn
             )
-            let elapsedMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
+            let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
             logger.trace(
               "agent.tool.invoked",
               metadata: [
@@ -115,7 +116,7 @@ public struct AgentLoop: Sendable {
                 "output_chars": "\(jsonOutput.count)",
               ])
           } catch is AgentTurnInterruptedError {
-            let abortMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
+            let abortMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
             logger.notice(
               "agent.abort",
               metadata: [
@@ -127,7 +128,7 @@ public struct AgentLoop: Sendable {
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
             throw AgentTurnInterruptedError()
           }
-          let elapsedMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
+          let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
           let unknown = jsonOutput.contains("unknown tool")
           if unknown {
             logger.warning(

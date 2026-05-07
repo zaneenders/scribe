@@ -22,6 +22,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
+    .package(url: "https://github.com/apple/swift-collections.git", from: "1.1.0"),
   ],
   targets: [
     .target(
@@ -47,6 +48,7 @@ let package = Package(
         .product(name: "Configuration", package: "swift-configuration"),
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "Logging", package: "swift-log"),
+        .product(name: "_RopeModule", package: "swift-collections"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

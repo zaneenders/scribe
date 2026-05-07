@@ -48,6 +48,18 @@ public struct ToolRegistry: Sendable {
         "args": "\(arguments.logSafe())",
       ])
 
+    // Abort before starting the tool if the flag is already set — avoids
+    // a race where the tool completes but the poller ticks before we dequeue.
+    if shouldAbortTurn() {
+      Self.logger.debug(
+        "agent.tool.aborted-before-start",
+        metadata: [
+          "tool": "\(name)",
+          "args": "\(arguments.logSafe())",
+        ])
+      throw AgentTurnInterruptedError()
+    }
+
     let json: String
     do {
       let groupStart = clock.now
@@ -110,26 +122,19 @@ public struct ToolRegistry: Sendable {
                 ])
               throw AgentTurnInterruptedError()
             }
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(50))
           }
         }
-        defer {
-          let deferMs = Int(start.duration(to: clock.now) / .milliseconds(1))
-          Self.logger.trace(
-            "agent.tool.taskgroup.cancelAll",
-            metadata: [
-              "tool": "\(name)",
-              "elapsed_ms": "\(deferMs)",
-            ])
-          group.cancelAll()
-        }
         let winner = try await group.next()!
-        let winnerMs = Int(groupStart.duration(to: clock.now) / .milliseconds(1))
+        // Tool task completed — cancel the polling task so the group
+        // can exit cleanly.  (In the abort case the poller already threw,
+        // so cancelAll() is a harmless no-op here.)
+        group.cancelAll()
         Self.logger.trace(
           "agent.tool.taskgroup.first-completed",
           metadata: [
             "tool": "\(name)",
-            "elapsed_ms": "\(winnerMs)",
+            "elapsed_ms": "\(Int(groupStart.duration(to: clock.now) / .milliseconds(1)))",
             "result_chars": "\(winner.count)",
           ])
         return winner

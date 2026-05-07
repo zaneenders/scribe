@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Subprocess
+import _RopeModule
 
 #if canImport(Darwin)
 import Darwin
@@ -125,8 +126,8 @@ enum Shell {
       ])
     return Result(
       exitCode: outcome.terminationStatus,
-      stdout: outcome.value.1,
-      stderr: outcome.value.2,
+      stdout: String(outcome.value.1),
+      stderr: String(outcome.value.2),
       pid: outcome.value.0
     )
   }
@@ -143,7 +144,7 @@ enum Shell {
     while i < pids.count {
       let current = pids[i]
       if let children = readChildPids(of: current) {
-        for child in children where child > 1 {
+        for child in children where child > 2 {  // skip PID 1 (init) and PID 2 (kthreadd)
           if !pids.contains(child) {
             pids.append(child)
           }
@@ -182,13 +183,12 @@ enum Shell {
   }
   #endif
 
-  /// Drain an ``AsyncBufferSequence`` into a single `String`.
   private static func collectString(
     from sequence: AsyncBufferSequence,
     label: String,
     pid: pid_t
-  ) async throws -> String {
-    var result = ""
+  ) async throws -> BigString {
+    var result = BigString()
     var chunkCount = 0
     var totalBytes = 0
     for try await buffer in sequence {
@@ -197,9 +197,10 @@ enum Shell {
       if chunkCount == 1 {
         logger.trace("first-chunk", metadata: ["stream": "\(label)", "pid": "\(pid)", "bytes": "\(buffer.count)"])
       }
-      result += buffer.withUnsafeBytes { raw in
-        String(decoding: raw, as: UTF8.self)
-      }
+      result.append(
+        contentsOf: buffer.withUnsafeBytes { raw in
+          String(decoding: raw, as: UTF8.self)
+        })
     }
     logger.trace(
       "collect-done",
