@@ -51,6 +51,16 @@ struct ToolRunnerShellTests {
     #expect(fail.error?.contains("command is empty") == true)
   }
 
+  @Test func emptyCwdIsTreatedAsNil() async throws {
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    // Passing cwd as empty string exercises the if-let-empty-to-nil conversion.
+    let args = try jsonArguments(["command": "/bin/echo ok", "cwd": ""])
+    let json = try! await registry.run(name: "shell", arguments: args, abortVia: { false })
+    let out = try decodeShell(json)
+    #expect(out.ok == true)
+    #expect(out.stdout?.trimmingCharacters(in: .whitespacesAndNewlines) == "ok")
+  }
+
   @Test func invalidWorkingDirectoryFails() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let bogusDir =
