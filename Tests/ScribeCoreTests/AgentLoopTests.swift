@@ -31,10 +31,17 @@ private final class TestHarness: AgentHarnessProtocol, Sendable {
     var callCount = 0
     var lastMessagesCount = 0
     var outcomes: [RoundOutcome] = []
+    var throwInterruptedOnCall: Int? = nil
   }
 
   init(outcomes: [RoundOutcome]) {
     state = Mutex(State(outcomes: outcomes))
+  }
+
+  /// Creates a harness that throws `AgentTurnInterruptedError` on the first call
+  /// and returns the given outcomes thereafter.
+  init(throwInterruptedThen outcomes: [RoundOutcome]) {
+    state = Mutex(State(outcomes: outcomes, throwInterruptedOnCall: 0))
   }
 
   var callCount: Int {
@@ -47,13 +54,21 @@ private final class TestHarness: AgentHarnessProtocol, Sendable {
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool
   ) async throws -> RoundOutcome {
-    let outcome = state.withLock { state -> RoundOutcome? in
+    let (maybeOutcome, shouldThrow) = state.withLock { state -> (RoundOutcome?, Bool) in
       state.lastMessagesCount = messages.count
-      guard state.callCount < state.outcomes.count else { return nil }
-      defer { state.callCount += 1 }
-      return state.outcomes[state.callCount]
+      let shouldThrow = state.throwInterruptedOnCall == state.callCount
+      let outcome: RoundOutcome?
+      if !shouldThrow {
+        guard state.callCount < state.outcomes.count else { return (nil, false) }
+        outcome = state.outcomes[state.callCount]
+      } else {
+        outcome = nil
+      }
+      state.callCount += 1
+      return (outcome, shouldThrow)
     }
-    guard let outcome else { return .completed }
+    if shouldThrow { throw AgentTurnInterruptedError() }
+    guard let outcome = maybeOutcome else { return .completed }
     if case .toolCalls(let invocations) = outcome {
       let assistantMessage = Components.Schemas.ChatMessage(
         role: .assistant,
@@ -73,6 +88,16 @@ private final class TestHarness: AgentHarnessProtocol, Sendable {
         reasoningContent: nil
       )
       messages.append(assistantMessage)
+    } else {
+      // .completed — append an assistant message like the real AgentHarness does
+      messages.append(Components.Schemas.ChatMessage(
+        role: .assistant,
+        content: "",
+        name: nil,
+        toolCalls: nil,
+        toolCallId: nil,
+        reasoningContent: nil
+      ))
     }
     return outcome
   }
@@ -140,11 +165,12 @@ struct AgentLoopTests {
     )
     #expect(outcome == .completed)
     #expect(harness.callCount == 2)
-    // One assistant message + one tool message should have been appended.
-    #expect(messages.count == 2)
+    // 1 assistant (toolCalls round) + 1 tool message + 1 final assistant = 3
+    #expect(messages.count == 3)
     #expect(messages[0].role == .assistant)
     #expect(messages[1].role == .tool)
     #expect(messages[1].toolCallId == "call_1")
+    #expect(messages[2].role == .assistant)
   }
 
   @Test func abortBeforeRoundReturnsInterrupted() async throws {
@@ -215,5 +241,204 @@ struct AgentLoopTests {
       return false
     })
     #expect(hasToolEvent)
+  }
+
+  // MARK: - Interrupted error from harness
+
+  @Test func interruptedErrorFromHarnessReturnsInterrupted() async throws {
+    let harness = TestHarness(throwInterruptedThen: [.completed])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let loop = AgentLoop(harness: harness, registry: registry)
+
+    var messages: [Components.Schemas.ChatMessage] = []
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { _ in }
+    )
+    #expect(outcome == .interrupted)
+    #expect(harness.callCount == 1)
+  }
+
+  // MARK: - Tool round limit
+
+  @Test func toolRoundLimitReturnsLimitOutcome() async throws {
+    // Harness keeps returning toolCalls, but maxToolRounds=1 stops after first.
+    let harness = TestHarness(outcomes: [
+      .toolCalls([ToolInvocation(id: "c1", name: "fake_tool", arguments: "{}")]),
+      .completed,  // would be reached if limit didn't fire
+    ])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let loop = AgentLoop(harness: harness, registry: registry)
+
+    var messages: [Components.Schemas.ChatMessage] = []
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { _ in },
+      maxToolRounds: 1
+    )
+    #expect(outcome == .toolRoundLimit(rounds: 1))
+    // Harness should have been called only once (limit hit before second call).
+    #expect(harness.callCount == 1)
+  }
+
+  @Test func toolRoundLimitCleansUpMessages() async throws {
+    // When the limit fires, messages added during the final round are rolled back.
+    let harness = TestHarness(outcomes: [
+      .toolCalls([ToolInvocation(id: "c1", name: "fake_tool", arguments: "{}")]),
+      .completed,
+    ])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let loop = AgentLoop(harness: harness, registry: registry)
+
+    var messages: [Components.Schemas.ChatMessage] = [
+      Components.Schemas.ChatMessage(role: .user, content: "hi"),
+    ]
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { _ in },
+      maxToolRounds: 1
+    )
+    #expect(outcome == .toolRoundLimit(rounds: 1))
+    // The harness appends an assistant message; on limit the loop removes it.
+    // Only the original user message should remain.
+    #expect(messages.count == 1)
+    #expect(messages[0].role == .user)
+  }
+
+  // MARK: - Pre-tool abort
+
+  @Test func abortPreToolReturnsInterrupted() async throws {
+    let harness = TestHarness(outcomes: [
+      .toolCalls([
+        ToolInvocation(id: "c1", name: "fake_tool", arguments: "{}"),
+        ToolInvocation(id: "c2", name: "fake_tool", arguments: "{}"),
+      ]),
+    ])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let loop = AgentLoop(harness: harness, registry: registry)
+
+    // Abort on the second tool invocation.
+    let state = AbortState()
+    var messages: [Components.Schemas.ChatMessage] = []
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { _ in },
+      shouldAbortTurn: {
+        if state.value {
+          return true
+        }
+        state.set(true)
+        return false  // first tool runs, abort before second
+      }
+    )
+    #expect(outcome == .interrupted)
+    // Only the assistant message from the harness (not tool messages)
+    #expect(messages.count == 1)
+    #expect(messages[0].role == .assistant)
+  }
+
+  // MARK: - Multiple tool calls in one round
+
+  @Test func multipleToolCallsInSingleRound() async throws {
+    let harness = TestHarness(outcomes: [
+      .toolCalls([
+        ToolInvocation(id: "c1", name: "fake_tool", arguments: #"{"a":1}"#),
+        ToolInvocation(id: "c2", name: "fake_tool", arguments: #"{"b":2}"#),
+      ]),
+      .completed,
+    ])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let loop = AgentLoop(harness: harness, registry: registry)
+
+    var messages: [Components.Schemas.ChatMessage] = []
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { _ in }
+    )
+    #expect(outcome == .completed)
+    // 1 assistant + 2 tool messages + 1 final assistant = 4
+    #expect(messages.count == 4)
+    #expect(messages[0].role == .assistant)
+    #expect(messages[1].role == .tool)
+    #expect(messages[1].toolCallId == "c1")
+    #expect(messages[2].role == .tool)
+    #expect(messages[2].toolCallId == "c2")
+    #expect(messages[3].role == .assistant)
+  }
+
+  // MARK: - Event emission
+
+  @Test func emitsToolRoundHeaderEvent() async throws {
+    let harness = TestHarness(outcomes: [
+      .toolCalls([ToolInvocation(id: "c1", name: "fake_tool", arguments: "{}")]),
+      .completed,
+    ])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let collector = EventCollector()
+    let loop = AgentLoop(harness: harness, registry: registry)
+
+    var messages: [Components.Schemas.ChatMessage] = []
+    _ = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { collector.append($0) }
+    )
+    let hasHeader = collector.contains(where: {
+      if case .toolRoundHeader(let round, let names) = $0,
+         round == 1, names == ["fake_tool"] { return true }
+      return false
+    })
+    #expect(hasHeader)
+  }
+
+  @Test func emitsToolInvocationAndBlankLineEvents() async throws {
+    let harness = TestHarness(outcomes: [
+      .toolCalls([ToolInvocation(id: "c1", name: "fake_tool", arguments: #"{"x":1}"#)]),
+      .completed,
+    ])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    let collector = EventCollector()
+    let loop = AgentLoop(harness: harness, registry: registry)
+
+    var messages: [Components.Schemas.ChatMessage] = []
+    _ = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { collector.append($0) }
+    )
+
+    let invocation = collector.events.first(where: {
+      if case .toolInvocation = $0 { return true }
+      return false
+    })
+    guard case .toolInvocation(let name, let args, let output) = invocation else {
+      #expect(Bool(false), "expected toolInvocation event")
+      return
+    }
+    #expect(name == "fake_tool")
+    #expect(args == #"{"x":1}"#)
+    // FakeTool echoes the arguments as JSON; output is non-empty and self-describing.
+    #expect(!output.isEmpty)
+    #expect(output.contains("ok"))
+
+    // Blank line should follow the tool invocation
+    let invIndex = collector.events.firstIndex(where: {
+      if case .toolInvocation = $0 { return true }
+      return false
+    })
+    guard let idx = invIndex, idx + 1 < collector.events.count else {
+      #expect(Bool(false), "expected blankLine after toolInvocation")
+      return
+    }
+    if case .blankLine = collector.events[idx + 1] {
+      // expected
+    } else {
+      #expect(Bool(false), "expected blankLine after toolInvocation")
+    }
   }
 }
