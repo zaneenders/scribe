@@ -2,6 +2,7 @@ import Foundation
 import Logging
 import ScribeCore
 import ScribeLLM
+import Synchronization
 import Testing
 
 // MARK: - Fakes
@@ -22,43 +23,51 @@ private struct FakeTool: ScribeTool {
   }
 }
 
-private final class FakeHarness: @unchecked Sendable {
-  var callCount = 0
-  var lastMessagesCount = 0
-  let outcomes: [RoundOutcome]
-  let tools: [Components.Schemas.ChatTool]
+private final class TestHarness: AgentHarnessProtocol, Sendable {
+  let model = "test-model"
+  private let state: Mutex<State>
 
-  init(outcomes: [RoundOutcome], tools: [Components.Schemas.ChatTool] = []) {
-    self.outcomes = outcomes
-    self.tools = tools
+  private struct State {
+    var callCount = 0
+    var lastMessagesCount = 0
+    var outcomes: [RoundOutcome] = []
   }
 
-  func nextOutcome() -> RoundOutcome? {
-    guard callCount < outcomes.count else { return nil }
-    defer { callCount += 1 }
-    return outcomes[callCount]
+  init(outcomes: [RoundOutcome]) {
+    state = Mutex(State(outcomes: outcomes))
   }
-}
 
-extension FakeHarness: AgentHarnessProtocol {
-  nonisolated var model: String { "fake-model" }
+  var callCount: Int {
+    state.withLock { $0.callCount }
+  }
 
   func runRound(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool
   ) async throws -> RoundOutcome {
-    lastMessagesCount = messages.count
-    guard let outcome = nextOutcome() else {
-      return .completed
+    let outcome = state.withLock { state -> RoundOutcome? in
+      state.lastMessagesCount = messages.count
+      guard state.callCount < state.outcomes.count else { return nil }
+      defer { state.callCount += 1 }
+      return state.outcomes[state.callCount]
     }
+    guard let outcome else { return .completed }
     if case .toolCalls(let invocations) = outcome {
       let assistantMessage = Components.Schemas.ChatMessage(
         role: .assistant,
         content: "",
         name: nil,
-        toolCalls: invocations.map {
-          .init(id: $0.id, _type: "function", function: .init(name: $0.name, arguments: $0.arguments))
+        toolCalls: invocations.map { inv in
+          Components.Schemas.AssistantToolCall(
+            id: inv.id,
+            _type: "function",
+            function: .init(
+              name: inv.name,
+              arguments: inv.arguments
+            )
+          )
         },
         toolCallId: nil,
         reasoningContent: nil
@@ -69,6 +78,9 @@ extension FakeHarness: AgentHarnessProtocol {
   }
 }
 
+// These helpers still need @unchecked Sendable since they are used across
+// isolation domains in tests. They are simple data holders without complex
+// synchronization needs.
 private final class EventCollector: @unchecked Sendable {
   var events: [TranscriptEvent] = []
 
@@ -94,37 +106,37 @@ private final class AbortState: @unchecked Sendable {
 @Suite
 struct AgentLoopTests {
   @Test func completedRoundReturnsCompleted() async throws {
-    let harness = FakeHarness(outcomes: [.completed])
+    let harness = TestHarness(outcomes: [.completed])
     let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      registry: registry,
-      onEvent: { _ in }
+      registry: registry
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test")
+      logger: Logger(label: "test"),
+      onEvent: { _ in }
     )
     #expect(outcome == .completed)
     #expect(harness.callCount == 1)
   }
 
   @Test func toolCallsAreExecutedAndMessagesAppended() async throws {
-    let harness = FakeHarness(outcomes: [
+    let harness = TestHarness(outcomes: [
       .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{\"x\":1}")]),
       .completed,
     ])
     let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      registry: registry,
-      onEvent: { _ in }
+      registry: registry
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test")
+      logger: Logger(label: "test"),
+      onEvent: { _ in }
     )
     #expect(outcome == .completed)
     #expect(harness.callCount == 2)
@@ -136,17 +148,17 @@ struct AgentLoopTests {
   }
 
   @Test func abortBeforeRoundReturnsInterrupted() async throws {
-    let harness = FakeHarness(outcomes: [.completed])
+    let harness = TestHarness(outcomes: [.completed])
     let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      registry: registry,
-      onEvent: { _ in }
+      registry: registry
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
       logger: Logger(label: "test"),
+      onEvent: { _ in },
       shouldAbortTurn: { true }
     )
     #expect(outcome == .interrupted)
@@ -154,20 +166,20 @@ struct AgentLoopTests {
   }
 
   @Test func abortBeforeToolReturnsInterrupted() async throws {
-    let harness = FakeHarness(outcomes: [
+    let harness = TestHarness(outcomes: [
       .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{}")])
     ])
     let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
       harness: harness,
-      registry: registry,
-      onEvent: { _ in }
+      registry: registry
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let state = AbortState()
     let outcome = try await loop.runModelTurn(
       messages: &messages,
       logger: Logger(label: "test"),
+      onEvent: { _ in },
       shouldAbortTurn: {
         if state.value {
           return true
@@ -181,7 +193,7 @@ struct AgentLoopTests {
   }
 
   @Test func unknownToolEmitsWarningEvent() async throws {
-    let harness = FakeHarness(outcomes: [
+    let harness = TestHarness(outcomes: [
       .toolCalls([ToolInvocation(id: "call_1", name: "missing_tool", arguments: "{}")]),
       .completed,
     ])
@@ -189,13 +201,13 @@ struct AgentLoopTests {
     let collector = EventCollector()
     let loop = AgentLoop(
       harness: harness,
-      registry: registry,
-      onEvent: { collector.append($0) }
+      registry: registry
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test")
+      logger: Logger(label: "test"),
+      onEvent: { collector.append($0) }
     )
     #expect(outcome == .completed)
     let hasToolEvent = collector.contains(where: {

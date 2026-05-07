@@ -34,17 +34,14 @@ import ScribeLLM
 public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public var client: Client
   public var model: String
-  private let onEvent: @Sendable (TranscriptEvent) -> Void
   private let tools: [Components.Schemas.ChatTool]
   private let clock = ContinuousClock()
 
   public init(
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     client: Client,
     model: String,
     tools: [Components.Schemas.ChatTool]
   ) {
-    self.onEvent = onEvent
     self.client = client
     self.model = model
     self.tools = tools
@@ -53,6 +50,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public func runRound(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> RoundOutcome {
     let requestBody = buildRequest(messages: messages)
@@ -66,7 +64,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       streamWallStart: clock.now
     )
     try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
-    return finalizeTurn(turn, processor: processor, messages: &messages, logger: logger)
+    return finalizeTurn(turn, processor: processor, messages: &messages, logger: logger, onEvent: onEvent)
   }
 
   // MARK: - Private helpers
@@ -152,7 +150,8 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     _ turn: StreamedAssistantTurn,
     processor: StreamProcessor,
     messages: inout [Components.Schemas.ChatMessage],
-    logger: Logger
+    logger: Logger,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
   ) -> RoundOutcome {
     let streamElapsedMs = Int((clock.now - processor.streamWallStart) / .milliseconds(1))
     if let u = processor.lastUsage {

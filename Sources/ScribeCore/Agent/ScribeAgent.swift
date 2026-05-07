@@ -34,6 +34,7 @@ public struct ScribeAgent: Sendable {
   public let toolRegistry: ToolRegistry
 
   private let chatTools: [Components.Schemas.ChatTool]
+  private let loop: AgentLoop
 
   /// Primary initializer: provide an `AgentConfig` that includes the server URL
   /// and optional bearer token; the HTTP client is created internally.
@@ -67,6 +68,15 @@ public struct ScribeAgent: Sendable {
     self.systemPrompt = systemPrompt
     self.toolRegistry = ToolRegistry(tools: tools)
     self.chatTools = DefaultAgentTools.chatTools(from: tools)
+    let harness = AgentHarness(
+      client: client,
+      model: configuration.agentModel,
+      tools: chatTools
+    )
+    self.loop = AgentLoop(
+      harness: harness,
+      registry: toolRegistry
+    )
   }
 
   // MARK: - runTurn
@@ -81,20 +91,10 @@ public struct ScribeAgent: Sendable {
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
-    let harness = AgentHarness(
-      onEvent: onEvent,
-      client: client,
-      model: configuration.agentModel,
-      tools: chatTools
-    )
-    let loop = AgentLoop(
-      harness: harness,
-      registry: toolRegistry,
-      onEvent: onEvent
-    )
     return try await loop.runModelTurn(
       messages: &messages,
       logger: log,
+      onEvent: onEvent,
       maxToolRounds: maxToolRounds,
       shouldAbortTurn: shouldAbortTurn
     )

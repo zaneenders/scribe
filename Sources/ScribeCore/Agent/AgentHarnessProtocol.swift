@@ -9,6 +9,7 @@ public protocol AgentHarnessProtocol: Sendable {
   func runRound(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool
   ) async throws -> RoundOutcome
 }

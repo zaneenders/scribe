@@ -7,21 +7,19 @@ import ScribeLLM
 public struct AgentLoop: Sendable {
   private let harness: any AgentHarnessProtocol
   private let registry: ToolRegistry
-  private let onEvent: @Sendable (TranscriptEvent) -> Void
 
   public init(
     harness: any AgentHarnessProtocol,
-    registry: ToolRegistry,
-    onEvent: @escaping @Sendable (TranscriptEvent) -> Void
+    registry: ToolRegistry
   ) {
     self.harness = harness
     self.registry = registry
-    self.onEvent = onEvent
   }
 
   public func runModelTurn(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     maxToolRounds: Int = .max,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
@@ -54,6 +52,7 @@ public struct AgentLoop: Sendable {
         roundOutcome = try await harness.runRound(
           messages: &messages,
           logger: logger,
+          onEvent: onEvent,
           shouldAbortTurn: shouldAbortTurn
         )
       } catch is AgentTurnInterruptedError {
