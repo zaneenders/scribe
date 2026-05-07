@@ -15,9 +15,21 @@ public struct ToolRegistry: Sendable {
     self.tools = map
   }
 
-  /// Execute a tool by name, logging start/completed/errored events
-  /// with wall-clock duration measured by `ContinuousClock`.
-  public func run(name: String, arguments: String) async -> String {
+  /// Execute a tool by name with cooperative abort support.
+  ///
+  /// A task group runs the tool while another task polls `shouldAbortTurn()`.
+  /// If the abort condition fires, the tool task is cancelled — tools that use
+  /// `withTaskCancellationHandler` (e.g. Shell sends SIGKILL) respond promptly.
+  ///
+  /// Pass `abortVia: { false }` when abort support is not needed.
+  ///
+  /// - Throws: `AgentTurnInterruptedError` if `shouldAbortTurn()` returns true.
+  /// - Returns: JSON-encoded tool result (or JSON error string for tool failures).
+  public func run(
+    name: String,
+    arguments: String,
+    abortVia shouldAbortTurn: @escaping @Sendable () -> Bool
+  ) async throws -> String {
     guard let tool = tools[name] else {
       Self.logger.debug(
         """
@@ -32,34 +44,114 @@ public struct ToolRegistry: Sendable {
       """
       event=agent.tool.start \
       tool=\(name) \
-      args_chars=\(arguments.count)
+      args_chars=\(arguments.count) \
+      args="\(arguments.logSafe())"
       """)
+
+    let json: String
     do {
-      let result = try await tool.run(arguments: arguments)
-      let elapsed = start.duration(to: clock.now)
-      let elapsedMs = Int(elapsed / .milliseconds(1))
-      let encoder = JSONEncoder()
-      encoder.keyEncodingStrategy = .convertToSnakeCase
-      do {
-        let json = try Self.encode(result, using: encoder)
-        Self.logger.debug(
+      let groupStart = clock.now
+      json = try await withThrowingTaskGroup(of: String.self) { group in
+        group.addTask {
+          do {
+            let value = try await tool.run(arguments: arguments)
+            let elapsed = start.duration(to: clock.now)
+            let elapsedMs = Int(elapsed / .milliseconds(1))
+            do {
+              let encoder = JSONEncoder()
+              encoder.keyEncodingStrategy = .convertToSnakeCase
+              let encoded = try Self.encode(value, using: encoder)
+              Self.logger.debug(
+                """
+                event=agent.tool.completed \
+                tool=\(name) \
+                elapsed_ms=\(elapsedMs) \
+                output_chars=\(encoded.count) \
+                args="\(arguments.logSafe())"
+                """)
+              return encoded
+            } catch {
+              Self.logger.warning(
+                """
+                event=agent.tool.encode_failed \
+                tool=\(name) \
+                elapsed_ms=\(elapsedMs) \
+                args="\(arguments.logSafe())" \
+                error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
+                """)
+              return Self.jsonError(String(describing: error))
+            }
+          } catch {
+            let elapsed = start.duration(to: clock.now)
+            let elapsedMs = Int(elapsed / .milliseconds(1))
+            Self.logger.trace(
+              """
+              event=agent.tool.task.exited \
+              tool=\(name) \
+              elapsed_ms=\(elapsedMs) \
+              args="\(arguments.logSafe())" \
+              error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
+              """)
+            return Self.jsonError(String(describing: error))
+          }
+        }
+        group.addTask {
+          Self.logger.trace(
+            """
+            event=agent.tool.polling.start \
+            tool=\(name)
+            """)
+          while true {
+            if shouldAbortTurn() {
+              Self.logger.trace(
+                """
+                event=agent.tool.polling.abort-detected \
+                tool=\(name)
+                """)
+              throw AgentTurnInterruptedError()
+            }
+            try await Task.sleep(for: .milliseconds(100))
+          }
+        }
+        defer {
+          let deferMs = Int(start.duration(to: clock.now) / .milliseconds(1))
+          Self.logger.trace(
+            """
+            event=agent.tool.taskgroup.cancelAll \
+            tool=\(name) \
+            elapsed_ms=\(deferMs)
+            """)
+          group.cancelAll()
+        }
+        let winner = try await group.next()!
+        let winnerMs = Int(groupStart.duration(to: clock.now) / .milliseconds(1))
+        Self.logger.trace(
           """
-          event=agent.tool.completed \
+          event=agent.tool.taskgroup.first-completed \
           tool=\(name) \
-          elapsed_ms=\(elapsedMs) \
-          output_chars=\(json.count)
+          elapsed_ms=\(winnerMs) \
+          result_chars=\(winner.count)
           """)
-        return json
-      } catch {
-        Self.logger.warning(
-          """
-          event=agent.tool.encode_failed \
-          tool=\(name) \
-          elapsed_ms=\(elapsedMs) \
-          error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
-          """)
-        return Self.jsonError(String(describing: error))
+        return winner
       }
+      let cleanupMs = Int(start.duration(to: clock.now) / .milliseconds(1))
+      Self.logger.trace(
+        """
+        event=agent.tool.taskgroup.all-completed \
+        tool=\(name) \
+        cleanup_elapsed_ms=\(cleanupMs)
+        """)
+    } catch is AgentTurnInterruptedError {
+      let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
+      Self.logger.debug(
+        """
+        event=agent.tool.errored \
+        tool=\(name) \
+        elapsed_ms=\(elapsedMs) \
+        args="\(arguments.logSafe())" \
+        error="AgentTurnInterruptedError"
+        """)
+      throw AgentTurnInterruptedError()
     } catch {
       let elapsed = start.duration(to: clock.now)
       let elapsedMs = Int(elapsed / .milliseconds(1))
@@ -68,10 +160,13 @@ public struct ToolRegistry: Sendable {
         event=agent.tool.errored \
         tool=\(name) \
         elapsed_ms=\(elapsedMs) \
+        args="\(arguments.logSafe())" \
         error="\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))"
         """)
       return Self.jsonError(String(describing: error))
     }
+
+    return json
   }
 
   // MARK: - Encoding helpers
@@ -92,5 +187,16 @@ public struct ToolRegistry: Sendable {
     } catch {
       return jsonSerializationFallback
     }
+  }
+}
+
+extension String {
+  /// Escape quotes and truncate to a reasonable length for structured log lines.
+  func logSafe(maxLength: Int = 500) -> String {
+    let escaped = replacingOccurrences(of: "\"", with: "\\\"")
+    if escaped.count <= maxLength {
+      return escaped
+    }
+    return String(escaped.prefix(maxLength)) + "..."
   }
 }

@@ -196,7 +196,8 @@ internal enum SlateChatRenderer {
     }
 
     if headerRows >= 2, let banner {
-      let modelWithVersion = "\(banner.model)  v:\(banner.scribeVersion)"
+      let shortId = String(banner.sessionId.prefix(8))
+      let modelWithVersion = "\(banner.model)  v:\(banner.scribeVersion)  sid:\(shortId)"
       paintBannerKV(
         into: &grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage, label: "Model: ",
         valueSpans: [

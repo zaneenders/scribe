@@ -6,6 +6,7 @@ struct ShellToolResult: Encodable, Sendable {
   let exitCode: Int
   let stdout: String
   let stderr: String
+  let pid: pid_t
 }
 
 public struct ShellTool: ScribeTool {
@@ -38,6 +39,7 @@ public struct ShellTool: ScribeTool {
     Self.logger.debug(
       """
       event=agent.tool.shell \
+      pid=\(result.pid) \
       exit_code=\(result.exitCodeForJSON) \
       stdout_chars=\(result.stdout.count) \
       stderr_chars=\(result.stderr.count)
@@ -45,7 +47,8 @@ public struct ShellTool: ScribeTool {
     return ShellToolResult(
       exitCode: result.exitCodeForJSON,
       stdout: result.stdout,
-      stderr: result.stderr
+      stderr: result.stderr,
+      pid: result.pid
     )
   }
 }

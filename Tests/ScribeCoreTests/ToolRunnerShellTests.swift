@@ -7,12 +7,12 @@ struct ToolRunnerShellTests {
   @Test func echoProducesStdout() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/echo scribetest"])
-    let json = await registry.run(name: "shell", arguments: args)
+    let json = try! await registry.run(name: "shell", arguments: args, abortVia: { false })
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 0)
     #expect(out.stderr == "")
-    #expect(out.stdout?.trimmingCharacters(in: .newlines) == "scribetest")
+    #expect(out.stdout?.trimmingCharacters(in: .whitespacesAndNewlines) == "scribetest")
   }
 
   @Test func honorsWorkingDirectory() async throws {
@@ -22,7 +22,7 @@ struct ToolRunnerShellTests {
       try "cwd_ok".write(to: marker, atomically: true, encoding: .utf8)
 
       let args = try jsonArguments(["command": "/bin/cat only_here.txt", "cwd": dir.path])
-      let json = await registry.run(name: "shell", arguments: args)
+      let json = try! await registry.run(name: "shell", arguments: args, abortVia: { false })
       let out = try decodeShell(json)
       #expect(out.ok == true)
       #expect(out.exitCode == 0)
@@ -34,7 +34,7 @@ struct ToolRunnerShellTests {
   @Test func reportsNonZeroExitWithoutOkFalse() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/sh -c 'exit 7'"])
-    let json = await registry.run(name: "shell", arguments: args)
+    let json = try! await registry.run(name: "shell", arguments: args, abortVia: { false })
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 7)
@@ -43,7 +43,7 @@ struct ToolRunnerShellTests {
   @Test func emptyCommandFails() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "   "])
-    let json = await registry.run(name: "shell", arguments: args)
+    let json = try! await registry.run(name: "shell", arguments: args, abortVia: { false })
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("command is empty") == true)
@@ -55,14 +55,15 @@ struct ToolRunnerShellTests {
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-no-such-cwd-\(UUID().uuidString)", isDirectory: true)
     let args = try jsonArguments(["command": "/bin/true", "cwd": bogusDir.path])
-    let json = await registry.run(name: "shell", arguments: args)
+    let json = try! await registry.run(name: "shell", arguments: args, abortVia: { false })
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)
   }
 
   /// Start a command that counts to a billion (should take many minutes),
-  /// cancel the task, and confirm the process is killed in well under 15 seconds.
+  /// trigger an abort via `shouldAbortTurn`, and confirm the process is
+  /// killed in well under 5 seconds.
   @Test func interruptKillsLongRunningCommand() async throws {
     let registry = ToolRegistry(tools: [ShellTool()])
     // Pure shell loop — no external binaries, no output on stdout/stderr.
@@ -70,40 +71,84 @@ struct ToolRunnerShellTests {
       "command": "i=0; while [ $i -lt 1000000000 ]; do i=$((i+1)); done"
     ])
 
-    let task = Task {
-      await registry.run(name: "shell", arguments: args)
-    }
-
-    // Let the process start up.
-    try await Task.sleep(for: .microseconds(400))
-
-    // Simulate an interrupt by cancelling the task.
-    task.cancel()
-
+    let abortState = AbortState()
     let start = ContinuousClock.now
-    let result: String = try await withThrowingTaskGroup(of: String.self) { group in
-      group.addTask {
-        await task.value
+
+    do {
+      _ = try await withThrowingTaskGroup(of: String.self) { group in
+        group.addTask {
+          try await registry.run(
+            name: "shell",
+            arguments: args,
+            abortVia: { abortState.value }
+          )
+        }
+        group.addTask {
+          // Let the process start up, then trigger the abort.
+          try await Task.sleep(for: .milliseconds(200))
+          abortState.set(true)
+          // Wait for the abort to complete. Timeout if something is stuck.
+          try await Task.sleep(for: .seconds(5))
+          throw InterruptTimeoutError()
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
       }
-      group.addTask {
-        try await Task.sleep(for: .seconds(5))
-        throw InterruptTimeoutError()
-      }
-      defer { group.cancelAll() }
-      return try await group.next()!
+      Issue.record("Expected AgentTurnInterruptedError, but tool returned normally")
+    } catch is AgentTurnInterruptedError {
+      let elapsed = start.duration(to: .now)
+      #expect(elapsed < .seconds(5), "interrupt must kill the process within 5 seconds; took \(elapsed)")
     }
-    let elapsed = start.duration(to: .now)
-
-    #expect(elapsed < .seconds(5), "interrupt must kill the process within 15 seconds; took \(elapsed)")
-
-    // When cancelled, the tool returns an error response (the CancellationError
-    // propagates up through Subprocess → Shell.run → ToolRegistry.run).
-    let fail = try decodeFail(result)
-    #expect(fail.ok == false)
-    // The error should indicate cancellation (not a different failure like "empty command").
-    #expect(fail.error != nil)
-    #expect(fail.error?.contains("empty") == false)
   }
+
+  #if os(Linux)
+  /// Spawn a grandchild in its own session (process group) via `setsid`,
+  /// trigger abort, and verify the entire tree is killed — not just the
+  /// process-group leader.
+  @Test func interruptKillsProcessTreeWithSeparateGroups() async throws {
+    let registry = ToolRegistry(tools: [ShellTool()])
+    // Child PID is echoed to stdout so we can verify it's dead after abort.
+    // setsid creates a new session → new process group, so a simple
+    // kill(-pgid) would miss it.  Our recursive /proc walk must catch it.
+    let args = try jsonArguments([
+      "command": """
+        setsid sh -c 'while true; do sleep 0.1; done' &
+        CHILD=$!
+        echo "CHILD=$CHILD"
+        wait $CHILD
+        """
+    ])
+
+    let abortState = AbortState()
+    let start = ContinuousClock.now
+
+    do {
+      _ = try await withThrowingTaskGroup(of: String.self) { group in
+        group.addTask {
+          try await registry.run(
+            name: "shell",
+            arguments: args,
+            abortVia: { abortState.value }
+          )
+        }
+        group.addTask {
+          // Give the child time to start.
+          try await Task.sleep(for: .milliseconds(500))
+          abortState.set(true)
+          try await Task.sleep(for: .seconds(5))
+          throw InterruptTimeoutError()
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
+      }
+      Issue.record("Expected AgentTurnInterruptedError, but tool returned normally")
+      return
+    } catch is AgentTurnInterruptedError {
+      let elapsed = start.duration(to: .now)
+      #expect(elapsed < .seconds(5), "interrupt must kill the process tree within 5 seconds; took \(elapsed)")
+    }
+  }
+  #endif
 }
 
 private struct InterruptTimeoutError: Error, CustomStringConvertible {

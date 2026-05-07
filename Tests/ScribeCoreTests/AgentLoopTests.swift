@@ -81,7 +81,7 @@ private final class EventCollector: @unchecked Sendable {
   }
 }
 
-private final class AbortState: @unchecked Sendable {
+final class AbortState: @unchecked Sendable {
   var value = false
 
   func set(_ newValue: Bool) {

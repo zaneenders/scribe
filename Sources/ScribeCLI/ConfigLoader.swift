@@ -62,15 +62,15 @@ public enum ScribeLogLevel: String, Sendable, CaseIterable {
 
 // MARK: - Logging infrastructure
 
-final class LockedDataWriter: Sendable {
+public final class LockedDataWriter: Sendable {
   private let mutex = Mutex(())
   private let emit: @Sendable (Data) -> Void
 
-  init(_ emit: @escaping @Sendable (Data) -> Void) {
+  public init(_ emit: @escaping @Sendable (Data) -> Void) {
     self.emit = emit
   }
 
-  func write(_ data: Data) {
+  public func write(_ data: Data) {
     mutex.withLock { _ in emit(data) }
   }
 }
@@ -197,23 +197,15 @@ public struct LoadedConfig: Sendable {
     if !FileManager.default.fileExists(atPath: fileURL.path) {
       _ = FileManager.default.createFile(atPath: fileURL.path, contents: nil)
     }
-    guard let fileHandle = try? FileHandle(forUpdating: fileURL) else {
-      // Last-resort fallback: emit to stderr if we can't open the per-session file.
-      return Logger(label: "scribe.session") { _ in
-        ScribeLineLogHandler(
-          minimumLevel: level,
-          dataWriter: LockedDataWriter { data in
-            try? FileHandle.standardError.write(contentsOf: data)
-          })
-      }
+    if let fileHandle = try? FileHandle(forUpdating: fileURL) {
+      _ = try? fileHandle.seekToEnd()
+      let sink = FileSink(handle: fileHandle)
+      let fileWriter = LockedDataWriter { data in sink.write(data) }
+      SharedLogWriter.swap(to: fileWriter, level: level)
     }
-    _ = try? fileHandle.seekToEnd()
-
-    let sink = FileSink(handle: fileHandle)
-    let fileWriter = LockedDataWriter { data in sink.write(data) }
-    return Logger(label: "scribe.session") { _ in
-      ScribeLineLogHandler(minimumLevel: level, dataWriter: fileWriter)
-    }
+    // Logger will use the globally bootstrapped SharedLogLineHandler,
+    // which now writes through the swapped file writer.
+    return Logger(label: "scribe.session")
   }
 }
 

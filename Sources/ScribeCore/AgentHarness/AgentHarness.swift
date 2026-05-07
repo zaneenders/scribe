@@ -25,7 +25,7 @@ import ScribeLLM
 /// | `agent.stream.abort` | `where chunks had_visible_tokens` | Turn was aborted while streaming. `where` is `mid-stream` or `post-stream`. |
 /// | `agent.assistant.final` | `round answer_chars reasoning_chars` | Assistant produced a final reply with no tool calls. |
 /// | `agent.tool.round` | `round tool_count tools` | Assistant requested tool calls; runner is about to execute them. |
-/// | `agent.tool.invoke` | `round tool args_chars output_chars elapsed_ms unknown` | A single tool call completed. |
+/// | `agent.tool.invoke` | `round tool args_chars args output_chars elapsed_ms unknown` | A single tool call completed. `args` is the JSON arguments (escaped, truncated at 500 chars). |
 /// | `agent.tool.unknown` | `round tool` | Tool runner reported the call name as unknown. |
 /// | `agent.tool.round.end` | `round messages` | All tool calls in a round done; loop will request the next model response. |
 /// | `agent.turn.end` | `turn status [elapsed_ms limit err]` | Coordinator's outcome line per turn. `status` is `completed`, `tool-round-limit`, `interrupted`, or `error`. |

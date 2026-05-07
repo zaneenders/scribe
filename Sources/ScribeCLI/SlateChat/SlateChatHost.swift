@@ -45,6 +45,15 @@ private final class ModelTurnInterruptFlag: Sendable {
   func peek() -> Bool {
     lock.withLock { $0 }
   }
+
+  func logState(_ logger: Logger, tag: String) {
+    let val = peek()
+    logger.trace(
+      """
+      event=chat.interrupt-flag.\(tag) \
+      value=\(val)
+      """)
+  }
 }
 
 /// Incremental word-wrap flatten of completed transcript lines (streaming only re-wraps the open tail).
@@ -223,7 +232,8 @@ internal final class SlateChatHost {
           model: self.configuration.agentModel,
           cwd: cwd,
           scribeVersion: GitVersion.hash,
-          gitBranch: gitBranch)
+          gitBranch: gitBranch,
+          sessionId: self.sessionId.uuidString)
 
         let interruptFlag = self.modelInterruptFlag
         let sessionLog = self.log
@@ -254,8 +264,21 @@ internal final class SlateChatHost {
               },
               initialConversation: resumeSnapshot?.messages,
               onConversationPersist: persist,
-              prepareModelTurnStart: { interruptFlag.clear() },
-              shouldAbortTurn: { interruptFlag.peek() },
+              prepareModelTurnStart: {
+                interruptFlag.clear()
+                interruptFlag.logState(sessionLog, tag: "cleared-for-new-turn")
+              },
+              shouldAbortTurn: {
+                let v = interruptFlag.peek()
+                if v {
+                  sessionLog.trace(
+                    """
+                    event=chat.interrupt-flag.polled \
+                    value=true
+                    """)
+                }
+                return v
+              },
               log: sessionLog
             )
           } catch {
@@ -322,6 +345,7 @@ internal final class SlateChatHost {
                   model_busy=true
                   """)
                 self.modelInterruptFlag.request()
+                self.modelInterruptFlag.logState(self.log, tag: "requested-by-ctrl-c")
                 self.renderWake?.requestRender()
               } else {
                 // 3. Exit chat

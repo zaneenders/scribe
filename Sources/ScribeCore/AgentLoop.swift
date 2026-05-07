@@ -93,35 +93,41 @@ public struct AgentLoop: Sendable {
             throw AgentTurnInterruptedError()
           }
           let toolStarted = Date()
-          // Run the tool in a task group that polls shouldAbortTurn so
-          // long-running commands (e.g. shell builds) can be cancelled
-          // cooperatively.  The abort task throws AgentTurnInterruptedError,
-          // which cancels the tool task.  Shell.run responds to cancellation
-          // by sending SIGINT to the child process.
+          // ToolRegistry.run(name:arguments:abortVia:) wraps the
+          // tool in a task group that polls shouldAbortTurn so long-running
+          // commands (e.g. shell builds) can be cancelled cooperatively.
           let jsonOutput: String
           do {
-            jsonOutput = try await withThrowingTaskGroup(of: String.self) { group in
-              group.addTask {
-                await registry.run(name: inv.name, arguments: inv.arguments)
-              }
-              group.addTask {
-                while true {
-                  if shouldAbortTurn() {
-                    throw AgentTurnInterruptedError()
-                  }
-                  try await Task.sleep(for: .milliseconds(100))
-                }
-              }
-              defer { group.cancelAll() }
-              return try await group.next()!
-            }
+            logger.trace(
+              """
+              event=agent.tool.invoking \
+              tool=\(inv.name) \
+              round=\(round) \
+              args_chars=\(inv.arguments.count)
+              """)
+            jsonOutput = try await registry.run(
+              name: inv.name,
+              arguments: inv.arguments,
+              abortVia: shouldAbortTurn
+            )
+            let elapsedMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
+            logger.trace(
+              """
+              event=agent.tool.invoked \
+              tool=\(inv.name) \
+              round=\(round) \
+              elapsed_ms=\(elapsedMs) \
+              output_chars=\(jsonOutput.count)
+              """)
           } catch is AgentTurnInterruptedError {
+            let abortMs = Int(Date().timeIntervalSince(toolStarted) * 1000)
             logger.notice(
               """
               event=agent.abort \
               where=mid-tool \
               tool=\(inv.name) \
-              round=\(round)
+              round=\(round) \
+              until_abort_ms=\(abortMs)
               """
             )
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
@@ -144,6 +150,7 @@ public struct AgentLoop: Sendable {
             round=\(round) \
             tool=\(inv.name) \
             args_chars=\(inv.arguments.count) \
+            args="\(inv.arguments.logSafe())" \
             output_chars=\(jsonOutput.count) \
             elapsed_ms=\(elapsedMs) \
             unknown=\(unknown)
