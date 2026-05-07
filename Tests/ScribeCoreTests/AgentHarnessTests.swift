@@ -74,6 +74,11 @@ private func makeHarness(
 
 private let testLogger = Logger(label: "test")
 
+final class AbortState: @unchecked Sendable {
+  var value = false
+  func set(_ newValue: Bool) { value = newValue }
+}
+
 /// Helper to drain a stream and get the result.
 private func awaitRound(_ rs: RoundStream, collector: EventCollector? = nil) async throws -> RoundResult {
   if let c = collector {
@@ -108,7 +113,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs, collector: collector)
 
     #expect(result.outcome == .completed)
@@ -146,7 +151,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs, collector: collector)
 
     #expect(result.outcome == .completed)
@@ -173,7 +178,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs)
 
     guard case .toolCalls(let invocations) = result.outcome else {
@@ -200,7 +205,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs)
 
     #expect(result.outcome == .completed)
@@ -214,7 +219,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: [doneChunk()])
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs, collector: collector)
 
     #expect(result.outcome == .completed)
@@ -233,7 +238,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(statusCode: 500, chunks: [errorBody("Internal server error")])
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     do {
       _ = try await awaitRound(rs)
       #expect(Bool(false), "expected error")
@@ -250,7 +255,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(statusCode: 404, chunks: [errorBody("not found")])
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     do {
       _ = try await awaitRound(rs)
       #expect(Bool(false), "expected error")
@@ -268,7 +273,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(statusCode: 400, chunks: [errorBody("model not found")])
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     do {
       _ = try await awaitRound(rs)
       #expect(Bool(false), "expected error")
@@ -295,7 +300,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs, collector: collector)
 
     #expect(result.outcome == .completed)
@@ -323,7 +328,7 @@ struct AgentHarnessTests {
 
     let abortState = AbortState()
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(
+    let rs = harness.runRound(
       messages: messages,
       logger: testLogger,
       temperature: 0,
@@ -357,7 +362,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     _ = try await awaitRound(rs, collector: collector)
 
     let usageEvents = collector.events.compactMap {
@@ -381,7 +386,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     _ = try await awaitRound(rs, collector: collector)
 
     let hasUsage = collector.events.contains {
@@ -405,7 +410,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs)
 
     guard case .toolCalls = result.outcome else {
@@ -428,7 +433,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     _ = try await awaitRound(rs, collector: collector)
 
     let hasBlankLine = collector.events.contains {
@@ -449,7 +454,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks, model: "custom-model")
 
     let messages: [Components.Schemas.ChatMessage] = []
-    let rs = harness.runStreamingRound(messages: messages, logger: testLogger, temperature: 0)
+    let rs = harness.runRound(messages: messages, logger: testLogger, temperature: 0, shouldAbortTurn: { false })
     let result = try await awaitRound(rs)
 
     #expect(result.messages[0].role == .assistant)

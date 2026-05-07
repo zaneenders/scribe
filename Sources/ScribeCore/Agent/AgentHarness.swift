@@ -47,11 +47,11 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     self.tools = tools
   }
 
-  public func runStreamingRound(
+  public func runRound(
     messages: [Components.Schemas.ChatMessage],
     logger: Logger,
     temperature: Double,
-    shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
+    shouldAbortTurn: @escaping @Sendable () -> Bool
   ) -> RoundStream {
     let (stream, continuation) = AsyncStream<TranscriptEvent>.makeStream()
     var mutable = messages

@@ -8,7 +8,7 @@ public protocol AgentHarnessProtocol: Sendable {
 
   /// Execute a single LLM round, returning a live stream of events plus a
   /// deferred result with the outcome and updated messages.
-  func runStreamingRound(
+  func runRound(
     messages: [Components.Schemas.ChatMessage],
     logger: Logger,
     temperature: Double,

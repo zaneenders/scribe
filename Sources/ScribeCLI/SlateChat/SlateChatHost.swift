@@ -249,38 +249,92 @@ internal final class SlateChatHost {
               systemPrompt: systemPrompt,
               tools: tools
             )
-            try await agent.runInteractive(
-              onEvent: { event in sink.emit(event) },
-              readUserLine: {
-                // Record the submission in scrollback exactly when the coordinator picks it up,
-                // so messages held in the queued-tray (during a busy turn) appear in scrollback
-                // only at the moment they're dispatched—not while they sit in the tray.
-                guard let line = await gate.nextLine() else { return nil }
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                  sink.recordUserSubmission(trimmedVisible: trimmed)
-                }
-                return line
-              },
-              initialConversation: resumeSnapshot?.messages,
-              onConversationPersist: persist,
-              prepareModelTurnStart: {
-                interruptFlag.clear()
-                interruptFlag.logState(sessionLog, tag: "cleared-for-new-turn")
-              },
-              shouldAbortTurn: {
-                let v = interruptFlag.peek()
-                if v {
-                  sessionLog.trace(
-                    "chat.interrupt-flag.polled",
-                    metadata: [
-                      "value": "true"
-                    ])
-                }
-                return v
-              },
-              log: sessionLog
+
+            // Build initial history
+            var history: [Components.Schemas.ChatMessage]
+            if let initial = resumeSnapshot?.messages, !initial.isEmpty {
+              guard initial.first?.role == .system else {
+                throw ScribeError.sessionCorrupted(
+                  reason: "Resumed conversation must begin with a system message.")
+              }
+              history = initial
+            } else {
+              history = [
+                .init(role: .system, content: systemPrompt)
+              ]
+            }
+
+            persist(history)
+            sessionLog.debug("event=chat.coordinator.start messages=\(history.count) resumed=\(resumeSnapshot != nil)")
+
+            let tracker = TokenTracker(
+              contextWindow: configuration.contextWindow,
+              threshold: configuration.contextWindowThreshold
             )
+
+            while true {
+              guard let line = await gate.nextLine() else {
+                sessionLog.info("event=chat.user.eof reason=stdin-closed")
+                break
+              }
+              let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+              if trimmed == "exit" {
+                sessionLog.notice("event=chat.user.exit-command")
+                break
+              }
+              if trimmed.isEmpty {
+                sessionLog.trace("event=chat.user.empty-skip")
+                continue
+              }
+
+              // Record visible submission
+              sink.recordUserSubmission(trimmedVisible: trimmed)
+
+              history.append(.init(role: .user, content: trimmed))
+              sessionLog.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
+
+              interruptFlag.clear()
+              interruptFlag.logState(sessionLog, tag: "cleared-for-new-turn")
+              sink.emit(.modelTurnRunning(true))
+              defer { sink.emit(.modelTurnRunning(false)) }
+
+              do {
+                let ts = agent.streamTurn(
+                  messages: history,
+                  log: sessionLog,
+                  shouldAbortTurn: {
+                    let v = interruptFlag.peek()
+                    if v { sessionLog.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
+                    return v
+                  }
+                )
+                for await event in ts.events {
+                  if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
+                  sink.emit(event)
+                }
+                let result = try await ts.result.value
+                history = result.messages
+                switch result.outcome {
+                case .completed:
+                  sessionLog.info("event=agent.turn.end status=completed")
+                  tracker.logStatus(logger: sessionLog)
+                case .interrupted:
+                  sessionLog.notice("event=agent.turn.end status=interrupted")
+                  sink.emit(.turnInterrupted)
+                case .toolRoundLimit(let max):
+                  sessionLog.notice("event=agent.turn.end status=tool-round-limit limit=\(max)")
+                  sink.emit(.turnInterrupted)
+                }
+              } catch {
+                let se = (error as? ScribeError) ?? .generic(String(describing: error))
+                sessionLog.error("event=agent.turn.end status=error err=\"\(se.errorDescription ?? String(describing: se))\"")
+                sink.emit(.harnessError(se))
+                if history.last?.role == .user { history.removeLast() }
+              }
+              persist(history)
+            }
+            persist(history)
+            sessionLog.debug("event=chat.coordinator.end transcript_messages=\(history.count)")
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
             sink.emit(.harnessError(scribeError))
