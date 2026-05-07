@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import ScribeCLI
 import ScribeCore
 import ScribeLLM
 import Testing
@@ -81,7 +82,7 @@ private final class EventCollector: @unchecked Sendable {
   }
 }
 
-private final class AbortState: @unchecked Sendable {
+final class AbortState: @unchecked Sendable {
   var value = false
 
   func set(_ newValue: Bool) {
@@ -211,5 +212,20 @@ struct AgentLoopTests {
       return false
     })
     #expect(hasToolEvent)
+  }
+
+  // MARK: - Logging metadata flow
+
+  @Test func loggersCreatedForAgentLoopDoNotCrash() async throws {
+    // Just verify that running an agent loop with a logger does not crash.
+    let harness = FakeHarness(outcomes: [.completed])
+    let registry = ToolRegistry(tools: [FakeTool()])
+    var messages: [Components.Schemas.ChatMessage] = []
+    let loop = AgentLoop(harness: harness, registry: registry, onEvent: { _ in })
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "scribe.test.agentloop")
+    )
+    #expect(outcome == .completed)
   }
 }

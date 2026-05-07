@@ -65,18 +65,18 @@ public struct ReadFileTool: ScribeTool {
     let result = try Self.readFile(path: path, offset: offset, limit: limit)
     let returnedLines = max(0, result.endLine - result.startLine + 1)
     Self.logger.debug(
-      """
-      event=agent.tool.read_file \
-      ok=true \
-      path="\(result.absolutePath.replacingOccurrences(of: "\"", with: "\\\""))" \
-      bytes=\(result.totalBytes) \
-      total_lines=\(result.totalLines) \
-      start_line=\(result.startLine) \
-      end_line=\(result.endLine) \
-      returned_lines=\(returnedLines) \
-      content_chars=\(result.content.count) \
-      truncated=\(result.truncated)
-      """)
+      "agent.tool.read_file",
+      metadata: [
+        "ok": "true",
+        "path": "\(result.absolutePath.replacingOccurrences(of: "\"", with: "\\\""))",
+        "bytes": "\(result.totalBytes)",
+        "total_lines": "\(result.totalLines)",
+        "start_line": "\(result.startLine)",
+        "end_line": "\(result.endLine)",
+        "returned_lines": "\(returnedLines)",
+        "content_chars": "\(result.content.count)",
+        "truncated": "\(result.truncated)",
+      ])
     return ReadFileToolResult(
       path: result.absolutePath,
       content: result.content,

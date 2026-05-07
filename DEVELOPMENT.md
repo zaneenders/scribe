@@ -54,7 +54,7 @@ While scribe is doing work, trigger a sample from another terminal:
 
 ```bash
 curl --unix-socket /tmp/scribe-$(ls /tmp/scribe-*.sock | head -1 | sed 's/.*scribe-//;s/\.sock//').sock \
-  -sd '{"numberOfSamples":200,"timeInterval":"10ms"}' \
+  -sd '{"numberOfSamples":500,"timeInterval":"10ms"}' \
   http://localhost/sample > ./samples.perf
 ```
 
@@ -62,8 +62,22 @@ curl --unix-socket /tmp/scribe-$(ls /tmp/scribe-*.sock | head -1 | sed 's/.*scri
 
 | Key | Description |
 |---|---|
-| `numberOfSamples` | How many stacks to capture (200 ≈ 2 seconds at 10 ms intervals) |
+| `numberOfSamples` | How many stacks to capture (500 ≈ 5 seconds at 10 ms intervals) |
 | `timeInterval` | Sampling interval, e.g. `"10ms"` or `"100ms"` |
+
+**Choosing parameters:**
+
+- `"10ms"` (100 Hz) is a good default — fine-grained enough to see hot paths,
+  coarse enough to avoid excessive overhead.
+- `numberOfSamples` controls duration: 500 samples at 10ms = 5 seconds,
+  2000 at 10ms = 20 seconds. Start with 500; increase if you need a longer
+  window to catch sporadic work.
+- The profiler captures **all threads**. You'll see NIO event loops and GCD
+  worker threads even when the app is idle, so trigger the capture while the
+  app is actively doing the work you want to profile — not when it's sitting
+  at a prompt.
+- A 500-sample profile at 10ms produces a ~5 MB file. Scaling to 100,000
+  samples produces unwieldy ~100 MB files that are mostly idle-thread noise.
 
 ### Visualizing
 

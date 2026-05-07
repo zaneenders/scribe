@@ -10,7 +10,7 @@ struct ToolRunnerWriteFileTests {
       let fileURL = dir.appendingPathComponent("out.txt")
       let body = "written_once\nγ\n"
       let args = try jsonArguments(["path": fileURL.path, "content": body])
-      let json = await registry.run(name: "write_file", arguments: args)
+      let json = try! await registry.run(name: "write_file", arguments: args, abortVia: { false })
       let payload = try decodeWrite(json)
       #expect(payload.ok == true)
       #expect(payload.written == true)
@@ -19,8 +19,8 @@ struct ToolRunnerWriteFileTests {
       #expect(onDisk == body)
 
       let reread = try decodeRead(
-        await registry.run(
-          name: "read_file", arguments: try jsonArguments(["path": fileURL.path])))
+        try! await registry.run(
+          name: "read_file", arguments: try jsonArguments(["path": fileURL.path]), abortVia: { false }))
       #expect(reread.ok == true)
       #expect(reread.content == body)
     }
@@ -32,7 +32,7 @@ struct ToolRunnerWriteFileTests {
       let fileURL = dir.appendingPathComponent("overwrite.txt")
       try "old".write(to: fileURL, atomically: true, encoding: .utf8)
       let args = try jsonArguments(["path": fileURL.path, "content": "new"])
-      let json = await registry.run(name: "write_file", arguments: args)
+      let json = try! await registry.run(name: "write_file", arguments: args, abortVia: { false })
       let payload = try decodeWrite(json)
       #expect(payload.ok == true)
       let onDisk = try String(contentsOf: fileURL, encoding: .utf8)
@@ -46,7 +46,7 @@ struct ToolRunnerWriteFileTests {
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-deep-\(UUID().uuidString)/nope/out.txt")
     let args = try jsonArguments(["path": deep.path, "content": "x"])
-    let json = await registry.run(name: "write_file", arguments: args)
+    let json = try! await registry.run(name: "write_file", arguments: args, abortVia: { false })
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("parent directory does not exist") == true)
@@ -56,8 +56,8 @@ struct ToolRunnerWriteFileTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("only_path.txt")
-      let json = await registry.run(
-        name: "write_file", arguments: try jsonArguments(["path": fileURL.path]))
+      let json = try! await registry.run(
+        name: "write_file", arguments: try jsonArguments(["path": fileURL.path]), abortVia: { false })
       let fail = try decodeFail(json)
       #expect(fail.ok == false)
       #expect(fail.error?.contains("missing or empty field content") == true)
