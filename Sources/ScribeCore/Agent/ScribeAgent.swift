@@ -71,8 +71,7 @@ public struct ScribeAgent: Sendable {
     let harness = AgentHarness(
       client: client,
       model: configuration.agentModel,
-      tools: chatTools,
-      temperature: configuration.temperature
+      tools: chatTools
     )
     self.loop = AgentLoop(
       harness: harness,
@@ -88,6 +87,7 @@ public struct ScribeAgent: Sendable {
   public func runTurn(
     messages: inout [Components.Schemas.ChatMessage],
     log: Logger,
+    temperature: Double = 0,
     maxToolRounds: Int = .max,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
@@ -95,6 +95,7 @@ public struct ScribeAgent: Sendable {
     return try await loop.runModelTurn(
       messages: &messages,
       logger: log,
+      temperature: temperature,
       onEvent: onEvent,
       maxToolRounds: maxToolRounds,
       shouldAbortTurn: shouldAbortTurn
@@ -106,6 +107,7 @@ public struct ScribeAgent: Sendable {
   public func runInteractive(
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     readUserLine: @escaping @Sendable () async -> String?,
+    temperature: Double = 0,
     initialConversation: [Components.Schemas.ChatMessage]? = nil,
     onConversationPersist: (@Sendable ([Components.Schemas.ChatMessage]) -> Void)? = nil,
     prepareModelTurnStart: @escaping @Sendable () -> Void = {},
@@ -200,6 +202,7 @@ public struct ScribeAgent: Sendable {
         let outcome = try await runTurn(
           messages: &history,
           log: log,
+          temperature: temperature,
           onEvent: wrappedOnEvent,
           shouldAbortTurn: shouldAbortTurn
         )
@@ -265,6 +268,7 @@ public struct ScribeAgent: Sendable {
 
   public func runIPC(
     request: ScribeAgentRequest,
+    temperature: Double = 0,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     log: Logger
   ) async -> ScribeAgentResponse {
@@ -294,6 +298,7 @@ public struct ScribeAgent: Sendable {
       let outcome = try await runTurn(
         messages: &history,
         log: log,
+        temperature: temperature,
         onEvent: onEvent
       )
       let text = ChatHistory.lastAssistantText(from: history) ?? ""

@@ -14,22 +14,17 @@ public struct AgentConfig: Sendable {
   public var serverURL: String
   /// Optional bearer token for the API.
   public var bearerToken: String?
-  /// LLM sampling temperature (0.0–2.0). Default 0 for deterministic output.
-  public var temperature: Double
-
   public init(
     agentModel: String,
     contextWindow: Int = 131_072,
     contextWindowThreshold: Double = 0.85,
     serverURL: String = "https://api.openai.com",
-    bearerToken: String? = nil,
-    temperature: Double = 0
+    bearerToken: String? = nil
   ) {
     self.agentModel = agentModel
     self.contextWindow = contextWindow
     self.contextWindowThreshold = contextWindowThreshold
     self.serverURL = serverURL
     self.bearerToken = bearerToken
-    self.temperature = temperature
   }
 }

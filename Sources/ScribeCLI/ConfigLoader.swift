@@ -16,7 +16,6 @@ public enum ScribeConfigBinding {
   public static let agentModel: ConfigKey = "agent.model"
   public static let contextWindow: ConfigKey = "agent.contextWindow"
   public static let contextWindowThreshold: ConfigKey = "agent.contextWindowThreshold"
-  public static let temperature: ConfigKey = "agent.temperature"
   public static let loggingLevel: ConfigKey = "logging.level"
   /// Base directory for all Scribe storage. `logs/` and `sessions/` subdirectories are
   /// created under it automatically. Relative paths resolve against the process working
@@ -149,7 +148,6 @@ private struct ConfigTemplate: Codable {
     var model: String
     var contextWindow: Int
     var contextWindowThreshold: Double
-    var temperature: Double?
   }
   struct LoggingSection: Codable {
     var level: String
@@ -362,14 +360,6 @@ public enum ConfigLoader {
 
     let resolvedPathString = PathResolution.fileSystemPath(configPath)
 
-    let temperature: Double?
-    do {
-      temperature = try await reader.fetchRequiredDouble(
-        forKey: ScribeConfigBinding.temperature)
-    } catch {
-      temperature = nil
-    }
-
     var agentConfig = AgentConfig(
       agentModel: model,
       contextWindow: contextWindow,
@@ -377,7 +367,6 @@ public enum ConfigLoader {
     )
     agentConfig.serverURL = baseURL
     agentConfig.bearerToken = resolvedAPIKey
-    if let t = temperature { agentConfig.temperature = t }
     return LoadedConfig(
       agentConfig: agentConfig,
       apiBaseURL: baseURL,
@@ -400,8 +389,7 @@ public enum ConfigLoader {
       agent: ConfigTemplate.AgentSection(
         model: "gemma4:e2b",
         contextWindow: 128000,
-        contextWindowThreshold: 0.8,
-        temperature: 0
+        contextWindowThreshold: 0.8
       ),
       logging: ConfigTemplate.LoggingSection(
         level: "trace",

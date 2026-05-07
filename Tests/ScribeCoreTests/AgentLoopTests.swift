@@ -52,6 +52,7 @@ private final class TestHarness: AgentHarnessProtocol, Sendable {
   func runRound(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    temperature: Double,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool
   ) async throws -> RoundOutcome {
@@ -142,7 +143,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in }
     )
     #expect(outcome == .completed)
@@ -162,7 +163,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in }
     )
     #expect(outcome == .completed)
@@ -185,7 +186,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in },
       shouldAbortTurn: { true }
     )
@@ -206,7 +207,7 @@ struct AgentLoopTests {
     let state = AbortState()
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in },
       shouldAbortTurn: {
         if state.value {
@@ -234,7 +235,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { collector.append($0) }
     )
     #expect(outcome == .completed)
@@ -255,7 +256,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in }
     )
     #expect(outcome == .interrupted)
@@ -276,7 +277,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in },
       maxToolRounds: 1
     )
@@ -299,7 +300,7 @@ struct AgentLoopTests {
     ]
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in },
       maxToolRounds: 1
     )
@@ -331,7 +332,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in },
       shouldAbortTurn: {
         counter.count += 1
@@ -359,7 +360,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { _ in }
     )
     #expect(outcome == .completed)
@@ -387,7 +388,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     _ = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { collector.append($0) }
     )
     let hasHeader = collector.contains(where: {
@@ -413,7 +414,7 @@ struct AgentLoopTests {
     var messages: [Components.Schemas.ChatMessage] = []
     _ = try await loop.runModelTurn(
       messages: &messages,
-      logger: Logger(label: "test"),
+      logger: Logger(label: "test"), temperature: 0,
       onEvent: { collector.append($0) }
     )
 

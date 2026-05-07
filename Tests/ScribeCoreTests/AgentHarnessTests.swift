@@ -65,12 +65,11 @@ private final class EventCollector: @unchecked Sendable {
 private func makeHarness(
   statusCode: Int = 200,
   chunks: [HTTPBody.ByteChunk],
-  model: String = "test-model",
-  temperature: Double = 0
+  model: String = "test-model"
 ) -> AgentHarness {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  return AgentHarness(client: client, model: model, tools: [], temperature: temperature)
+  return AgentHarness(client: client, model: model, tools: [])
 }
 
 private let testLogger = Logger(label: "test")
@@ -99,7 +98,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { collector.append($0) })
+    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { collector.append($0) })
 
     #expect(outcome == .completed)
     #expect(messages.count == 1)
@@ -139,7 +138,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { collector.append($0) })
+    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { collector.append($0) })
 
     #expect(outcome == .completed)
     #expect(messages[0].content == "The answer is 42.")
@@ -166,7 +165,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { _ in })
+    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { _ in })
 
     guard case .toolCalls(let invocations) = outcome else {
       #expect(Bool(false), "expected toolCalls outcome")
@@ -193,7 +192,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { _ in })
+    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { _ in })
 
     #expect(outcome == .completed)
     #expect(messages[0].content == "ok")
@@ -208,7 +207,7 @@ struct AgentHarnessTests {
     )
 
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { collector.append($0) })
+    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { collector.append($0) })
 
     #expect(outcome == .completed)
     #expect(messages[0].content == "")
@@ -230,7 +229,7 @@ struct AgentHarnessTests {
 
     var messages: [Components.Schemas.ChatMessage] = []
     do {
-      _ = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { _ in })
+      _ = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { _ in })
       #expect(Bool(false), "expected error")
     } catch let error as ScribeError {
       guard case .apiHTTPError(let code, _, _) = error else {
@@ -249,7 +248,7 @@ struct AgentHarnessTests {
 
     var messages: [Components.Schemas.ChatMessage] = []
     do {
-      _ = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { _ in })
+      _ = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { _ in })
       #expect(Bool(false), "expected error")
     } catch let error as ScribeError {
       guard case .apiHTTPError(let code, _, let hint) = error else {
@@ -269,7 +268,7 @@ struct AgentHarnessTests {
 
     var messages: [Components.Schemas.ChatMessage] = []
     do {
-      _ = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { _ in })
+      _ = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { _ in })
       #expect(Bool(false), "expected error")
     } catch let error as ScribeError {
       guard case .apiHTTPError(_, _, let hint) = error else {
@@ -295,7 +294,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { collector.append($0) })
+    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { collector.append($0) })
 
     #expect(outcome == .completed)
     #expect(messages[0].content == "valid")
@@ -326,6 +325,7 @@ struct AgentHarnessTests {
       _ = try await harness.runRound(
         messages: &messages,
         logger: testLogger,
+        temperature: 0,
         onEvent: { _ in },
         shouldAbortTurn: {
           // Abort on the second iteration — after first chunk has streamed content
@@ -358,7 +358,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    _ = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { collector.append($0) })
+    _ = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { collector.append($0) })
 
     let usageEvents = collector.events.compactMap {
       if case .usage(let u, let tps) = $0 { (u, tps) } else { nil }
@@ -382,7 +382,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    _ = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { collector.append($0) })
+    _ = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { collector.append($0) })
 
     let hasUsage = collector.events.contains {
       if case .usage = $0 { true } else { false }
@@ -405,7 +405,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { _ in })
+    let outcome = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { _ in })
 
     guard case .toolCalls = outcome else {
       #expect(Bool(false), "expected toolCalls")
@@ -428,7 +428,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks)
 
     var messages: [Components.Schemas.ChatMessage] = []
-    _ = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { collector.append($0) })
+    _ = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { collector.append($0) })
 
     let hasBlankLine = collector.events.contains {
       if case .blankLine = $0 { true } else { false }
@@ -448,7 +448,7 @@ struct AgentHarnessTests {
     let harness = makeHarness(chunks: chunks, model: "custom-model")
 
     var messages: [Components.Schemas.ChatMessage] = []
-    _ = try await harness.runRound(messages: &messages, logger: testLogger, onEvent: { _ in })
+    _ = try await harness.runRound(messages: &messages, logger: testLogger, temperature: 0, onEvent: { _ in })
 
     #expect(messages[0].role == .assistant)
     #expect(harness.model == "custom-model")

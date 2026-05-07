@@ -19,6 +19,7 @@ public struct AgentLoop: Sendable {
   public func runModelTurn(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    temperature: Double,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     maxToolRounds: Int = .max,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
@@ -50,6 +51,7 @@ public struct AgentLoop: Sendable {
         roundOutcome = try await harness.runRound(
           messages: &messages,
           logger: logger,
+          temperature: temperature,
           onEvent: onEvent,
           shouldAbortTurn: shouldAbortTurn
         )

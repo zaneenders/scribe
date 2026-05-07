@@ -35,28 +35,26 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public var client: Client
   public var model: String
   private let tools: [Components.Schemas.ChatTool]
-  private let temperature: Double
   private let clock = ContinuousClock()
 
   public init(
     client: Client,
     model: String,
-    tools: [Components.Schemas.ChatTool],
-    temperature: Double
+    tools: [Components.Schemas.ChatTool]
   ) {
     self.client = client
     self.model = model
     self.tools = tools
-    self.temperature = temperature
   }
 
   public func runRound(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    temperature: Double,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> RoundOutcome {
-    let requestBody = buildRequest(messages: messages)
+    let requestBody = buildRequest(messages: messages, temperature: temperature)
     let (httpBody, httpStart) = try await sendStreamingRequest(requestBody, logger: logger)
 
     var turn = StreamedAssistantTurn()
@@ -73,7 +71,8 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   // MARK: - Private helpers
 
   private func buildRequest(
-    messages: [Components.Schemas.ChatMessage]
+    messages: [Components.Schemas.ChatMessage],
+    temperature: Double
   ) -> Components.Schemas.CreateChatCompletionRequest {
     Components.Schemas.CreateChatCompletionRequest(
       model: model,
