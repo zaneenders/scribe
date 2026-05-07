@@ -23,6 +23,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
     .package(url: "https://github.com/apple/swift-collections.git", from: "1.1.0"),
+    .package(url: "https://github.com/apple/swift-profile-recorder.git", .upToNextMinor(from: "0.3.13")),
   ],
   targets: [
     .target(
@@ -63,10 +64,12 @@ let package = Package(
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "Markdown", package: "swift-markdown"),
+        .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
+        .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),  // Needed to support release mode profiling.
       ],
       plugins: [
         "GitVersionPlugin"

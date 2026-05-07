@@ -4,5 +4,6 @@
 /sessions
 /scribe-config.json
 *.docc-build
+*.perf
 *.profraw
 

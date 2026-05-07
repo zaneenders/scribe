@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import ProfileRecorderServer
 import ScribeCore
 
 @main struct ScribeCLI: AsyncParsableCommand {
@@ -113,6 +114,10 @@ import ScribeCore
           "current_model": "\(loaded.agentConfig.agentModel)",
         ])
     }
+
+    async let _ = ProfileRecorderServer(
+      configuration: .parseFromEnvironment()
+    ).runIgnoringFailures(logger: log)
 
     try await SlateChat.runFullscreen(
       configuration: loaded.agentConfig,
