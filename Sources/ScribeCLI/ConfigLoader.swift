@@ -62,15 +62,15 @@ public enum ScribeLogLevel: String, Sendable, CaseIterable {
 
 // MARK: - Logging infrastructure
 
-public final class LockedDataWriter: Sendable {
+final class LockedDataWriter: Sendable {
   private let mutex = Mutex(())
   private let emit: @Sendable (Data) -> Void
 
-  public init(_ emit: @escaping @Sendable (Data) -> Void) {
+  init(_ emit: @escaping @Sendable (Data) -> Void) {
     self.emit = emit
   }
 
-  public func write(_ data: Data) {
+  func write(_ data: Data) {
     mutex.withLock { _ in emit(data) }
   }
 }
@@ -102,8 +102,7 @@ private let scribeLogTimestampFormatter: Mutex<ISO8601DateFormatter> = {
 }()
 
 /// One log line per call, formatted as
-/// `<iso8601-ms> [<level>] <message>` so each line is timestamped and easy to grep,
-/// and message bodies are expected to use the structured `event=ns.name k=v k=v` style.
+/// `<iso8601-ms> [<level>] <message>` so each line is timestamped and easy to grep.
 struct ScribeLineLogHandler: LogHandler {
   var logLevel: Logger.Level = .info
   var metadata: Logger.Metadata = [:]
@@ -119,6 +118,12 @@ struct ScribeLineLogHandler: LogHandler {
     var text = "\(event.message)"
     if let error = event.error {
       text += " err=\"\(error)\""
+    }
+    if let metadata = event.metadata, !metadata.isEmpty {
+      let pairs = metadata.map { key, value in
+        "\(key)=\(value)"
+      }.sorted().joined(separator: " ")
+      text += " \(pairs)"
     }
     let timestamp = scribeLogTimestampFormatter.withLock { $0.string(from: Date()) }
     let line = "\(timestamp) [\(event.level.rawValue)] \(text)\n"
@@ -201,11 +206,18 @@ public struct LoadedConfig: Sendable {
       _ = try? fileHandle.seekToEnd()
       let sink = FileSink(handle: fileHandle)
       let fileWriter = LockedDataWriter { data in sink.write(data) }
-      SharedLogWriter.swap(to: fileWriter, level: level)
+      return Logger(label: "scribe.session") { _ in
+        ScribeLineLogHandler(minimumLevel: level, dataWriter: fileWriter)
+      }
     }
-    // Logger will use the globally bootstrapped SharedLogLineHandler,
-    // which now writes through the swapped file writer.
-    return Logger(label: "scribe.session")
+    // Last-resort fallback: emit to stderr if we can't open the per-session file.
+    return Logger(label: "scribe.session") { _ in
+      ScribeLineLogHandler(
+        minimumLevel: level,
+        dataWriter: LockedDataWriter { data in
+          try? FileHandle.standardError.write(contentsOf: data)
+        })
+    }
   }
 }
 

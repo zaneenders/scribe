@@ -21,7 +21,6 @@ import ScribeCore
   var resume: String?
 
   func run() async throws {
-    bootstrapScribeLogging()
     let loaded = try await ConfigLoader.load()
 
     if listSessions {

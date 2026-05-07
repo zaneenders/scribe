@@ -217,10 +217,7 @@ struct AgentLoopTests {
   // MARK: - Logging metadata flow
 
   @Test func loggersCreatedForAgentLoopDoNotCrash() async throws {
-    // Just verify that running an agent loop with a real logger (via
-    // bootstrapScribeLogging) does not crash. The metadata rendering
-    // is verified in ScribeLoggingTests.
-    bootstrapScribeLogging()
+    // Just verify that running an agent loop with a logger does not crash.
     let harness = FakeHarness(outcomes: [.completed])
     let registry = ToolRegistry(tools: [FakeTool()])
     var messages: [Components.Schemas.ChatMessage] = []
