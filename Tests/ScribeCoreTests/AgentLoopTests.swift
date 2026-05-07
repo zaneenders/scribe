@@ -135,7 +135,7 @@ struct AgentLoopTests {
     #expect(messages[1].toolCallId == "call_1")
   }
 
-  @Test func abortBeforeRoundThrowsInterrupted() async throws {
+  @Test func abortBeforeRoundReturnsInterrupted() async throws {
     let harness = FakeHarness(outcomes: [.completed])
     let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(
@@ -144,20 +144,16 @@ struct AgentLoopTests {
       onEvent: { _ in }
     )
     var messages: [Components.Schemas.ChatMessage] = []
-    do {
-      _ = try await loop.runModelTurn(
-        messages: &messages,
-        logger: Logger(label: "test"),
-        shouldAbortTurn: { true }
-      )
-      #expect(Bool(false))
-    } catch is AgentTurnInterruptedError {
-      // expected
-    }
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      shouldAbortTurn: { true }
+    )
+    #expect(outcome == .interrupted)
     #expect(harness.callCount == 0)
   }
 
-  @Test func abortBeforeToolThrowsInterrupted() async throws {
+  @Test func abortBeforeToolReturnsInterrupted() async throws {
     let harness = FakeHarness(outcomes: [
       .toolCalls([ToolInvocation(id: "call_1", name: "fake_tool", arguments: "{}")])
     ])
@@ -169,22 +165,18 @@ struct AgentLoopTests {
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let state = AbortState()
-    do {
-      _ = try await loop.runModelTurn(
-        messages: &messages,
-        logger: Logger(label: "test"),
-        shouldAbortTurn: {
-          if state.value {
-            return true
-          }
-          state.set(true)
-          return false
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      shouldAbortTurn: {
+        if state.value {
+          return true
         }
-      )
-      #expect(Bool(false))
-    } catch is AgentTurnInterruptedError {
-      // expected
-    }
+        state.set(true)
+        return false
+      }
+    )
+    #expect(outcome == .interrupted)
     #expect(harness.callCount == 1)
   }
 

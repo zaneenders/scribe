@@ -22,13 +22,15 @@ public struct AgentLoop: Sendable {
   public func runModelTurn(
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger,
+    maxToolRounds: Int = .max,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
     logger.debug(
       """
       event=agent.turn.start \
       model=\(harness.model) \
-      messages=\(messages.count)
+      messages=\(messages.count) \
+      max_tool_rounds=\(maxToolRounds)
       """
     )
     var round = 0
@@ -42,16 +44,21 @@ public struct AgentLoop: Sendable {
           round=\(round)
           """
         )
-        throw AgentTurnInterruptedError()
+        return .interrupted
       }
 
       let messagesCountBeforeRound = messages.count
 
-      let roundOutcome = try await harness.runRound(
-        messages: &messages,
-        logger: logger,
-        shouldAbortTurn: shouldAbortTurn
-      )
+      let roundOutcome: RoundOutcome
+      do {
+        roundOutcome = try await harness.runRound(
+          messages: &messages,
+          logger: logger,
+          shouldAbortTurn: shouldAbortTurn
+        )
+      } catch is AgentTurnInterruptedError {
+        return .interrupted
+      }
 
       if shouldAbortTurn() {
         logger.debug(
@@ -61,7 +68,7 @@ public struct AgentLoop: Sendable {
           round=\(round)
           """
         )
-        throw AgentTurnInterruptedError()
+        return .interrupted
       }
 
       switch roundOutcome {
@@ -69,6 +76,17 @@ public struct AgentLoop: Sendable {
         return .completed
 
       case .toolCalls(let invocations):
+        if round >= maxToolRounds {
+          logger.notice(
+            """
+            event=agent.turn.tool-round-limit \
+            max=\(maxToolRounds)
+            """
+          )
+          messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
+          return .toolRoundLimit(rounds: maxToolRounds)
+        }
+
         logger.info(
           """
           event=agent.tool.round \
@@ -90,7 +108,7 @@ public struct AgentLoop: Sendable {
               """
             )
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
-            throw AgentTurnInterruptedError()
+            return .interrupted
           }
           let toolStarted = Date()
           let jsonOutput = await registry.run(name: inv.name, arguments: inv.arguments)

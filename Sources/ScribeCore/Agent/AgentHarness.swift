@@ -222,10 +222,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       return .completed
     }
 
-    return .toolCalls(
-      toolInvocations.map {
-        ToolInvocation(id: $0.id, name: $0.name, arguments: $0.arguments)
-      })
+    return .toolCalls(toolInvocations)
   }
 
 }

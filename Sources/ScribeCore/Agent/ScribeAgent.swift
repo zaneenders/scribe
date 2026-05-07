@@ -77,6 +77,7 @@ public struct ScribeAgent: Sendable {
   public func runTurn(
     messages: inout [Components.Schemas.ChatMessage],
     log: Logger,
+    maxToolRounds: Int = .max,
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
   ) async throws -> ModelTurnOutcome {
@@ -94,6 +95,7 @@ public struct ScribeAgent: Sendable {
     return try await loop.runModelTurn(
       messages: &messages,
       logger: log,
+      maxToolRounds: maxToolRounds,
       shouldAbortTurn: shouldAbortTurn
     )
   }
@@ -194,31 +196,43 @@ public struct ScribeAgent: Sendable {
       }
       let turnStart = Date()
       do {
-        let _ = try await runTurn(
+        let outcome = try await runTurn(
           messages: &history,
           log: log,
           onEvent: wrappedOnEvent,
           shouldAbortTurn: shouldAbortTurn
         )
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
-        log.info(
-          """
-          event=agent.turn.end \
-          turn=\(turnIndex) \
-          status=completed \
-          elapsed_ms=\(elapsedMs)
-          """)
-        tracker.logStatus(logger: log)
-      } catch is AgentTurnInterruptedError {
-        let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
-        log.notice(
-          """
-          event=agent.turn.end \
-          turn=\(turnIndex) \
-          status=interrupted \
-          elapsed_ms=\(elapsedMs)
-          """)
-        onEvent(.turnInterrupted)
+        switch outcome {
+        case .completed:
+          log.info(
+            """
+            event=agent.turn.end \
+            turn=\(turnIndex) \
+            status=completed \
+            elapsed_ms=\(elapsedMs)
+            """)
+          tracker.logStatus(logger: log)
+        case .interrupted:
+          log.notice(
+            """
+            event=agent.turn.end \
+            turn=\(turnIndex) \
+            status=interrupted \
+            elapsed_ms=\(elapsedMs)
+            """)
+          onEvent(.turnInterrupted)
+        case .toolRoundLimit(let max):
+          log.notice(
+            """
+            event=agent.turn.end \
+            turn=\(turnIndex) \
+            status=tool-round-limit \
+            elapsed_ms=\(elapsedMs) \
+            limit=\(max)
+            """)
+          onEvent(.turnInterrupted)
+        }
       } catch {
         let elapsedMs = Int(Date().timeIntervalSince(turnStart) * 1000)
         let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
@@ -276,19 +290,39 @@ public struct ScribeAgent: Sendable {
       model=\(configuration.agentModel)
       """)
     do {
-      let _ = try await runTurn(
+      let outcome = try await runTurn(
         messages: &history,
         log: log,
         onEvent: onEvent
       )
       let text = ChatHistory.lastAssistantText(from: history) ?? ""
-      log.notice(
-        """
-        event=ipc.session.end \
-        status=ok \
-        assistant_chars=\(text.count)
-        """)
-      return .success(assistant: text)
+      switch outcome {
+      case .completed:
+        log.notice(
+          """
+          event=ipc.session.end \
+          status=ok \
+          assistant_chars=\(text.count)
+          """)
+        return .success(assistant: text)
+      case .interrupted:
+        log.notice(
+          """
+          event=ipc.session.end \
+          status=interrupted \
+          assistant_chars=\(text.count)
+          """)
+        return .failure("Turn was interrupted.")
+      case .toolRoundLimit(let max):
+        log.notice(
+          """
+          event=ipc.session.end \
+          status=tool-round-limit \
+          max=\(max) \
+          assistant_chars=\(text.count)
+          """)
+        return .failure("Hit maximum tool rounds (\(max)).")
+      }
     } catch let e as ScribeError {
       log.error(
         """
