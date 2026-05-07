@@ -1,5 +1,5 @@
 {
-  "originHash" : "94d958d23eecf622ac838c143e4735d512a195c2da6deb8d3a61efdd49380b5e",
+  "originHash" : "9eb1e42a98840cead4727ed8c1b890360b9c27edc297c0cda4d9fadb7f5a6b41",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -242,6 +242,24 @@
       "state" : {
         "revision" : "f039fa6d6338aab5164f3d1be16281524c9a8f89",
         "version" : "1.11.0"
+      }
+    },
+    {
+      "identity" : "swift-profile-recorder",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-profile-recorder.git",
+      "state" : {
+        "revision" : "dc22b17d43b56d499baf808ec47425b950bd948b",
+        "version" : "0.3.16"
+      }
+    },
+    {
+      "identity" : "swift-protobuf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-protobuf.git",
+      "state" : {
+        "revision" : "81558271e243f8f47dfe8e9fdd55f3c2b5413f68",
+        "version" : "1.37.0"
       }
     },
     {

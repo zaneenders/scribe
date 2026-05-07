@@ -56,11 +56,11 @@ public struct EditFileTool: ScribeTool {
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try text.write(toFile: s, atomically: true, encoding: .utf8)
     Self.logger.debug(
-      """
-      event=agent.tool.edit_file \
-      path="\(s.replacingOccurrences(of: "\"", with: "\\\""))" \
-      replaced=true
-      """)
+      "agent.tool.edit_file",
+      metadata: [
+        "path": "\(s.replacingOccurrences(of: "\"", with: "\\\""))",
+        "replaced": "true",
+      ])
     return EditFileToolResult(replaced: true, content: text)
   }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import ScribeCLI
 import ScribeCore
 import ScribeLLM
 import Synchronization
@@ -90,14 +91,15 @@ private final class TestHarness: AgentHarnessProtocol, Sendable {
       messages.append(assistantMessage)
     } else {
       // .completed — append an assistant message like the real AgentHarness does
-      messages.append(Components.Schemas.ChatMessage(
-        role: .assistant,
-        content: "",
-        name: nil,
-        toolCalls: nil,
-        toolCallId: nil,
-        reasoningContent: nil
-      ))
+      messages.append(
+        Components.Schemas.ChatMessage(
+          role: .assistant,
+          content: "",
+          name: nil,
+          toolCalls: nil,
+          toolCallId: nil,
+          reasoningContent: nil
+        ))
     }
     return outcome
   }
@@ -118,7 +120,7 @@ private final class EventCollector: @unchecked Sendable {
   }
 }
 
-private final class AbortState: @unchecked Sendable {
+final class AbortState: @unchecked Sendable {
   var value = false
 
   func set(_ newValue: Bool) {
@@ -181,13 +183,17 @@ struct AgentLoopTests {
       registry: registry
     )
     var messages: [Components.Schemas.ChatMessage] = []
-    let outcome = try await loop.runModelTurn(
-      messages: &messages,
-      logger: Logger(label: "test"),
-      onEvent: { _ in },
-      shouldAbortTurn: { true }
-    )
-    #expect(outcome == .interrupted)
+    do {
+      _ = try await loop.runModelTurn(
+        messages: &messages,
+        logger: Logger(label: "test"),
+        onEvent: { _ in },
+        shouldAbortTurn: { true }
+      )
+      #expect(Bool(false), "expected AgentTurnInterruptedError")
+    } catch is AgentTurnInterruptedError {
+      // Expected — before-http abort now throws
+    }
     #expect(harness.callCount == 0)
   }
 
@@ -202,19 +208,23 @@ struct AgentLoopTests {
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let state = AbortState()
-    let outcome = try await loop.runModelTurn(
-      messages: &messages,
-      logger: Logger(label: "test"),
-      onEvent: { _ in },
-      shouldAbortTurn: {
-        if state.value {
-          return true
+    do {
+      _ = try await loop.runModelTurn(
+        messages: &messages,
+        logger: Logger(label: "test"),
+        onEvent: { _ in },
+        shouldAbortTurn: {
+          if state.value {
+            return true
+          }
+          state.set(true)
+          return false
         }
-        state.set(true)
-        return false
-      }
-    )
-    #expect(outcome == .interrupted)
+      )
+      #expect(Bool(false), "expected AgentTurnInterruptedError")
+    } catch is AgentTurnInterruptedError {
+      // Expected — post-stream-pre-tools abort now throws
+    }
     #expect(harness.callCount == 1)
   }
 
@@ -293,7 +303,7 @@ struct AgentLoopTests {
     let loop = AgentLoop(harness: harness, registry: registry)
 
     var messages: [Components.Schemas.ChatMessage] = [
-      Components.Schemas.ChatMessage(role: .user, content: "hi"),
+      Components.Schemas.ChatMessage(role: .user, content: "hi")
     ]
     let outcome = try await loop.runModelTurn(
       messages: &messages,
@@ -315,30 +325,30 @@ struct AgentLoopTests {
       .toolCalls([
         ToolInvocation(id: "c1", name: "fake_tool", arguments: "{}"),
         ToolInvocation(id: "c2", name: "fake_tool", arguments: "{}"),
-      ]),
+      ])
     ])
     let registry = ToolRegistry(tools: [FakeTool()])
     let loop = AgentLoop(harness: harness, registry: registry)
 
-    // Abort on the second tool invocation.
-    let state = AbortState()
+    // Abort at the pre-tool check for the second tool. shouldAbortTurn is called
+    // multiple times per tool (pre-tool check, ToolRegistry abort-before-start,
+    // polling loop). We use a counter that only triggers after the first tool has
+    // finished all its internal checks.
+    final class CallCounter: @unchecked Sendable { var count = 0 }
+    let counter = CallCounter()
     var messages: [Components.Schemas.ChatMessage] = []
     let outcome = try await loop.runModelTurn(
       messages: &messages,
       logger: Logger(label: "test"),
       onEvent: { _ in },
       shouldAbortTurn: {
-        if state.value {
-          return true
-        }
-        state.set(true)
-        return false  // first tool runs, abort before second
+        counter.count += 1
+        return counter.count == 6
       }
     )
     #expect(outcome == .interrupted)
-    // Only the assistant message from the harness (not tool messages)
-    #expect(messages.count == 1)
-    #expect(messages[0].role == .assistant)
+    // All messages added during this round are rolled back.
+    #expect(messages.count == 0)
   }
 
   // MARK: - Multiple tool calls in one round
@@ -390,7 +400,10 @@ struct AgentLoopTests {
     )
     let hasHeader = collector.contains(where: {
       if case .toolRoundHeader(let round, let names) = $0,
-         round == 1, names == ["fake_tool"] { return true }
+        round == 1, names == ["fake_tool"]
+      {
+        return true
+      }
       return false
     })
     #expect(hasHeader)

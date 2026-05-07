@@ -55,11 +55,6 @@ private func errorBody(_ message: String) -> HTTPBody.ByteChunk {
 
 // MARK: - Sendable helpers
 
-private final class AbortState: @unchecked Sendable {
-  var value = false
-  func set(_ newValue: Bool) { value = newValue }
-}
-
 private final class EventCollector: @unchecked Sendable {
   var events: [TranscriptEvent] = []
   func append(_ event: TranscriptEvent) { events.append(event) }
