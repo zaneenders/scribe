@@ -16,19 +16,19 @@ import ScribeLLM
 /// | `agent.turn.dispatch` | `turn chars` | Coordinator pulled a non-empty user line from the gate and is starting a model turn. |
 /// | `agent.turn.start` | `model messages max_tool_rounds` | First action inside `runModelTurn`. |
 /// | `agent.http.request` | `round payload_messages` | Streaming POST to `chat/completions` was issued. |
-/// | `agent.http.response` | `round status elapsed_ms [body_snippet]` | HTTP response received. `status=200` for success; non-200 includes `body_snippet`. |
+/// | `agent.http.response` | `round status elapsed [body_snippet]` | HTTP response received. `status=200` for success; non-200 includes `body_snippet`. |
 /// | `agent.stream.first-chunk` | `round ttfb_ms` | First decoded SSE chunk arrived. `ttfb_ms` is wall time since the request was issued. |
-/// | `agent.stream.progress` | `round chunks elapsed_ms chunks_per_s` | Periodic progress every 200 chunks. (Per-chunk lines are intentionally not emitted — they drown the signal during long streams.) |
-/// | `agent.stream.end` | `round chunks skipped elapsed_ms prompt_tokens completion_tokens tps` | Stream finished cleanly; usage block included when the server provided one. |
+/// | `agent.stream.progress` | `round chunks elapsed chunks_per_s` | Periodic progress every 200 chunks. (Per-chunk lines are intentionally not emitted — they drown the signal during long streams.) |
+/// | `agent.stream.end` | `round chunks skipped elapsed prompt_tokens completion_tokens tps` | Stream finished cleanly; usage block included when the server provided one. |
 /// | `agent.stream.empty` | `chunks` | Stream produced no tokens and no tool calls. |
 /// | `agent.stream.unreadable-chunk` | `chunk_index err raw_prefix` | An SSE event failed JSON decoding (decoder skipped). |
 /// | `agent.stream.abort` | `where chunks had_visible_tokens` | Turn was aborted while streaming. `where` is `mid-stream` or `post-stream`. |
 /// | `agent.assistant.final` | `round answer_chars reasoning_chars` | Assistant produced a final reply with no tool calls. |
 /// | `agent.tool.round` | `round tool_count tools` | Assistant requested tool calls; runner is about to execute them. |
-/// | `agent.tool.invoke` | `round tool args_chars output_chars elapsed_ms unknown` | A single tool call completed. |
+/// | `agent.tool.invoke` | `round tool args_chars output_chars elapsed unknown` | A single tool call completed. |
 /// | `agent.tool.unknown` | `round tool` | Tool runner reported the call name as unknown. |
 /// | `agent.tool.round.end` | `round messages` | All tool calls in a round done; loop will request the next model response. |
-/// | `agent.turn.end` | `turn status [elapsed_ms limit err]` | Coordinator's outcome line per turn. `status` is `completed`, `tool-round-limit`, `interrupted`, or `error`. |
+/// | `agent.turn.end` | `turn status [elapsed limit err]` | Coordinator's outcome line per turn. `status` is `completed`, `tool-round-limit`, `interrupted`, or `error`. |
 /// | `agent.turn.tool-round-limit` | `max` | Hit the configured tool-round ceiling without a clean reply. |
 /// | `agent.abort` | `where round [tool]` | Cooperative abort fired between phases (`before-http`, `post-stream-pre-tools`, `pre-tool`). |
 public struct AgentHarness: Sendable, AgentHarnessProtocol {
@@ -99,14 +99,14 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       """
     )
     let response = try await client.createChatCompletion(body: .json(requestBody))
-    let httpElapsedMs = elapsedMs(since: httpStart)
+
     switch response {
     case .ok(let ok):
       logger.debug(
         """
         event=agent.http.response \
         status=200 \
-        elapsed_ms=\(httpElapsedMs)
+        elapsed=\(clock.now - httpStart)
         """
       )
       return (try ok.body.textEventStream, httpStart)
@@ -136,7 +136,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
         """
         event=agent.http.response \
         status=\(code) \
-        elapsed_ms=\(httpElapsedMs) \
+        elapsed=\((clock.now - httpStart) / .milliseconds(1)) \
         body_snippet="\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))"
         """
       )
@@ -218,21 +218,20 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       result.decodedChunkCount += 1
       if !loggedFirstChunk {
         loggedFirstChunk = true
-        let firstChunkMs = elapsedMs(since: httpStart)
         logger.debug(
           """
           event=agent.stream.first-chunk \
-          ttfb_ms=\(firstChunkMs)
+          ttfb_ms=\((clock.now - httpStart) / .milliseconds(1))
           """
         )
       } else if result.decodedChunkCount % streamProgressEvery == 0 {
-        let elapsedMs = elapsedMs(since: result.streamWallStart)
+        let elapsedMs = Int((clock.now - result.streamWallStart) / .milliseconds(1))
         let chunksPerSec = Double(result.decodedChunkCount) / (Double(elapsedMs) / 1000.0)
         logger.trace(
           """
           event=agent.stream.progress \
           chunks=\(result.decodedChunkCount) \
-          elapsed_ms=\(elapsedMs) \
+          elapsed=\(elapsedMs) \
           chunks_per_s=\(String(format: "%.1f", chunksPerSec))
           """
         )
@@ -287,10 +286,10 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     messages: inout [Components.Schemas.ChatMessage],
     logger: Logger
   ) -> RoundOutcome {
-    let streamElapsedMs = elapsedMs(since: result.streamWallStart)
+    let streamElapsedMs = Int((clock.now - result.streamWallStart) / .milliseconds(1))
     if let u = result.lastUsage {
       let genStart = result.firstStreamContentAt ?? result.streamWallStart
-      let genSec = elapsedSeconds(since: genStart)
+      let genSec = (clock.now - genStart) / .seconds(1)
       let tps: Double? = {
         guard let c = u.completionTokens, c > 0 else { return nil }
         return Double(c) / max(0.001, genSec)
@@ -300,7 +299,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
         event=agent.stream.end \
         chunks=\(result.decodedChunkCount) \
         skipped=\(result.skippedChunkCount) \
-        elapsed_ms=\(streamElapsedMs) \
+        elapsed=\(streamElapsedMs) \
         prompt_tokens=\(u.promptTokens.map(String.init(describing:)) ?? "nil") \
         completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
         tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
@@ -313,7 +312,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
         event=agent.stream.end \
         chunks=\(result.decodedChunkCount) \
         skipped=\(result.skippedChunkCount) \
-        elapsed_ms=\(streamElapsedMs) \
+        elapsed=\(streamElapsedMs) \
         usage=missing
         """
       )
@@ -361,16 +360,4 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       })
   }
 
-  // MARK: - Timing helpers (ContinuousClock)
-
-  /// Milliseconds since `start`, using native `Duration` division (no manual
-  /// component extraction, avoiding `Double(Int64)` precision loss).
-  private func elapsedMs(since start: ContinuousClock.Instant) -> Int {
-    Int((clock.now - start) / .milliseconds(1))
-  }
-
-  /// Seconds since `start` as `Double`, using native `Duration` division.
-  private func elapsedSeconds(since start: ContinuousClock.Instant) -> Double {
-    (clock.now - start) / .seconds(1)
-  }
 }
