@@ -34,11 +34,11 @@ public struct WriteFileTool: ScribeTool {
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try content.write(toFile: s, atomically: true, encoding: .utf8)
     Self.logger.debug(
-      """
-      event=agent.tool.write_file \
-      path="\(s.replacingOccurrences(of: "\"", with: "\\\""))" \
-      bytes_written=\(content.utf8.count)
-      """)
+      "agent.tool.write_file",
+      metadata: [
+        "path": "\(s.replacingOccurrences(of: "\"", with: "\\\""))",
+        "bytes_written": "\(content.utf8.count)",
+      ])
     return WriteFileToolResult(written: true)
   }
 }

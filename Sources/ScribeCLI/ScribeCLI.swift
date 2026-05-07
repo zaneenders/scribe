@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import ProfileRecorderServer
 import ScribeCore
 
 @main struct ScribeCLI: AsyncParsableCommand {
@@ -92,29 +93,31 @@ import ScribeCore
     let log = loaded.makeSessionLogger(sessionId: sessionId)
     let mode = resumeArchive == nil ? "new" : "resume"
     log.notice(
-      """
-      event=chat.session.start \
-      session_id=\(sessionId.uuidString) \
-      mode=\(mode) \
-      scribe_version=\(GitVersion.hash) \
-      model=\(loaded.agentConfig.agentModel) \
-      base_url=\(loaded.agentConfig.serverURL) \
-      api_key=\(loaded.agentConfig.bearerToken == nil ? "none" : "set") \
-      log_level=\(loaded.logLevel.rawValue) \
-      cwd=\(cwd) \
-      session_file=\(sessionPersistenceURL.path) \
-      config_file=\(loaded.resolvedConfigurationPath)
-      """
-    )
+      "chat.session.start",
+      metadata: [
+        "session_id": "\(sessionId.uuidString)",
+        "mode": "\(mode)",
+        "scribe_version": "\(GitVersion.hash)",
+        "model": "\(loaded.agentConfig.agentModel)",
+        "base_url": "\(loaded.agentConfig.serverURL)",
+        "api_key": "\(loaded.agentConfig.bearerToken == nil ? "none" : "set")",
+        "log_level": "\(loaded.logLevel.rawValue)",
+        "cwd": "\(cwd)",
+        "session_file": "\(sessionPersistenceURL.path)",
+        "config_file": "\(loaded.resolvedConfigurationPath)",
+      ])
     if let archived = resumeArchive, archived.model != loaded.agentConfig.agentModel {
       log.warning(
-        """
-        event=chat.session.resume.model-mismatch \
-        archived_model=\(archived.model) \
-        current_model=\(loaded.agentConfig.agentModel)
-        """
-      )
+        "chat.session.resume.model-mismatch",
+        metadata: [
+          "archived_model": "\(archived.model)",
+          "current_model": "\(loaded.agentConfig.agentModel)",
+        ])
     }
+
+    async let _ = ProfileRecorderServer(
+      configuration: .parseFromEnvironment()
+    ).runIgnoringFailures(logger: log)
 
     try await SlateChat.runFullscreen(
       configuration: loaded.agentConfig,
@@ -125,7 +128,7 @@ import ScribeCore
       log: log,
       tools: tools
     )
-    log.notice("event=chat.session.end status=ok")
+    log.notice("chat.session.end", metadata: ["status": "ok"])
     printExitResumeHint(
       resumeArchive: resumeArchive,
       sessionPersistenceURL: sessionPersistenceURL

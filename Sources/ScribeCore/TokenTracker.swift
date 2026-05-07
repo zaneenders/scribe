@@ -76,23 +76,21 @@ public final class TokenTracker: Sendable {
     let pct = Int(Double(prompt) / Double(contextWindow) * 100)
     if isOverLimit {
       logger.warning(
-        """
-        event=token-tracker.over-limit \
-        last_prompt_tokens=\(prompt) \
-        context_window=\(contextWindow) \
-        pct=\(pct)
-        """
-      )
+        "token-tracker.over-limit",
+        metadata: [
+          "last_prompt_tokens": "\(prompt)",
+          "context_window": "\(contextWindow)",
+          "pct": "\(pct)",
+        ])
     } else if isApproachingLimit {
       logger.warning(
-        """
-        event=token-tracker.approaching-limit \
-        last_prompt_tokens=\(prompt) \
-        context_window=\(contextWindow) \
-        threshold=\(threshold) \
-        pct=\(pct)
-        """
-      )
+        "token-tracker.approaching-limit",
+        metadata: [
+          "last_prompt_tokens": "\(prompt)",
+          "context_window": "\(contextWindow)",
+          "threshold": "\(threshold)",
+          "pct": "\(pct)",
+        ])
     }
   }
 }
