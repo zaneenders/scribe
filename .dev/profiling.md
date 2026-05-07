@@ -49,11 +49,11 @@ PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' \
   scribe
 
 # 2. In another terminal, trigger a sample while scribe is doing work
-curl --unix-socket /tmp/scribe-<PID>.sock \
+curl --unix-socket /tmp/scribe-$(ls /tmp/scribe-*.sock | head -1 | sed 's/.*scribe-//;s/\.sock//').sock \
   -sd '{"numberOfSamples":200,"timeInterval":"10ms"}' \
-  http://localhost/sample | swift demangle --compact > /tmp/samples.perf
+  http://localhost/sample > ./samples.perf
 
-# 3. Visualize: drag /tmp/samples.perf onto https://speedscope.app
+# 3. Visualize: drag ./samples.perf onto https://speedscope.app
 ```
 
 **Key parameters:**
