@@ -74,7 +74,7 @@ xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex
 ```bash
 swift test --enable-code-coverage
 PROFDATA=$(find .build -name '*.profdata' -print -quit)
-BIN=$(find .build -name 'scribePackageTests' -type f -print -quit)
+BIN=$(find .build -name 'scribePackageTests.xctest' -type f -print -quit)
 llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
 ```
 
