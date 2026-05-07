@@ -2,7 +2,8 @@
 
 /// Thrown when an interactive host asks to stop the current model/tool round.
 /// Only thrown by ``AgentHarness/runRound``; ``AgentLoop/runModelTurn`` catches
-/// this and returns ``ModelTurnOutcome/interrupted`` instead.
+/// this and returns ``ModelTurnOutcome/interrupted`` instead. `AgentLoop` itself
+/// always returns `.interrupted` for aborts rather than throwing this error.
 public struct AgentTurnInterruptedError: Error, Sendable {
   public init() {}
 }

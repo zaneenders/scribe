@@ -183,17 +183,13 @@ struct AgentLoopTests {
       registry: registry
     )
     var messages: [Components.Schemas.ChatMessage] = []
-    do {
-      _ = try await loop.runModelTurn(
-        messages: &messages,
-        logger: Logger(label: "test"),
-        onEvent: { _ in },
-        shouldAbortTurn: { true }
-      )
-      #expect(Bool(false), "expected AgentTurnInterruptedError")
-    } catch is AgentTurnInterruptedError {
-      // Expected — before-http abort now throws
-    }
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { _ in },
+      shouldAbortTurn: { true }
+    )
+    #expect(outcome == .interrupted)
     #expect(harness.callCount == 0)
   }
 
@@ -208,23 +204,19 @@ struct AgentLoopTests {
     )
     var messages: [Components.Schemas.ChatMessage] = []
     let state = AbortState()
-    do {
-      _ = try await loop.runModelTurn(
-        messages: &messages,
-        logger: Logger(label: "test"),
-        onEvent: { _ in },
-        shouldAbortTurn: {
-          if state.value {
-            return true
-          }
-          state.set(true)
-          return false
+    let outcome = try await loop.runModelTurn(
+      messages: &messages,
+      logger: Logger(label: "test"),
+      onEvent: { _ in },
+      shouldAbortTurn: {
+        if state.value {
+          return true
         }
-      )
-      #expect(Bool(false), "expected AgentTurnInterruptedError")
-    } catch is AgentTurnInterruptedError {
-      // Expected — post-stream-pre-tools abort now throws
-    }
+        state.set(true)
+        return false
+      }
+    )
+    #expect(outcome == .interrupted)
     #expect(harness.callCount == 1)
   }
 

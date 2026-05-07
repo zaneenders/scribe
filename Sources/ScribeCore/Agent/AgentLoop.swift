@@ -40,7 +40,7 @@ public struct AgentLoop: Sendable {
             "where": "before-http",
             "round": "\(round)",
           ])
-        throw AgentTurnInterruptedError()
+        return .interrupted
       }
 
       let messagesCountBeforeRound = messages.count
@@ -64,7 +64,8 @@ public struct AgentLoop: Sendable {
             "where": "post-stream-pre-tools",
             "round": "\(round)",
           ])
-        throw AgentTurnInterruptedError()
+        messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
+        return .interrupted
       }
 
       switch roundOutcome {
@@ -142,7 +143,7 @@ public struct AgentLoop: Sendable {
                 "until_abort_ms": "\(abortMs)",
               ])
             messages.removeSubrange(messagesCountBeforeRound..<messages.endIndex)
-            throw AgentTurnInterruptedError()
+            return .interrupted
           }
           let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
           let unknown = jsonOutput.contains("unknown tool")
