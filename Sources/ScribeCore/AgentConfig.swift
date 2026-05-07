@@ -14,18 +14,27 @@ public struct AgentConfig: Sendable {
   public var serverURL: String
   /// Optional bearer token for the API.
   public var bearerToken: String?
+  /// Maximum number of tool-call rounds per model turn. When exceeded the turn
+  /// returns `.toolRoundLimit` rather than looping forever. Default unlimited.
+  public var maxToolRounds: Int
+  /// LLM sampling temperature (0.0–2.0). Default 0 for deterministic output.
+  public var temperature: Double
 
   public init(
     agentModel: String,
     contextWindow: Int = 131_072,
     contextWindowThreshold: Double = 0.85,
     serverURL: String = "https://api.openai.com",
-    bearerToken: String? = nil
+    bearerToken: String? = nil,
+    maxToolRounds: Int = .max,
+    temperature: Double = 0
   ) {
     self.agentModel = agentModel
     self.contextWindow = contextWindow
     self.contextWindowThreshold = contextWindowThreshold
     self.serverURL = serverURL
     self.bearerToken = bearerToken
+    self.maxToolRounds = maxToolRounds
+    self.temperature = temperature
   }
 }

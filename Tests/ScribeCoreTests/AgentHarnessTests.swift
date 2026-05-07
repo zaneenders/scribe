@@ -70,11 +70,12 @@ private final class EventCollector: @unchecked Sendable {
 private func makeHarness(
   statusCode: Int = 200,
   chunks: [HTTPBody.ByteChunk],
-  model: String = "test-model"
+  model: String = "test-model",
+  temperature: Double = 0
 ) -> AgentHarness {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  return AgentHarness(client: client, model: model, tools: [])
+  return AgentHarness(client: client, model: model, tools: [], temperature: temperature)
 }
 
 private let testLogger = Logger(label: "test")

@@ -35,16 +35,19 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public var client: Client
   public var model: String
   private let tools: [Components.Schemas.ChatTool]
+  private let temperature: Double
   private let clock = ContinuousClock()
 
   public init(
     client: Client,
     model: String,
-    tools: [Components.Schemas.ChatTool]
+    tools: [Components.Schemas.ChatTool],
+    temperature: Double
   ) {
     self.client = client
     self.model = model
     self.tools = tools
+    self.temperature = temperature
   }
 
   public func runRound(
@@ -76,7 +79,7 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       model: model,
       messages: messages,
       stream: true,
-      temperature: 0,
+      temperature: Float(temperature),
       maxTokens: nil,
       tools: tools,
       toolChoice: .case1("auto"),

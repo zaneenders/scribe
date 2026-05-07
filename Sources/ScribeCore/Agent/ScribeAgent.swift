@@ -71,7 +71,8 @@ public struct ScribeAgent: Sendable {
     let harness = AgentHarness(
       client: client,
       model: configuration.agentModel,
-      tools: chatTools
+      tools: chatTools,
+      temperature: configuration.temperature
     )
     self.loop = AgentLoop(
       harness: harness,
