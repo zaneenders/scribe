@@ -14,11 +14,24 @@ public protocol MarkdownRenderer: Sendable {
   /// - Returns: An array of logical lines. The caller is responsible for
   ///   word-wrapping these lines to the terminal width.
   func render(text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> [TLine]
+
+  /// Fast path for streaming: renders only inline markdown patterns
+  /// (`**bold**`, `*italic*`, `` `code` ``) without block-level parsing.
+  ///
+  /// Called on every SSE chunk during streaming.  The full `render` is invoked
+  /// once at finalize to apply block-level formatting (headings, code blocks, etc.).
+  ///
+  /// Default implementation falls back to `render`.
+  func renderStreaming(text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> [TLine]
 }
 
 extension MarkdownRenderer {
   /// Default implementation using the vibrant theme.
   public func render(text: String, baseFG: TerminalRGB, baseBold: Bool) -> [TLine] {
     render(text: text, baseFG: baseFG, baseBold: baseBold, theme: .vibrant)
+  }
+
+  public func renderStreaming(text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> [TLine] {
+    render(text: text, baseFG: baseFG, baseBold: baseBold, theme: theme)
   }
 }
