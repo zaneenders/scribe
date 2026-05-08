@@ -177,24 +177,29 @@ internal final class SlateChatHost {
           ] in
           defer { sink.markCoordinatorFinished() }
           do {
-            let agent = try ScribeAgent.make(configuration: configuration)
-
-            // Build initial history
-            var history: [Components.Schemas.ChatMessage]
-            if let initial = resumeSnapshot?.messages, !initial.isEmpty {
-              guard initial.first?.role == .system else {
+            // Build initial messages
+            let initialMessages: [Components.Schemas.ChatMessage]
+            if let resumed = resumeSnapshot?.messages, !resumed.isEmpty {
+              guard resumed.first?.role == .system else {
                 throw ScribeError.sessionCorrupted(
                   reason: "Resumed conversation must begin with a system message.")
               }
-              history = initial
+              initialMessages = resumed
             } else {
-              history = [
+              initialMessages = [
                 .init(role: .system, content: systemPrompt)
               ]
             }
 
-            persist(history)
-            sessionLog.debug("event=chat.coordinator.start messages=\(history.count) resumed=\(resumeSnapshot != nil)")
+            let agent = try ScribeAgent(
+              configuration: configuration,
+              systemPrompt: systemPrompt,
+              initialMessages: initialMessages
+            )
+
+            persist(initialMessages)
+            let msgCount = initialMessages.count
+            sessionLog.debug("event=chat.coordinator.start messages=\(msgCount) resumed=\(resumeSnapshot != nil)")
 
             let tracker = TokenTracker(
               contextWindow: configuration.contextWindow,
@@ -218,8 +223,6 @@ internal final class SlateChatHost {
 
               // Record visible submission
               sink.recordUserSubmission(trimmedVisible: trimmed)
-
-              history.append(.init(role: .user, content: trimmed))
               sessionLog.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
 
               interruptFlag.clear()
@@ -227,22 +230,21 @@ internal final class SlateChatHost {
               sink.emit(.modelTurnRunning(true))
               defer { sink.emit(.modelTurnRunning(false)) }
 
+              let options = AgentRunOptions(
+                shouldAbortTurn: {
+                  let v = interruptFlag.peek()
+                  if v { sessionLog.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
+                  return v
+                }
+              )
+
               do {
-                let ts = agent.streamTurn(
-                  messages: history,
-                  log: sessionLog,
-                  shouldAbortTurn: {
-                    let v = interruptFlag.peek()
-                    if v { sessionLog.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
-                    return v
-                  }
-                )
+                let ts = await agent.prompt(trimmed, options: options, log: sessionLog)
                 for await event in ts.events {
                   if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
                   sink.emit(event)
                 }
                 let result = try await ts.result.value
-                history = result.messages
                 switch result.outcome {
                 case .completed:
                   sessionLog.info("event=agent.turn.end status=completed")
@@ -259,12 +261,12 @@ internal final class SlateChatHost {
                 sessionLog.error(
                   "event=agent.turn.end status=error err=\"\(se.errorDescription ?? String(describing: se))\"")
                 sink.emit(.harnessError(se))
-                if history.last?.role == .user { history.removeLast() }
               }
-              persist(history)
+              persist(await agent.messages)
             }
-            persist(history)
-            sessionLog.debug("event=chat.coordinator.end transcript_messages=\(history.count)")
+            persist(await agent.messages)
+            let finalMsgCount = await agent.messages.count
+            sessionLog.debug("event=chat.coordinator.end transcript_messages=\(finalMsgCount)")
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
             sink.emit(.harnessError(scribeError))

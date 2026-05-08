@@ -85,8 +85,12 @@ private func makeAgent(
 ) -> ScribeAgent {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  let harness = AgentHarness(client: client, model: model, tools: tools)
-  return ScribeAgent(harness: harness)
+  return ScribeAgent(
+    client: client,
+    model: model,
+    systemPrompt: "You are a test agent.",
+    tools: tools
+  )
 }
 
 private func makeAgent(
@@ -98,8 +102,12 @@ private func makeAgent(
   let transport = FakeClientTransport(
     statusCode: statusCode, responseBodyChunksForCall: chunksForCall)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  let harness = AgentHarness(client: client, model: model, tools: tools)
-  return ScribeAgent(harness: harness)
+  return ScribeAgent(
+    client: client,
+    model: model,
+    systemPrompt: "You are a test agent.",
+    tools: tools
+  )
 }
 
 // MARK: - Tests
@@ -107,21 +115,21 @@ private func makeAgent(
 @Suite
 struct ScribeAgentTests {
 
-  // MARK: - streamTurn: outcome
+  // MARK: - prompt: outcome
 
-  @Test func streamTurnCompletesWithAnswerText() async throws {
+  @Test func promptCompletesWithAnswerText() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = agent.streamTurn(messages: [], log: testLogger)
+    let ts = await agent.prompt("hello", log: testLogger)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
   }
 
-  @Test func streamTurnPassesMaxToolRounds() async throws {
+  @Test func promptRespectsMaxToolRounds() async throws {
     let chunks = [
       sseChunk(
         #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
@@ -129,22 +137,23 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks, tools: [FakeTool()])
-    let ts = agent.streamTurn(messages: [], log: testLogger, maxToolRounds: 1)
+    let options = AgentRunOptions(maxToolRounds: 1)
+    let ts = await agent.prompt("test", options: options, log: testLogger)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .toolRoundLimit(rounds: 1))
   }
 
-  // MARK: - streamTurn: events
+  // MARK: - prompt: events
 
-  @Test func streamTurnYieldsAssistantTextEvents() async throws {
+  @Test func promptYieldsAssistantTextEvents() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hello"}}]}"#),
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":" world"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = agent.streamTurn(messages: [], log: testLogger)
+    let ts = await agent.prompt("test", log: testLogger)
     var texts: [String] = []
     for await event in ts.events {
       if case .appendAssistantText(_, let text) = event { texts.append(text) }
@@ -154,7 +163,7 @@ struct ScribeAgentTests {
     #expect(result.outcome == .completed)
   }
 
-  @Test func streamTurnYieldsToolInvocationEvents() async throws {
+  @Test func promptYieldsToolInvocationEvents() async throws {
     let toolChunks = [
       sseChunk(
         #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
@@ -166,7 +175,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
-    let ts = agent.streamTurn(messages: [], log: testLogger)
+    let ts = await agent.prompt("test", log: testLogger)
     var events: [TranscriptEvent] = []
     for await event in ts.events { events.append(event) }
     let result = try await ts.result.value
@@ -183,14 +192,14 @@ struct ScribeAgentTests {
     #expect(hasInvocation)
   }
 
-  @Test func streamTurnYieldsUsageEvent() async throws {
+  @Test func promptYieldsUsageEvent() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"x"}}]}"#),
       sseChunk(#"{"id":"1","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = agent.streamTurn(messages: [], log: testLogger)
+    let ts = await agent.prompt("test", log: testLogger)
     var events: [TranscriptEvent] = []
     for await event in ts.events { events.append(event) }
     _ = try await ts.result.value
@@ -201,26 +210,25 @@ struct ScribeAgentTests {
     #expect(hasUsage)
   }
 
-  // MARK: - streamTurn: result.messages
+  // MARK: - prompt: result.messages
 
-  @Test func streamTurnResultMessagesContainsAssistantMessage() async throws {
+  @Test func promptResultMessagesContainsAssistantMessage() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let messages: [Components.Schemas.ChatMessage] = [.init(role: .user, content: "hello")]
-    let ts = agent.streamTurn(messages: messages, log: testLogger)
+    let ts = await agent.prompt("hello", log: testLogger)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
-    #expect(result.messages.count == 2)
+    #expect(result.messages.count == 2)  // user + assistant
     #expect(result.messages[0].role == .user)
     #expect(result.messages[0].content == "hello")
     #expect(result.messages[1].role == .assistant)
     #expect(result.messages[1].content == "reply")
   }
 
-  @Test func streamTurnResultMessagesAfterToolRound() async throws {
+  @Test func promptResultMessagesAfterToolRound() async throws {
     let toolChunks = [
       sseChunk(
         #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
@@ -232,23 +240,25 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
-    let ts = agent.streamTurn(messages: [], log: testLogger)
+    let ts = await agent.prompt("test", log: testLogger)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
-    #expect(result.messages.count == 3)
-    #expect(result.messages[0].role == .assistant)
-    #expect(result.messages[1].role == .tool)
-    #expect(result.messages[1].toolCallId == "c1")
-    #expect(result.messages[2].role == .assistant)
-    #expect(result.messages[2].content == "done")
+    // Messages: user(prompt) + assistant(tool-calling) + tool(result) + assistant(done)
+    #expect(result.messages.count == 4)
+    #expect(result.messages[0].role == .user)
+    #expect(result.messages[1].role == .assistant)
+    #expect(result.messages[2].role == .tool)
+    #expect(result.messages[2].toolCallId == "c1")
+    #expect(result.messages[3].role == .assistant)
+    #expect(result.messages[3].content == "done")
   }
 
-  // MARK: - streamTurn: error propagation
+  // MARK: - prompt: error propagation
 
-  @Test func streamTurnPropagatesHTTPError() async {
+  @Test func promptPropagatesHTTPError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
-    let ts = agent.streamTurn(messages: [], log: testLogger)
+    let ts = await agent.prompt("test", log: testLogger)
     Task { for await _ in ts.events {} }
     do {
       _ = try await ts.result.value
@@ -264,9 +274,9 @@ struct ScribeAgentTests {
     }
   }
 
-  @Test func streamTurnStreamFinishesOnError() async {
+  @Test func promptStreamFinishesOnError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
-    let ts = agent.streamTurn(messages: [], log: testLogger)
+    let ts = await agent.prompt("test", log: testLogger)
     var eventCount = 0
     for await _ in ts.events { eventCount += 1 }
     let didThrow: Bool
@@ -278,15 +288,16 @@ struct ScribeAgentTests {
     #expect(eventCount == 0)
   }
 
-  // MARK: - streamTurn: shouldAbortTurn
+  // MARK: - prompt: shouldAbortTurn
 
-  @Test func streamTurnAbortReturnsInterrupted() async throws {
+  @Test func promptAbortReturnsInterrupted() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hello"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = agent.streamTurn(messages: [], log: testLogger, shouldAbortTurn: { true })
+    let options = AgentRunOptions(shouldAbortTurn: { true })
+    let ts = await agent.prompt("test", options: options, log: testLogger)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .interrupted)
