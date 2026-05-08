@@ -14,7 +14,7 @@ import ScribeCore
   @Flag(name: .long, help: "List saved chat sessions (newest first) and exit.")
   var listSessions = false
 
-  @Flag(name: .long, help: "Print Scribe\u{2019}s resolved paths, version, and configuration and exit.")
+  @Flag(name: .long, help: "Print Scribe’s resolved paths, version, and configuration and exit.")
   var info = false
 
   @Option(
@@ -73,18 +73,18 @@ import ScribeCore
     let systemPrompt = """
       You are Scribe, a coding agent CLI with shell and file tools.
 
-      Prefer doing over asking\u{2014}use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don\u{2019}t ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never \u{201c}should I look at X?\u{201d} instead of opening X.
+      Prefer doing over asking — use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don’t ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never “should I look at X?” instead of opening X.
 
       Git: use `shell` for normal inspection (`git status`, `git diff`, `git log`, branches). Avoid destructive git operations (force push, hard reset, branch deletion) unless the user explicitly requests them.
 
-      Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way\u{2014}if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
+      Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way — if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
 
       Tool names must match exactly: \(toolNames).
-      Parallel tool calls are fine when they do not depend on each other\u{2019}s outputs.
+      Parallel tool calls are fine when they do not depend on each other’s outputs.
 
       \(toolHints)
 
-      Scribe\u{2019}s configuration, logs, and sessions live under `~/.scribe/` by default.  If asked to modify or rebuild Scribe itself, clone the source into `~/.scribe/scribe/` from https://github.com/zaneenders/scribe.
+      Scribe’s configuration, logs, and sessions live under `~/.scribe/` by default.  If asked to modify or rebuild Scribe itself, clone the source into `~/.scribe/scribe/` from https://github.com/zaneenders/scribe.
 
       Current working directory (relative paths resolve here): \(cwd)
       """
@@ -187,7 +187,7 @@ import ScribeCore
 }
 
 extension ScribeCLI {
-  /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only \u{2014} structured logs stay in log files).
+  /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only — structured logs stay in log files).
   fileprivate func printExitResumeHint(
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL
