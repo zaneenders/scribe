@@ -37,7 +37,7 @@ enum SlateChat {
   ///   - resumeArchive: If set, restores model context and redraws approximate transcript (`sessionPersistenceURL` should point at that archive).
   ///   - sessionId: UUID identifying this Scribe invocation (matches the `{uuid}.json` archive
   ///     stem and the `scribe-{uuid}.log` file the `log` parameter writes to).
-  ///   - log: Per-session logger created in `Chat.run` via ``AgentConfig/makeSessionLogger(sessionId:)``.
+  ///   - log: Per-session logger created in `Chat.run` via ``ScribeConfig/makeSessionLogger(sessionId:)``.
   ///     All chat events for this invocation funnel into this single `Logger`; we no longer emit
   ///     to a separate diagnostics file.
   ///
@@ -92,13 +92,12 @@ enum SlateChat {
   /// | `chat.coordinator.fail` | `err` | Coordinator task threw out of `runInteractive`. |
   /// | `chat.session.end` | `status=ok` | Last line of the file. |
   static func runFullscreen(
-    configuration: AgentConfig,
+    configuration: ScribeConfig,
     systemPrompt: String,
     resumeArchive: ChatSessionArchive? = nil,
     sessionPersistenceURL: URL,
     sessionId: UUID,
-    log: Logger,
-    tools: [any ScribeTool]
+    log: Logger
   ) async throws {
     guard isatty(STDIN_FILENO) != 0 else {
       log.error("event=chat.session.fail reason=stdin-not-tty")
@@ -119,8 +118,7 @@ enum SlateChat {
         sessionPersistenceURL: sessionPersistenceURL,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
-        log: log,
-        tools: tools
+        log: log
       )
       do {
         try await host.run()
