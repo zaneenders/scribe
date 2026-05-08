@@ -17,10 +17,6 @@ public enum ScribeConfigBinding {
   public static let contextWindow: ConfigKey = "agent.contextWindow"
   public static let contextWindowThreshold: ConfigKey = "agent.contextWindowThreshold"
   public static let loggingLevel: ConfigKey = "logging.level"
-  /// Base directory for all Scribe storage. `logs/` and `sessions/` subdirectories are
-  /// created under it automatically. Relative paths resolve against the process working
-  /// directory when the config is loaded. Required.
-  public static let loggingStorage: ConfigKey = "logging.storage"
 }
 
 // MARK: - Log level
@@ -151,7 +147,6 @@ private struct ConfigTemplate: Codable {
   }
   struct LoggingSection: Codable {
     var level: String
-    var storage: String
   }
   var api: APISection
   var agent: AgentSection
@@ -235,11 +230,11 @@ public enum ConfigLoader {
       }
     }
 
-    // 2. Check ~/.config/scribe/scribe-config.json.
-    let homeCandidate = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".config/scribe/\(configFileName)", isDirectory: false)
-    if FileManager.default.fileExists(atPath: homeCandidate.path) {
-      return try await loadConfig(at: ScribeFilePath(homeCandidate.path))
+    // 2. Check ~/.scribe/scribe-config.json.
+    let homeScribeCandidate = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".scribe/\(configFileName)", isDirectory: false)
+    if FileManager.default.fileExists(atPath: homeScribeCandidate.path) {
+      return try await loadConfig(at: ScribeFilePath(homeScribeCandidate.path))
     }
 
     // 3. Check cwd/scribe-config.json.
@@ -250,14 +245,16 @@ public enum ConfigLoader {
       return try await loadConfig(at: ScribeFilePath(cwdCandidate))
     }
 
-    // 4. Not found — write a default config to cwd, then load it.
-    try writeDefaultConfig(to: cwdCandidate)
-    if let data = "scribe: no config found — wrote default \(configFileName) to \(cwdCandidate)\n"
+    // 4. Not found — write a default config to ~/.scribe/, then load it.
+    let defaultCandidate = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".scribe/\(configFileName)", isDirectory: false).path
+    try writeDefaultConfig(to: defaultCandidate)
+    if let data = "scribe: no config found — wrote default \(configFileName) to \(defaultCandidate)\n"
       .data(using: .utf8)
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
-    return try await loadConfig(at: ScribeFilePath(cwdCandidate))
+    return try await loadConfig(at: ScribeFilePath(defaultCandidate))
   }
 
   private static func loadConfig(at path: ScribeFilePath) async throws -> LoadedConfig {
@@ -341,21 +338,11 @@ public enum ConfigLoader {
       )
     }
 
-    let storageRaw = try await reader.fetchRequiredString(
-      forKey: ScribeConfigBinding.loggingStorage
-    ).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !storageRaw.isEmpty else {
-      throw ScribeError.configuration(
-        key: ScribeConfigBinding.loggingStorage.description,
-        reason:
-          "`\(ScribeConfigBinding.loggingStorage.description)` must be a non-empty path in `\(configFileName)`."
-      )
-    }
-    let storagePath = resolveConfigurableDirectory(
-      configuredRelativeOrAbsolutePath: storageRaw)
-    let logDirectoryPath = URL(fileURLWithPath: storagePath, isDirectory: true)
+    let scribeHome = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".scribe", isDirectory: true)
+    let logDirectoryPath = scribeHome
       .appendingPathComponent("logs", isDirectory: true).standardizedFileURL.path
-    let chatSessionsDirectoryPath = URL(fileURLWithPath: storagePath, isDirectory: true)
+    let chatSessionsDirectoryPath = scribeHome
       .appendingPathComponent("sessions", isDirectory: true).standardizedFileURL.path
 
     let resolvedPathString = PathResolution.fileSystemPath(configPath)
@@ -392,8 +379,7 @@ public enum ConfigLoader {
         contextWindowThreshold: 0.8
       ),
       logging: ConfigTemplate.LoggingSection(
-        level: "trace",
-        storage: "~/.local/share/scribe"
+        level: "trace"
       )
     )
     let encoder = JSONEncoder()
@@ -406,21 +392,5 @@ public enum ConfigLoader {
         at: dir, withIntermediateDirectories: true)
     }
     try data.write(to: url, options: .atomic)
-  }
-
-  // MARK: - Path helpers
-
-  private static func resolveConfigurableDirectory(
-    configuredRelativeOrAbsolutePath configured: String
-  ) -> String {
-    let trimmed = configured.trimmingCharacters(in: .whitespacesAndNewlines)
-    let cwd = FileManager.default.currentDirectoryPath
-    let expanded = NSString(string: trimmed).expandingTildeInPath
-    if expanded.hasPrefix("/") {
-      return URL(fileURLWithPath: expanded, isDirectory: true).standardizedFileURL.path
-    }
-    return URL(fileURLWithPath: cwd, isDirectory: true)
-      .appendingPathComponent(expanded, isDirectory: true)
-      .standardizedFileURL.path
   }
 }
