@@ -5,6 +5,7 @@ import Foundation
 public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
   case configuration(key: String?, reason: String)
   case apiHTTPError(statusCode: Int, detail: String, hint: String?)
+  case toolUnknown(name: String)
   case sessionCorrupted(reason: String)
   case resumeNotFound(specifier: String)
   case resumeAmbiguous(specifier: String)
@@ -24,6 +25,8 @@ public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
         msg += ".\(hint)"
       }
       return msg
+    case .toolUnknown(let name):
+      return "Unknown tool \"\(name)\""
     case .sessionCorrupted(let reason):
       return reason
     case .resumeNotFound(let specifier):

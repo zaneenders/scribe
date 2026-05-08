@@ -34,17 +34,22 @@ import ScribeLLM
 public struct AgentHarness: Sendable, AgentHarnessProtocol {
   public var client: Client
   public var model: String
+  public let registry: ToolRegistry
   private let tools: [Components.Schemas.ChatTool]
   private let clock = ContinuousClock()
 
+  /// - Parameter tools: The tool set the LLM may call.  The harness derives
+  ///   both the `ChatTool` schemas for the API and a `ToolRegistry` for
+  ///   execution from this single array, so they can never drift apart.
   public init(
     client: Client,
     model: String,
-    tools: [Components.Schemas.ChatTool]
+    tools: [any ScribeTool]
   ) {
     self.client = client
     self.model = model
-    self.tools = tools
+    self.registry = ToolRegistry(tools: tools)
+    self.tools = DefaultAgentTools.chatTools(from: tools)
   }
 
   public func runRound(

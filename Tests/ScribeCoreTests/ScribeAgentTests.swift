@@ -85,9 +85,8 @@ private func makeAgent(
 ) -> ScribeAgent {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  let chatTools = tools.map { type(of: $0).toChatTool() }
-  let harness = AgentHarness(client: client, model: model, tools: chatTools)
-  return ScribeAgent(harness: harness, registry: ToolRegistry(tools: tools))
+  let harness = AgentHarness(client: client, model: model, tools: tools)
+  return ScribeAgent(harness: harness)
 }
 
 private func makeAgent(
@@ -99,9 +98,8 @@ private func makeAgent(
   let transport = FakeClientTransport(
     statusCode: statusCode, responseBodyChunksForCall: chunksForCall)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  let chatTools = tools.map { type(of: $0).toChatTool() }
-  let harness = AgentHarness(client: client, model: model, tools: chatTools)
-  return ScribeAgent(harness: harness, registry: ToolRegistry(tools: tools))
+  let harness = AgentHarness(client: client, model: model, tools: tools)
+  return ScribeAgent(harness: harness)
 }
 
 // MARK: - Tests
@@ -118,19 +116,21 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks)
     let ts = agent.streamTurn(messages: [], log: testLogger)
-    Task { for await _ in ts.events { } }
+    Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
   }
 
   @Test func streamTurnPassesMaxToolRounds() async throws {
     let chunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#),
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks, tools: [FakeTool()])
     let ts = agent.streamTurn(messages: [], log: testLogger, maxToolRounds: 1)
-    Task { for await _ in ts.events { } }
+    Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .toolRoundLimit(rounds: 1))
   }
@@ -156,7 +156,9 @@ struct ScribeAgentTests {
 
   @Test func streamTurnYieldsToolInvocationEvents() async throws {
     let toolChunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#),
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
       doneChunk(),
     ]
     let replyChunks = [
@@ -209,7 +211,7 @@ struct ScribeAgentTests {
     let agent = makeAgent(chunks: chunks)
     let messages: [Components.Schemas.ChatMessage] = [.init(role: .user, content: "hello")]
     let ts = agent.streamTurn(messages: messages, log: testLogger)
-    Task { for await _ in ts.events { } }
+    Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.messages.count == 2)
     #expect(result.messages[0].role == .user)
@@ -220,7 +222,9 @@ struct ScribeAgentTests {
 
   @Test func streamTurnResultMessagesAfterToolRound() async throws {
     let toolChunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#),
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
       doneChunk(),
     ]
     let replyChunks = [
@@ -229,7 +233,7 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
     let ts = agent.streamTurn(messages: [], log: testLogger)
-    Task { for await _ in ts.events { } }
+    Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
     #expect(result.messages.count == 3)
@@ -245,12 +249,15 @@ struct ScribeAgentTests {
   @Test func streamTurnPropagatesHTTPError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
     let ts = agent.streamTurn(messages: [], log: testLogger)
-    Task { for await _ in ts.events { } }
+    Task { for await _ in ts.events {} }
     do {
       _ = try await ts.result.value
       #expect(Bool(false), "expected error")
     } catch let error as ScribeError {
-      guard case .apiHTTPError(let code, _, _) = error else { #expect(Bool(false)); return }
+      guard case .apiHTTPError(let code, _, _) = error else {
+        #expect(Bool(false))
+        return
+      }
       #expect(code == 500)
     } catch {
       #expect(Bool(false))
@@ -263,8 +270,10 @@ struct ScribeAgentTests {
     var eventCount = 0
     for await _ in ts.events { eventCount += 1 }
     let didThrow: Bool
-    do { _ = try await ts.result.value; didThrow = false }
-    catch { didThrow = true }
+    do {
+      _ = try await ts.result.value
+      didThrow = false
+    } catch { didThrow = true }
     #expect(didThrow)
     #expect(eventCount == 0)
   }
@@ -278,7 +287,7 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks)
     let ts = agent.streamTurn(messages: [], log: testLogger, shouldAbortTurn: { true })
-    Task { for await _ in ts.events { } }
+    Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .interrupted)
   }

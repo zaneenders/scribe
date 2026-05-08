@@ -177,7 +177,7 @@ internal final class SlateChatHost {
           ] in
           defer { sink.markCoordinatorFinished() }
           do {
-            let agent = ScribeAgent(configuration: configuration)
+            let agent = try ScribeAgent.make(configuration: configuration)
 
             // Build initial history
             var history: [Components.Schemas.ChatMessage]

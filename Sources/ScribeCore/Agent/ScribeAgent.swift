@@ -9,31 +9,30 @@ import ScribeLLM
 /// Instantiate with a `ScribeConfig` (or a harness for testing), then call `streamTurn`.
 public struct ScribeAgent: Sendable {
   private let harness: any AgentHarnessProtocol
-  private let registry: ToolRegistry
 
-  public init(configuration: ScribeConfig) {
+  /// Creates an agent from a `ScribeConfig`. Throws `ScribeError.configuration`
+  /// if `serverURL` cannot be parsed into a `URL`.
+  public static func make(configuration: ScribeConfig) throws -> ScribeAgent {
     guard let serverURL = URL(string: configuration.serverURL) else {
-      fatalError("Invalid serverURL in ScribeConfig: \(configuration.serverURL)")
+      throw ScribeError.configuration(
+        key: "serverURL",
+        reason: "Invalid serverURL in ScribeConfig: \(configuration.serverURL)"
+      )
     }
     let client = OpenAICompatibleClient.make(
       serverURL: serverURL, apiKey: configuration.apiKey)
-    let chatTools = DefaultAgentTools.chatTools(from: configuration.tools)
-    self.harness = AgentHarness(
+    let harness = AgentHarness(
       client: client,
       model: configuration.agentModel,
-      tools: chatTools
+      tools: configuration.tools
     )
-    self.registry = ToolRegistry(tools: configuration.tools)
+    return ScribeAgent(harness: harness)
   }
 
   /// Escape hatch: provide a pre-configured `AgentHarnessProtocol` directly
   /// (e.g. for testing with a custom transport).
-  public init(
-    harness: any AgentHarnessProtocol,
-    registry: ToolRegistry
-  ) {
+  public init(harness: any AgentHarnessProtocol) {
     self.harness = harness
-    self.registry = registry
   }
 
   // MARK: - streamTurn
@@ -51,9 +50,10 @@ public struct ScribeAgent: Sendable {
     let (stream, continuation) = AsyncStream<TranscriptEvent>.makeStream()
     var mutable = messages
 
-    let task = Task { [harness, registry] in
+    let task = Task { [harness] in
       defer { continuation.finish() }
       let clock = ContinuousClock()
+      let registry = harness.registry
       log.debug(
         "agent.turn.start",
         metadata: [
@@ -132,18 +132,17 @@ public struct ScribeAgent: Sendable {
             } catch is AgentTurnInterruptedError {
               mutable.removeSubrange(messagesCountBeforeRound..<mutable.endIndex)
               return TurnResult(messages: mutable, outcome: .interrupted)
+            } catch let ScribeError.toolUnknown(name) {
+              log.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
+              jsonOutput = ToolRegistry.jsonError("unknown tool \(name)")
             }
             let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
-            let unknown = jsonOutput.contains("unknown tool")
-            if unknown {
-              log.warning("agent.tool.unknown", metadata: ["tool": "\(inv.name)", "round": "\(round)"])
-            }
             log.debug(
               "agent.tool.invoke",
               metadata: [
                 "round": "\(round)", "tool": "\(inv.name)",
                 "args_chars": "\(inv.arguments.count)", "output_chars": "\(jsonOutput.count)",
-                "elapsed_ms": "\(elapsedMs)", "unknown": "\(unknown)",
+                "elapsed_ms": "\(elapsedMs)",
               ])
             continuation.yield(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
             continuation.yield(.blankLine)

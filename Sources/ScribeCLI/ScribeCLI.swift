@@ -22,6 +22,11 @@ import ScribeCore
   var resume: String?
 
   func run() async throws {
+    #if !os(macOS) && !os(Linux)
+    throw ScribeError.configuration(
+      key: nil,
+      reason: "Scribe is only tested on macOS and Linux.")
+    #endif
     let loaded = try await ConfigLoader.load()
 
     if listSessions {
