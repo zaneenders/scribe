@@ -14,6 +14,9 @@ import ScribeCore
   @Flag(name: .long, help: "List saved chat sessions (newest first) and exit.")
   var listSessions = false
 
+  @Flag(name: .long, help: "Print Scribe\u{2019}s resolved paths, version, and configuration and exit.")
+  var info = false
+
   @Option(
     name: .long,
     help:
@@ -28,6 +31,11 @@ import ScribeCore
       reason: "Scribe is only tested on macOS and Linux.")
     #endif
     let loaded = try await ConfigLoader.load()
+
+    if info {
+      printInfo(loaded: loaded)
+      return
+    }
 
     if listSessions {
       let root = try ChatSessionStore.sessionsDirectoryURL(
@@ -65,18 +73,20 @@ import ScribeCore
     let systemPrompt = """
       You are Scribe, a coding agent CLI with shell and file tools.
 
-      Prefer doing over asking—use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don’t ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never “should I look at X?” instead of opening X.
+      Prefer doing over asking\u{2014}use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don\u{2019}t ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never \u{201c}should I look at X?\u{201d} instead of opening X.
 
       Git: use `shell` for normal inspection (`git status`, `git diff`, `git log`, branches). Avoid destructive git operations (force push, hard reset, branch deletion) unless the user explicitly requests them.
 
-      Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way—if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
+      Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way\u{2014}if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
 
       Tool names must match exactly: \(toolNames).
-      Parallel tool calls are fine when they do not depend on each other’s outputs.
+      Parallel tool calls are fine when they do not depend on each other\u{2019}s outputs.
 
       \(toolHints)
 
-      Working directory (relative paths resolve here): \(cwd)
+      Scribe\u{2019}s configuration, logs, and sessions live under `~/.scribe/` by default.  If asked to modify or rebuild Scribe itself, clone the source into `~/.scribe/scribe/` from https://github.com/zaneenders/scribe.
+
+      Current working directory (relative paths resolve here): \(cwd)
       """
 
     let scribeConfig = ScribeConfig(
@@ -147,10 +157,37 @@ import ScribeCore
       sessionPersistenceURL: sessionPersistenceURL
     )
   }
+
+  // MARK: - Info
+
+  private func printInfo(loaded: LoadedConfig) {
+    let p = loaded.paths
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+    func abbreviate(_ path: String) -> String {
+      if path.hasPrefix(home) {
+        return "~" + path.dropFirst(home.count)
+      }
+      return path
+    }
+
+    let scribeHomeEnv = ProcessInfo.processInfo.environment["SCRIBE_HOME"]
+
+    print("Scribe version:  \(GitVersion.hash)")
+    print("Data home:       \(abbreviate(p.dataHome))")
+    print("Config:          \(abbreviate(loaded.resolvedConfigurationPath))")
+    print("Logs:            \(abbreviate(p.logDirectoryPath))")
+    print("Sessions:        \(abbreviate(p.sessionsDirectoryPath))")
+    if let env = scribeHomeEnv {
+      print("SCRIBE_HOME:     \(env)")
+    } else {
+      print("SCRIBE_HOME:     (not set)")
+    }
+  }
 }
 
 extension ScribeCLI {
-  /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only — structured logs stay in log files).
+  /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only \u{2014} structured logs stay in log files).
   fileprivate func printExitResumeHint(
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL
@@ -183,7 +220,6 @@ extension ScribeCLI {
     case ..<1: return "just now"
     case ..<60: return "\(Int(delta))s ago"
     case ..<3600: return "\(Int(delta / 60))m ago"
-    case ..<86400: return "\(Int(delta / 3600))h ago"
     case ..<604800: return "\(Int(delta / 86400))d ago"
     default: return "\(Int(delta / 604800))w ago"
     }
