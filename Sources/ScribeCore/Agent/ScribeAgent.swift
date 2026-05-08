@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeLLM
+import Synchronization
 
 // MARK: - AgentRunOptions
 
@@ -72,7 +73,6 @@ public struct ScribeAgent: Sendable {
     var streamingMessage: Components.Schemas.ChatMessage?
     var pendingToolCalls = Set<String>()
     var errorMessage: String?
-    var isAborted = false
 
     init(
       systemPrompt: String,
@@ -98,9 +98,6 @@ public struct ScribeAgent: Sendable {
     }
 
     func setStreaming(_ value: Bool) { isStreaming = value }
-    func requestAbort() { isAborted = true }
-    func clearAbort() { isAborted = false }
-    func checkAbort() -> Bool { isAborted }
 
     func reset() {
       messages = []
@@ -108,7 +105,6 @@ public struct ScribeAgent: Sendable {
       streamingMessage = nil
       pendingToolCalls = []
       errorMessage = nil
-      isAborted = false
     }
   }
 
@@ -124,6 +120,12 @@ public struct ScribeAgent: Sendable {
 
   /// The OpenAI-compatible HTTP client.
   private let client: Client
+
+  /// Synchronous abort flag checked by the run loop without `await`.
+  private final class AbortFlag: @unchecked Sendable {
+    let value = Atomic<Bool>(false)
+  }
+  private let abortFlag = AbortFlag()
 
   // MARK: - Constructor
 
@@ -220,10 +222,11 @@ public struct ScribeAgent: Sendable {
     // Take a single snapshot before the task starts
     let snapshot = await storage.snapshot()
     await storage.setStreaming(true)
-    await storage.clearAbort()
+    abortFlag.value.store(false, ordering: .sequentiallyConsistent)
 
     let task = Task {
-      [storage, registry, chatTools, client, promptMessages, options, log] in
+      [storage, registry, chatTools, client, promptMessages, options, log,
+       abortFlag] in
       defer {
         continuation.finish()
         Task { await storage.setStreaming(false) }
@@ -231,9 +234,8 @@ public struct ScribeAgent: Sendable {
 
       // Combine agent-level abort with caller-level abort
       let shouldAbort: @Sendable () -> Bool = {
-        // We can't await storage.checkAbort() inside a non-async closure.
-        // Instead, the caller's shouldAbortTurn can check the agent flag if desired.
-        options.shouldAbortTurn?() == true
+        abortFlag.value.load(ordering: .sequentiallyConsistent)
+          || options.shouldAbortTurn?() == true
       }
 
       // Build context from snapshot (messages BEFORE the prompt)
@@ -282,12 +284,13 @@ public struct ScribeAgent: Sendable {
   // MARK: - Abort / reset
 
   /// Abort the current run, if one is active.
-  public func abort() async {
-    await storage.requestAbort()
+  public func abort() {
+    abortFlag.value.store(true, ordering: .sequentiallyConsistent)
   }
 
   /// Clear transcript and runtime state.
   public func reset() async {
+    abortFlag.value.store(false, ordering: .sequentiallyConsistent)
     await storage.reset()
   }
 }

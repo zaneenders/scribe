@@ -224,7 +224,7 @@ private func runSingleRound(
     }()
     let detailSnippet = detail.count > 512 ? String(detail.prefix(512)) + "…(\(detail.count) chars)" : detail
     let level: Logger.Level = code >= 500 ? .error : .warning
-    logger.log(
+    log.log(
       level: level,
       """
       event=agent.http.response \
@@ -299,6 +299,3 @@ private func runSingleRound(
 
   return .toolCalls(toolInvocations)
 }
-
-// Logger helper for the free function
-private let logger = Logger(label: "scribe.agent.loop")
