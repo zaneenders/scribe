@@ -63,15 +63,25 @@ func runAgentLoop(
     }
 
     let messagesCountBeforeRound = currentContext.messages.count
-    let roundResult = try await runSingleRound(
-      context: &currentContext,
-      config: config,
-      emit: emit,
-      log: log,
-      clock: clock,
-      round: round,
-      shouldAbortTurn: shouldAbortTurn
-    )
+    let roundResult: RoundOutcome
+    do {
+      roundResult = try await runSingleRound(
+        context: &currentContext,
+        config: config,
+        emit: emit,
+        log: log,
+        clock: clock,
+        round: round,
+        shouldAbortTurn: shouldAbortTurn
+      )
+    } catch is AgentTurnInterruptedError {
+      log.notice(
+        "agent.abort",
+        metadata: [
+          "where": "mid-stream", "round": "\(round)",
+        ])
+      return (newMessages, .interrupted)
+    }
 
     // Collect new messages from this round
     let roundMessages = Array(currentContext.messages[messagesCountBeforeRound...])

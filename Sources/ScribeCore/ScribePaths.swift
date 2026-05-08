@@ -24,11 +24,14 @@ public struct ScribePaths: Sendable {
   public init(dataHome: String) {
     let homeURL = URL(fileURLWithPath: dataHome, isDirectory: true).standardizedFileURL
     self.dataHome = homeURL.path
-    self.defaultConfigPath = homeURL
+    self.defaultConfigPath =
+      homeURL
       .appendingPathComponent("scribe-config.json", isDirectory: false).path
-    self.logDirectoryPath = homeURL
+    self.logDirectoryPath =
+      homeURL
       .appendingPathComponent("logs", isDirectory: true).path
-    self.sessionsDirectoryPath = homeURL
+    self.sessionsDirectoryPath =
+      homeURL
       .appendingPathComponent("sessions", isDirectory: true).path
   }
 
