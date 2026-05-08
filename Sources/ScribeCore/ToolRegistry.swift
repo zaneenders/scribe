@@ -24,6 +24,7 @@ public struct ToolRegistry: Sendable {
   /// Pass `abortVia: { false }` when abort support is not needed.
   ///
   /// - Throws: `AgentTurnInterruptedError` if `shouldAbortTurn()` returns true.
+  /// - Throws: `ScribeError.toolUnknown` if the tool `name` is not in the registry.
   /// - Returns: JSON-encoded tool result (or JSON error string for tool failures).
   public func run(
     name: String,
@@ -36,7 +37,7 @@ public struct ToolRegistry: Sendable {
         metadata: [
           "tool": "\(name)"
         ])
-      return Self.jsonError("unknown tool \(name)")
+      throw ScribeError.toolUnknown(name: name)
     }
     let clock = ContinuousClock()
     let start = clock.now
@@ -184,7 +185,7 @@ public struct ToolRegistry: Sendable {
   private static let jsonSerializationFallback =
     "{\"ok\":false,\"error\":\"tool result could not be encoded as JSON\"}"
 
-  private static func jsonError(_ text: String) -> String {
+  static func jsonError(_ text: String) -> String {
     let payload: [String: Any] = ["ok": false, "error": text]
     do {
       let data = try JSONSerialization.data(withJSONObject: payload, options: [])

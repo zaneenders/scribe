@@ -121,7 +121,8 @@ struct MarkdownRendererTests {
     #expect(completed.count == expected.count)
     for (i, (ec, et)) in expected.enumerated() {
       let text = completed[i].spans.map(\.text).joined()
-      #expect(firstColor(of: completed[i]) == ec, "line \(i) color: expected \(ec), got \(firstColor(of: completed[i]))")
+      #expect(
+        firstColor(of: completed[i]) == ec, "line \(i) color: expected \(ec), got \(firstColor(of: completed[i]))")
       #expect(text == et, "line \(i) text: expected '\(et)', got '\(text)'")
     }
   }

@@ -168,7 +168,7 @@ private struct ConfigTemplate: Codable {
 
 /// Loaded configuration bundle returned by `ConfigLoader.load()`.
 public struct LoadedConfig: Sendable {
-  public var agentConfig: AgentConfig
+  public var scribeConfig: ScribeConfig
   public var apiBaseURL: String
   public var apiKey: String?
   public var logLevel: ScribeLogLevel
@@ -184,7 +184,7 @@ public struct LoadedConfig: Sendable {
           "Invalid \(ScribeConfigBinding.apiBaseURL.description) in `scribe-config.json`. Use host only, no `/v1` (e.g. http://127.0.0.1:11434 for Ollama)."
       )
     }
-    return OpenAICompatibleClient.make(serverURL: serverURL, bearerToken: apiKey)
+    return OpenAICompatibleClient.make(serverURL: serverURL, apiKey: apiKey)
   }
 
   /// Returns a logger appending all events for one Scribe invocation to
@@ -359,15 +359,16 @@ public enum ConfigLoader {
       .appendingPathComponent("sessions", isDirectory: true).standardizedFileURL.path
 
     let resolvedPathString = PathResolution.fileSystemPath(configPath)
-    var agentConfig = AgentConfig(
+
+    let scribeConfig = ScribeConfig(
       agentModel: model,
       contextWindow: contextWindow,
-      contextWindowThreshold: contextWindowThreshold
+      contextWindowThreshold: contextWindowThreshold,
+      serverURL: baseURL,
+      apiKey: resolvedAPIKey
     )
-    agentConfig.serverURL = baseURL
-    agentConfig.bearerToken = resolvedAPIKey
     return LoadedConfig(
-      agentConfig: agentConfig,
+      scribeConfig: scribeConfig,
       apiBaseURL: baseURL,
       apiKey: resolvedAPIKey,
       logLevel: logLevel,

@@ -56,7 +56,6 @@ private final class ModelTurnInterruptFlag: Sendable {
   }
 }
 
-/// Incremental word-wrap flatten of completed transcript lines (streaming only re-wraps the open tail).
 private struct TranscriptFlattenCache {
   var wrapWidth: Int = -1
   var completedLogicalLines: Int = 0
@@ -64,102 +63,38 @@ private struct TranscriptFlattenCache {
   var lastGeneration: Int = -1
 }
 
-// MARK: - Host
-
-/// The Slate chat host manages all user input routing — `Enter`, `Ctrl+C`, and the
-/// queued-tray strip — relative to the agent's busy/idle state.
-///
-/// ## Behavior table
-///
-/// | Situation | Result |
-/// |---|---|
-/// | Agent **idle** + Enter (non-empty buffer) | Message is sent **immediately** to the agent (no tray, no delay). Recorded in scrollback as orange `you:`. |
-/// | Agent **busy** + Enter (non-empty buffer) | Buffer text goes into the **queued tray** above the input box (orange `queued:` label, light-gray text on the input strip background). Not in scrollback yet. |
-/// | Agent busy + queue exists + Enter on **empty** buffer | **Interrupts** the in-flight turn and **sends** the queued message. Recorded in scrollback at the moment the coordinator picks it up. |
-/// | Agent busy + queue exists + types more + Enter | New buffer text **replaces** the queued message in the tray (single-slot queue). |
-/// | Queue exists + **Ctrl+C** (1st press) | Queued message is moved back into the **input box** for editing. **The agent keeps running.** |
-/// | No queue + agent busy + **Ctrl+C** (2nd press of the ladder) | Interrupts the agent. |
-/// | No queue + agent idle + **Ctrl+C** (3rd press of the ladder) | Exits the chat. |
-/// | Agent finishes a turn **naturally** with queue non-empty | Queued message is **auto-flushed** to the coordinator on the busy → idle transition. |
-///
-/// ### Ctrl+C ladder
-///
-/// When a queued message exists, three taps of Ctrl+C walk through three distinct states:
-///
-/// 1. **Recall** — first press pulls the queued message back into the input box so
-///    you can edit it. The agent is unaffected and keeps streaming.
-/// 2. **Interrupt** — second press (queue now empty, agent still busy) interrupts
-///    the in-flight model turn.
-/// 3. **Exit** — third press (queue empty, agent idle) exits the chat.
-///
-/// If the agent is already idle when you start pressing, step 2 is skipped: a
-/// single Ctrl+C with no queue exits.
-///
-/// ## Key design notes
-///
-/// - **Single-slot queue.** Submitting again while busy replaces the previous queued
-///   message rather than appending; recall it with Ctrl+C if you want to edit
-///   instead of overwrite.
-/// - **Scrollback recording is deferred to pickup.** ``readUserLine`` is wrapped so
-///   the orange `you:` block is appended to scrollback exactly when the coordinator
-///   consumes the line. This gives the right ordering for the interrupt-and-send
-///   case: `previous turn → (interrupted) → you: queued message → new response`.
-/// - **Tray geometry.** The tray sits between the transcript and the input strip,
-///   shares the input strip background, indents continuation rows under an 8-space
-///   gutter (matching the width of `queued: `), and is hard-capped at 4 rows with
-///   trailing `…` truncation so a long queued paste cannot push the transcript off
-///   screen.
-/// - **Busy → idle transition** is detected in the render callback by comparing
-///   `sink.modelTurnBusy()` against the previous render's snapshot
-///   (`lastObservedModelBusy`); the auto-flush fires exactly once per transition.
-///   `markModelTurnRunning(false)` also schedules a deferred 50 ms follow-up
-///   `requestRender()` so the throttled external-wake stream cannot drop the
-///   trailing render that paints the new idle state.
 @MainActor
 internal final class SlateChatHost {
 
-  private let configuration: AgentConfig
+  private let configuration: ScribeConfig
   private let systemPrompt: String
   private let resumeArchive: ChatSessionArchive?
   private let sessionPersistenceURL: URL
   private let sessionId: UUID
   private let sessionCreatedAt: Date
   private var inputBuffer = ""
-  /// Index into the flattened transcript of the top row of the transcript viewport (used when ``followingLiveTranscript`` is false).
   private var transcriptFirstVisibleRow: Int = 0
-  /// When true, the viewport follows the live tail (new tokens stay at the bottom). When false, ``transcriptFirstVisibleRow`` is fixed so streaming does not move the view.
   private var followingLiveTranscript: Bool = true
   private var flattenCache = TranscriptFlattenCache()
-  /// stdin key decoder (handles UTF-8, CSI, bracketed paste) — provided by slate.
   private var keyDecoder = TerminalKeyDecoder()
-  /// True while inside a bracketed paste region (paste newlines stay literal instead of submitting).
   private var inPaste = false
   private var renderWake: ExternalWake?
   private var llmWaitAnimationFrame: Int = 0
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
   private let modelInterruptFlag = ModelTurnInterruptFlag()
-  /// Holds a user submission that arrived while the agent was busy. The text lives in the queued
-  /// tray UI strip above the input; it is delivered to the coordinator when the user explicitly
-  /// hits Enter again (interrupting the agent), recalls it with Ctrl+C, or when the current model
-  /// turn finishes naturally.
   private var queuedSubmission: String? = nil
-  /// Previous-render snapshot of `sink.modelTurnBusy()`, used to detect busy → idle transitions
-  /// in `onEvent` and auto-flush a queued submission to the coordinator at that moment.
   private var lastObservedModelBusy: Bool = false
-  /// Per-session logger threaded in from `Chat.run`; writes to `scribe-{uuid}.log`.
   private let log: Logger
-  private let tools: [any ScribeTool]
 
   init(
-    configuration: AgentConfig,
+    configuration: ScribeConfig,
     systemPrompt: String,
     resumeArchive: ChatSessionArchive?,
     sessionPersistenceURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,
-    log: Logger,
-    tools: [any ScribeTool]
+    log: Logger
   ) {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
@@ -168,7 +103,6 @@ internal final class SlateChatHost {
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.log = log
-    self.tools = tools
   }
 
   deinit {
@@ -239,48 +173,98 @@ internal final class SlateChatHost {
         let sessionLog = self.log
         self.coordinatorTask = Task {
           [
-            configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog,
-            tools
+            configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog
           ] in
           defer { sink.markCoordinatorFinished() }
           do {
-            let agent = ScribeAgent(
-              configuration: configuration,
-              systemPrompt: systemPrompt,
-              tools: tools
+            let agent = try ScribeAgent.make(configuration: configuration)
+
+            // Build initial history
+            var history: [Components.Schemas.ChatMessage]
+            if let initial = resumeSnapshot?.messages, !initial.isEmpty {
+              guard initial.first?.role == .system else {
+                throw ScribeError.sessionCorrupted(
+                  reason: "Resumed conversation must begin with a system message.")
+              }
+              history = initial
+            } else {
+              history = [
+                .init(role: .system, content: systemPrompt)
+              ]
+            }
+
+            persist(history)
+            sessionLog.debug("event=chat.coordinator.start messages=\(history.count) resumed=\(resumeSnapshot != nil)")
+
+            let tracker = TokenTracker(
+              contextWindow: configuration.contextWindow,
+              threshold: configuration.contextWindowThreshold
             )
-            try await agent.runInteractive(
-              onEvent: { event in sink.emit(event) },
-              readUserLine: {
-                // Record the submission in scrollback exactly when the coordinator picks it up,
-                // so messages held in the queued-tray (during a busy turn) appear in scrollback
-                // only at the moment they're dispatched—not while they sit in the tray.
-                guard let line = await gate.nextLine() else { return nil }
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                  sink.recordUserSubmission(trimmedVisible: trimmed)
+
+            while true {
+              guard let line = await gate.nextLine() else {
+                sessionLog.info("event=chat.user.eof reason=stdin-closed")
+                break
+              }
+              let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+              if trimmed == "exit" {
+                sessionLog.notice("event=chat.user.exit-command")
+                break
+              }
+              if trimmed.isEmpty {
+                sessionLog.trace("event=chat.user.empty-skip")
+                continue
+              }
+
+              // Record visible submission
+              sink.recordUserSubmission(trimmedVisible: trimmed)
+
+              history.append(.init(role: .user, content: trimmed))
+              sessionLog.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
+
+              interruptFlag.clear()
+              interruptFlag.logState(sessionLog, tag: "cleared-for-new-turn")
+              sink.emit(.modelTurnRunning(true))
+              defer { sink.emit(.modelTurnRunning(false)) }
+
+              do {
+                let ts = agent.streamTurn(
+                  messages: history,
+                  log: sessionLog,
+                  shouldAbortTurn: {
+                    let v = interruptFlag.peek()
+                    if v { sessionLog.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
+                    return v
+                  }
+                )
+                for await event in ts.events {
+                  if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
+                  sink.emit(event)
                 }
-                return line
-              },
-              initialConversation: resumeSnapshot?.messages,
-              onConversationPersist: persist,
-              prepareModelTurnStart: {
-                interruptFlag.clear()
-                interruptFlag.logState(sessionLog, tag: "cleared-for-new-turn")
-              },
-              shouldAbortTurn: {
-                let v = interruptFlag.peek()
-                if v {
-                  sessionLog.trace(
-                    "chat.interrupt-flag.polled",
-                    metadata: [
-                      "value": "true"
-                    ])
+                let result = try await ts.result.value
+                history = result.messages
+                switch result.outcome {
+                case .completed:
+                  sessionLog.info("event=agent.turn.end status=completed")
+                  tracker.logStatus(logger: sessionLog)
+                case .interrupted:
+                  sessionLog.notice("event=agent.turn.end status=interrupted")
+                  sink.emit(.turnInterrupted)
+                case .toolRoundLimit(let max):
+                  sessionLog.notice("event=agent.turn.end status=tool-round-limit limit=\(max)")
+                  sink.emit(.turnInterrupted)
                 }
-                return v
-              },
-              log: sessionLog
-            )
+              } catch {
+                let se = (error as? ScribeError) ?? .generic(String(describing: error))
+                sessionLog.error(
+                  "event=agent.turn.end status=error err=\"\(se.errorDescription ?? String(describing: se))\"")
+                sink.emit(.harnessError(se))
+                if history.last?.role == .user { history.removeLast() }
+              }
+              persist(history)
+            }
+            persist(history)
+            sessionLog.debug("event=chat.coordinator.end transcript_messages=\(history.count)")
           } catch {
             let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
             sink.emit(.harnessError(scribeError))
