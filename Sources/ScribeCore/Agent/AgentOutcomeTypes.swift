@@ -1,24 +1,15 @@
 // MARK: - Outcome types for agent turns and rounds
 
 /// Thrown when an interactive host asks to stop the current model/tool round.
-/// Only thrown by ``AgentHarness/runRound``; ``AgentLoop/runModelTurn`` catches
-/// this and returns ``ModelTurnOutcome/interrupted`` instead. `AgentLoop` itself
-/// always returns `.interrupted` for aborts rather than throwing this error.
 public struct AgentTurnInterruptedError: Error, Sendable {
   public init() {}
 }
 
-/// Result of ``AgentLoop/runModelTurn(messages:logger:shouldAbortTurn:)``.
-public enum ModelTurnOutcome: Sendable, Equatable {
+/// Result of a full agent turn (one user prompt through completion or interruption).
+public enum TurnOutcome: Sendable, Equatable {
   case completed
   case interrupted
   case toolRoundLimit(rounds: Int)
-}
-
-/// Result of a single LLM round from ``AgentHarness/runRound(messages:logger:shouldAbortTurn:)``.
-public enum RoundOutcome: Sendable, Equatable {
-  case completed
-  case toolCalls([ToolInvocation])
 }
 
 /// A resolved tool call produced by the assistant in a single round.

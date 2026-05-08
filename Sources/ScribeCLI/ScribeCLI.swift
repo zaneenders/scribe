@@ -220,6 +220,7 @@ extension ScribeCLI {
     case ..<1: return "just now"
     case ..<60: return "\(Int(delta))s ago"
     case ..<3600: return "\(Int(delta / 60))m ago"
+    case ..<86400: return "\(Int(delta / 3600))h ago"
     case ..<604800: return "\(Int(delta / 86400))d ago"
     default: return "\(Int(delta / 604800))w ago"
     }

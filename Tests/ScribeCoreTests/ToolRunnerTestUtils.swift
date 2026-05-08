@@ -101,3 +101,11 @@ func withTemporaryDirectory<T>(
   defer { try? FileManager.default.removeItem(at: dir) }
   return try await body(dir)
 }
+
+// MARK: - Shared test helpers
+
+/// Mutable boolean flag used by tool tests that exercise abort logic.
+final class AbortState: @unchecked Sendable {
+  var value = false
+  func set(_ newValue: Bool) { value = newValue }
+}
