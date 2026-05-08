@@ -100,9 +100,9 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
       temperature: Float(temperature),
       maxTokens: nil,
       tools: tools,
-      toolChoice: .case1("auto"),
+      toolChoice: nil,
       streamOptions: .init(includeUsage: true),
-      reasoning: nil
+      reasoning: Components.Schemas.ChatCompletionReasoning(enabled: true)
     )
   }
 
@@ -132,8 +132,12 @@ public struct AgentHarness: Sendable, AgentHarnessProtocol {
     case .undocumented(statusCode: let code, let payload):
       var detail = ""
       if let body = payload.body {
-        let chunk = try await HTTPBody.ByteChunk(collecting: body, upTo: 4096)
-        detail = String(decoding: chunk, as: UTF8.self)
+        do {
+          let chunk = try await HTTPBody.ByteChunk(collecting: body, upTo: 4096)
+          detail = String(decoding: chunk, as: UTF8.self)
+        } catch {
+          detail = "(response body exceeds 4096 bytes — truncated)"
+        }
       }
       let hint: String = {
         let d = detail.lowercased()
