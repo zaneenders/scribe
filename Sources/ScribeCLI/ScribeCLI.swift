@@ -74,6 +74,15 @@ import ScribeCore
       Working directory (relative paths resolve here): \(cwd)
       """
 
+    let scribeConfig = ScribeConfig(
+      agentModel: loaded.scribeConfig.agentModel,
+      contextWindow: loaded.scribeConfig.contextWindow,
+      contextWindowThreshold: loaded.scribeConfig.contextWindowThreshold,
+      serverURL: loaded.scribeConfig.serverURL,
+      apiKey: loaded.scribeConfig.apiKey,
+      tools: tools
+    )
+
     let sessionPersistenceURL: URL
     let resumeArchive: ChatSessionArchive?
     let sessionId: UUID
@@ -98,20 +107,20 @@ import ScribeCore
         "session_id": "\(sessionId.uuidString)",
         "mode": "\(mode)",
         "scribe_version": "\(GitVersion.hash)",
-        "model": "\(loaded.agentConfig.agentModel)",
-        "base_url": "\(loaded.agentConfig.serverURL)",
-        "api_key": "\(loaded.agentConfig.bearerToken == nil ? "none" : "set")",
+        "model": "\(scribeConfig.agentModel)",
+        "base_url": "\(scribeConfig.serverURL)",
+        "api_key": "\(scribeConfig.apiKey == nil ? "none" : "set")",
         "log_level": "\(loaded.logLevel.rawValue)",
         "cwd": "\(cwd)",
         "session_file": "\(sessionPersistenceURL.path)",
         "config_file": "\(loaded.resolvedConfigurationPath)",
       ])
-    if let archived = resumeArchive, archived.model != loaded.agentConfig.agentModel {
+    if let archived = resumeArchive, archived.model != scribeConfig.agentModel {
       log.warning(
         "chat.session.resume.model-mismatch",
         metadata: [
           "archived_model": "\(archived.model)",
-          "current_model": "\(loaded.agentConfig.agentModel)",
+          "current_model": "\(scribeConfig.agentModel)",
         ])
     }
 
@@ -120,13 +129,12 @@ import ScribeCore
     ).runIgnoringFailures(logger: log)
 
     try await SlateChat.runFullscreen(
-      configuration: loaded.agentConfig,
+      configuration: scribeConfig,
       systemPrompt: systemPrompt,
       resumeArchive: resumeArchive,
       sessionPersistenceURL: sessionPersistenceURL,
       sessionId: sessionId,
-      log: log,
-      tools: tools
+      log: log
     )
     log.notice("chat.session.end", metadata: ["status": "ok"])
     printExitResumeHint(

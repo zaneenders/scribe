@@ -6,28 +6,24 @@ import ScribeLLM
 
 /// An agent that executes LLM turns with tool execution.
 ///
-/// Instantiate with configuration, a system prompt, and tools, then call `streamTurn`.
+/// Instantiate with a `ScribeConfig` (or a harness for testing), then call `streamTurn`.
 public struct ScribeAgent: Sendable {
   private let harness: any AgentHarnessProtocol
   private let registry: ToolRegistry
 
-  public init(
-    configuration: AgentConfig,
-    systemPrompt: String,
-    tools: [any ScribeTool]
-  ) {
+  public init(configuration: ScribeConfig) {
     guard let serverURL = URL(string: configuration.serverURL) else {
-      fatalError("Invalid serverURL in AgentConfig: \(configuration.serverURL)")
+      fatalError("Invalid serverURL in ScribeConfig: \(configuration.serverURL)")
     }
     let client = OpenAICompatibleClient.make(
-      serverURL: serverURL, bearerToken: configuration.bearerToken)
-    let chatTools = DefaultAgentTools.chatTools(from: tools)
+      serverURL: serverURL, apiKey: configuration.apiKey)
+    let chatTools = DefaultAgentTools.chatTools(from: configuration.tools)
     self.harness = AgentHarness(
       client: client,
       model: configuration.agentModel,
       tools: chatTools
     )
-    self.registry = ToolRegistry(tools: tools)
+    self.registry = ToolRegistry(tools: configuration.tools)
   }
 
   /// Escape hatch: provide a pre-configured `AgentHarnessProtocol` directly
@@ -58,9 +54,11 @@ public struct ScribeAgent: Sendable {
     let task = Task { [harness, registry] in
       defer { continuation.finish() }
       let clock = ContinuousClock()
-      log.debug("agent.turn.start", metadata: [
-        "model": "\(harness.model)", "messages": "\(mutable.count)",
-      ])
+      log.debug(
+        "agent.turn.start",
+        metadata: [
+          "model": "\(harness.model)", "messages": "\(mutable.count)",
+        ])
       var round = 0
       while true {
         round += 1
@@ -108,17 +106,21 @@ public struct ScribeAgent: Sendable {
             return TurnResult(messages: mutable, outcome: .toolRoundLimit(rounds: maxToolRounds))
           }
 
-          log.info("agent.tool.round", metadata: [
-            "round": "\(round)", "tool_count": "\(invocations.count)",
-            "tools": "\(invocations.map(\.name).joined(separator: ","))",
-          ])
+          log.info(
+            "agent.tool.round",
+            metadata: [
+              "round": "\(round)", "tool_count": "\(invocations.count)",
+              "tools": "\(invocations.map(\.name).joined(separator: ","))",
+            ])
           continuation.yield(.toolRoundHeader(round: round, toolNames: invocations.map(\.name)))
 
           for inv in invocations {
             if shouldAbortTurn() {
-              log.notice("agent.abort", metadata: [
-                "where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)",
-              ])
+              log.notice(
+                "agent.abort",
+                metadata: [
+                  "where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)",
+                ])
               mutable.removeSubrange(messagesCountBeforeRound..<mutable.endIndex)
               return TurnResult(messages: mutable, outcome: .interrupted)
             }
@@ -136,11 +138,13 @@ public struct ScribeAgent: Sendable {
             if unknown {
               log.warning("agent.tool.unknown", metadata: ["tool": "\(inv.name)", "round": "\(round)"])
             }
-            log.debug("agent.tool.invoke", metadata: [
-              "round": "\(round)", "tool": "\(inv.name)",
-              "args_chars": "\(inv.arguments.count)", "output_chars": "\(jsonOutput.count)",
-              "elapsed_ms": "\(elapsedMs)", "unknown": "\(unknown)",
-            ])
+            log.debug(
+              "agent.tool.invoke",
+              metadata: [
+                "round": "\(round)", "tool": "\(inv.name)",
+                "args_chars": "\(inv.arguments.count)", "output_chars": "\(jsonOutput.count)",
+                "elapsed_ms": "\(elapsedMs)", "unknown": "\(unknown)",
+              ])
             continuation.yield(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
             continuation.yield(.blankLine)
             mutable.append(
