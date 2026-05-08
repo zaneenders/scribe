@@ -170,6 +170,7 @@ public struct LoadedConfig: Sendable {
   public var logDirectoryPath: String
   public var chatSessionsDirectoryPath: String
   public var resolvedConfigurationPath: String
+  public var paths: ScribePaths
 
   public func makeClient() throws -> Client {
     guard let serverURL = URL(string: apiBaseURL) else {
@@ -222,19 +223,19 @@ public enum ConfigLoader {
   private static let configFileName = "scribe-config.json"
 
   public static func load() async throws -> LoadedConfig {
+    let paths = ScribePaths.resolve()
+
     // 1. SCRIBE_CONFIG_PATH override — use exactly as given, error if missing.
     if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
       let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
       if !t.isEmpty {
-        return try await loadConfig(at: ScribeFilePath(t))
+        return try await loadConfig(at: ScribeFilePath(t), paths: paths)
       }
     }
 
-    // 2. Check ~/.scribe/scribe-config.json.
-    let homeScribeCandidate = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".scribe/\(configFileName)", isDirectory: false)
-    if FileManager.default.fileExists(atPath: homeScribeCandidate.path) {
-      return try await loadConfig(at: ScribeFilePath(homeScribeCandidate.path))
+    // 2. Check {dataHome}/scribe-config.json.
+    if FileManager.default.fileExists(atPath: paths.defaultConfigPath) {
+      return try await loadConfig(at: ScribeFilePath(paths.defaultConfigPath), paths: paths)
     }
 
     // 3. Check cwd/scribe-config.json.
@@ -242,22 +243,24 @@ public enum ConfigLoader {
     let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
       .appendingPathComponent(configFileName).path
     if FileManager.default.fileExists(atPath: cwdCandidate) {
-      return try await loadConfig(at: ScribeFilePath(cwdCandidate))
+      return try await loadConfig(at: ScribeFilePath(cwdCandidate), paths: paths)
     }
 
-    // 4. Not found — write a default config to ~/.scribe/, then load it.
-    let defaultCandidate = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".scribe/\(configFileName)", isDirectory: false).path
+    // 4. Not found — write a default config to {dataHome}/, then load it.
+    let defaultCandidate = paths.defaultConfigPath
     try writeDefaultConfig(to: defaultCandidate)
     if let data = "scribe: no config found — wrote default \(configFileName) to \(defaultCandidate)\n"
       .data(using: .utf8)
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
-    return try await loadConfig(at: ScribeFilePath(defaultCandidate))
+    return try await loadConfig(at: ScribeFilePath(defaultCandidate), paths: paths)
   }
 
-  private static func loadConfig(at path: ScribeFilePath) async throws -> LoadedConfig {
+  private static func loadConfig(
+    at path: ScribeFilePath,
+    paths: ScribePaths
+  ) async throws -> LoadedConfig {
     let fileProvider: FileProvider<JSONSnapshot>
     do {
       fileProvider = try await FileProvider<JSONSnapshot>(
@@ -269,12 +272,13 @@ public enum ConfigLoader {
           "Could not load configuration at \(path). Create `\(configFileName)` in `~` or the current directory, or set SCRIBE_CONFIG_PATH to a JSON file path. (\(error))"
       )
     }
-    return try await parse(reader: ConfigReader(providers: [fileProvider]), configPath: path)
+    return try await parse(reader: ConfigReader(providers: [fileProvider]), configPath: path, paths: paths)
   }
 
   private static func parse(
     reader: ConfigReader,
-    configPath: ScribeFilePath
+    configPath: ScribeFilePath,
+    paths: ScribePaths
   ) async throws -> LoadedConfig {
     let baseURL = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.apiBaseURL)
     guard !baseURL.isEmpty else {
@@ -338,12 +342,8 @@ public enum ConfigLoader {
       )
     }
 
-    let scribeHome = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".scribe", isDirectory: true)
-    let logDirectoryPath = scribeHome
-      .appendingPathComponent("logs", isDirectory: true).standardizedFileURL.path
-    let chatSessionsDirectoryPath = scribeHome
-      .appendingPathComponent("sessions", isDirectory: true).standardizedFileURL.path
+    let logDirectoryPath = paths.logDirectoryPath
+    let chatSessionsDirectoryPath = paths.sessionsDirectoryPath
 
     let resolvedPathString = PathResolution.fileSystemPath(configPath)
 
@@ -361,7 +361,8 @@ public enum ConfigLoader {
       logLevel: logLevel,
       logDirectoryPath: logDirectoryPath,
       chatSessionsDirectoryPath: chatSessionsDirectoryPath,
-      resolvedConfigurationPath: resolvedPathString
+      resolvedConfigurationPath: resolvedPathString,
+      paths: paths
     )
   }
 
