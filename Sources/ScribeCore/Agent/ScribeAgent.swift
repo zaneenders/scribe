@@ -70,9 +70,6 @@ public struct ScribeAgent: Sendable {
     var model: String
     var messages: [Components.Schemas.ChatMessage]
     var isStreaming = false
-    var streamingMessage: Components.Schemas.ChatMessage?
-    var pendingToolCalls = Set<String>()
-    var errorMessage: String?
 
     init(
       systemPrompt: String,
@@ -102,9 +99,6 @@ public struct ScribeAgent: Sendable {
     func reset() {
       messages = []
       isStreaming = false
-      streamingMessage = nil
-      pendingToolCalls = []
-      errorMessage = nil
     }
   }
 
@@ -115,14 +109,14 @@ public struct ScribeAgent: Sendable {
   /// The tool registry derived from the tools passed at construction.
   public let registry: ToolRegistry
 
-  /// The chat tool schemas sent to the LLM.
-  public let chatTools: [Components.Schemas.ChatTool]
+  /// The chat tool schemas sent to the LLM, provided by the registry.
+  public var chatTools: [Components.Schemas.ChatTool] { registry.chatTools }
 
   /// The OpenAI-compatible HTTP client.
   private let client: Client
 
   /// Synchronous abort flag checked by the run loop without `await`.
-  private final class AbortFlag: @unchecked Sendable {
+  private final class AbortFlag: Sendable {
     let value = Atomic<Bool>(false)
   }
   private let abortFlag = AbortFlag()
@@ -148,7 +142,6 @@ public struct ScribeAgent: Sendable {
     self.client = OpenAICompatibleClient.make(
       serverURL: serverURL, apiKey: configuration.apiKey)
     self.registry = ToolRegistry(tools: configuration.tools)
-    self.chatTools = DefaultAgentTools.chatTools(from: configuration.tools)
     self.storage = Storage(
       systemPrompt: systemPrompt,
       model: configuration.agentModel,
@@ -166,7 +159,6 @@ public struct ScribeAgent: Sendable {
   ) {
     self.client = client
     self.registry = ToolRegistry(tools: tools)
-    self.chatTools = DefaultAgentTools.chatTools(from: tools)
     self.storage = Storage(
       systemPrompt: systemPrompt,
       model: model,
@@ -225,8 +217,10 @@ public struct ScribeAgent: Sendable {
     abortFlag.value.store(false, ordering: .sequentiallyConsistent)
 
     let task = Task {
-      [storage, registry, chatTools, client, promptMessages, options, log,
-       abortFlag] in
+      [
+        storage, registry, client, promptMessages, options, log,
+        abortFlag
+      ] in
       defer {
         continuation.finish()
         Task { await storage.setStreaming(false) }
@@ -248,7 +242,6 @@ public struct ScribeAgent: Sendable {
         model: snapshot.model,
         client: client,
         registry: registry,
-        chatTools: chatTools,
         temperature: options.temperature,
         maxToolRounds: options.maxToolRounds
       )

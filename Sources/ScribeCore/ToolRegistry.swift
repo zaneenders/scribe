@@ -1,8 +1,12 @@
 import Foundation
 import Logging
+import ScribeLLM
 
 public struct ToolRegistry: Sendable {
   private let tools: [String: any ScribeTool]
+
+  /// The ChatTool schemas sent to the LLM, derived from the same tools.
+  let chatTools: [Components.Schemas.ChatTool]
 
   private static let logger = Logger(label: "scribe.tool.registry")
 
@@ -13,6 +17,7 @@ public struct ToolRegistry: Sendable {
       map[name] = tool
     }
     self.tools = map
+    self.chatTools = tools.map { type(of: $0).toChatTool() }
   }
 
   /// Execute a tool by name with cooperative abort support.

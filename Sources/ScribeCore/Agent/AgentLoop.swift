@@ -17,7 +17,6 @@ struct AgentLoopConfig: Sendable {
   let model: String
   let client: Client
   let registry: ToolRegistry
-  let chatTools: [Components.Schemas.ChatTool]
   let temperature: Double
   let maxToolRounds: Int
 }
@@ -177,7 +176,7 @@ private func runSingleRound(
     stream: true,
     temperature: Float(config.temperature),
     maxTokens: nil,
-    tools: config.chatTools,
+    tools: config.registry.chatTools,
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
     reasoning: Components.Schemas.ChatCompletionReasoning(enabled: true)
