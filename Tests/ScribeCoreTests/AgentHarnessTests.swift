@@ -81,12 +81,16 @@ final class AbortState: @unchecked Sendable {
 
 /// Helper to drain a stream and get the result.
 private func awaitRound(_ rs: RoundStream, collector: EventCollector? = nil) async throws -> RoundResult {
-  if let c = collector {
-    for await event in rs.events { c.append(event) }
-  } else {
-    Task { for await _ in rs.events {} }
-  }
-  return try await rs.result.value
+  async let drain: Void = {
+    if let c = collector {
+      for await event in rs.events { c.append(event) }
+    } else {
+      for await _ in rs.events {}
+    }
+  }()
+  let result = try await rs.result.value
+  _ = await drain
+  return result
 }
 
 // MARK: - Tests
