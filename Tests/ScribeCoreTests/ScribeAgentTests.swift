@@ -344,7 +344,7 @@ struct ScribeAgentTests {
 
   @Test func messagesSinceZeroReturnsAll() async throws {
     let agent = makeAgent(chunks: [])
-    let total = await agent.messages.count // just system
+    let total = await agent.messages.count  // just system
     let all = await agent.messages(since: 0)
     #expect(all.count == total)
   }

@@ -15,7 +15,8 @@ struct ToolRunnerEditFileTests {
         "old_string": "world",
         "new_string": "scribe",
       ])
-      let json = try! await registry.run(name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      let json = try! await registry.run(
+        name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
       let payload = try decodeEdit(json)
       #expect(payload.ok == true)
       #expect(payload.replaced == true)
@@ -36,7 +37,8 @@ struct ToolRunnerEditFileTests {
         "old_string": "",
         "new_string": "y",
       ])
-      let json = try! await registry.run(name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      let json = try! await registry.run(
+        name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
       let fail = try decodeFail(json)
       #expect(fail.ok == false)
       #expect(fail.error?.contains("missing or empty field old_string") == true)
@@ -54,7 +56,8 @@ struct ToolRunnerEditFileTests {
         "old_string": "zzz",
         "new_string": "qqq",
       ])
-      let json = try! await registry.run(name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      let json = try! await registry.run(
+        name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
       let fail = try decodeFail(json)
       #expect(fail.ok == false)
       #expect(fail.error?.contains("old_string not found") == true)
@@ -72,7 +75,8 @@ struct ToolRunnerEditFileTests {
         "old_string": "foo",
         "new_string": "bar",
       ])
-      let json = try! await registry.run(name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      let json = try! await registry.run(
+        name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
       let fail = try decodeFail(json)
       #expect(fail.ok == false)
       #expect(fail.error?.contains("old_string must be unique") == true)
@@ -89,7 +93,8 @@ struct ToolRunnerEditFileTests {
       "old_string": "a",
       "new_string": "b",
     ])
-    let json = try! await registry.run(name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+    let json = try! await registry.run(
+      name: "edit_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)

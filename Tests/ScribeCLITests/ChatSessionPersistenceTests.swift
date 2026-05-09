@@ -2,6 +2,7 @@ import Foundation
 import Logging
 import ScribeLLM
 import Testing
+
 @testable import ScribeCLI
 
 @Suite

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ScribeCore
 
 @Suite
@@ -7,7 +8,8 @@ struct ToolRunnerShellTests {
   @Test func echoProducesStdout() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/echo scribetest"])
-    let json = try! await registry.run(name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+    let json = try! await registry.run(
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 0)
@@ -24,7 +26,8 @@ struct ToolRunnerShellTests {
       try "cwd_ok".write(to: marker, atomically: true, encoding: .utf8)
 
       let args = try jsonArguments(["command": "/bin/cat only_here.txt", "cwd": dir.path])
-      let json = try! await registry.run(name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      let json = try! await registry.run(
+        name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
       let out = try decodeShell(json)
       #expect(out.ok == true)
       #expect(out.exitCode == 0)
@@ -36,7 +39,8 @@ struct ToolRunnerShellTests {
   @Test func reportsNonZeroExitWithoutOkFalse() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/sh -c 'exit 7'"])
-    let json = try! await registry.run(name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+    let json = try! await registry.run(
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 7)
@@ -45,7 +49,8 @@ struct ToolRunnerShellTests {
   @Test func emptyCommandFails() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "   "])
-    let json = try! await registry.run(name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+    let json = try! await registry.run(
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("command is empty") == true)
@@ -55,7 +60,8 @@ struct ToolRunnerShellTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     // Passing cwd as empty string exercises the if-let-empty-to-nil conversion.
     let args = try jsonArguments(["command": "/bin/echo ok", "cwd": ""])
-    let json = try! await registry.run(name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+    let json = try! await registry.run(
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.stdout?.trimmingCharacters(in: .whitespacesAndNewlines) == "ok")
@@ -67,7 +73,8 @@ struct ToolRunnerShellTests {
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-no-such-cwd-\(UUID().uuidString)", isDirectory: true)
     let args = try jsonArguments(["command": "/bin/true", "cwd": bogusDir.path])
-    let json = try! await registry.run(name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+    let json = try! await registry.run(
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)

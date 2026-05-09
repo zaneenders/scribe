@@ -1,3 +1,4 @@
+import ScribeLLM
 import SlateCore
 import Testing
 
@@ -87,13 +88,12 @@ struct MarkdownRendererTests {
   }
 
   @Test func debugSinkColors() {
-    let sink = SlateTranscriptSink(markdownRenderer: SwiftMarkdownRenderer())
-    sink.recordUserSubmission(trimmedVisible: "test")
-    sink.emit(.enterAssistantSection(.answer, previous: nil))
-    let md = "### 4. O(n²) re-parsing\n1. hello world\n"
-    sink.emit(.appendAssistantText(.answer, text: md))
-    sink.emit(.finalizeAssistantStream)
-    let (completed, _, _) = sink.snapshotTranscriptForLayout()
+    let messages: [Components.Schemas.ChatMessage] = [
+      .init(role: .user, content: "test"),
+      .init(role: .assistant, content: "### 4. O(n²) re-parsing\n1. hello world\n"),
+    ]
+    let completed = renderMessagesToTranscript(
+      messages, theme: .default, renderer: SwiftMarkdownRenderer())
 
     func firstColor(of line: TLine) -> String {
       if let first = line.spans.first {
@@ -116,6 +116,7 @@ struct MarkdownRendererTests {
       ("other", "  · answer"),
       ("headingPrefix", "### 4. O(n²) re-parsing"),
       ("listMarker", "1. hello world"),
+      ("empty", ""),
     ]
 
     #expect(completed.count == expected.count)

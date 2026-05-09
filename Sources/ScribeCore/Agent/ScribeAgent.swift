@@ -102,6 +102,14 @@ public struct ScribeAgent: Sendable {
       return Array(messages[clamped...])
     }
 
+    /// Return messages in `range`, clamped to valid indices.
+    func messages(in range: Range<Int>) -> [Components.Schemas.ChatMessage] {
+      let lower = max(0, range.lowerBound)
+      let upper = min(messages.count, range.upperBound)
+      guard lower < upper else { return [] }
+      return Array(messages[lower..<upper])
+    }
+
     func setStreaming(_ value: Bool) { isStreaming = value }
   }
 
@@ -191,6 +199,11 @@ public struct ScribeAgent: Sendable {
   /// transcript copy when only the tail (e.g. incremental persist) is needed.
   public func messages(since start: Int) async -> [Components.Schemas.ChatMessage] {
     await storage.messages(since: start)
+  }
+
+  /// Return messages in `range`, clamped to valid indices.
+  public func messages(in range: Range<Int>) async -> [Components.Schemas.ChatMessage] {
+    await storage.messages(in: range)
   }
 
   /// Whether the agent is currently streaming.

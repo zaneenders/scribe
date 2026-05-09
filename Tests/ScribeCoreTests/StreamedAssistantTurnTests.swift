@@ -1,6 +1,7 @@
 import Foundation
 import ScribeLLM
 import Testing
+
 @testable import ScribeCore
 
 /// Tests for the chunk-accumulation logic in `StreamedAssistantTurn`,
