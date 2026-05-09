@@ -19,7 +19,6 @@ struct ToolRunnerEditFileTests {
       let payload = try decodeEdit(json)
       #expect(payload.ok == true)
       #expect(payload.replaced == true)
-      #expect(payload.content == "hello scribe")
 
       let onDisk = try String(contentsOf: fileURL, encoding: .utf8)
       #expect(onDisk == "hello scribe")

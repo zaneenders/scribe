@@ -13,11 +13,16 @@ import Musl
 
 // MARK: - Styled transcript model
 
-public struct StyledSpan: Equatable, Sendable {
+public struct StyledSpan: Equatable, Sendable, TerminalSpanProtocol {
   public var fg: TerminalRGB
   public var bg: TerminalRGB
   public var bold: Bool
   public var text: String
+
+  // TerminalSpanProtocol conformance — bridges naming conventions.
+  public var foreground: TerminalRGB { fg }
+  public var background: TerminalRGB { bg }
+  public var flags: TerminalCellFlags { bold ? .bold : [] }
 
   public init(fg: TerminalRGB, bg: TerminalRGB, bold: Bool, text: String) {
     self.fg = fg
@@ -107,6 +112,8 @@ private struct SinkState {
   var assistantOpenLineRaw: String = ""
   /// Index in `lines` where the current assistant section begins (after headers).
   var assistantSectionStartIndex: Int?
+  /// The current streaming section (reasoning or answer), tracked so finalize can pick the right theme.
+  var currentSection: AssistantStreamSection = .answer
   /// Bumps every time `lines` is modified in the middle (not just appended).
   var lineGeneration: Int = 0
   var wake: ExternalWake?
@@ -242,6 +249,7 @@ public final class SlateTranscriptSink: Sendable {
     switch event {
     case .enterAssistantSection(let section, let previous):
       state.withLock { sink in
+        sink.currentSection = section
         if previous != nil {
           if let open = sink.assistantOpenLine {
             sink.lines.append(open)
@@ -294,7 +302,8 @@ public final class SlateTranscriptSink: Sendable {
           sink.assistantOpenLineRaw = ""
         }
         sink.assistantOpenLineRaw += text
-        let rendered = self.markdownRenderer.render(
+        // Fast path during streaming: inline-only styling, no block-level parse.
+        let rendered = self.markdownRenderer.renderStreaming(
           text: sink.assistantOpenLineRaw,
           baseFG: st.fg,
           baseBold: st.bold,
@@ -318,6 +327,32 @@ public final class SlateTranscriptSink: Sendable {
 
     case .finalizeAssistantStream:
       state.withLock { sink in
+        // Re-render the accumulated text with full block-level markdown.
+        if sink.assistantSectionStartIndex != nil {
+          let section = sink.currentSection
+          let st = self.style(for: section)
+          let mdTheme = section == .reasoning ? MarkdownTheme.grayscale : self.theme.markdown
+          let fullRender = self.markdownRenderer.render(
+            text: sink.assistantOpenLineRaw,
+            baseFG: st.fg,
+            baseBold: st.bold,
+            theme: mdTheme
+          )
+          // Replace the streaming-rendered lines with the full render.
+          if let startIdx = sink.assistantSectionStartIndex {
+            let removeCount = max(0, sink.lines.count - startIdx)
+            if removeCount > 0 {
+              sink.lines.removeLast(removeCount)
+              sink.lineGeneration += 1
+            }
+            if fullRender.isEmpty {
+              sink.assistantOpenLine = TLine(spans: [])
+            } else {
+              sink.lines.append(contentsOf: fullRender.dropLast())
+              sink.assistantOpenLine = fullRender.last!
+            }
+          }
+        }
         if let open = sink.assistantOpenLine {
           sink.lines.append(open)
           sink.assistantOpenLine = nil
@@ -522,68 +557,71 @@ internal enum TranscriptLayout {
     guard width > 0 else { return [] }
     if text.isEmpty { return [""] }
 
-    // Tokenize into alternating word / space sequences so leading/trailing
-    // spaces are preserved.
-    var tokens: [String] = []
+    // Tokenize into Substring ranges (no per-token String allocation).
+    var tokenRanges: [Range<String.Index>] = []
     var i = text.startIndex
     while i < text.endIndex {
+      var j = i
       if text[i] == " " {
-        var j = i
-        while j < text.endIndex && text[j] == " " {
-          j = text.index(after: j)
-        }
-        tokens.append(String(text[i..<j]))
-        i = j
+        while j < text.endIndex && text[j] == " " { j = text.index(after: j) }
       } else {
-        var j = i
-        while j < text.endIndex && text[j] != " " {
-          j = text.index(after: j)
-        }
-        tokens.append(String(text[i..<j]))
-        i = j
+        while j < text.endIndex && text[j] != " " { j = text.index(after: j) }
       }
+      tokenRanges.append(i..<j)
+      i = j
     }
 
     var lines: [String] = []
-    var current = ""
+    var lineStart = 0  // index into tokenRanges
+    var lineCharCount = 0
 
-    func flush() {
-      lines.append(current)
-      current = ""
-    }
+    for idx in tokenRanges.indices {
+      let range = tokenRanges[idx]
+      let tokenLen = text.distance(from: range.lowerBound, to: range.upperBound)
 
-    for token in tokens {
-      let candidate = current + token
-      if candidate.count <= width {
-        current = candidate
+      if lineCharCount + tokenLen <= width {
+        lineCharCount += tokenLen
         continue
       }
 
-      if !current.isEmpty {
-        flush()
+      // Token doesn't fit — flush current line if non-empty.
+      if lineCharCount > 0 {
+        let lineTokens = tokenRanges[lineStart..<idx].map { text[$0] }
+        lines.append(lineTokens.joined())
+        lineStart = idx
+        lineCharCount = 0
       }
 
-      if token.count <= width {
-        current = token
+      if tokenLen <= width {
+        lineStart = idx
+        lineCharCount = tokenLen
       } else {
-        // Token longer than width — must be a word (spaces are always <= width).
-        var rest = Substring(token)
-        while rest.count > width {
-          lines.append(String(rest.prefix(width)))
-          rest = rest.dropFirst(width)
+        // Token longer than width — split it.
+        var pos = range.lowerBound
+        let end = range.upperBound
+        while text.distance(from: pos, to: end) > width {
+          let chunkEnd = text.index(pos, offsetBy: width)
+          lines.append(String(text[pos..<chunkEnd]))
+          pos = chunkEnd
         }
-        current = String(rest)
+        if pos < end {
+          tokenRanges[idx] = pos..<end
+          lineStart = idx
+          lineCharCount = text.distance(from: pos, to: end)
+        } else {
+          lineStart = idx + 1
+          lineCharCount = 0
+        }
       }
     }
 
-    if !current.isEmpty || !lines.isEmpty {
-      lines.append(current)
+    // Flush remaining tokens.
+    if lineStart < tokenRanges.count {
+      let lineTokens = tokenRanges[lineStart...].map { text[$0] }
+      lines.append(lineTokens.joined())
     }
 
-    if lines.isEmpty {
-      lines.append("")
-    }
-
+    if lines.isEmpty { lines.append("") }
     return lines
   }
 
@@ -607,14 +645,12 @@ internal enum TranscriptLayout {
         continue
       }
 
+      // Concatenate all span text and track which span each character came from.
       var plain = ""
-      var styles: [(fg: TerminalRGB, bg: TerminalRGB, bold: Bool)] = []
-      for sp in line.spans {
-        let s = (fg: sp.fg, bg: sp.bg, bold: sp.bold)
-        for ch in sp.text {
-          plain.append(ch)
-          styles.append(s)
-        }
+      var charSpan: [Int] = []  // charSpan[i] = index into line.spans
+      for (si, sp) in line.spans.enumerated() {
+        plain += sp.text
+        charSpan.append(contentsOf: Array(repeating: si, count: sp.text.count))
       }
 
       if plain.isEmpty {
@@ -622,35 +658,39 @@ internal enum TranscriptLayout {
         continue
       }
 
+      // Split on logical newlines within the concatenated text.
       let chars = Array(plain)
-      precondition(chars.count == styles.count)
-
       var i = 0
       while i < chars.count {
         var j = i
-        while j < chars.count, chars[j] != "\n" {
-          j &+= 1
-        }
+        while j < chars.count, chars[j] != "\n" { j &+= 1 }
 
-        let part = chars[i..<j]
-        if !part.isEmpty {
-          let wrapped = wrappedPlainLines(String(part), width: width)
+        let segmentLen = j - i
+        if segmentLen > 0 {
+          let wrapped = wrappedPlainLines(String(chars[i..<j]), width: width)
           var charOffset = i
           for segment in wrapped {
-            let sliceStyles = styles[charOffset..<(charOffset + segment.count)]
-            charOffset += segment.count
+            let segCount = segment.count
+            let sliceSpans = charSpan[charOffset..<(charOffset + segCount)]
+            charOffset += segCount
             var newLine = TLine(spans: [])
-            for (style, ch) in zip(sliceStyles, segment) {
-              if let lastIdx = newLine.spans.indices.last,
-                newLine.spans[lastIdx].fg == style.fg,
-                newLine.spans[lastIdx].bg == style.bg,
-                newLine.spans[lastIdx].bold == style.bold
-              {
-                newLine.spans[lastIdx].text.append(ch)
-              } else {
+            var runStart = 0
+            while runStart < segCount {
+              let si = sliceSpans[sliceSpans.startIndex + runStart]
+              let sp = line.spans[si]
+              var runEnd = runStart + 1
+              while runEnd < segCount,
+                sliceSpans[sliceSpans.startIndex + runEnd] == si
+              { runEnd += 1 }
+              let segStartIdx = segment.startIndex
+              let runStartIdx = segment.index(segStartIdx, offsetBy: runStart)
+              let runEndIdx = segment.index(segStartIdx, offsetBy: runEnd)
+              let text = String(segment[runStartIdx..<runEndIdx])
+              if !text.isEmpty {
                 newLine.spans.append(
-                  StyledSpan(fg: style.fg, bg: style.bg, bold: style.bold, text: String(ch)))
+                  StyledSpan(fg: sp.fg, bg: sp.bg, bold: sp.bold, text: text))
               }
+              runStart = runEnd
             }
             out.append(newLine)
           }
