@@ -148,7 +148,7 @@ internal final class SlateChatHost {
     let sink = SlateTranscriptSink(theme: .default)
     let gate = UserLineGate()
 
-    await slate.start(
+    await slate.subscribe(
       prepare: { [self] wake in
         sink.installWake(wake)
         sink.setContextWindow(self.configuration.contextWindow)
@@ -324,7 +324,7 @@ internal final class SlateChatHost {
         }
         wake.requestRender()
       },
-      externalCoalesceMaxFramesPerSecond: 60,
+      coalesceMaxFPS: 60,
       onEvent: { slate, event in
         switch event {
         case .resize:
@@ -409,61 +409,63 @@ internal final class SlateChatHost {
           Task { await gate.complete(text) }
         }
 
-        // Render frame
-        let prepareStart = Date()
-        let (completed, open, generation) = sink.snapshotTranscriptForLayout()
-        let flatTranscript = TranscriptLayout.FlattenCache.flatten(
-          cache: &self.flattenCache,
-          completed: completed,
-          open: open,
-          width: slate.cols,
-          generation: generation)
-        let queuedTrayText = sink.queuedTrayTextSnapshot()
-        let contentRows = SlateChatRenderer.transcriptContentRows(
-          cols: slate.cols,
-          rows: slate.rows,
-          banner: sink.bannerSnapshot(),
-          usage: sink.usageHUDSnapshot(),
-          inputLine: self.inputHandler.buffer,
-          waitingForLLM: sink.modelTurnBusy(),
-          queuedTrayText: queuedTrayText)
-        _ = self.viewport.resolve(flatCount: flatTranscript.count, contentRows: contentRows)
-        let transcriptTailStart = self.viewport.firstVisibleRow
-        let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
+        // Render frame — all layout + paint inside slate.with {} to access grid dimensions.
+        slate.with { grid in
+          let scrCols = grid.cols
+          let scrRows = grid.rows
 
-        let submitStart = Date()
-        // Slate owns the grid — dirty-region tracking in encode(into:) skips
-        // unchanged rows. grid.resize() is handled by refreshWindowSize() on .resize.
-        SlateChatRenderer.render(
-          into: &slate.grid,
-          cols: slate.cols,
-          rows: slate.rows,
-          flattenedTranscript: flatTranscript,
-          transcriptTailStart: transcriptTailStart,
-          banner: sink.bannerSnapshot(),
-          usage: sink.usageHUDSnapshot(),
-          inputLine: self.inputHandler.buffer,
-          llmWaitAnimationFrame: self.llmWaitAnimationFrame,
-          waitingForLLM: sink.modelTurnBusy(),
-          queuedTrayText: queuedTrayText,
-          theme: .default)
-        slate.enscribe()
-        let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
-        let totalMs = prepareMs &+ submitMs
-        if totalMs >= 50 {
-          self.log.debug(
-            "chat.render.slow",
-            metadata: [
-              "elapsed_ms": "\(totalMs)",
-              "prepare_ms": "\(prepareMs)",
-              "submit_ms": "\(submitMs)",
-              "flat_rows": "\(flatTranscript.count)",
-              "cols": "\(slate.cols)",
-              "rows": "\(slate.rows)",
-              "model_busy": "\(nowBusy)",
-              "queue_chars": "\(self.submitCoordinator.queuedText?.count ?? 0)",
-              "buffer_chars": "\(self.inputHandler.buffer.count)",
-            ])
+          let prepareStart = Date()
+          let (completed, open, generation) = sink.snapshotTranscriptForLayout()
+          let flatTranscript = TranscriptLayout.FlattenCache.flatten(
+            cache: &self.flattenCache,
+            completed: completed,
+            open: open,
+            width: scrCols,
+            generation: generation)
+          let queuedTrayText = sink.queuedTrayTextSnapshot()
+          let contentRows = SlateChatRenderer.transcriptContentRows(
+            cols: scrCols,
+            rows: scrRows,
+            banner: sink.bannerSnapshot(),
+            usage: sink.usageHUDSnapshot(),
+            inputLine: self.inputHandler.buffer,
+            waitingForLLM: sink.modelTurnBusy(),
+            queuedTrayText: queuedTrayText)
+          _ = self.viewport.resolve(flatCount: flatTranscript.count, contentRows: contentRows)
+          let transcriptTailStart = self.viewport.firstVisibleRow
+          let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
+
+          let submitStart = Date()
+          SlateChatRenderer.render(
+            into: &grid,
+            cols: scrCols,
+            rows: scrRows,
+            flattenedTranscript: flatTranscript,
+            transcriptTailStart: transcriptTailStart,
+            banner: sink.bannerSnapshot(),
+            usage: sink.usageHUDSnapshot(),
+            inputLine: self.inputHandler.buffer,
+            llmWaitAnimationFrame: self.llmWaitAnimationFrame,
+            waitingForLLM: sink.modelTurnBusy(),
+            queuedTrayText: queuedTrayText,
+            theme: .default)
+          let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
+          let totalMs = prepareMs &+ submitMs
+          if totalMs >= 50 {
+            self.log.debug(
+              "chat.render.slow",
+              metadata: [
+                "elapsed_ms": "\(totalMs)",
+                "prepare_ms": "\(prepareMs)",
+                "submit_ms": "\(submitMs)",
+                "flat_rows": "\(flatTranscript.count)",
+                "cols": "\(scrCols)",
+                "rows": "\(scrRows)",
+                "model_busy": "\(nowBusy)",
+                "queue_chars": "\(self.submitCoordinator.queuedText?.count ?? 0)",
+                "buffer_chars": "\(self.inputHandler.buffer.count)",
+              ])
+          }
         }
         return sink.coordinatorFinished() ? .stop : .continue
       })
