@@ -95,11 +95,6 @@ public struct ScribeAgent: Sendable {
     }
 
     func setStreaming(_ value: Bool) { isStreaming = value }
-
-    func reset() {
-      messages = []
-      isStreaming = false
-    }
   }
 
   // ── Stored properties ────────────────────────────────
@@ -281,16 +276,10 @@ public struct ScribeAgent: Sendable {
     return TurnStream(events: stream, result: task)
   }
 
-  // MARK: - Abort / reset
+  // MARK: - Abort
 
   /// Abort the current run, if one is active.
   public func abort() {
     abortFlag.value.store(true, ordering: .sequentiallyConsistent)
-  }
-
-  /// Clear transcript and runtime state.
-  public func reset() async {
-    abortFlag.value.store(false, ordering: .sequentiallyConsistent)
-    await storage.reset()
   }
 }
