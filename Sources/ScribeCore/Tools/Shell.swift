@@ -52,7 +52,7 @@ enum Shell {
     let workingDirectory: ScribeFilePath?
     if let cwd {
       let fp = try PathResolution.resolve(existingDirectory: cwd)
-      workingDirectory = ScribeFilePath(PathResolution.fileSystemPath(fp))
+      workingDirectory = ScribeFilePath(fp.fileSystemPath)
     } else {
       workingDirectory = nil
     }

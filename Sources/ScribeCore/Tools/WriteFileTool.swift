@@ -30,7 +30,7 @@ public struct WriteFileTool: ScribeTool {
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let content = try ToolArgumentParsing.string(obj["content"], field: "content")
     let fp = try PathResolution.resolve(writing: path)
-    let s = PathResolution.fileSystemPath(fp)
+    let s = fp.fileSystemPath
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try content.write(toFile: s, atomically: true, encoding: .utf8)
     Self.logger.debug(

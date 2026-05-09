@@ -114,7 +114,7 @@ public struct ReadFileTool: ScribeTool {
     limit: Int?
   ) throws -> ReadFileResult {
     let fp = try PathResolution.resolve(reading: path)
-    let s = PathResolution.fileSystemPath(fp)
+    let s = fp.fileSystemPath
     let text = try String(contentsOfFile: s, encoding: .utf8)
     let totalBytes = text.utf8.count
 

@@ -51,7 +51,7 @@ public struct EditFileTool: ScribeTool {
     }
     text = text.replacingOccurrences(of: oldS, with: newS, options: [], range: nil)
     let fp = try PathResolution.resolve(writing: path)
-    let s = PathResolution.fileSystemPath(fp)
+    let s = fp.fileSystemPath
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try text.write(toFile: s, atomically: true, encoding: .utf8)
     Self.logger.debug(
