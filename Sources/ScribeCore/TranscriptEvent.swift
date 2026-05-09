@@ -19,11 +19,12 @@ public enum TranscriptEvent: Sendable {
   case skippedUnreadableStreamLine
   case harnessError(ScribeError)
   case turnInterrupted
-  case modelTurnRunning(Bool)
 
   /// A user submitted text — the host should render a "you:" entry in the transcript.
   case userSubmitted(String)
-  /// Turn ended; the host should rebuild its transcript cache from the agent's
-  /// committed message list (the single source of truth).
-  case reconcileFromAgent([Components.Schemas.ChatMessage])
+  /// Turn completed; carries the agent's committed message list for
+  /// consistency comparison (streaming render vs batch render).
+  /// The host should NOT rebuild from these messages — the streaming path
+  /// is authoritative.  Differences are logged as warnings for later test-casing.
+  case turnComplete(referenceMessages: [Components.Schemas.ChatMessage])
 }

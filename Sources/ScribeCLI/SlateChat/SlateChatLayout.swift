@@ -39,7 +39,7 @@ public struct TLine: Equatable, Sendable {
 /// - **Round** – the single most recent API response (one HTTP request/response pair).
 /// - **Turn** – the sum of every API round triggered by the current user message
 ///   (including tool‑call loops). Reset to zero when a new user turn starts
-///   (`.modelTurnRunning(true)`).
+///   (signaled via `HostEvent.modelTurnRunning(true)`).
 /// - **Session** – the cumulative total across all turns since `scribe chat` began.
 ///   Never reset during a session.
 internal struct UsageHUDSnapshot: Equatable {

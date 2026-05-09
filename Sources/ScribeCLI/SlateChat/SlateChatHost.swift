@@ -392,9 +392,10 @@ internal final class SlateChatHost {
               await persistNew(from: agent, since: persistedCount)
               persistedCount = await agent.messages.count
 
-              // Turn complete — tell host to reconcile from agent.
+              // Turn complete — tell host to finalize and optionally
+              // compare streaming render against the batch render.
               let committed = await agent.messages
-              enqueue(.transcript(.reconcileFromAgent(committed)))
+              enqueue(.transcript(.turnComplete(referenceMessages: committed)))
             }
             await persistNew(from: agent, since: persistedCount)
             let finalMsgCount = await agent.messages.count
@@ -879,18 +880,42 @@ internal final class SlateChatHost {
       }
       renderWake?.requestRender()
 
-    case .reconcileFromAgent(let messages):
-      // Discard streaming state and rebuild transcript from agent messages.
-      transcriptLines = renderMessagesToTranscript(messages, theme: theme, renderer: markdownRenderer)
+    case .turnComplete(let referenceMessages):
+      // Finalize any dangling streaming state (should already be done, defensive).
+      if let open = streamingOpenLine {
+        transcriptLines.append(open)
+      }
       streamingOpenLine = nil
       streamingOpenLineRaw = ""
       streamingSectionStartLineIndex = nil
-      transcriptGeneration &+= 1
-      flattenCache = TranscriptLayout.FlattenCache()
-      renderWake?.requestRender()
 
-    case .modelTurnRunning:
-      break  // Handled by HostEvent.modelTurnRunning
+      // Compare streaming render against batch render for drift detection.
+      let batchLines = renderMessagesToTranscript(
+        referenceMessages, theme: theme, renderer: markdownRenderer)
+      if transcriptLines != batchLines {
+        let sc = transcriptLines.count
+        let bc = batchLines.count
+        let driftMeta: Logger.Metadata = [
+          "streaming_count": .string("\(sc)"),
+          "batch_count": .string("\(bc)"),
+        ]
+        log.warning("transcript.streaming-drift", metadata: driftMeta)
+        // Log every differing line for easy test-casing.
+        let maxCount = max(sc, bc)
+        for idx in 0..<maxCount {
+          let sLine = idx < sc ? transcriptLines[idx] : nil
+          let bLine = idx < bc ? batchLines[idx] : nil
+          if sLine != bLine {
+            let detailMeta: Logger.Metadata = [
+              "index": .string("\(idx)"),
+              "streaming": .string(sLine.map { spansToDebugString($0) } ?? "(missing)"),
+              "batch": .string(bLine.map { spansToDebugString($0) } ?? "(missing)"),
+            ]
+            log.warning("transcript.streaming-drift.detail", metadata: detailMeta)
+          }
+        }
+      }
+      renderWake?.requestRender()
     }
   }
 
@@ -940,6 +965,11 @@ internal final class SlateChatHost {
       && s.fg == theme.userPrefix
       && s.bg == theme.background
       && s.text == "you:"
+  }
+
+  /// Renders a TLine into a compact debug string for log output.
+  private func spansToDebugString(_ line: TLine) -> String {
+    line.spans.map { $0.text }.joined()
   }
 
   // MARK: - Git branch detection
