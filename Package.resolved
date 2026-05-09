@@ -1,5 +1,5 @@
 {
-  "originHash" : "d48fba26648ee92858d57d8ec3b76247472995574a1170908be96c6146c7fed5",
+  "originHash" : "b6f54a96515d21fad9f694cb848e702f8c79950ae923945bb3b9068a6ec91856",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/zaneenders/slate",
       "state" : {
-        "branch" : "5c35221",
-        "revision" : "5c35221367996868317a2dfb4e0e6de403e1b965"
+        "branch" : "b97c324",
+        "revision" : "b97c324dbadf82d344711685a12e91e25044f718"
       }
     },
     {
