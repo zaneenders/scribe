@@ -304,4 +304,55 @@ struct ScribeAgentTests {
     let result = try await ts.result.value
     #expect(result.outcome == .interrupted)
   }
+
+  // MARK: - messages(since:)
+
+  @Test func messagesSinceReturnsTailSlice() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let agent = makeAgent(chunks: chunks)
+    let ts = await agent.prompt("one", log: testLogger)
+    Task { for await _ in ts.events {} }
+    _ = try await ts.result.value
+    let ts2 = await agent.prompt("two", log: testLogger)
+    Task { for await _ in ts2.events {} }
+    _ = try await ts2.result.value
+
+    // messages: user:"one", assistant:"ok", user:"two", assistant:"ok"
+    let tail = await agent.messages(since: 2)
+    #expect(tail.count == 2)
+    #expect(tail.first?.role == .user)
+    #expect(tail.first?.content == "two")
+  }
+
+  @Test func messagesSinceAtCountReturnsEmpty() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let agent = makeAgent(chunks: chunks)
+    let ts = await agent.prompt("hello", log: testLogger)
+    Task { for await _ in ts.events {} }
+    _ = try await ts.result.value
+
+    let total = await agent.messages.count
+    let empty = await agent.messages(since: total)
+    #expect(empty.isEmpty)
+  }
+
+  @Test func messagesSinceZeroReturnsAll() async throws {
+    let agent = makeAgent(chunks: [])
+    let total = await agent.messages.count // just system
+    let all = await agent.messages(since: 0)
+    #expect(all.count == total)
+  }
+
+  @Test func messagesSinceNegativeClampedToZero() async throws {
+    let agent = makeAgent(chunks: [])
+    let total = await agent.messages.count
+    let all = await agent.messages(since: -5)
+    #expect(all.count == total)
+  }
 }

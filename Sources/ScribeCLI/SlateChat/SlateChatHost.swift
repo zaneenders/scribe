@@ -200,16 +200,16 @@ internal final class SlateChatHost {
           defer { sink.markCoordinatorFinished() }
 
           func persistNew(from agent: ScribeAgent, since count: Int) async {
-            let current = await agent.messages
-            guard current.count > count else { return }
-            let newMessages = Array(current[count...])
+            let newMessages = await agent.messages(since: count)
+            guard !newMessages.isEmpty else { return }
             do {
               try ChatSessionStore.appendMessages(newMessages, to: persistURL)
+              let total = await agent.messages.count
               sessionLog.trace(
                 "chat.persist.append",
                 metadata: [
                   "new": "\(newMessages.count)",
-                  "total": "\(current.count)",
+                  "total": "\(total)",
                   "path": "\(persistURL.path)",
                 ])
             } catch {
