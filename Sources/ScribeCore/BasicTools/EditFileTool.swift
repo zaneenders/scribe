@@ -7,24 +7,20 @@ struct EditFileToolResult: Encodable, Sendable {
 }
 
 public struct EditFileTool: ScribeTool {
-  public static var name: String { "edit_file" }
-  public static var description: String {
-    "Replace one unique occurrence of old_string with new_string."
-  }
-  public static var parameters: [ScribeToolParameter] {
-    [
-      ScribeToolParameter(
-        name: "path", type: .string,
-        description: "Filesystem path (relative paths resolve against the process cwd).",
-        required: true),
-      ScribeToolParameter(
-        name: "old_string", type: .string,
-        description: "Exact text to replace; must match exactly one place.", required: true),
-      ScribeToolParameter(
-        name: "new_string", type: .string, description: "Replacement text.", required: true),
-    ]
-  }
-  public static var promptHint: String? { nil }
+  public let name = "edit_file"
+  public let description = "Replace one unique occurrence of old_string with new_string."
+  public let parameters: [ScribeToolParameter] = [
+    ScribeToolParameter(
+      name: "path", type: .string,
+      description: "Filesystem path (relative paths resolve against the process cwd).",
+      required: true),
+    ScribeToolParameter(
+      name: "old_string", type: .string,
+      description: "Exact text to replace; must match exactly one place.", required: true),
+    ScribeToolParameter(
+      name: "new_string", type: .string, description: "Replacement text.", required: true),
+  ]
+  public let promptHint: String? = nil
 
   public init() {}
 

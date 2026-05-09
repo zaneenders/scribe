@@ -54,20 +54,20 @@ private final class FakeClientTransport: ClientTransport, @unchecked Sendable {
 // MARK: - Fake tools
 
 private struct FakeTool: ScribeTool {
-  static var name: String { "fake_tool" }
-  static var description: String { "A fake tool for testing." }
-  static var parameters: [ScribeToolParameter] { [] }
-  static var promptHint: String? { nil }
+  let name = "fake_tool"
+  let description = "A fake tool for testing."
+  let parameters: [ScribeToolParameter] = []
+  let promptHint: String? = nil
   struct Result: Encodable { let ok = true }
   func run(arguments: String) async throws -> Encodable { Result() }
 }
 
 /// A tool that throws `AgentTurnInterruptedError` directly from `run`.
 private struct InterruptedTool: ScribeTool {
-  static var name: String { "interrupted_tool" }
-  static var description: String { "Throws AgentTurnInterruptedError." }
-  static var parameters: [ScribeToolParameter] { [] }
-  static var promptHint: String? { nil }
+  let name = "interrupted_tool"
+  let description = "Throws AgentTurnInterruptedError."
+  let parameters: [ScribeToolParameter] = []
+  let promptHint: String? = nil
   struct Result: Encodable { let ok = true }
   func run(arguments: String) async throws -> Encodable {
     throw AgentTurnInterruptedError()

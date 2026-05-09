@@ -13,40 +13,36 @@ struct ReadFileToolResult: Encodable, Sendable {
 }
 
 public struct ReadFileTool: ScribeTool {
-  public static var name: String { "read_file" }
-  public static var description: String {
+  public let name = "read_file"
+  public let description =
     "Read a UTF-8 file at the given path (relative paths resolve against the process cwd). "
       + "Supports line-based pagination via `offset` and `limit` so very large files can be "
       + "fetched in sections without bloating the conversation history. The result includes "
       + "`bytes`, `total_lines`, `start_line`, `end_line`, and `truncated` so you can decide "
       + "whether to request another page (`offset = previous end_line + 1`)."
-  }
-  public static var parameters: [ScribeToolParameter] {
-    [
-      ScribeToolParameter(
-        name: "path", type: .string,
-        description: "Filesystem path (relative paths resolve against the process cwd).",
-        required: true),
-      ScribeToolParameter(
-        name: "offset", type: .integer,
-        description:
-          "1-indexed line number to start reading from. Omit (or pass 1) to start at the top. "
-          + "Use the previous call's `end_line + 1` to read the next page of a large file.",
-        required: false),
-      ScribeToolParameter(
-        name: "limit", type: .integer,
-        description:
-          "Maximum number of lines to return (default 2000). Pass a smaller value when only a "
-          + "section is needed; pass `0` to read to end of file. Response includes `total_lines`, "
-          + "`start_line`, `end_line`, and `truncated` so you can tell whether to fetch another page.",
-        required: false),
-    ]
-  }
-  public static var promptHint: String? {
+  public let parameters: [ScribeToolParameter] = [
+    ScribeToolParameter(
+      name: "path", type: .string,
+      description: "Filesystem path (relative paths resolve against the process cwd).",
+      required: true),
+    ScribeToolParameter(
+      name: "offset", type: .integer,
+      description:
+        "1-indexed line number to start reading from. Omit (or pass 1) to start at the top. "
+        + "Use the previous call's `end_line + 1` to read the next page of a large file.",
+      required: false),
+    ScribeToolParameter(
+      name: "limit", type: .integer,
+      description:
+        "Maximum number of lines to return (default 2000). Pass a smaller value when only a "
+        + "section is needed; pass `0` to read to end of file. Response includes `total_lines`, "
+        + "`start_line`, `end_line`, and `truncated` so you can tell whether to fetch another page.",
+      required: false),
+  ]
+  public let promptHint: String? =
     "For `read_file`, prefer paginating large files: pass `offset` (1-indexed start line) "
       + "and `limit` (max lines, default 2000) and use the returned `end_line` + 1 as the "
       + "next `offset` if `truncated` is true. This keeps the conversation history small."
-  }
 
   public init() {}
 

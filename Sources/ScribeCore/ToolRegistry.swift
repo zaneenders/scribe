@@ -13,11 +13,10 @@ public struct ToolRegistry: Sendable {
   public init(tools: [any ScribeTool]) {
     var map: [String: any ScribeTool] = [:]
     for tool in tools {
-      let name = type(of: tool).name
-      map[name] = tool
+      map[tool.name] = tool
     }
     self.tools = map
-    self.chatTools = tools.map { type(of: $0).toChatTool() }
+    self.chatTools = tools.map { $0.toChatTool() }
   }
 
   /// Execute a tool by name with cooperative abort support.

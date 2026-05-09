@@ -64,11 +64,14 @@ import ScribeCore
 
     let cwd = FileManager.default.currentDirectoryPath
 
-    let tools: [any ScribeTool] = [
-      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
-    ]
-    let toolNames = tools.map { type(of: $0).name }.joined(separator: ", ")
-    let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
+    let tools = Tools {
+      ShellTool()
+      ReadFileTool()
+      WriteFileTool()
+      EditFileTool()
+    }
+    let toolNames = tools.map { $0.name }.joined(separator: ", ")
+    let toolHints = tools.compactMap { $0.promptHint }.joined(separator: "\n\n")
 
     let systemPrompt = """
       You are Scribe, a coding agent CLI with shell and file tools.

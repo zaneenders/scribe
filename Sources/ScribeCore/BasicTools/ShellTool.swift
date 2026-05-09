@@ -10,21 +10,19 @@ struct ShellToolResult: Encodable, Sendable {
 }
 
 public struct ShellTool: ScribeTool {
-  public static var name: String { "shell" }
-  public static var description: String { "Run a command via /bin/sh -c." }
-  public static var parameters: [ScribeToolParameter] {
-    [
-      ScribeToolParameter(
-        name: "command", type: .string,
-        description: "Shell command to run (passed to /bin/sh -c).", required: true),
-      ScribeToolParameter(
-        name: "cwd", type: .string,
-        description:
-          "Optional working directory for the command (relative paths resolve against the process cwd).",
-        required: false),
-    ]
-  }
-  public static var promptHint: String? { nil }
+  public let name = "shell"
+  public let description = "Run a command via /bin/sh -c."
+  public let parameters: [ScribeToolParameter] = [
+    ScribeToolParameter(
+      name: "command", type: .string,
+      description: "Shell command to run (passed to /bin/sh -c).", required: true),
+    ScribeToolParameter(
+      name: "cwd", type: .string,
+      description:
+        "Optional working directory for the command (relative paths resolve against the process cwd).",
+      required: false),
+  ]
+  public let promptHint: String? = nil
 
   public init() {}
 

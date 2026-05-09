@@ -9,18 +9,22 @@ import ScribeLLM
 ///
 /// Conformances provide both the LLM-facing schema and the runtime execution
 /// so a single type is the source of truth for a tool.
+///
+/// Metadata properties are **instance** members so tools can be defined inline
+/// (e.g. via ``InlineTool``) without requiring a separate type per tool.
+/// ``ToolsBuilder`` composes arrays of tools using result-builder syntax.
 public protocol ScribeTool: Sendable {
   /// The tool name as exposed to the LLM (e.g. `"shell"`, `"read_file"`).
-  static var name: String { get }
+  var name: String { get }
 
   /// Short description the LLM sees when deciding whether to call this tool.
-  static var description: String { get }
+  var description: String { get }
 
   /// JSON Schema parameters the tool accepts.
-  static var parameters: [ScribeToolParameter] { get }
+  var parameters: [ScribeToolParameter] { get }
 
   /// Optional hint injected into the system prompt (e.g. pagination guidance).
-  static var promptHint: String? { get }
+  var promptHint: String? { get }
 
   /// Execute the tool with the given JSON-encoded arguments.
   ///
@@ -34,7 +38,7 @@ public protocol ScribeTool: Sendable {
 
 extension ScribeTool {
   /// Converts this tool's schema into the `ChatTool` form the LLM API expects.
-  public static func toChatTool() -> Components.Schemas.ChatTool {
+  public func toChatTool() -> Components.Schemas.ChatTool {
     var props: [String: (any Sendable)?] = [:]
     var required: [String] = []
     for p in parameters {
