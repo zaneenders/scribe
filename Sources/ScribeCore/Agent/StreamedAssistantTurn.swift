@@ -2,12 +2,12 @@ import Foundation
 import ScribeLLM
 
 /// Accumulates one assistant step from streamed chunks (content + parallel tool calls).
-public struct StreamedAssistantTurn {
-  public var text = ""
+struct StreamedAssistantTurn {
+  var text = ""
   /// Accumulated thinking/reasoning stream; must be sent back as `reasoning_content` on the next API call for providers such as DeepSeek.
-  public var reasoningText = ""
+  var reasoningText = ""
   var toolCalls: [Int: PartialToolCall] = [:]
-  public var finishReason: String?
+  var finishReason: String?
 
   struct PartialToolCall {
     var id: String?
@@ -21,9 +21,9 @@ public struct StreamedAssistantTurn {
     }
   }
 
-  public init() {}
+  init() {}
 
-  public mutating func apply(chunk: Components.Schemas.ChatCompletionChunk) {
+  mutating func apply(chunk: Components.Schemas.ChatCompletionChunk) {
     guard let choices = chunk.choices else { return }
     for choice in choices {
       if let fr = choice.finishReason {
@@ -50,7 +50,7 @@ public struct StreamedAssistantTurn {
     }
   }
 
-  public func resolvedToolCalls() -> [ToolInvocation] {
+  func resolvedToolCalls() -> [ToolInvocation] {
     toolCalls.keys.sorted().compactMap { key in
       guard let t = toolCalls[key], let id = t.id, let name = t.name else { return nil }
       return ToolInvocation(id: id, name: name, arguments: t.arguments)

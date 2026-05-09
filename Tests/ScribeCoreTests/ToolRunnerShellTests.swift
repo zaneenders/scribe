@@ -1,6 +1,6 @@
 import Foundation
-import ScribeCore
 import Testing
+@testable import ScribeCore
 
 @Suite
 struct ToolRunnerShellTests {

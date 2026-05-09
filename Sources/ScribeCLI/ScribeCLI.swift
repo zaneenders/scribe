@@ -2,6 +2,7 @@ import ArgumentParser
 import Foundation
 import ProfileRecorderServer
 import ScribeCore
+import ScribeLLM
 
 @main struct ScribeCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -99,23 +100,25 @@ import ScribeCore
     )
 
     let sessionPersistenceURL: URL
-    let resumeArchive: ChatSessionArchive?
+    let resumeMetadata: ChatSessionMetadata?
+    let resumeMessages: [Components.Schemas.ChatMessage]
     let sessionId: UUID
     if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
       sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
         specifier: spec, sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
-      let archived = try ChatSessionStore.load(from: sessionPersistenceURL)
-      resumeArchive = archived
-      sessionId = archived.id
+      resumeMetadata = try ChatSessionStore.loadMetadata(from: sessionPersistenceURL)
+      resumeMessages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
+      sessionId = resumeMetadata!.id
     } else {
       sessionId = UUID()
       sessionPersistenceURL = try ChatSessionStore.sessionDirectoryURL(
         sessionId: sessionId, sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
-      resumeArchive = nil
+      resumeMetadata = nil
+      resumeMessages = []
     }
 
     let log = loaded.makeSessionLogger(sessionId: sessionId)
-    let mode = resumeArchive == nil ? "new" : "resume"
+    let mode = resumeMetadata == nil ? "new" : "resume"
     log.notice(
       "chat.session.start",
       metadata: [
@@ -130,11 +133,11 @@ import ScribeCore
         "session_file": "\(sessionPersistenceURL.path)",
         "config_file": "\(loaded.resolvedConfigurationPath)",
       ])
-    if let archived = resumeArchive, archived.model != scribeConfig.agentModel {
+    if let meta = resumeMetadata, meta.model != scribeConfig.agentModel {
       log.warning(
         "chat.session.resume.model-mismatch",
         metadata: [
-          "archived_model": "\(archived.model)",
+          "archived_model": "\(meta.model)",
           "current_model": "\(scribeConfig.agentModel)",
         ])
     }
@@ -146,14 +149,14 @@ import ScribeCore
     try await SlateChat.runFullscreen(
       configuration: scribeConfig,
       systemPrompt: systemPrompt,
-      resumeArchive: resumeArchive,
+      resumeMessages: resumeMessages,
       sessionPersistenceURL: sessionPersistenceURL,
       sessionId: sessionId,
       log: log
     )
     log.notice("chat.session.end", metadata: ["status": "ok"])
     printExitResumeHint(
-      resumeArchive: resumeArchive,
+      sessionId: sessionId,
       sessionPersistenceURL: sessionPersistenceURL
     )
   }
@@ -189,18 +192,10 @@ import ScribeCore
 extension ScribeCLI {
   /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only — structured logs stay in log files).
   fileprivate func printExitResumeHint(
-    resumeArchive: ChatSessionArchive?,
+    sessionId: UUID,
     sessionPersistenceURL: URL
   ) {
-    let stemUUID = UUID(uuidString: sessionPersistenceURL.lastPathComponent)
-    let specifier: String
-    if let archived = resumeArchive {
-      specifier = archived.id.uuidString
-    } else if let stem = stemUUID {
-      specifier = stem.uuidString
-    } else {
-      specifier = "'" + Self.escapeForSingleQuotedPOSIXPath(sessionPersistenceURL.path) + "'"
-    }
+    let specifier = sessionId.uuidString
     let binaryName =
       CommandLine.arguments.first.map { NSString(string: $0).lastPathComponent } ?? "scribe"
     let hint = "\(binaryName) --resume \(specifier)"

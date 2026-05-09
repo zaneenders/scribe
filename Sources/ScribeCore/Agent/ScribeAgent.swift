@@ -25,13 +25,13 @@ public struct AgentRunOptions: Sendable {
 // MARK: - AgentStateSnapshot
 
 /// Read-only snapshot of agent state.
-public struct AgentStateSnapshot: Sendable {
-  public let systemPrompt: String
-  public let model: String
-  public let messages: [Components.Schemas.ChatMessage]
-  public let isStreaming: Bool
+struct AgentStateSnapshot: Sendable {
+  let systemPrompt: String
+  let model: String
+  let messages: [Components.Schemas.ChatMessage]
+  let isStreaming: Bool
 
-  public init(
+  init(
     systemPrompt: String,
     model: String,
     messages: [Components.Schemas.ChatMessage],
@@ -150,7 +150,7 @@ public struct ScribeAgent: Sendable {
   }
 
   /// Creates an agent with a pre-built client (for testing or custom transports).
-  public init(
+  package init(
     client: Client,
     model: String,
     systemPrompt: String,
@@ -169,7 +169,7 @@ public struct ScribeAgent: Sendable {
   // MARK: - Public state
 
   /// A snapshot of the current agent state.
-  public var state: AgentStateSnapshot {
+  var state: AgentStateSnapshot {
     get async { await storage.snapshot() }
   }
 

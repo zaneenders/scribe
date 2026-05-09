@@ -1,7 +1,7 @@
 import Foundation
-import ScribeCore
 import ScribeLLM
 import Testing
+@testable import ScribeCore
 
 /// Tests for the chunk-accumulation logic in `StreamedAssistantTurn`,
 /// which assembles streamed deltas into final text, reasoning, and tool calls.

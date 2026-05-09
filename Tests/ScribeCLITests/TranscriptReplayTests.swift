@@ -3,6 +3,7 @@ import ScribeCore
 import ScribeLLM
 import Synchronization
 import Testing
+@testable import ScribeCLI
 
 // MARK: - TranscriptReplay tests
 

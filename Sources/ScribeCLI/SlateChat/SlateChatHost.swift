@@ -103,7 +103,7 @@ internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
   private let systemPrompt: String
-  private let resumeArchive: ChatSessionArchive?
+  private let resumeMessages: [Components.Schemas.ChatMessage]
   private let sessionPersistenceURL: URL
   private let sessionId: UUID
   private let sessionCreatedAt: Date
@@ -124,7 +124,7 @@ internal final class SlateChatHost {
   init(
     configuration: ScribeConfig,
     systemPrompt: String,
-    resumeArchive: ChatSessionArchive?,
+    resumeMessages: [Components.Schemas.ChatMessage],
     sessionPersistenceURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,
@@ -132,7 +132,7 @@ internal final class SlateChatHost {
   ) {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
-    self.resumeArchive = resumeArchive
+    self.resumeMessages = resumeMessages
     self.sessionPersistenceURL = sessionPersistenceURL
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
@@ -154,10 +154,10 @@ internal final class SlateChatHost {
         sink.setContextWindow(self.configuration.contextWindow)
         self.renderWake = wake
 
-        let resumeSnapshot = self.resumeArchive
-        if let resumed = resumeSnapshot {
+        let resumeSnapshot = self.resumeMessages
+        if !resumeSnapshot.isEmpty {
           TranscriptReplay.replay(
-            messages: resumed.messages,
+            messages: resumeSnapshot,
             onEvent: { sink.emit($0) },
             recordUserSubmission: { sink.recordUserSubmission(trimmedVisible: $0) }
           )
@@ -165,20 +165,6 @@ internal final class SlateChatHost {
         }
 
         let persistURL = self.sessionPersistenceURL
-        let cid = self.sessionId
-        let created = self.sessionCreatedAt
-        let modelSnapshot = self.configuration.agentModel
-        let baseSnapshot = self.configuration.serverURL
-        let persistLog = self.log
-        let persist = ChatSessionStore.makePersistCallback(
-          sessionId: cid,
-          createdAt: created,
-          model: modelSnapshot,
-          baseURL: baseSnapshot,
-          scribeVersion: GitVersion.hash,
-          persistURL: persistURL,
-          logger: persistLog
-        )
 
         let cwd = FileManager.default.currentDirectoryPath
         sink.setBanner(
@@ -209,18 +195,41 @@ internal final class SlateChatHost {
         let sessionLog = self.log
         self.coordinatorTask = Task {
           [
-            configuration, systemPrompt, sink, gate, resumeSnapshot, persist, interruptFlag, sessionLog
+            configuration, systemPrompt, sink, gate, resumeSnapshot, interruptFlag, sessionLog
           ] in
           defer { sink.markCoordinatorFinished() }
 
+          func persistNew(from agent: ScribeAgent, since count: Int) async {
+            let current = await agent.messages
+            guard current.count > count else { return }
+            let newMessages = Array(current[count...])
+            do {
+              try ChatSessionStore.appendMessages(newMessages, to: persistURL)
+              sessionLog.trace(
+                "chat.persist.append",
+                metadata: [
+                  "new": "\(newMessages.count)",
+                  "total": "\(current.count)",
+                  "path": "\(persistURL.path)",
+                ])
+            } catch {
+              sessionLog.error(
+                "chat.persist.fail",
+                metadata: [
+                  "path": "\(persistURL.path)",
+                  "err": "\(error.localizedDescription)",
+                ])
+            }
+          }
+
           do {
             let initialMessages: [Components.Schemas.ChatMessage]
-            if let resumed = resumeSnapshot?.messages, !resumed.isEmpty {
-              guard resumed.first?.role == .system else {
+            if !resumeSnapshot.isEmpty {
+              guard resumeSnapshot.first?.role == .system else {
                 throw ScribeError.sessionCorrupted(
                   reason: "Resumed conversation must begin with a system message.")
               }
-              initialMessages = resumed
+              initialMessages = resumeSnapshot
             } else {
               initialMessages = [.init(role: .system, content: systemPrompt)]
             }
@@ -231,10 +240,26 @@ internal final class SlateChatHost {
               initialMessages: initialMessages
             )
 
-            persist(initialMessages)
+            // Write metadata on first persist (new sessions only — resume keeps existing metadata).
+            if resumeSnapshot.isEmpty {
+              let cwd = FileManager.default.currentDirectoryPath
+              let meta = ChatSessionMetadata(
+                id: self.sessionId,
+                createdAt: self.sessionCreatedAt,
+                model: configuration.agentModel,
+                cwd: cwd,
+                baseURL: configuration.serverURL,
+                scribeVersion: GitVersion.hash
+              )
+              try? ChatSessionStore.saveMetadata(meta, to: persistURL)
+            }
+
+            try ChatSessionStore.appendMessages(initialMessages, to: persistURL)
+            var persistedCount = initialMessages.count
+
             let msgCount = initialMessages.count
             sessionLog.debug(
-              "event=chat.coordinator.start messages=\(msgCount) resumed=\(resumeSnapshot != nil)")
+              "event=chat.coordinator.start messages=\(msgCount) resumed=\(!resumeSnapshot.isEmpty)")
 
             let tracker = TokenTracker(
               contextWindow: configuration.contextWindow,
@@ -296,9 +321,10 @@ internal final class SlateChatHost {
                   "event=agent.turn.end status=error err=\"\(se.errorDescription ?? String(describing: se))\"")
                 sink.emit(.harnessError(se))
               }
-              persist(await agent.messages)
+              await persistNew(from: agent, since: persistedCount)
+              persistedCount = await agent.messages.count
             }
-            persist(await agent.messages)
+            await persistNew(from: agent, since: persistedCount)
             let finalMsgCount = await agent.messages.count
             sessionLog.debug("event=chat.coordinator.end transcript_messages=\(finalMsgCount)")
           } catch {

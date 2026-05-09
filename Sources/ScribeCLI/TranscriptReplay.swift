@@ -1,14 +1,15 @@
 import Foundation
+import ScribeCore
 import ScribeLLM
 
-/// Replays a persisted conversation (e.g. from `ChatSessionArchive`) by emitting
+/// Replays a persisted conversation by emitting `TranscriptEvent` values
 /// `TranscriptEvent` values and recording user submissions, so CLI rendering code
 /// never needs to import ScribeLLM directly.
-public enum TranscriptReplay {
+enum TranscriptReplay {
 
   /// Walk `messages` (skipping the leading system message) and call `onEvent` /
   /// `recordUserSubmission` for each turn so the host can rebuild its scrollback.
-  public static func replay(
+  static func replay(
     messages: [Components.Schemas.ChatMessage],
     onEvent: @escaping @Sendable (TranscriptEvent) -> Void,
     recordUserSubmission: @escaping @Sendable (String) -> Void
