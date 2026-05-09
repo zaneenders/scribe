@@ -680,9 +680,29 @@ internal final class SlateChatHost {
       }
       streamingOpenLineRaw += text
       currentStreamingSection = section
+
+      // When the user has scrolled up, skip per-chunk rendering — the
+      // streaming section isn't visible.  Accumulate raw text only; the
+      // next chunk after scrolling back (or finalize) will catch up.
+      guard viewport.followingLive else { return }
+
       let st = theme.style(for: section)
+
+      // Only render the visible tail during streaming — the full accumulated
+      // text is re-parsed with block-level markdown at finalize anyway.
+      // Keeps per-chunk work bounded to O(screen) instead of O(total-response).
+      let maxVisibleLogicalLines = 200  // generous: 2-4× a typical terminal
+      let tailText: String = {
+        let allLines = streamingOpenLineRaw.split(
+          separator: "\n", omittingEmptySubsequences: false)
+        guard allLines.count > maxVisibleLogicalLines else {
+          return streamingOpenLineRaw
+        }
+        return allLines.suffix(maxVisibleLogicalLines).joined(separator: "\n")
+      }()
+
       let rendered = markdownRenderer.renderStreaming(
-        text: streamingOpenLineRaw,
+        text: tailText,
         baseFG: st.fg,
         baseBold: st.bold,
         theme: section == .reasoning ? .grayscale : theme.markdown
