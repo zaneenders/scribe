@@ -109,7 +109,7 @@ internal final class SlateChatHost {
   private let sessionCreatedAt: Date
 
   // Extracted concerns
-  private var inputHandler = InputHandler()
+  private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
   private var flattenCache = TranscriptLayout.FlattenCache()
@@ -387,7 +387,7 @@ internal final class SlateChatHost {
                 ])
 
             case .character, .backspace, .tab:
-              break  // Buffer already mutated by InputHandler
+              break  // Buffer already mutated by TerminalInputHandler
             }
           }
 
@@ -432,19 +432,22 @@ internal final class SlateChatHost {
         let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
 
         let submitStart = Date()
-        slate.enscribe(
-          grid: SlateChatRenderer.makeGrid(
-            cols: slate.cols,
-            rows: slate.rows,
-            flattenedTranscript: flatTranscript,
-            transcriptTailStart: transcriptTailStart,
-            banner: sink.bannerSnapshot(),
-            usage: sink.usageHUDSnapshot(),
-            inputLine: self.inputHandler.buffer,
-            llmWaitAnimationFrame: self.llmWaitAnimationFrame,
-            waitingForLLM: sink.modelTurnBusy(),
-            queuedTrayText: queuedTrayText,
-            theme: .default))
+        // Slate owns the grid — dirty-region tracking in encode(into:) skips
+        // unchanged rows. grid.resize() is handled by refreshWindowSize() on .resize.
+        SlateChatRenderer.render(
+          into: &slate.grid,
+          cols: slate.cols,
+          rows: slate.rows,
+          flattenedTranscript: flatTranscript,
+          transcriptTailStart: transcriptTailStart,
+          banner: sink.bannerSnapshot(),
+          usage: sink.usageHUDSnapshot(),
+          inputLine: self.inputHandler.buffer,
+          llmWaitAnimationFrame: self.llmWaitAnimationFrame,
+          waitingForLLM: sink.modelTurnBusy(),
+          queuedTrayText: queuedTrayText,
+          theme: .default)
+        slate.enscribe()
         let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
         let totalMs = prepareMs &+ submitMs
         if totalMs >= 50 {

@@ -142,7 +142,8 @@ internal enum SlateChatRenderer {
     return max(0, firstTrayRow &- headerRows)
   }
 
-  static func makeGrid(
+  static func render(
+    into grid: inout TerminalCellGrid,
     cols: Int,
     rows: Int,
     flattenedTranscript: [TLine],
@@ -154,10 +155,13 @@ internal enum SlateChatRenderer {
     waitingForLLM: Bool,
     queuedTrayText: String?,
     theme: CLITheme
-  ) -> TerminalCellGrid {
-    let fill = TerminalCell(
+  ) {
+    // Background fill cells used for clearing regions before painting.
+    let transcriptFill = TerminalCell(
       glyph: " ", foreground: theme.inputText, background: theme.background, flags: [])
-    var grid = TerminalCellGrid(cols: cols, rows: rows, filling: fill)
+    let inputFill = TerminalCell(
+      glyph: " ", foreground: theme.inputText,
+      background: theme.inputAreaBg, flags: [])
 
     let headerRows: Int = {
       if banner != nil {
@@ -173,6 +177,60 @@ internal enum SlateChatRenderer {
       cols: cols, rows: rows, banner: banner, usage: usage,
       inputLine: inputLine, waitingForLLM: waitingForLLM,
       queuedTrayText: queuedTrayText)
+
+    let showSpinner = waitingForLLM && inputLine.isEmpty
+    let textWidth = max(0, cols &- inputGutterColumns)
+    let maxInputRows = min(8, max(1, rows &- headerRows &- 1))
+    let visualLines: [String]
+    let inputRowCount: Int
+    if showSpinner || textWidth == 0 {
+      visualLines = []
+      inputRowCount = 1
+    } else {
+      var lines = TranscriptLayout.inputVisualLines(from: inputLine, textWidth: textWidth)
+      let needsExtraCursorRow =
+        lines.last.map { $0.count >= textWidth && textWidth > 0 } ?? false
+      if needsExtraCursorRow {
+        lines.append("")
+      }
+      let capped = min(maxInputRows, max(1, lines.count))
+      inputRowCount = capped
+      visualLines =
+        lines.count > capped
+        ? Array(lines.suffix(capped))
+        : lines + Array(repeating: "", count: max(0, capped &- lines.count))
+    }
+
+    let firstInputRow = rows &- inputRowCount
+    let trayTextWidth = max(0, cols &- queuedTrayGutterColumns)
+    let rawTrayLines = queuedTrayVisualLines(
+      queuedTrayText: queuedTrayText, textWidth: trayTextWidth)
+    let availableTrayRows = max(0, firstInputRow &- headerRows)
+    let trayVisualLines = Array(rawTrayLines.prefix(availableTrayRows))
+    let trayRowCount = trayVisualLines.count
+    let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
+
+    // Targeted background fills (instead of resetting the whole grid).
+    // Only rows that are painted are marked dirty, so idle frames (cursor
+    // blink only) emit minimal CSI via dirty-region encoding.
+    if headerRows > 0 {
+      grid.blit(
+        column: 0, row: 0, width: cols, height: headerRows,
+        repeating: transcriptFill)
+    }
+    // Transcript area — fill the visible portion only.
+    if firstTrayRow > headerRows {
+      grid.blit(
+        column: 0, row: headerRows, width: cols, height: firstTrayRow &- headerRows,
+        repeating: transcriptFill)
+    }
+    // Input/tray background.
+    let inputBgRowCount = trayRowCount &+ inputRowCount
+    if inputBgRowCount > 0 {
+      grid.blit(
+        column: 0, row: firstTrayRow, width: cols, height: inputBgRowCount,
+        repeating: inputFill)
+    }
 
     let usageReserve: Int = {
       guard let u = usage else { return 0 }
@@ -219,60 +277,20 @@ internal enum SlateChatRenderer {
         valueSpans: cwdSpans, theme: theme)
     }
 
-    let showSpinner = waitingForLLM && inputLine.isEmpty
-    let textWidth = max(0, cols &- inputGutterColumns)
-    let maxInputRows = min(8, max(1, rows &- headerRows &- 1))
-    let visualLines: [String]
-    let inputRowCount: Int
-    if showSpinner || textWidth == 0 {
-      visualLines = []
-      inputRowCount = 1
-    } else {
-      var lines = TranscriptLayout.inputVisualLines(from: inputLine, textWidth: textWidth)
-      let needsExtraCursorRow =
-        lines.last.map { $0.count >= textWidth && textWidth > 0 } ?? false
-      if needsExtraCursorRow {
-        lines.append("")
-      }
-      let capped = min(maxInputRows, max(1, lines.count))
-      inputRowCount = capped
-      visualLines =
-        lines.count > capped
-        ? Array(lines.suffix(capped))
-        : lines + Array(repeating: "", count: max(0, capped &- lines.count))
-    }
-
-    let firstInputRow = rows &- inputRowCount
-    let trayTextWidth = max(0, cols &- queuedTrayGutterColumns)
-    let rawTrayLines = queuedTrayVisualLines(
-      queuedTrayText: queuedTrayText, textWidth: trayTextWidth)
-    let availableTrayRows = max(0, firstInputRow &- headerRows)
-    let trayVisualLines = Array(rawTrayLines.prefix(availableTrayRows))
-    let trayRowCount = trayVisualLines.count
-    let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
-
-    // Fill input/tray background region in one blit
-    let inputBgRowCount = trayRowCount &+ inputRowCount
-    if inputBgRowCount > 0 {
-      grid.blit(
-        column: 0, row: firstTrayRow, width: cols, height: inputBgRowCount,
-        repeating: TerminalCell(
-          glyph: " ", foreground: theme.inputText,
-          background: theme.inputAreaBg, flags: []))
-    }
-
     if contentRows > 0 {
       let flat = flattenedTranscript
       let maxTailStart = max(0, flat.count &- contentRows)
       let tailStart = min(max(0, transcriptTailStart), maxTailStart)
       let visibleCount = min(contentRows, flat.count &- tailStart)
-      let visible = visibleCount > 0 ? Array(flat[tailStart..<(tailStart &+ visibleCount)]) : []
-      let topPad = contentRows &- visible.count
+      let topPad = contentRows &- visibleCount
       var y = headerRows &+ topPad
-      for line in visible {
+      var idx = tailStart
+      let endIdx = tailStart &+ visibleCount
+      while idx < endIdx {
         guard y < firstTrayRow else { break }
-        grid.blitSpans(column: 0, row: y, maxWidth: cols, line.toSlateSpans)
+        grid.blitSpans(column: 0, row: y, maxWidth: cols, flat[idx].spans)
         y &+= 1
+        idx &+= 1
       }
     }
 
@@ -296,8 +314,6 @@ internal enum SlateChatRenderer {
       llmWaitAnimationFrame: llmWaitAnimationFrame,
       showSpinner: showSpinner,
       theme: theme)
-
-    return grid
   }
 
   private static func formatUsageInt(_ n: Int) -> String {
@@ -423,9 +439,11 @@ internal enum SlateChatRenderer {
       spans = trimmed
     }
 
+    // Build spans with label prepended in one allocation.
+    var allSpans = spans
+    allSpans.insert(TerminalStyledSpan(label, foreground: theme.bannerLabel, background: bg), at: 0)
     grid.blitSpans(
-      column: 0, row: row, maxWidth: cap,
-      [TerminalStyledSpan(label, foreground: theme.bannerLabel, background: bg)] + spans)
+      column: 0, row: row, maxWidth: cap, allSpans)
   }
 
   private static func paintUsageHUD(
@@ -531,22 +549,6 @@ internal enum SlateChatRenderer {
       }
       grid.blitSpans(column: 0, row: row, maxWidth: cols, spans)
       lineIdx &+= 1
-    }
-  }
-}
-
-// MARK: - TLine → slate span conversion
-
-extension TLine {
-  /// Converts scribe-style ``StyledSpan``s into slate-native ``TerminalStyledSpan``s
-  /// for use with ``TerminalCellGrid/blitSpans(column:row:maxWidth:_:)``.
-  var toSlateSpans: [TerminalStyledSpan] {
-    spans.map { s in
-      TerminalStyledSpan(
-        s.text,
-        foreground: s.fg,
-        background: s.bg,
-        flags: s.bold ? .bold : [])
     }
   }
 }

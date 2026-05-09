@@ -13,11 +13,16 @@ import Musl
 
 // MARK: - Styled transcript model
 
-public struct StyledSpan: Equatable, Sendable {
+public struct StyledSpan: Equatable, Sendable, TerminalSpanProtocol {
   public var fg: TerminalRGB
   public var bg: TerminalRGB
   public var bold: Bool
   public var text: String
+
+  // TerminalSpanProtocol conformance — bridges naming conventions.
+  public var foreground: TerminalRGB { fg }
+  public var background: TerminalRGB { bg }
+  public var flags: TerminalCellFlags { bold ? .bold : [] }
 
   public init(fg: TerminalRGB, bg: TerminalRGB, bold: Bool, text: String) {
     self.fg = fg
@@ -567,7 +572,7 @@ internal enum TranscriptLayout {
     }
 
     var lines: [String] = []
-    var lineStart = 0          // index into tokenRanges
+    var lineStart = 0  // index into tokenRanges
     var lineCharCount = 0
 
     for idx in tokenRanges.indices {

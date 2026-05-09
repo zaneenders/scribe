@@ -61,9 +61,9 @@ struct TranscriptViewport {
     let page = max(1, contentRows)
 
     switch pendingScrollDelta {
-    case Int.min:       // page up
+    case Int.min:  // page up
       applyScroll(delta: -page, flatCount: flatCount, contentRows: contentRows)
-    case Int.min + 1:   // page down
+    case Int.min + 1:  // page down
       applyScroll(delta: page, flatCount: flatCount, contentRows: contentRows)
     case let delta where delta != 0:
       applyScroll(delta: delta, flatCount: flatCount, contentRows: contentRows)
