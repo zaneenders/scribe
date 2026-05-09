@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeLLM
+import Synchronization
 
 /// On-disk format for `scribe chat` session logs (JSON).
 public struct ChatSessionArchive: Codable, Sendable, Equatable {
@@ -281,7 +282,11 @@ public enum ChatSessionStore {
     return only
   }
 
-  /// Creates a conversation-persist callback that writes the full history on every call.
+  /// Creates a conversation-persist callback that writes incrementally.
+  ///
+  /// The first call performs a full `save()` to create `metadata.json` +
+  /// `messages.jsonl`.  Subsequent calls append only new messages via
+  /// `appendMessages()`, avoiding O(n²) disk I/O on long sessions.
   public static func makePersistCallback(
     sessionId: UUID,
     createdAt: Date,
@@ -291,28 +296,53 @@ public enum ChatSessionStore {
     persistURL: URL,
     logger: Logger
   ) -> @Sendable ([Components.Schemas.ChatMessage]) -> Void {
+    let persistedCount = Mutex(0)
+
     return { history in
       let cwd = FileManager.default.currentDirectoryPath
+
+      let prev = persistedCount.withLock { count -> Int in
+        let old = count
+        count = history.count
+        return old
+      }
+
       do {
-        try save(
-          ChatSessionArchive(
-            id: sessionId,
-            createdAt: createdAt,
-            updatedAt: Date(),
-            cwd: cwd,
-            model: model,
-            baseURL: baseURL,
-            scribeVersion: scribeVersion,
-            messages: history
-          ),
-          to: persistURL
-        )
-        logger.trace(
-          "chat.persist.save",
-          metadata: [
-            "messages": "\(history.count)",
-            "path": "\(persistURL.path)",
-          ])
+        if prev == 0 {
+          // First write: full save creates metadata.json + messages.jsonl.
+          try save(
+            ChatSessionArchive(
+              id: sessionId,
+              createdAt: createdAt,
+              updatedAt: Date(),
+              cwd: cwd,
+              model: model,
+              baseURL: baseURL,
+              scribeVersion: scribeVersion,
+              messages: history
+            ),
+            to: persistURL
+          )
+          logger.trace(
+            "chat.persist.save.full",
+            metadata: [
+              "messages": "\(history.count)",
+              "path": "\(persistURL.path)",
+            ])
+        } else {
+          // Incremental: only new messages since last persist.
+          let newMessages = Array(history.suffix(history.count - prev))
+          if !newMessages.isEmpty {
+            try appendMessages(newMessages, to: persistURL)
+            logger.trace(
+              "chat.persist.save.append",
+              metadata: [
+                "new": "\(newMessages.count)",
+                "total": "\(history.count)",
+                "path": "\(persistURL.path)",
+              ])
+          }
+        }
       } catch {
         logger.error(
           "chat.persist.fail",

@@ -32,7 +32,6 @@ struct WritePayload: Decodable {
 struct EditPayload: Decodable {
   let ok: Bool
   let replaced: Bool?
-  let content: String?
 }
 
 enum ToolRunnerTestFailure: LocalizedError {

@@ -4,7 +4,6 @@ import Logging
 struct EditFileToolResult: Encodable, Sendable {
   let ok = true
   let replaced: Bool
-  let content: String
 }
 
 public struct EditFileTool: ScribeTool {
@@ -61,7 +60,7 @@ public struct EditFileTool: ScribeTool {
         "path": "\(s.replacingOccurrences(of: "\"", with: "\\\""))",
         "replaced": "true",
       ])
-    return EditFileToolResult(replaced: true, content: text)
+    return EditFileToolResult(replaced: true)
   }
 
   private static func numberOfNonOverlappingOccurrences(in haystack: String, of needle: String) -> Int {
