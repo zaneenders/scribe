@@ -115,6 +115,9 @@ public struct ScribeAgent: Sendable {
   /// The OpenAI-compatible HTTP client.
   private let client: Client
 
+  /// Absolute working directory for tool path resolution.
+  private let workingDirectory: ScribeFilePath
+
   /// Synchronous abort flag checked by the run loop without `await`.
   private final class AbortFlag: Sendable {
     let value = Atomic<Bool>(false)
@@ -141,6 +144,7 @@ public struct ScribeAgent: Sendable {
     }
     self.client = OpenAICompatibleClient.make(
       serverURL: serverURL, apiKey: configuration.apiKey)
+    self.workingDirectory = ScribeFilePath(configuration.workingDirectory)
     self.registry = ToolRegistry(tools: configuration.tools)
     self.storage = Storage(
       systemPrompt: systemPrompt,
@@ -155,9 +159,11 @@ public struct ScribeAgent: Sendable {
     model: String,
     systemPrompt: String,
     tools: [any ScribeTool] = [],
-    initialMessages: [Components.Schemas.ChatMessage] = []
+    initialMessages: [Components.Schemas.ChatMessage] = [],
+    workingDirectory: ScribeFilePath
   ) {
     self.client = client
+    self.workingDirectory = workingDirectory
     self.registry = ToolRegistry(tools: tools)
     self.storage = Storage(
       systemPrompt: systemPrompt,
@@ -243,7 +249,8 @@ public struct ScribeAgent: Sendable {
         client: client,
         registry: registry,
         temperature: options.temperature,
-        maxToolRounds: options.maxToolRounds
+        maxToolRounds: options.maxToolRounds,
+        workingDirectory: workingDirectory
       )
 
       do {

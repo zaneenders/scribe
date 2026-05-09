@@ -96,7 +96,8 @@ import ScribeLLM
       contextWindowThreshold: loaded.scribeConfig.contextWindowThreshold,
       serverURL: loaded.scribeConfig.serverURL,
       apiKey: loaded.scribeConfig.apiKey,
-      tools: tools
+      tools: tools,
+      workingDirectory: cwd
     )
 
     let sessionPersistenceURL: URL

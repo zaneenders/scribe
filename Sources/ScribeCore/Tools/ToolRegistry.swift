@@ -34,6 +34,7 @@ public struct ToolRegistry: Sendable {
   public func run(
     name: String,
     arguments: String,
+    workingDirectory: ScribeFilePath,
     abortVia shouldAbortTurn: @escaping @Sendable () -> Bool
   ) async throws -> String {
     guard let tool = tools[name] else {
@@ -72,7 +73,7 @@ public struct ToolRegistry: Sendable {
       json = try await withThrowingTaskGroup(of: String.self) { group in
         group.addTask {
           do {
-            let value = try await tool.run(arguments: arguments)
+            let value = try await tool.run(arguments: arguments, workingDirectory: workingDirectory)
             let elapsed = start.duration(to: clock.now)
             let elapsedMs = Int(elapsed / .milliseconds(1))
             do {

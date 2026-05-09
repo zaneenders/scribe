@@ -366,7 +366,8 @@ public enum ConfigLoader {
       contextWindow: contextWindow,
       contextWindowThreshold: contextWindowThreshold,
       serverURL: baseURL,
-      apiKey: resolvedAPIKey
+      apiKey: resolvedAPIKey,
+      workingDirectory: "."
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,

@@ -58,7 +58,7 @@ private struct FakeTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String) async throws -> Encodable { Result() }
+  func run(arguments: String, workingDirectory: ScribeCore.ScribeFilePath) async throws -> Encodable { Result() }
 }
 
 // MARK: - SSE chunk helpers
@@ -89,7 +89,8 @@ private func makeAgent(
     client: client,
     model: model,
     systemPrompt: "You are a test agent.",
-    tools: tools
+    tools: tools,
+    workingDirectory: ScribeFilePath("/tmp")
   )
 }
 
@@ -106,7 +107,8 @@ private func makeAgent(
     client: client,
     model: model,
     systemPrompt: "You are a test agent.",
-    tools: tools
+    tools: tools,
+    workingDirectory: ScribeFilePath("/tmp")
   )
 }
 

@@ -11,8 +11,8 @@ enum FileSystemToolHelpers {
     }
   }
 
-  static func readFileWhole(path: String) throws -> String {
-    let fp = try PathResolution.resolve(reading: path)
+  static func readFileWhole(path: String, workingDirectory: ScribeFilePath) throws -> String {
+    let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
     let s = fp.fileSystemPath
     return try String(contentsOfFile: s, encoding: .utf8)
   }

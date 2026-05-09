@@ -19,6 +19,7 @@ struct AgentLoopConfig: Sendable {
   let registry: ToolRegistry
   let temperature: Double
   let maxToolRounds: Int
+  let workingDirectory: ScribeFilePath
 }
 
 /// Why the agent loop stopped.
@@ -130,7 +131,8 @@ func runAgentLoop(
         let jsonOutput: String
         do {
           jsonOutput = try await config.registry.run(
-            name: inv.name, arguments: inv.arguments, abortVia: shouldAbortTurn)
+            name: inv.name, arguments: inv.arguments,
+            workingDirectory: config.workingDirectory, abortVia: shouldAbortTurn)
         } catch is AgentTurnInterruptedError {
           currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
           newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
