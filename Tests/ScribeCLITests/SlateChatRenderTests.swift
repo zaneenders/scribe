@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 import SlateCore
+import Testing
 
 @testable import ScribeCLI
 
