@@ -27,16 +27,20 @@ public struct ChatDriver: Sendable {
     public var terminalCols: Int
     /// Virtual terminal height for frame rendering.
     public var terminalRows: Int
+    /// Per-turn options (temperature, max rounds, abort predicate).
+    public var options: AgentRunOptions
 
     public init(
       agent: ScribeAgent,
       theme: CLITheme = .default,
+      options: AgentRunOptions = .init(),
       captureEveryEvent: Bool = true,
       terminalCols: Int = 120,
       terminalRows: Int = 40
     ) {
       self.agent = agent
       self.theme = theme
+      self.options = options
       self.captureEveryEvent = captureEveryEvent
       self.terminalCols = terminalCols
       self.terminalRows = terminalRows
@@ -87,7 +91,7 @@ public struct ChatDriver: Sendable {
 
       // Run the model turn.
       log.debug("event=chat.headless.turn.dispatch", metadata: ["chars": "\(trimmed.count)"])
-      let stream = await config.agent.prompt(trimmed, log: log)
+      let stream = await config.agent.prompt(trimmed, options: config.options, log: log)
 
       // Drain streaming events into transcript controller.
       for await event in stream.events {

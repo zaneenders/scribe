@@ -281,4 +281,124 @@ struct ChatDriverTests {
 
     #expect(result.outcome == .completed)
   }
+
+  // MARK: - Real shell tool integration
+
+  /// When the LLM calls the `shell` tool, the transcript shows the exit code
+  /// and file paths (not inline output) so the human can find the results.
+  @Test func headlessShellToolShowsFilePathsInTranscript() async throws {
+    let chunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"shell","arguments":"{\"command\":\"echo hello\"}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let replyChunks = [
+      sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
+      doneChunk(),
+    ]
+    let agent = makeAgent(chunksForCall: [chunks, replyChunks], tools: [ShellTool()])
+
+    let result = try await ChatDriver().run(
+      config: ChatDriver.Config(agent: agent),
+      input: ["run shell"],
+      log: testLogger
+    )
+
+    let transcriptText = result.finalTranscript
+      .flatMap { $0.spans }
+      .map { $0.text }
+      .joined()
+    #expect(transcriptText.contains("tool round 1"))
+    #expect(transcriptText.contains("shell"))
+    #expect(transcriptText.contains("exit 0"))
+    #expect(transcriptText.contains("stdout →"))
+    #expect(transcriptText.contains("stderr →"))
+    #expect(result.outcome == .completed)
+  }
+
+  // MARK: - Real read_file tool integration
+
+  /// When the LLM calls `read_file`, the transcript shows a compact one-line
+  /// summary (bytes, lines, returned range) — not the full file content.
+  @Test func headlessReadFileToolShowsSummary() async throws {
+    // Write a temp file with known content.
+    let tmpDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("scribe-headless-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let filePath = tmpDir.appendingPathComponent("test.txt")
+    try "line1\nline2\nline3\n".write(to: filePath, atomically: false, encoding: .utf8)
+
+    let chunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"\#(filePath.path)\"}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let replyChunks = [
+      sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"got it"}}]}"#),
+      doneChunk(),
+    ]
+    let agent = makeAgent(chunksForCall: [chunks, replyChunks], tools: [ReadFileTool()])
+
+    let result = try await ChatDriver().run(
+      config: ChatDriver.Config(agent: agent),
+      input: ["read the file"],
+      log: testLogger
+    )
+
+    let transcriptText = result.finalTranscript
+      .flatMap { $0.spans }
+      .map { $0.text }
+      .joined()
+    #expect(transcriptText.contains("tool round 1"))
+    #expect(transcriptText.contains("read_file"))
+    #expect(transcriptText.contains("18 bytes"))
+    #expect(transcriptText.contains("4 lines"))
+    #expect(transcriptText.contains("returned 1–4"))
+    #expect(result.outcome == .completed)
+  }
+
+  // MARK: - Abort during shell tool execution
+
+  /// When the agent is aborted during a long-running shell command, the
+  /// turn ends as `interrupted` and any partial output is preserved.
+  @Test func headlessAbortDuringShellPreservesPartialOutput() async throws {
+    // Sleep long enough for the abort to fire (100ms) and be detected by the
+    // polling task (every 50ms), but short enough to not slow the test suite.
+
+    let chunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"shell","arguments":"{\"command\":\"sleep 0.3\"}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+
+    // Counter pattern: abort on the 4th call to shouldAbortTurn, which
+    // lands during ToolRegistry.run()'s polling loop (pre-tool check).
+    let counter = Atomic<Int>(0)
+    let shouldAbortTurn: @Sendable () -> Bool = {
+      let c = counter.load(ordering: .sequentiallyConsistent)
+      counter.store(c + 1, ordering: .sequentiallyConsistent)
+      return c == 4  // registry.run before-start check
+    }
+    let options = AgentRunOptions(shouldAbortTurn: shouldAbortTurn)
+    let agent = makeAgent(chunks: chunks, tools: [ShellTool()])
+
+    let result = try await ChatDriver().run(
+      config: ChatDriver.Config(agent: agent, options: options),
+      input: ["run slow shell"],
+      log: testLogger
+    )
+
+    #expect(result.outcome == .interrupted)
+
+    // Transcript should show the interrupted indicator.
+    let transcriptText = result.finalTranscript
+      .flatMap { $0.spans }
+      .map { $0.text }
+      .joined()
+    #expect(transcriptText.contains("(interrupted)"))
+  }
 }
