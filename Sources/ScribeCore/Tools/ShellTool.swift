@@ -13,7 +13,12 @@ struct ShellToolResult: Encodable, Sendable {
 
 public struct ShellTool: ScribeTool {
   public static var name: String { "shell" }
-  public static var description: String { "Run a command via /bin/sh -c." }
+  public static var description: String {
+    "Run a command via /bin/sh -c. "
+      + "Stdout and stderr are streamed to per-invocation temp files; "
+      + "the result returns `stdoutFile` and `stderrFile` paths — "
+      + "use `read_file` to inspect output."
+  }
   public static var parameters: [ScribeToolParameter] {
     [
       ScribeToolParameter(
@@ -26,7 +31,11 @@ public struct ShellTool: ScribeTool {
         required: false),
     ]
   }
-  public static var promptHint: String? { nil }
+  public static var promptHint: String? {
+    "For `shell`, output is written to temp files — use `read_file` on the returned "
+      + "`stdoutFile` / `stderrFile` paths to see results. The files are always present "
+      + "(empty when there was no output)."
+  }
 
   public init() {}
 

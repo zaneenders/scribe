@@ -63,6 +63,17 @@ Set `SCRIBE_HOME` to override the `~/.scribe` data directory for config, logs, a
 
 > Only OpenAI-compatible `completions` APIs are supported right now.
 
+## Tools
+
+Scribe has four built-in tools: `shell`, `read_file`, `write_file`, `edit_file`.
+
+**`shell`** runs commands via `/bin/sh -c`. Stdout and stderr are streamed to per-invocation
+temp files (under the system temporary directory, e.g. `/tmp/` on Linux). The tool result
+returns `stdoutFile` and `stderrFile` paths rather than inline output — the agent reads them
+with `read_file` when it needs the contents. These temp files are not automatically cleaned
+up; they persist until the system purges its temp directory (on reboot for Linux tmpfs, or
+periodically on macOS).
+
 ## Sessions & Logs
 
 Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
