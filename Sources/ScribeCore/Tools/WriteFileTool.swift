@@ -25,20 +25,20 @@ public struct WriteFileTool: ScribeTool {
 
   private static let logger = Logger(label: "scribe.tool.write_file")
 
-  public func run(arguments: String) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let content = try ToolArgumentParsing.string(obj["content"], field: "content")
-    let fp = try PathResolution.resolve(writing: path)
-    let s = PathResolution.fileSystemPath(fp)
+    let fp = try PathResolution.resolve(writing: path, cwd: workingDirectory)
+    let s = fp.fileSystemPath
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try content.write(toFile: s, atomically: true, encoding: .utf8)
     Self.logger.debug(
-      """
-      event=agent.tool.write_file \
-      path="\(s.replacingOccurrences(of: "\"", with: "\\\""))" \
-      bytes_written=\(content.utf8.count)
-      """)
+      "agent.tool.write_file",
+      metadata: [
+        "path": "\(s.replacingOccurrences(of: "\"", with: "\\\""))",
+        "bytes_written": "\(content.utf8.count)",
+      ])
     return WriteFileToolResult(written: true)
   }
 }

@@ -4,11 +4,20 @@ import Testing
 
 @Suite
 struct ToolRunnerRouterTests {
-  @Test func unknownToolReturnsStructuredFailure() async throws {
+  @Test func unknownToolThrowsTypedError() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
-    let json = await registry.run(name: "not_a_registered_tool", arguments: "{}")
-    let fail = try decodeFail(json)
-    #expect(fail.ok == false)
-    #expect(fail.error?.contains("unknown tool") == true)
+    do {
+      _ = try await registry.run(
+        name: "not_a_registered_tool", arguments: "{}", workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      #expect(Bool(false), "expected ScribeError.toolUnknown")
+    } catch let error as ScribeError {
+      guard case .toolUnknown(let name) = error else {
+        #expect(Bool(false), "expected .toolUnknown, got \(error)")
+        return
+      }
+      #expect(name == "not_a_registered_tool")
+    } catch {
+      #expect(Bool(false), "unexpected error type: \(error)")
+    }
   }
 }

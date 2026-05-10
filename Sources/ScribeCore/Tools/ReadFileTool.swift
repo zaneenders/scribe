@@ -57,26 +57,26 @@ public struct ReadFileTool: ScribeTool {
 
   private static let logger = Logger(label: "scribe.tool.read_file")
 
-  public func run(arguments: String) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let offset = ToolArgumentParsing.optionalInt(obj["offset"])
     let limit = ToolArgumentParsing.optionalInt(obj["limit"])
-    let result = try Self.readFile(path: path, offset: offset, limit: limit)
+    let result = try Self.readFile(path: path, offset: offset, limit: limit, workingDirectory: workingDirectory)
     let returnedLines = max(0, result.endLine - result.startLine + 1)
     Self.logger.debug(
-      """
-      event=agent.tool.read_file \
-      ok=true \
-      path="\(result.absolutePath.replacingOccurrences(of: "\"", with: "\\\""))" \
-      bytes=\(result.totalBytes) \
-      total_lines=\(result.totalLines) \
-      start_line=\(result.startLine) \
-      end_line=\(result.endLine) \
-      returned_lines=\(returnedLines) \
-      content_chars=\(result.content.count) \
-      truncated=\(result.truncated)
-      """)
+      "agent.tool.read_file",
+      metadata: [
+        "ok": "true",
+        "path": "\(result.absolutePath.replacingOccurrences(of: "\"", with: "\\\""))",
+        "bytes": "\(result.totalBytes)",
+        "total_lines": "\(result.totalLines)",
+        "start_line": "\(result.startLine)",
+        "end_line": "\(result.endLine)",
+        "returned_lines": "\(returnedLines)",
+        "content_chars": "\(result.content.count)",
+        "truncated": "\(result.truncated)",
+      ])
     return ReadFileToolResult(
       path: result.absolutePath,
       content: result.content,
@@ -111,10 +111,11 @@ public struct ReadFileTool: ScribeTool {
   private static func readFile(
     path: String,
     offset: Int?,
-    limit: Int?
+    limit: Int?,
+    workingDirectory: ScribeFilePath
   ) throws -> ReadFileResult {
-    let fp = try PathResolution.resolve(reading: path)
-    let s = PathResolution.fileSystemPath(fp)
+    let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
+    let s = fp.fileSystemPath
     let text = try String(contentsOfFile: s, encoding: .utf8)
     let totalBytes = text.utf8.count
 

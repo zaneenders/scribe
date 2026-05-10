@@ -5,6 +5,7 @@ struct ShellPayload: Decodable {
   let exitCode: Int?
   let stdout: String?
   let stderr: String?
+  let pid: Int?
 }
 
 struct FailPayload: Decodable {
@@ -31,7 +32,6 @@ struct WritePayload: Decodable {
 struct EditPayload: Decodable {
   let ok: Bool
   let replaced: Bool?
-  let content: String?
 }
 
 enum ToolRunnerTestFailure: LocalizedError {
@@ -99,4 +99,12 @@ func withTemporaryDirectory<T>(
   try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
   defer { try? FileManager.default.removeItem(at: dir) }
   return try await body(dir)
+}
+
+// MARK: - Shared test helpers
+
+/// Mutable boolean flag used by tool tests that exercise abort logic.
+final class AbortState: @unchecked Sendable {
+  var value = false
+  func set(_ newValue: Bool) { value = newValue }
 }

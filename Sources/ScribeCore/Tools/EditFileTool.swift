@@ -4,7 +4,6 @@ import Logging
 struct EditFileToolResult: Encodable, Sendable {
   let ok = true
   let replaced: Bool
-  let content: String
 }
 
 public struct EditFileTool: ScribeTool {
@@ -31,13 +30,13 @@ public struct EditFileTool: ScribeTool {
 
   private static let logger = Logger(label: "scribe.tool.edit_file")
 
-  public func run(arguments: String) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let oldS = try ToolArgumentParsing.string(obj["old_string"], field: "old_string")
     let newS = try ToolArgumentParsing.string(obj["new_string"], field: "new_string")
 
-    var text = try FileSystemToolHelpers.readFileWhole(path: path)
+    var text = try FileSystemToolHelpers.readFileWhole(path: path, workingDirectory: workingDirectory)
     if oldS.isEmpty {
       throw PathResolution.PathError(description: "old_string must not be empty for edit_file")
     }
@@ -51,17 +50,17 @@ public struct EditFileTool: ScribeTool {
       )
     }
     text = text.replacingOccurrences(of: oldS, with: newS, options: [], range: nil)
-    let fp = try PathResolution.resolve(writing: path)
-    let s = PathResolution.fileSystemPath(fp)
+    let fp = try PathResolution.resolve(writing: path, cwd: workingDirectory)
+    let s = fp.fileSystemPath
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try text.write(toFile: s, atomically: true, encoding: .utf8)
     Self.logger.debug(
-      """
-      event=agent.tool.edit_file \
-      path="\(s.replacingOccurrences(of: "\"", with: "\\\""))" \
-      replaced=true
-      """)
-    return EditFileToolResult(replaced: true, content: text)
+      "agent.tool.edit_file",
+      metadata: [
+        "path": "\(s.replacingOccurrences(of: "\"", with: "\\\""))",
+        "replaced": "true",
+      ])
+    return EditFileToolResult(replaced: true)
   }
 
   private static func numberOfNonOverlappingOccurrences(in haystack: String, of needle: String) -> Int {

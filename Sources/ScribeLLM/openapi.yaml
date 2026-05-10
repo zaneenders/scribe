@@ -89,6 +89,9 @@ components:
           type: string
           enum: [high, medium, low, none]
           description: Reasoning depth; none disables streamed reasoning deltas.
+        enabled:
+          type: boolean
+          description: Enable reasoning (OpenRouter-style).
       additionalProperties: true
     ChatMessage:
       type: object

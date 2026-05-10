@@ -24,6 +24,17 @@ public struct SwiftMarkdownRenderer: MarkdownRenderer {
     walker.visit(document)
     return walker.lines.map { styleRemainingMarkdown(in: $0, baseFG: baseFG, baseBold: baseBold, theme: theme) }
   }
+
+  /// Fast streaming path: inline-only styling without block-level parsing.
+  /// Splits on newlines and applies the safety-net inline pattern styler
+  /// (`**bold**`, `*italic*`, `` `code` ``) to each line.
+  public func renderStreaming(text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> [TLine] {
+    text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+      let spans = splitMarkdownPatterns(
+        in: String(line), baseFG: baseFG, baseBold: baseBold, theme: theme)
+      return TLine(spans: spans)
+    }
+  }
 }
 
 /// Scans a rendered line for any `**text**`, `*text*`, or `` `text` `` patterns

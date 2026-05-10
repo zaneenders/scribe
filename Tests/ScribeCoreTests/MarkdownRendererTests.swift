@@ -1,3 +1,4 @@
+import ScribeLLM
 import SlateCore
 import Testing
 
@@ -87,28 +88,43 @@ struct MarkdownRendererTests {
   }
 
   @Test func debugSinkColors() {
-    let sink = SlateTranscriptSink(markdownRenderer: SwiftMarkdownRenderer())
-    sink.recordUserSubmission(trimmedVisible: "test")
-    sink.emit(.enterAssistantSection(.answer, previous: nil))
-    let md = "### 4. O(n²) re-parsing\n1. hello world\n"
-    sink.emit(.appendAssistantText(.answer, text: md))
-    sink.emit(.finalizeAssistantStream)
-    let (completed, _, _) = sink.snapshotTranscriptForLayout()
-    for (i, line) in completed.enumerated() {
-      let text = line.spans.map(\.text).joined()
-      let firstColor: String
+    let messages: [Components.Schemas.ChatMessage] = [
+      .init(role: .user, content: "test"),
+      .init(role: .assistant, content: "### 4. O(n²) re-parsing\n1. hello world\n"),
+    ]
+    let completed = renderMessagesToTranscript(
+      messages, theme: .default, renderer: SwiftMarkdownRenderer())
+
+    func firstColor(of line: TLine) -> String {
       if let first = line.spans.first {
         switch first.fg {
-        case ScribePalette.cyan: firstColor = "cyan"
-        case ScribePalette.markdownHeading: firstColor = "heading"
-        case ScribePalette.markdownHeadingPrefix: firstColor = "headingPrefix"
-        case ScribePalette.markdownListMarker: firstColor = "listMarker"
-        default: firstColor = "other"
+        case ScribePalette.cyan: return "cyan"
+        case ScribePalette.markdownHeading: return "heading"
+        case ScribePalette.markdownHeadingPrefix: return "headingPrefix"
+        case ScribePalette.markdownListMarker: return "listMarker"
+        default: return "other"
         }
-      } else {
-        firstColor = "empty"
       }
-      print("LINE \(i): [\(firstColor)] '\(text)'")
+      return "empty"
+    }
+
+    let expected: [(color: String, text: String)] = [
+      ("other", "you:"),
+      ("other", "  test"),
+      ("empty", ""),
+      ("other", "scribe:"),
+      ("other", "  · answer"),
+      ("headingPrefix", "### 4. O(n²) re-parsing"),
+      ("listMarker", "1. hello world"),
+      ("empty", ""),
+    ]
+
+    #expect(completed.count == expected.count)
+    for (i, (ec, et)) in expected.enumerated() {
+      let text = completed[i].spans.map(\.text).joined()
+      #expect(
+        firstColor(of: completed[i]) == ec, "line \(i) color: expected \(ec), got \(firstColor(of: completed[i]))")
+      #expect(text == et, "line \(i) text: expected '\(et)', got '\(text)'")
     }
   }
 
