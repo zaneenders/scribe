@@ -9,7 +9,7 @@ import Testing
 
 // MARK: - Fake Client Transport
 
-private final class FakeClientTransport: ClientTransport, @unchecked Sendable {
+private final class FakeClientTransport: ClientTransport, Sendable {
   let statusCode: Int
   private let chunksForCall: [[HTTPBody.ByteChunk]]
   private let state: Mutex<State>

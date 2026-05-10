@@ -25,7 +25,7 @@ You can use the following commands to view current test coverage.
 swift test --enable-code-coverage
 PROFDATA=$(find .build -name '*.profdata' -print -quit)
 BIN=$(find .build -name 'scribePackageTests' -type f -not -path '*.dSYM*' -print -quit)
-xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
+xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='(\.build/|Tests/)'
 ```
 
 **Linux**
@@ -33,7 +33,7 @@ xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex
 swift test --enable-code-coverage
 PROFDATA=$(find .build -name '*.profdata' -print -quit)
 BIN=$(find .build -name 'scribePackageTests.xctest' -type f -print -quit)
-llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
+llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='(\.build/|Tests/)'
 ```
 
 ## Profiling
