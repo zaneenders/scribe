@@ -104,7 +104,7 @@ func withTemporaryDirectory<T>(
 // MARK: - Shared test helpers
 
 /// Mutable boolean flag used by tool tests that exercise abort logic.
-final class AbortState: Sendable {
+final class AbortState: @unchecked Sendable {
   var value = false
   func set(_ newValue: Bool) { value = newValue }
 }
