@@ -228,13 +228,15 @@ func run(config: Config, input: [String], log: Logger) async throws -> RunResult
 
 | Dependency | Status |
 |---|---|
-| `TranscriptController` | Proposed in `transcript-controller.md` |
-| `ChatCoordinator` | Proposed in `chat-coordinator.md` |
-| `buildFrame` | Proposed in `host-render-loop-extraction.md` |
-| `MarkdownToSlateAdapter` | Proposed in `markdown-output-decoupling.md` |
+| `TranscriptController` | ✅ **Done** — `Sources/ScribeCLI/TranscriptController.swift` |
+| `ChatCoordinator` | Skipped — `ChatDriver` uses `ScribeAgent.prompt()` directly |
+| `buildFrame` | Skipped — `ChatDriver.buildFrame()` renders into text lines |
+| `MarkdownToSlateAdapter` | Skipped — `MarkdownRenderer` already abstracts this |
 
-Without those, `ChatDriver` would have to duplicate the transcript-building
-and frame-rendering logic, defeating the purpose.
+The `ChatDriver` wires `ScribeAgent` + `TranscriptController` directly, avoiding
+the need for an intermediate `ChatCoordinator` (the agent itself handles the
+coordination).  Frame rendering produces plain-text `RenderOutput` instead of
+a Slate grid, keeping the headless path free of `@MainActor` constraints.
 
 ## Benefits
 
@@ -257,6 +259,45 @@ and frame-rendering logic, defeating the purpose.
 
 | File | Change |
 |---|---|
-| **New:** `ScribeCLI/ChatDriver.swift` | Headless driver |
-| **New:** `Tests/ScribeCLITests/ChatDriverTests.swift` | End-to-end tests |
-| **New:** `Tests/ScribeCLITests/TranscriptGoldenTests.swift` | Golden-file transcript tests |
+| **New:** `ScribeCLI/TranscriptController.swift` | ✅ Extracted transcript state machine |
+| **New:** `ScribeCLI/ChatDriver.swift` | ✅ Headless driver |
+| **New:** `Tests/ScribeCLITests/ChatDriverTests.swift` | ✅ End-to-end tests (7 tests) |
+| **New:** `Tests/ScribeCLITests/TranscriptControllerTests.swift` | ✅ Transcript controller tests (13 tests) |
+
+## Implementation summary
+
+Implemented 2026-05-10 on branch `headless-test-mode`.
+
+### `TranscriptController` (`Sources/ScribeCLI/TranscriptController.swift`)
+
+Extracted the transcript-building state machine from `SlateChatHost.handleTranscriptEvent()`
+into a standalone, testable `TranscriptController`. It takes `TranscriptEvent` values and
+maintains `completedLines`, `streamingOpenLine`, and `generation`. Pure value type — no
+`@MainActor`, no Slate dependency.
+
+### `ChatDriver` (`Sources/ScribeCLI/ChatDriver.swift`)
+
+The headless driver that wires `ScribeAgent.prompt()` + `TranscriptController`. Runs full
+chat turns with programmable input arrays, collects transcript snapshots after each event,
+and returns a `RunResult` with final transcript lines, messages, outcome, and a
+`RenderOutput`. The `buildFrame()` method produces plain-text render output without
+needing the `@MainActor` Slate renderer.
+
+### Tests (20 new, 0 regressions, 313 total passing)
+
+**`ChatDriverTests`** (7 tests): full turn transcript, tool round transcript, empty input
+skipped, exit stops early, multiple turns, transcript history capture, outcome propagation.
+
+**`TranscriptControllerTests`** (13 tests): covers all `TranscriptEvent` variants —
+user submission, assistant sections, streaming append/finalize, tool rounds, errors,
+interrupts, empty turns, blank lines, and `applyAll` history.
+
+### Design decisions
+
+- **Skipped `ChatCoordinator`** — `ScribeAgent.prompt()` already provides the event
+  stream, so `ChatDriver` uses it directly instead of introducing an intermediate
+  coordinator abstraction.
+- **Skipped `buildFrame` extraction into Slate** — headless render produces `RenderOutput`
+  with plain text lines, keeping the headless path free of `@MainActor` constraints.
+- **Skipped `MarkdownToSlateAdapter`** — the `MarkdownRenderer` protocol already provides
+  the necessary decoupling between markdown parsing and styled output.
