@@ -9,43 +9,47 @@ import Testing
 struct ToolInvocationFormattingTests {
   // MARK: - shell
 
-  @Test func shellShortStdoutIsRenderedVerbatim() {
+  @Test func shellShowsExitCodeAndFilePaths() {
     let json = """
-      {"ok":true,"exit_code":0,"stdout":"hello\\nworld\\n","stderr":""}
+      {"ok":true,"exit_code":0,"stdout_file":"/tmp/scribe-shell-uuid-stdout.txt","stderr_file":"/tmp/scribe-shell-uuid-stderr.txt"}
       """
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: json)
     #expect(lines.contains("exit 0"))
-    #expect(lines.contains("hello"))
-    #expect(lines.contains("world"))
-    #expect(lines.allSatisfy { !$0.contains("hidden") })
+    #expect(lines.contains { $0.hasPrefix("stdout → /tmp/scribe-shell-uuid-stdout.txt") })
+    #expect(lines.contains { $0.hasPrefix("stderr → /tmp/scribe-shell-uuid-stderr.txt") })
   }
 
-  @Test func shellStdoutOver200LinesIsTruncatedHeadAndTail() {
-    let body = (1...500).map { "line\($0)" }.joined(separator: "\n")
+  @Test func shellFilePathsReplaceInlineContent() {
+    // Even with stdout_file present, no inline content is shown — just the path.
     let json = """
-      {"ok":true,"exit_code":0,"stdout":\(stringJSON(body)),"stderr":""}
+      {"ok":true,"exit_code":1,"stdout_file":"/tmp/scribe-shell-out.txt","stderr_file":"/tmp/scribe-shell-err.txt"}
       """
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: json)
-    // Cap is 200 (120 head + 60 tail + 1 marker = 181 stream lines), plus "exit 0" + "stdout:".
-    #expect(lines.count < 500)
-    #expect(lines.contains("line1"))
-    #expect(lines.contains("line500"))
-    #expect(lines.contains { $0.contains("hidden") })
-    // Specifically, the gap between head and tail must remove the middle range.
-    #expect(!lines.contains("line250"))
+    #expect(lines.contains("exit 1"))
+    #expect(lines.contains { $0.hasPrefix("stdout → ") })
+    #expect(lines.contains { $0.hasPrefix("stderr → ") })
+    // No raw content lines leaking through.
+    #expect(lines.allSatisfy { !$0.hasPrefix("hello") && !$0.hasPrefix("world") })
   }
 
-  @Test func shellStderrIsTruncatedIndependentlyOfStdout() {
-    let stdoutBody = "ok\n"
-    let stderrBody = (1...400).map { "err\($0)" }.joined(separator: "\n")
+  @Test func shellWithoutStderrFileOmitsStderrLine() {
     let json = """
-      {"ok":true,"exit_code":1,"stdout":\(stringJSON(stdoutBody)),"stderr":\(stringJSON(stderrBody))}
+      {"ok":true,"exit_code":0,"stdout_file":"/tmp/f.txt"}
       """
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: json)
-    #expect(lines.contains("ok"))
-    #expect(lines.contains("err1"))
-    #expect(lines.contains("err400"))
-    #expect(lines.contains { $0.contains("hidden") })
+    #expect(lines.contains("exit 0"))
+    #expect(lines.contains { $0.hasPrefix("stdout → ") })
+    #expect(lines.allSatisfy { !$0.hasPrefix("stderr → ") })
+  }
+
+  @Test func shellWithoutStdoutFileOmitsStdoutLine() {
+    let json = """
+      {"ok":true,"exit_code":0,"stderr_file":"/tmp/e.txt"}
+      """
+    let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: json)
+    #expect(lines.contains("exit 0"))
+    #expect(lines.contains { $0.hasPrefix("stderr → ") })
+    #expect(lines.allSatisfy { !$0.hasPrefix("stdout → ") })
   }
 
   // MARK: - read_file (sanity check that the existing summary line keeps working)
@@ -194,16 +198,20 @@ struct ToolInvocationFormattingTests {
   // MARK: - outputLines for shell edge cases
 
   @Test func shellEmptyStreamsWithExitCodeShowsExitOnly() {
+    // When both file paths are present but files are empty, we still show them.
     let json = """
-      {"ok":true,"exit_code":0,"stdout":"","stderr":""}
+      {"ok":true,"exit_code":0,"stdout_file":"/tmp/out.txt","stderr_file":"/tmp/err.txt"}
       """
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: json)
-    #expect(lines == ["exit 0"])
+    #expect(lines.contains("exit 0"))
+    #expect(lines.contains { $0.hasPrefix("stdout → ") })
+    #expect(lines.contains { $0.hasPrefix("stderr → ") })
   }
 
   @Test func shellEmptyStreamsWithoutExitCodeShowsPlaceholder() {
+    // No exit_code and no file paths → nothing to show.
     let json = """
-      {"ok":true,"stdout":"","stderr":""}
+      {"ok":true}
       """
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: json)
     #expect(lines == ["(no output)"])
@@ -211,11 +219,11 @@ struct ToolInvocationFormattingTests {
 
   @Test func shellMissingExitCodeDoesNotShowExitLine() {
     let json = """
-      {"ok":true,"stdout":"hi\\n","stderr":""}
+      {"ok":true,"stdout_file":"/tmp/f.txt"}
       """
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: json)
     #expect(!lines.contains { $0.starts(with: "exit ") })
-    #expect(lines.contains("hi"))
+    #expect(lines.contains { $0.hasPrefix("stdout → /tmp/f.txt") })
   }
 
   // MARK: - readFileSummaryLine edge cases

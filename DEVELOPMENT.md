@@ -7,18 +7,6 @@ Until a 1.0.0 release the project targets the latest Swift version only.
 Currently only working on MacOs and Linux support so Windows is not currently
 supported but contributions and maintainers for that effort are welcome.
 
-## Branches
-
-Feature branches are scoped with a prefix so work stays isolated until merged.
-The prefix comes from the `.dev/` file name — `.dev/api.md` means `api/` branches.
-
-```
-api/streaming
-scribe/fix-tool-arg-parsing
-context/compaction
-ui/slash-commands
-```
-
 ## `.dev` directory
 
 `.dev/` holds the north star for each active effort — a living design doc that
@@ -27,6 +15,26 @@ content is absorbed into permanent documentation (inline doc comments surfaced
 by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 [docc]: https://www.swift.org/documentation/docc/
+
+## Testing
+
+You can use the following commands to view current test coverage.
+
+**macOS**
+```bash
+swift test --enable-code-coverage
+PROFDATA=$(find .build -name '*.profdata' -print -quit)
+BIN=$(find .build -name 'scribePackageTests' -type f -not -path '*.dSYM*' -print -quit)
+xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
+```
+
+**Linux**
+```bash
+swift test --enable-code-coverage
+PROFDATA=$(find .build -name '*.profdata' -print -quit)
+BIN=$(find .build -name 'scribePackageTests.xctest' -type f -print -quit)
+llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
+```
 
 ## Profiling
 

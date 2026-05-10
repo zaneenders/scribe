@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 import SlateCore
+import Testing
 
 @testable import ScribeCLI
 
@@ -58,7 +58,8 @@ struct TranscriptRenderIntegrationTests {
     // Verify: transcript area is blank (only background fill)
     let headerRows = 3
     let rowBelowHeader = headerRows
-    #expect(grid1[column: 0, row: rowBelowHeader].glyph == " ",
+    #expect(
+      grid1[column: 0, row: rowBelowHeader].glyph == " ",
       "Frame 1: transcript area should be blank")
 
     // ── Frame 2: User message arrives (after coordinator runs) ──
@@ -98,11 +99,13 @@ struct TranscriptRenderIntegrationTests {
     #expect(expectedFirstContentRow == 21)
 
     let youCell = grid2[column: 0, row: expectedFirstContentRow]
-    #expect(youCell.glyph == "y",
+    #expect(
+      youCell.glyph == "y",
       "Frame 2: Expected 'y' from 'you:' at row \(expectedFirstContentRow), got '\(youCell.glyph)'")
 
     let helloCell = grid2[column: 2, row: expectedFirstContentRow + 1]
-    #expect(helloCell.glyph == "h",
+    #expect(
+      helloCell.glyph == "h",
       "Frame 2: Expected 'h' from 'hello' at row \(expectedFirstContentRow + 1) col 2, got '\(helloCell.glyph)'")
   }
 
@@ -120,7 +123,8 @@ struct TranscriptRenderIntegrationTests {
     // User message arrives (2 lines, still fits in 20 content rows)
     let pos1 = viewport.resolve(flatCount: 2, contentRows: 20)
     #expect(pos1 == 0)  // max(0, 2-20) = 0
-    #expect(viewport.followingLive == true,
+    #expect(
+      viewport.followingLive == true,
       "Viewport should still be following live after first message")
 
     // Large transcript growth (model responds)
@@ -158,7 +162,7 @@ struct TranscriptRenderIntegrationTests {
 
     // Build up some cached content
     let lines1: [TLine] = [
-      TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")]),
+      TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")])
     ]
     _ = TranscriptLayout.FlattenCache.flatten(
       cache: &cache, completed: lines1, open: nil, width: 80, generation: 0)
