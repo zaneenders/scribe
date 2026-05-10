@@ -3,6 +3,7 @@ import Logging
 import Subprocess
 
 // Set by the CLI layer at session start so all tool/shell logs route to the session file.
+// TODO: Address logging mess.
 package nonisolated(unsafe) var scribeSessionLogger: Logger?
 
 #if canImport(Darwin)
