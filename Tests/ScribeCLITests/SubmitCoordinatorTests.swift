@@ -28,12 +28,12 @@ struct SubmitCoordinatorTests {
 
   // MARK: - Enter: model busy, non-empty buffer
 
-  @Test func enterWithTextWhenBusySetsQueued() {
+  @Test func enterWithTextWhenBusyAppendsToQueue() {
     var c = SubmitCoordinator()
     c.setModelBusy(true)
     let effect = c.handleEnter(text: "do thing")
-    #expect(effect == .setQueued("do thing"))
-    #expect(c.queuedText == "do thing")
+    #expect(effect == .setQueued(["do thing"]))
+    #expect(c.queuedTexts == ["do thing"])
   }
 
   // MARK: - Enter: empty buffer + queued tray
@@ -43,12 +43,12 @@ struct SubmitCoordinatorTests {
     c.setModelBusy(true)
     // First, queue something
     _ = c.handleEnter(text: "earlier")
-    #expect(c.queuedText == "earlier")
+    #expect(c.queuedTexts == ["earlier"])
 
     // Then empty-enter with busy model → interrupt-and-send
     let effect = c.handleEnter(text: "")
     #expect(effect == .interruptAndSend("earlier"))
-    #expect(c.queuedText == nil)
+    #expect(c.queuedTexts == [])
   }
 
   @Test func enterEmptyWhenIdleWithQueuedSendsToGate() {
@@ -60,7 +60,7 @@ struct SubmitCoordinatorTests {
     c.setModelBusy(false)
     let effect = c.handleEnter(text: "")
     #expect(effect == .sendToGate("queued msg"))
-    #expect(c.queuedText == nil)
+    #expect(c.queuedTexts == [])
   }
 
   @Test func enterWhitespaceWhenIdleWithQueuedSendsToGate() {
@@ -71,20 +71,22 @@ struct SubmitCoordinatorTests {
     // Whitespace-only is treated as empty
     let effect = c.handleEnter(text: "   ")
     #expect(effect == .sendToGate("queued msg"))
-    #expect(c.queuedText == nil)
+    #expect(c.queuedTexts == [])
   }
 
   // MARK: - Ctrl+C ladder
 
-  @Test func ctrlCWithQueuedRecallsText() {
+  @Test func ctrlCWithQueuedRecallsFirstText() {
     var c = SubmitCoordinator()
     c.setModelBusy(true)
-    _ = c.handleEnter(text: "queued work")
+    _ = c.handleEnter(text: "first")
+    _ = c.handleEnter(text: "second")
 
+    // Recall pops oldest (FIFO)
     let (effect, recall) = c.handleCtrlC()
-    #expect(effect == .clearQueued)
-    #expect(recall == "queued work")
-    #expect(c.queuedText == nil)
+    #expect(effect == .clearQueued(["second"]))
+    #expect(recall == "first")
+    #expect(c.queuedTexts == ["second"])
   }
 
   @Test func ctrlCWhenModelBusyNoQueuedInterruptsModel() {
@@ -107,46 +109,70 @@ struct SubmitCoordinatorTests {
 
   // MARK: - Model turn end (auto-flush)
 
-  @Test func modelTurnEndFlushesQueuedMessage() {
+  @Test func modelTurnEndFlushesAllQueuedMessages() {
     var c = SubmitCoordinator()
     c.setModelBusy(true)
-    _ = c.handleEnter(text: "next thing")
+    _ = c.handleEnter(text: "first")
+    _ = c.handleEnter(text: "second")
+    _ = c.handleEnter(text: "third")
 
-    // Model finishes → auto-flush
+    // Model finishes → auto-flush all
     c.setModelBusy(false)
-    let effect = c.handleModelTurnEnd()
-    #expect(effect == .sendToGate("next thing"))
-    #expect(c.queuedText == nil)
+    let drained = c.handleModelTurnEnd()
+    #expect(drained == ["first", "second", "third"])
+    #expect(c.queuedTexts == [])
   }
 
-  @Test func modelTurnEndWhenNothingQueuedIsNoOp() {
+  @Test func modelTurnEndWhenNothingQueuedReturnsEmpty() {
     var c = SubmitCoordinator()
     c.setModelBusy(false)
 
-    let effect = c.handleModelTurnEnd()
-    #expect(effect == .none)
+    let drained = c.handleModelTurnEnd()
+    #expect(drained == [])
   }
 
-  @Test func modelTurnEndWhenStillBusyDoesNotFlush() {
+  @Test func modelTurnEndWhenStillBusyReturnsEmpty() {
     var c = SubmitCoordinator()
     c.setModelBusy(true)
     _ = c.handleEnter(text: "patience")
 
     // Still busy — don't flush
-    let effect = c.handleModelTurnEnd()
-    #expect(effect == .none)
+    let drained = c.handleModelTurnEnd()
+    #expect(drained == [])
   }
 
-  // MARK: - Queue overwrite
+  // MARK: - Queue FIFO append
 
-  @Test func secondQueuedMessageOverwritesFirst() {
+  @Test func multipleQueuedMessagesAppendFIFO() {
     var c = SubmitCoordinator()
     c.setModelBusy(true)
 
     _ = c.handleEnter(text: "first")
-    #expect(c.queuedText == "first")
-
     _ = c.handleEnter(text: "second")
-    #expect(c.queuedText == "second")
+    _ = c.handleEnter(text: "third")
+    #expect(c.queuedTexts == ["first", "second", "third"])
+
+    // Empty enter pops oldest (FIFO)
+    let effect = c.handleEnter(text: "")
+    #expect(effect == .interruptAndSend("first"))
+    #expect(c.queuedTexts == ["second", "third"])
+  }
+
+  // MARK: - Enter: trim whitespace
+
+  @Test func enterWhitespaceOnlyBusyNoQueueIsNoOp() {
+    var c = SubmitCoordinator()
+    c.setModelBusy(true)
+    let effect = c.handleEnter(text: "   ")
+    #expect(effect == .none)
+    #expect(c.queuedTexts == [])
+  }
+
+  @Test func enterOnlyNewlineBusyNoQueueIsNoOp() {
+    var c = SubmitCoordinator()
+    c.setModelBusy(true)
+    let effect = c.handleEnter(text: "\n")
+    #expect(effect == .none)
+    #expect(c.queuedTexts == [])
   }
 }
