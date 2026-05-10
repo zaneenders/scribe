@@ -2,6 +2,9 @@ import Foundation
 import Logging
 import Subprocess
 
+// Set by the CLI layer at session start so all tool/shell logs route to the session file.
+package nonisolated(unsafe) var scribeSessionLogger: Logger?
+
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -36,7 +39,8 @@ enum Shell {
     let description: String
   }
 
-  private static let logger = Logger(label: "scribe.tool.shell")
+  private static let defaultLogger = Logger(label: "scribe.tool.shell")
+  private static var logger: Logger { scribeSessionLogger ?? defaultLogger }
 
   /// Run a shell command, supporting cooperative cancellation.
   ///
@@ -53,6 +57,15 @@ enum Shell {
     guard !trimmed.isEmpty else {
       throw ShellError(description: "command is empty")
     }
+
+    // Log entry immediately — before any filesystem work — so we can confirm
+    // Shell.run was reached even when logs aren't flushed later.
+    logger.trace(
+      "shell-run-entry",
+      metadata: [
+        "shell_id": "\(id)", "command": "\(trimmed.logSafe())",
+        "cancelled_at_entry": "\(Task.isCancelled)",
+      ])
 
     let shellCwd: ScribeFilePath?
     if let cwd {
@@ -74,16 +87,16 @@ enum Shell {
     try "".write(to: stderrURL, atomically: false, encoding: .utf8)
 
     logger.trace(
-      "shell-run-entry",
+      "shell-tempfiles-ready",
       metadata: [
-        "shell_id": "\(id)", "command": "\(trimmed)", "cwd": "\(shellCwd ?? "nil")",
+        "shell_id": "\(id)",
         "stdout_file": "\(stdoutURL.path)", "stderr_file": "\(stderrURL.path)",
-        "cancelled_at_entry": "\(Task.isCancelled)",
       ])
 
     // Open file handles up front so onCancel can close them as a safety net.
     guard let stdoutHandle = try? FileHandle(forWritingTo: stdoutURL),
-          let stderrHandle = try? FileHandle(forWritingTo: stderrURL) else {
+      let stderrHandle = try? FileHandle(forWritingTo: stderrURL)
+    else {
       logger.error("shell-handle-open-failed", metadata: ["shell_id": "\(id)"])
       throw ShellError(description: "could not open temp files for writing")
     }
@@ -92,10 +105,12 @@ enum Shell {
     platformOptions.processGroupID = 0
 
     let t1 = ContinuousClock.now
-    logger.trace("shell-entering-subprocess-run", metadata: [
-      "shell_id": "\(id)", "elapsed_us": "\(t0.duration(to: t1).microseconds)",
-      "cancelled": "\(Task.isCancelled)",
-    ])
+    logger.trace(
+      "shell-entering-subprocess-run",
+      metadata: [
+        "shell_id": "\(id)", "elapsed_us": "\(t0.duration(to: t1).microseconds)",
+        "cancelled": "\(Task.isCancelled)",
+      ])
 
     let outcome: ExecutionOutcome<(pid_t, Int, Int)>
     do {
@@ -108,17 +123,22 @@ enum Shell {
       ) { execution, _, outputSequence, errorSequence in
         let pid = execution.processIdentifier.value
         let tBody = ContinuousClock.now
-        logger.trace("shell-body-entered", metadata: [
-          "shell_id": "\(id)", "pid": "\(pid)",
-          "elapsed_since_entry_us": "\(t0.duration(to: tBody).microseconds)",
-          "cancelled": "\(Task.isCancelled)",
-        ])
-
-        return try await withTaskCancellationHandler {
-          logger.trace("shell-drain-start", metadata: [
+        logger.trace(
+          "shell-body-entered",
+          metadata: [
             "shell_id": "\(id)", "pid": "\(pid)",
+            "elapsed_since_entry_us": "\(t0.duration(to: tBody).microseconds)",
             "cancelled": "\(Task.isCancelled)",
           ])
+
+        return try await withTaskCancellationHandler {
+          logger.trace(
+            "shell-drain-start",
+            metadata: [
+              "shell_id": "\(id)", "pid": "\(pid)",
+              "cancelled": "\(Task.isCancelled)",
+              "handler_registered": "true",
+            ])
           let tDrain = ContinuousClock.now
 
           async let outBytes = writeStream(
@@ -131,48 +151,63 @@ enum Shell {
           let result: (pid_t, Int, Int)
           do {
             result = try await (pid, outBytes, errBytes)
-            logger.trace("shell-drain-complete", metadata: [
-              "shell_id": "\(id)", "pid": "\(pid)",
-              "out_bytes": "\(result.1)", "err_bytes": "\(result.2)",
-              "drain_elapsed_us": "\(tDrain.duration(to: ContinuousClock.now).microseconds)",
-              "cancelled": "\(Task.isCancelled)",
-            ])
+            logger.trace(
+              "shell-drain-complete",
+              metadata: [
+                "shell_id": "\(id)", "pid": "\(pid)",
+                "out_bytes": "\(result.1)", "err_bytes": "\(result.2)",
+                "drain_elapsed_us": "\(tDrain.duration(to: ContinuousClock.now).microseconds)",
+                "cancelled": "\(Task.isCancelled)",
+              ])
           } catch is CancellationError {
-            // writeStream threw CancellationError (from Task.checkCancellation).
-            // Handles are already closed by onCancel — return partial output.
-            logger.trace("shell-drain-cancellation-caught", metadata: [
-              "shell_id": "\(id)", "pid": "\(pid)",
-              "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
-            ])
-            result = (pid, 0, 0)
+            // writeStream now handles cancellation gracefully (writes chunk,
+            // then breaks), so this path should rarely be hit.  But if we
+            // do land here — e.g. a CancellationError from somewhere else —
+            // close handles and read whatever made it to disk.
+            try? stdoutHandle.close()
+            try? stderrHandle.close()
+            let outSize = Int(fileSize(url: stdoutURL))
+            let errSize = Int(fileSize(url: stderrURL))
+            logger.trace(
+              "shell-drain-cancellation-caught",
+              metadata: [
+                "shell_id": "\(id)", "pid": "\(pid)",
+                "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                "out_bytes_on_disk": "\(outSize)", "err_bytes_on_disk": "\(errSize)",
+              ])
+            result = (pid, outSize, errSize)
           } catch {
-            logger.trace("shell-drain-error", metadata: [
-              "shell_id": "\(id)", "pid": "\(pid)",
-              "error": "\(String(describing: error))",
-              "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
-            ])
+            logger.trace(
+              "shell-drain-error",
+              metadata: [
+                "shell_id": "\(id)", "pid": "\(pid)",
+                "error": "\(String(describing: error))",
+                "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+              ])
             throw error
           }
 
           try? stdoutHandle.close()
           try? stderrHandle.close()
-          logger.trace("shell-drain-handles-closed", metadata: [
-            "shell_id": "\(id)", "pid": "\(pid)",
-          ])
+          logger.trace(
+            "shell-drain-handles-closed",
+            metadata: [
+              "shell_id": "\(id)", "pid": "\(pid)",
+            ])
           return result
         } onCancel: {
           let tCancel = ContinuousClock.now
-          logger.trace("shell-onCancel-fired", metadata: [
-            "shell_id": "\(id)", "pid": "\(pid)",
-            "elapsed_since_entry_us": "\(tCancel.duration(to: t0).microseconds)",
-          ])
+          logger.trace(
+            "shell-onCancel-fired",
+            metadata: [
+              "shell_id": "\(id)", "pid": "\(pid)",
+              "elapsed_since_entry_us": "\(t0.duration(to: tCancel).microseconds)",
+            ])
 
-          // Slam file handles shut so any in-flight write throws immediately.
-          logger.trace("shell-onCancel-closing-handles", metadata: ["shell_id": "\(id)"])
-          try? stdoutHandle.close()
-          try? stderrHandle.close()
-          logger.trace("shell-onCancel-handles-closed", metadata: ["shell_id": "\(id)"])
-
+          // Kill the process tree first so the async sequences hit EOF.
+          // writeStream will drain any remaining buffered output and
+          // return naturally — do NOT close handles here or we lose
+          // partial output that hasn't been delivered yet.
           do {
             #if os(Windows)
             logger.trace("shell-onCancel-kill-windows", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
@@ -183,32 +218,52 @@ enum Shell {
             let tKill = ContinuousClock.now
             let killed = Self.killProcessTree(pid: pid, id: id.uuidString)
             let killUs = tKill.duration(to: .now).microseconds
-            logger.trace("shell-onCancel-kill-tree-done", metadata: [
-              "shell_id": "\(id)", "pid": "\(pid)",
-              "killed_count": "\(killed)", "kill_elapsed_us": "\(killUs)",
-            ])
+            logger.trace(
+              "shell-onCancel-kill-tree-done",
+              metadata: [
+                "shell_id": "\(id)", "pid": "\(pid)",
+                "killed_count": "\(killed)", "kill_elapsed_us": "\(killUs)",
+              ])
             #else
             logger.trace("shell-onCancel-kill-pgrp", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
             try execution.send(signal: .kill, toProcessGroup: true)
             logger.trace("shell-onCancel-kill-pgrp-ok", metadata: ["shell_id": "\(id)"])
             #endif
           } catch {
-            logger.trace("shell-onCancel-kill-failed", metadata: [
-              "shell_id": "\(id)", "pid": "\(pid)",
-              "error": "\(String(describing: error))",
-            ])
+            logger.trace(
+              "shell-onCancel-kill-failed",
+              metadata: [
+                "shell_id": "\(id)", "pid": "\(pid)",
+                "error": "\(String(describing: error))",
+              ])
           }
-          logger.trace("shell-onCancel-complete", metadata: [
-            "shell_id": "\(id)",
-            "onCancel_elapsed_us": "\(tCancel.duration(to: .now).microseconds)",
-          ])
+
+          // Safety net: if the process didn't die quickly enough, close
+          // handles after a short grace period so writeStream can't hang
+          // indefinitely.  The unstructured task avoids blocking onCancel.
+          let captureStdout = stdoutHandle
+          let captureStderr = stderrHandle
+          Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            try? captureStdout.close()
+            try? captureStderr.close()
+          }
+
+          logger.trace(
+            "shell-onCancel-complete",
+            metadata: [
+              "shell_id": "\(id)",
+              "onCancel_elapsed_us": "\(tCancel.duration(to: .now).microseconds)",
+            ])
         }
       }
     } catch {
-      logger.trace("shell-subprocess-run-threw", metadata: [
-        "shell_id": "\(id)", "error": "\(String(describing: error))",
-        "total_elapsed_us": "\(t0.duration(to: .now).microseconds)",
-      ])
+      logger.trace(
+        "shell-subprocess-run-threw",
+        metadata: [
+          "shell_id": "\(id)", "error": "\(String(describing: error))",
+          "total_elapsed_us": "\(t0.duration(to: .now).microseconds)",
+        ])
       throw error
     }
 
@@ -256,10 +311,12 @@ enum Shell {
       }
       i += 1
     }
-    logger.trace("kill-tree-collected", metadata: [
-      "shell_id": "\(id)", "root_pid": "\(pid)", "total_pids": "\(pids.count)",
-      "pids": "\(pids.map { String($0) }.joined(separator: ","))",
-    ])
+    logger.trace(
+      "kill-tree-collected",
+      metadata: [
+        "shell_id": "\(id)", "root_pid": "\(pid)", "total_pids": "\(pids.count)",
+        "pids": "\(pids.map { String($0) }.joined(separator: ","))",
+      ])
     // Kill from leaves to root (reverse order).
     var killed = 0
     for victim in pids.reversed() {
@@ -268,9 +325,11 @@ enum Shell {
       } else {
         let e = errno
         if e != ESRCH {
-          logger.trace("kill-tree-single-failed", metadata: [
-            "shell_id": "\(id)", "pid": "\(victim)", "errno": "\(e)",
-          ])
+          logger.trace(
+            "kill-tree-single-failed",
+            metadata: [
+              "shell_id": "\(id)", "pid": "\(victim)", "errno": "\(e)",
+            ])
         }
       }
     }
@@ -307,55 +366,91 @@ enum Shell {
     // Log a heartbeat every N chunks so we can see if the stream is alive.
     let heartbeatInterval = 1000
 
-    logger.trace("write-stream-entry", metadata: [
-      "shell_id": "\(shellID)", "stream": "\(label)", "pid": "\(pid)",
-      "cancelled": "\(Task.isCancelled)",
-    ])
+    logger.trace(
+      "write-stream-entry",
+      metadata: [
+        "shell_id": "\(shellID)", "stream": "\(label)", "pid": "\(pid)",
+        "cancelled": "\(Task.isCancelled)",
+      ])
 
     for try await buffer in sequence {
       // Record how long we waited for this chunk (helps detect hangs).
       let waitUs = t0.duration(to: .now).microseconds
       if chunkCount == 0 {
-        logger.trace("write-stream-first-chunk-arrived", metadata: [
-          "shell_id": "\(shellID)", "stream": "\(label)",
-          "bytes": "\(buffer.count)", "wait_us": "\(waitUs)",
-          "cancelled": "\(Task.isCancelled)",
-        ])
+        logger.trace(
+          "write-stream-first-chunk-arrived",
+          metadata: [
+            "shell_id": "\(shellID)", "stream": "\(label)",
+            "bytes": "\(buffer.count)", "wait_us": "\(waitUs)",
+            "cancelled": "\(Task.isCancelled)",
+          ])
       }
 
-      try Task.checkCancellation()
       chunkCount += 1
       totalBytes += buffer.count
 
       // Periodic heartbeat — proves we're still processing, not stuck.
       if chunkCount % heartbeatInterval == 0 {
-        logger.trace("write-stream-heartbeat", metadata: [
-          "shell_id": "\(shellID)", "stream": "\(label)",
-          "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
-          "elapsed_us": "\(waitUs)",
-          "cancelled": "\(Task.isCancelled)",
-        ])
+        logger.trace(
+          "write-stream-heartbeat",
+          metadata: [
+            "shell_id": "\(shellID)", "stream": "\(label)",
+            "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
+            "elapsed_us": "\(waitUs)",
+            "cancelled": "\(Task.isCancelled)",
+          ])
       }
 
-      try handle.write(contentsOf: Data(buffer: buffer))
+      // Write first, then check cancellation — preserves this chunk even when
+      // a Ctrl-C arrives while we're draining.  If the handle was already
+      // slammed shut by onCancel the write will fail and we stop cleanly.
+      do {
+        try handle.write(contentsOf: Data(buffer: buffer))
+      } catch {
+        logger.trace(
+          "write-stream-write-failed",
+          metadata: [
+            "shell_id": "\(shellID)", "stream": "\(label)",
+            "error": "\(String(describing: error))",
+            "chunks_written": "\(chunkCount - 1)",
+            "bytes_before_failure": "\(totalBytes - buffer.count)",
+          ])
+        // Don't count this chunk since the write failed.
+        totalBytes -= buffer.count
+        break
+      }
+
+      if Task.isCancelled {
+        logger.trace(
+          "write-stream-cancelled",
+          metadata: [
+            "shell_id": "\(shellID)", "stream": "\(label)",
+            "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
+          ])
+        break
+      }
 
       if chunkCount >= maxChunks {
-        logger.warning("write-stream-chunk-cap-hit", metadata: [
-          "shell_id": "\(shellID)", "stream": "\(label)",
-          "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
-        ])
+        logger.warning(
+          "write-stream-chunk-cap-hit",
+          metadata: [
+            "shell_id": "\(shellID)", "stream": "\(label)",
+            "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
+          ])
         break
       }
     }
 
     let elapsedUs = t0.duration(to: .now).microseconds
-    logger.trace("write-stream-exit", metadata: [
-      "shell_id": "\(shellID)", "stream": "\(label)",
-      "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
-      "elapsed_us": "\(elapsedUs)",
-      "cancelled_at_exit": "\(Task.isCancelled)",
-      "exit_reason": Task.isCancelled ? "cancelled" : (chunkCount >= maxChunks ? "cap" : "eof"),
-    ])
+    logger.trace(
+      "write-stream-exit",
+      metadata: [
+        "shell_id": "\(shellID)", "stream": "\(label)",
+        "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
+        "elapsed_us": "\(elapsedUs)",
+        "cancelled_at_exit": "\(Task.isCancelled)",
+        "exit_reason": Task.isCancelled ? "cancelled" : (chunkCount >= maxChunks ? "cap" : "eof"),
+      ])
     return totalBytes
   }
 

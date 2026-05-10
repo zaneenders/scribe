@@ -216,18 +216,23 @@ public struct LoadedConfig: Sendable {
       _ = try? fileHandle.seekToEnd()
       let sink = FileSink(handle: fileHandle)
       let fileWriter = LockedDataWriter { data in sink.write(data) }
-      return Logger(label: "scribe.session") { _ in
+      let sessionLogger = Logger(label: "scribe.session") { _ in
         ScribeLineLogHandler(minimumLevel: level, dataWriter: fileWriter)
       }
+      // Route all ScribeCore loggers (ToolRegistry, Shell, etc.) to this file.
+      ScribeCore.scribeSessionLogger = sessionLogger
+      return sessionLogger
     }
     // Last-resort fallback: emit to stderr if we can't open the per-session file.
-    return Logger(label: "scribe.session") { _ in
+    let fallback = Logger(label: "scribe.session") { _ in
       ScribeLineLogHandler(
         minimumLevel: level,
         dataWriter: LockedDataWriter { data in
           try? FileHandle.standardError.write(contentsOf: data)
         })
     }
+    ScribeCore.scribeSessionLogger = fallback
+    return fallback
   }
 }
 

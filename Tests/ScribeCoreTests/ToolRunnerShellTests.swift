@@ -175,6 +175,34 @@ struct ToolRunnerShellTests {
     }
   }
   #endif
+
+  // MARK: - Partial output on interrupt
+
+  /// When a shell command is interrupted mid-flight, any output that was
+  /// already written to the temp files must be preserved — the LLM needs to
+  /// see partial build logs, test output, etc. after a Ctrl‑C.
+  @Test func partialOutputPreservedOnInterrupt() async throws {
+    // Shell loop with a tiny sleep per iteration so it doesn't finish before
+    // we can cancel it.  200 ms should leave us with partial output.
+    let command =
+      "i=0; while [ $i -lt 20000 ]; do echo \"line$i\"; i=$((i+1)); sleep 0.001; done"
+
+    let task = Task {
+      try await Shell.run(
+        command: command, cwd: nil, workingDirectory: ScribeFilePath("/tmp"))
+    }
+    try await Task.sleep(for: .milliseconds(200))
+    task.cancel()
+
+    let result = try await task.value
+    let stdout = try String(
+      contentsOfFile: result.stdoutFile.string, encoding: .utf8)
+    #expect(!stdout.isEmpty, "stdout should have partial output, got empty")
+    let lines = stdout.split(separator: "\n", omittingEmptySubsequences: true)
+    #expect(lines.count > 0, "should have at least one line")
+    #expect(lines.count < 20000, "should be truncated (not all 20000 lines)")
+    #expect(stdout.contains("line0"), "first line should be present")
+  }
 }
 
 private struct InterruptTimeoutError: Error, CustomStringConvertible {
