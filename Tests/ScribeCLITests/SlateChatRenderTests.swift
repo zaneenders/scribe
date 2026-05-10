@@ -52,7 +52,7 @@ struct SlateChatRenderTests {
       inputLine: "",
       llmWaitAnimationFrame: 0,
       waitingForLLM: true,
-      queuedTrayText: nil,
+      queuedTrayTexts: [],
       theme: .default
     )
 
@@ -114,7 +114,7 @@ struct SlateChatRenderTests {
       inputLine: "",
       llmWaitAnimationFrame: 0,
       waitingForLLM: true,
-      queuedTrayText: nil,
+      queuedTrayTexts: [],
       theme: .default
     )
 
@@ -146,7 +146,7 @@ struct SlateChatRenderTests {
       inputLine: "",
       llmWaitAnimationFrame: 0,
       waitingForLLM: true,
-      queuedTrayText: nil,
+      queuedTrayTexts: [],
       theme: .default
     )
 
@@ -185,7 +185,7 @@ struct SlateChatRenderTests {
       inputLine: "typing...",
       llmWaitAnimationFrame: 0,
       waitingForLLM: false,
-      queuedTrayText: nil,
+      queuedTrayTexts: [],
       theme: .default
     )
 

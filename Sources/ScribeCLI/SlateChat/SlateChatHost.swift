@@ -121,6 +121,8 @@ internal final class SlateChatHost {
   private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
+  /// Current input mode: `.edit` for typing, `.read` for navigation/ladder.
+  private var editMode: EditMode = .edit
 
   // MARK: - Transcript state (source of truth for rendering)
 
@@ -271,7 +273,7 @@ internal final class SlateChatHost {
             guard !newMessages.isEmpty else { return }
             do {
               try ChatSessionStore.appendMessages(newMessages, to: persistURL)
-              let total = await agent.messages.count
+              let total = (await agent.messages).count
               sessionLog.trace(
                 "chat.persist.append",
                 metadata: [
@@ -441,24 +443,42 @@ internal final class SlateChatHost {
           }
 
           var shouldStop = false
+          self.inputHandler.isEditing = (self.editMode == .edit)
           let actions = self.inputHandler.handle(chunk)
 
           for action in actions {
             switch action {
             case .enter:
-              let text = self.inputHandler.takeBuffer()
-              self.submitCoordinator.setModelBusy(self.modelBusy)
-              let effect = self.submitCoordinator.handleEnter(text: text)
-              shouldStop = self.applySubmitEffect(effect, gate: gate)
+              if self.editMode == .read {
+                self.log.debug("event=chat.mode.to-edit source=enter")
+                self.editMode = .edit
+              } else {
+                let text = self.inputHandler.takeBuffer()
+                self.submitCoordinator.setModelBusy(self.modelBusy)
+                let effect = self.submitCoordinator.handleEnter(text: text)
+                shouldStop = self.applySubmitEffect(effect, gate: gate)
+              }
 
             case .ctrlC:
-              let (effect, recallText) = self.submitCoordinator.handleCtrlC()
-              if let recall = recallText {
-                self.inputHandler.setBuffer(recall)
-                self.queuedTrayText = nil
-                self.renderWake?.requestRender()
+              if self.editMode == .edit {
+                self.log.debug("event=chat.mode.to-read source=ctrl-c")
+                self.editMode = .read
+              } else {
+                let (effect, recallText) = self.submitCoordinator.handleCtrlC()
+                if let recall = recallText {
+                  self.inputHandler.setBuffer(recall)
+                  self.queuedTrayText = nil
+                  self.editMode = .edit
+                  self.renderWake?.requestRender()
+                }
+                shouldStop = self.applySubmitEffect(effect, gate: gate)
               }
-              shouldStop = self.applySubmitEffect(effect, gate: gate)
+
+            case .escape:
+              if self.editMode == .edit {
+                self.log.debug("event=chat.mode.to-read source=escape")
+                self.editMode = .read
+              }
 
             case .ctrlD:
               self.log.debug("chat.user.ctrl-d", metadata: ["action": "exit"])
@@ -534,7 +554,7 @@ internal final class SlateChatHost {
             usage: self.usageHUD,
             inputLine: self.inputHandler.buffer,
             waitingForLLM: self.modelBusy,
-            queuedTrayText: self.queuedTrayText)
+            queuedTrayTexts: [self.queuedTrayText].compactMap { $0 })
           _ = self.viewport.resolve(flatCount: flatTranscript.count, contentRows: contentRows)
           let transcriptTailStart = self.viewport.firstVisibleRow
           let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
@@ -549,9 +569,10 @@ internal final class SlateChatHost {
             banner: self.banner,
             usage: self.usageHUD,
             inputLine: self.inputHandler.buffer,
+            inputMode: self.editMode,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
-            queuedTrayText: self.queuedTrayText,
+            queuedTrayTexts: [self.queuedTrayText].compactMap { $0 },
             theme: .default)
           let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
           let totalMs = prepareMs &+ submitMs
