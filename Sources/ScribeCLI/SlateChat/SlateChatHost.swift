@@ -949,9 +949,11 @@ internal final class SlateChatHost {
   ) -> Bool {
     switch effect {
     case .sendToGate(let text):
+      queuedTrayText = nil
       Task { await gate.complete(text) }
 
     case .interruptAndSend(let text):
+      queuedTrayText = nil
       modelInterruptFlag.request()
       modelInterruptFlag.logState(log, tag: "interrupt-and-send")
       Task { await gate.complete(text) }
