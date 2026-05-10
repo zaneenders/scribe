@@ -23,8 +23,6 @@ public enum ToolInvocationFormatting {
     let ok: Bool
     let error: String?
     let exitCode: Int?
-    let stdout: String?  // legacy; now unused — replaced by stdoutFile
-    let stderr: String?  // legacy; now unused — replaced by stderrFile
     let stdoutFile: String?
     let stderrFile: String?
     let content: String?
