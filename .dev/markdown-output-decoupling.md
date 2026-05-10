@@ -186,3 +186,28 @@ asserts on `TLine` / `StyledSpan` values. After the split:
 | **Modify:** `SlateChatHost.swift` | Use `MarkdownToSlateAdapter` after `MarkdownRenderer` |
 | **Modify:** `Tests/ScribeCoreTests/MarkdownRendererTests.swift` | Assert on `MarkdownLine`, not `TLine` |
 | **New:** `Tests/ScribeCLITests/MarkdownToSlateAdapterTests.swift` | Adapter mapping tests |
+
+## Implementation summary (completed)
+
+### New files created
+- **`ScribeCore/MarkdownOutput.swift`** — semantic types (`MarkdownSpan`, `MarkdownLine`, `MarkdownColorRole`, `MarkdownColorTheme`), the new `MarkdownRenderer` protocol (returning `[MarkdownLine]` instead of `[TLine]`), and `MarkdownCodeBlockHighlighter` protocol
+- **`ScribeCore/SwiftMarkdownRenderer.swift`** — moved from `ScribeCLI`; now produces `MarkdownLine`/`MarkdownSpan` instead of `TLine`/`StyledSpan`; uses `MarkdownWalker` with `SpanContext` + `InlineContext` to emit correct semantic spans
+- **`ScribeCLI/Markdown/MarkdownToSlateAdapter.swift`** — maps semantic spans → Slate `StyledSpan` using `MarkdownTheme` RGB palette; takes `bodyFG`/`bodyBold` for stream-section base styling
+
+### Files removed
+- `ScribeCLI/Markdown/MarkdownRenderer.swift` — old protocol (replaced by `MarkdownRenderer` in `ScribeCore`)
+- `ScribeCLI/Markdown/SwiftMarkdownRenderer.swift` — moved to `ScribeCore`
+- `ScribeCLI/Markdown/CodeBlockHighlighter.swift` — replaced by `MarkdownCodeBlockHighlighter` in `ScribeCore`
+
+### Files modified
+- **`Package.swift`** — added `Markdown` dependency to `ScribeCore`, removed from `ScribeCLI` and `ScribeCoreTests`
+- **`SlateChatHost.swift`** — uses adapter pattern: `renderer` → `[MarkdownLine]` → `MarkdownToSlateAdapter.convert()` → `[TLine]`
+- **`TranscriptReplay.swift`** — same adapter pattern for message replay
+- **`MarkdownRendererTests.swift`** — rewritten to assert on `MarkdownLine`/`MarkdownSpan`; zero `SlateCore` imports in the semantic tests (one integration test still uses `TLine` via `@testable import ScribeCLI`)
+- **`MarkdownTheme.swift`** — retained in `ScribeCLI` as the RGB palette consumed by the adapter (differs from `MarkdownColorTheme` which only carries semantic roles)
+
+### Key outcomes
+1. **`ScribeCore` is terminal-agnostic** — zero `import SlateCore` in the ScribeCore target
+2. **`MarkdownRendererTests` decoupled from Slate** — 79 of 80 tests use only semantic types; one integration test (`debugSinkColors`) exercises the adapter path end-to-end
+3. **All 293 tests pass** across 21 suites
+4. **Terminal color changes are isolated** — if `CLITheme`/`MarkdownTheme` changes its RGB palette, only `MarkdownToSlateAdapter` is affected; the markdown parser in `ScribeCore` is untouched
