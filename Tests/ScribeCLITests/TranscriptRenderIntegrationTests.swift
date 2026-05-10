@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 import SlateCore
+import Testing
 
 @testable import ScribeCLI
 
@@ -119,7 +119,8 @@ struct TranscriptRenderIntegrationTests {
     // User message arrives (2 lines, still fits in 20 content rows)
     let pos1 = viewport.resolve(flatCount: 2, contentRows: 20)
     #expect(pos1 == 0)  // max(0, 2-20) = 0
-    #expect(viewport.followingLive == true,
+    #expect(
+      viewport.followingLive == true,
       "Viewport should still be following live after first message")
 
     // Large transcript growth (model responds)
@@ -159,7 +160,7 @@ struct TranscriptRenderIntegrationTests {
 
     // Build up some cached content
     let lines1: [TLine] = [
-      TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")]),
+      TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")])
     ]
     let (c0, _) = TranscriptLayout.FlattenCache.flatten(
       cache: cache, completed: lines1, open: nil, width: 80, generation: 0)

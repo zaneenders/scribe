@@ -161,18 +161,17 @@ internal final class SlateChatHost {
   // MARK: - Coordinator communication
 
   /// Thread-safe event queue for coordinator → host communication.
-  private final class EventQueue: @unchecked Sendable {
-    private let lock = NSLock()
-    private var events: [HostEvent] = []
+  private final class EventQueue: Sendable {
+    private let events: Mutex<[HostEvent]> = Mutex([])
 
     func enqueue(_ event: HostEvent) {
-      lock.withLock { events.append(event) }
+      events.withLock { $0.append(event) }
     }
 
     func drain() -> [HostEvent] {
-      lock.withLock {
-        let copy = events
-        events = []
+      events.withLock {
+        let copy = $0
+        $0 = []
         return copy
       }
     }
