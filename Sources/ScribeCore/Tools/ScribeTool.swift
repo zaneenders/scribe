@@ -22,12 +22,13 @@ public protocol ScribeTool: Sendable {
   /// Optional hint injected into the system prompt (e.g. pagination guidance).
   static var promptHint: String? { get }
 
-  /// Execute the tool with the given JSON-encoded arguments.
+  /// Execute the tool with the given JSON-encoded arguments and explicit working directory.
   ///
+  /// - Parameters:
+  ///   - arguments: JSON-encoded arguments string from the LLM.
+  ///   - workingDirectory: The absolute working directory for path resolution.
   /// - Returns: An `Encodable` value that the registry will serialize as JSON.
-  ///   The value should include an `ok: true` field so the encoded response is
-  ///   self-describing.
-  func run(arguments: String) async throws -> Encodable
+  func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable
 }
 
 // MARK: - ScribeTool → ChatTool conversion

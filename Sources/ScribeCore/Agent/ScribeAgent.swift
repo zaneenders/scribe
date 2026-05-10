@@ -25,13 +25,13 @@ public struct AgentRunOptions: Sendable {
 // MARK: - AgentStateSnapshot
 
 /// Read-only snapshot of agent state.
-public struct AgentStateSnapshot: Sendable {
-  public let systemPrompt: String
-  public let model: String
-  public let messages: [Components.Schemas.ChatMessage]
-  public let isStreaming: Bool
+struct AgentStateSnapshot: Sendable {
+  let systemPrompt: String
+  let model: String
+  let messages: [Components.Schemas.ChatMessage]
+  let isStreaming: Bool
 
-  public init(
+  init(
     systemPrompt: String,
     model: String,
     messages: [Components.Schemas.ChatMessage],
@@ -94,12 +94,23 @@ public struct ScribeAgent: Sendable {
       messages.append(contentsOf: newMessages)
     }
 
-    func setStreaming(_ value: Bool) { isStreaming = value }
-
-    func reset() {
-      messages = []
-      isStreaming = false
+    /// Return only messages at or after `start` index (avoids copying the full
+    /// transcript when only the tail is needed, e.g. incremental persist).
+    func messages(since start: Int) -> [Components.Schemas.ChatMessage] {
+      guard start < messages.count else { return [] }
+      let clamped = max(start, 0)
+      return Array(messages[clamped...])
     }
+
+    /// Return messages in `range`, clamped to valid indices.
+    func messages(in range: Range<Int>) -> [Components.Schemas.ChatMessage] {
+      let lower = max(0, range.lowerBound)
+      let upper = min(messages.count, range.upperBound)
+      guard lower < upper else { return [] }
+      return Array(messages[lower..<upper])
+    }
+
+    func setStreaming(_ value: Bool) { isStreaming = value }
   }
 
   // ── Stored properties ────────────────────────────────
@@ -114,6 +125,9 @@ public struct ScribeAgent: Sendable {
 
   /// The OpenAI-compatible HTTP client.
   private let client: Client
+
+  /// Absolute working directory for tool path resolution.
+  private let workingDirectory: ScribeFilePath
 
   /// Synchronous abort flag checked by the run loop without `await`.
   private final class AbortFlag: Sendable {
@@ -141,6 +155,7 @@ public struct ScribeAgent: Sendable {
     }
     self.client = OpenAICompatibleClient.make(
       serverURL: serverURL, apiKey: configuration.apiKey)
+    self.workingDirectory = ScribeFilePath(configuration.workingDirectory)
     self.registry = ToolRegistry(tools: configuration.tools)
     self.storage = Storage(
       systemPrompt: systemPrompt,
@@ -150,14 +165,16 @@ public struct ScribeAgent: Sendable {
   }
 
   /// Creates an agent with a pre-built client (for testing or custom transports).
-  public init(
+  package init(
     client: Client,
     model: String,
     systemPrompt: String,
     tools: [any ScribeTool] = [],
-    initialMessages: [Components.Schemas.ChatMessage] = []
+    initialMessages: [Components.Schemas.ChatMessage] = [],
+    workingDirectory: ScribeFilePath
   ) {
     self.client = client
+    self.workingDirectory = workingDirectory
     self.registry = ToolRegistry(tools: tools)
     self.storage = Storage(
       systemPrompt: systemPrompt,
@@ -169,13 +186,24 @@ public struct ScribeAgent: Sendable {
   // MARK: - Public state
 
   /// A snapshot of the current agent state.
-  public var state: AgentStateSnapshot {
+  var state: AgentStateSnapshot {
     get async { await storage.snapshot() }
   }
 
   /// The current transcript messages.
   public var messages: [Components.Schemas.ChatMessage] {
     get async { await storage.messages }
+  }
+
+  /// Return only messages at or after `start` index, avoiding a full
+  /// transcript copy when only the tail (e.g. incremental persist) is needed.
+  public func messages(since start: Int) async -> [Components.Schemas.ChatMessage] {
+    await storage.messages(since: start)
+  }
+
+  /// Return messages in `range`, clamped to valid indices.
+  public func messages(in range: Range<Int>) async -> [Components.Schemas.ChatMessage] {
+    await storage.messages(in: range)
   }
 
   /// Whether the agent is currently streaming.
@@ -243,7 +271,8 @@ public struct ScribeAgent: Sendable {
         client: client,
         registry: registry,
         temperature: options.temperature,
-        maxToolRounds: options.maxToolRounds
+        maxToolRounds: options.maxToolRounds,
+        workingDirectory: workingDirectory
       )
 
       do {
@@ -274,16 +303,10 @@ public struct ScribeAgent: Sendable {
     return TurnStream(events: stream, result: task)
   }
 
-  // MARK: - Abort / reset
+  // MARK: - Abort
 
   /// Abort the current run, if one is active.
   public func abort() {
     abortFlag.value.store(true, ordering: .sequentiallyConsistent)
-  }
-
-  /// Clear transcript and runtime state.
-  public func reset() async {
-    abortFlag.value.store(false, ordering: .sequentiallyConsistent)
-    await storage.reset()
   }
 }

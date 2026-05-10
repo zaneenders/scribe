@@ -42,23 +42,23 @@ enum Shell {
   /// When the calling `Task` is cancelled, a `SIGKILL` is sent to the entire
   /// process group so long-running commands (builds, servers, etc.) and all
   /// of their child processes are terminated.
-  static func run(command: String, cwd: String?) async throws -> Result {
+  static func run(command: String, cwd: String?, workingDirectory: ScribeFilePath) async throws -> Result {
     let id = UUID()
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       throw ShellError(description: "command is empty")
     }
 
-    let workingDirectory: ScribeFilePath?
+    let shellCwd: ScribeFilePath?
     if let cwd {
-      let fp = try PathResolution.resolve(existingDirectory: cwd)
-      workingDirectory = ScribeFilePath(PathResolution.fileSystemPath(fp))
+      let fp = try PathResolution.resolve(existingDirectory: cwd, cwd: workingDirectory)
+      shellCwd = ScribeFilePath(fp.fileSystemPath)
     } else {
-      workingDirectory = nil
+      shellCwd = nil
     }
 
     logger.trace(
-      "starting", metadata: ["shell_id": "\(id)", "command": "\(command)", "cwd": "\(workingDirectory ?? "nil")"])
+      "starting", metadata: ["shell_id": "\(id)", "command": "\(command)", "cwd": "\(shellCwd ?? "nil")"])
 
     // Use the body-based Subprocess API to get an Execution handle so we can
     // send SIGKILL to the process group on cancellation.  Output is collected
@@ -69,7 +69,7 @@ enum Shell {
       .path(ScribeFilePath("/bin/sh")),
       arguments: ["-c", trimmed],
       environment: .inherit,
-      workingDirectory: workingDirectory,
+      workingDirectory: shellCwd,
       platformOptions: platformOptions
     ) { execution, _, outputSequence, errorSequence in
       let pid = execution.processIdentifier.value

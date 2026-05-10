@@ -59,7 +59,7 @@ private struct FakeTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String) async throws -> Encodable { Result() }
+  func run(arguments: String, workingDirectory: ScribeCore.ScribeFilePath) async throws -> Encodable { Result() }
 }
 
 /// A tool that throws `AgentTurnInterruptedError` directly from `run`.
@@ -69,7 +69,7 @@ private struct InterruptedTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String) async throws -> Encodable {
+  func run(arguments: String, workingDirectory: ScribeCore.ScribeFilePath) async throws -> Encodable {
     throw AgentTurnInterruptedError()
   }
 }
@@ -124,7 +124,7 @@ private func makeConfig(
     client: client,
     registry: ToolRegistry(tools: tools),
     temperature: temperature,
-    maxToolRounds: maxToolRounds
+    maxToolRounds: maxToolRounds, workingDirectory: ScribeFilePath("/tmp")
   )
 }
 
@@ -234,7 +234,7 @@ struct AgentLoopTests {
       client: client,
       registry: ToolRegistry(tools: [FakeTool()]),
       temperature: 0,
-      maxToolRounds: .max
+      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config)
@@ -371,7 +371,7 @@ struct AgentLoopTests {
         client: client,
         registry: ToolRegistry(tools: [FakeTool()]),
         temperature: 0,
-        maxToolRounds: .max
+        maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
       )
       let (messages, termination) = try await runLoop(
         prompt: "test",
@@ -555,7 +555,7 @@ struct AgentLoopTests {
       client: client,
       registry: ToolRegistry(tools: [FakeTool()]),
       temperature: 0,
-      maxToolRounds: .max
+      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config)
@@ -593,7 +593,7 @@ struct AgentLoopTests {
       client: client,
       registry: ToolRegistry(tools: [InterruptedTool()]),
       temperature: 0,
-      maxToolRounds: .max
+      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config)

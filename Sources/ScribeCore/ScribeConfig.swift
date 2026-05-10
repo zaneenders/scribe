@@ -14,13 +14,16 @@ public struct ScribeConfig: Sendable {
   public var serverURL: String
   public var apiKey: String?
   public var tools: [any ScribeTool]
+  /// Absolute working directory for tool path resolution.
+  public var workingDirectory: String
   public init(
     agentModel: String,
     contextWindow: Int,
     contextWindowThreshold: Double,
     serverURL: String,
     apiKey: String? = nil,
-    tools: [any ScribeTool] = []
+    tools: [any ScribeTool] = [],
+    workingDirectory: String
   ) {
     self.agentModel = agentModel
     self.contextWindow = contextWindow
@@ -28,5 +31,6 @@ public struct ScribeConfig: Sendable {
     self.serverURL = serverURL
     self.apiKey = apiKey
     self.tools = tools
+    self.workingDirectory = workingDirectory
   }
 }

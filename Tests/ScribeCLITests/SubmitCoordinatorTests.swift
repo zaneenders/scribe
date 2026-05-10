@@ -1,6 +1,7 @@
 import Foundation
-@testable import ScribeCLI
 import Testing
+
+@testable import ScribeCLI
 
 // MARK: - SubmitCoordinator tests
 

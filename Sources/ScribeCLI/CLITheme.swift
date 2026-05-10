@@ -1,3 +1,4 @@
+import ScribeCore
 import SlateCore
 
 /// All colors used by the Scribe CLI, in one place.
@@ -95,6 +96,16 @@ public struct CLITheme: Sendable {
   public var usageCtxPctWarn: TerminalRGB
   /// Context-window percentage at or above the danger threshold.
   public var usageCtxPctDanger: TerminalRGB
+
+  // MARK: - Derived helpers
+
+  /// Foreground color and bold flag for a streaming section.
+  public func style(for section: AssistantStreamSection) -> (fg: TerminalRGB, bold: Bool) {
+    switch section {
+    case .reasoning: (reasoningBaseFG, false)
+    case .answer: (answerBaseFG, false)
+    }
+  }
 
   // MARK: - Built-in themes
 

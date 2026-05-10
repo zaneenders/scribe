@@ -4,6 +4,20 @@ import Logging
 import ScribeCore
 import ScribeLLM
 import Synchronization
+import SystemPackage
+
+// MARK: - ScribeFilePath extension
+
+extension ScribeFilePath {
+  /// Bridge to `SystemPackage.FilePath` for Swift Configuration file providers.
+  var configurationFilePath: SystemPackage.FilePath {
+    #if canImport(System)
+    SystemPackage.FilePath(string)
+    #else
+    self
+    #endif
+  }
+}
 
 // MARK: - Config key bindings
 
@@ -345,14 +359,15 @@ public enum ConfigLoader {
     let logDirectoryPath = paths.logDirectoryPath
     let chatSessionsDirectoryPath = paths.sessionsDirectoryPath
 
-    let resolvedPathString = PathResolution.fileSystemPath(configPath)
+    let resolvedPathString = configPath.fileSystemPath
 
     let scribeConfig = ScribeConfig(
       agentModel: model,
       contextWindow: contextWindow,
       contextWindowThreshold: contextWindowThreshold,
       serverURL: baseURL,
-      apiKey: resolvedAPIKey
+      apiKey: resolvedAPIKey,
+      workingDirectory: "."
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,

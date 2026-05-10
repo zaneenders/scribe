@@ -94,7 +94,7 @@ enum SlateChat {
   static func runFullscreen(
     configuration: ScribeConfig,
     systemPrompt: String,
-    resumeArchive: ChatSessionArchive? = nil,
+    resumeMessages: [Components.Schemas.ChatMessage] = [],
     sessionPersistenceURL: URL,
     sessionId: UUID,
     log: Logger
@@ -110,11 +110,11 @@ enum SlateChat {
       """
     )
     try await Task { @MainActor () throws -> Void in
-      let sessionCreatedAt = resumeArchive?.createdAt ?? Date()
+      let sessionCreatedAt = Date()
       let host = SlateChatHost(
         configuration: configuration,
         systemPrompt: systemPrompt,
-        resumeArchive: resumeArchive,
+        resumeMessages: resumeMessages,
         sessionPersistenceURL: sessionPersistenceURL,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
