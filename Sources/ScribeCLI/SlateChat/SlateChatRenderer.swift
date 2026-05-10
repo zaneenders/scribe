@@ -34,11 +34,8 @@ import SlateCore
 ///    `submit_ms` covers grid build + encode + writer submission (also on main
 ///    actor; the actual tty drain is off-actor and **not** included).
 /// 5. **Tool output truncation in the transcript.** `read_file` results render as
-///    a single summary line, and shell `stdout` / `stderr` results larger than
-///    200 lines render as a head + truncation marker + tail (120 + marker + 60).
-///    The full content is preserved in the conversation history sent to the
-///    model — the cap only affects the rendered scrollback to keep flatten +
-///    layout cost bounded after a verbose tool call.
+///    a single summary line, and shell results show the temp file paths
+///    instead of inline content — the LLM reads files with `read_file`.
 ///
 /// ## Queued tray
 ///

@@ -8,7 +8,8 @@ public struct ToolRegistry: Sendable {
   /// The ChatTool schemas sent to the LLM, derived from the same tools.
   let chatTools: [Components.Schemas.ChatTool]
 
-  private static let logger = Logger(label: "scribe.tool.registry")
+  private static let defaultLogger = Logger(label: "scribe.tool.registry")
+  private static var logger: Logger { scribeSessionLogger ?? defaultLogger }
 
   public init(tools: [any ScribeTool]) {
     var map: [String: any ScribeTool] = [:]
@@ -73,6 +74,9 @@ public struct ToolRegistry: Sendable {
       json = try await withThrowingTaskGroup(of: String.self) { group in
         group.addTask {
           do {
+            Self.logger.trace(
+              "agent.tool.task.calling-run",
+              metadata: ["tool": "\(name)"])
             let value = try await tool.run(arguments: arguments, workingDirectory: workingDirectory)
             let elapsed = start.duration(to: clock.now)
             let elapsedMs = Int(elapsed / .milliseconds(1))
@@ -120,16 +124,18 @@ public struct ToolRegistry: Sendable {
             metadata: [
               "tool": "\(name)"
             ])
+          var ticks = 0
           while true {
             if shouldAbortTurn() {
               Self.logger.trace(
                 "agent.tool.polling.abort-detected",
                 metadata: [
-                  "tool": "\(name)"
+                  "tool": "\(name)", "polling_ticks": "\(ticks)",
                 ])
               throw AgentTurnInterruptedError()
             }
             try await Task.sleep(for: .milliseconds(50))
+            ticks += 1
           }
         }
         let winner = try await group.next()!
