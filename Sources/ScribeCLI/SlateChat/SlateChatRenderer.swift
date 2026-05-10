@@ -60,10 +60,18 @@ internal enum SlateChatRenderer {
   ]
 
   static let inputGutterColumns = 6
-  /// Width of `queued: ` prefix; continuation rows under the queued tray indent to align under text.
-  private static let queuedTrayGutterColumns = 8
   /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
   private static let queuedTrayMaxRows = 4
+
+  /// The queued-tray label for a given queue depth, e.g. `"queued (3): "`.
+  private static func queuedTrayLabel(queueCount: Int) -> String {
+    "queued (\(queueCount)): "
+  }
+
+  /// Column width consumed by the tray label (must match `queuedTrayLabel`).
+  private static func queuedTrayGutterWidth(queueCount: Int) -> Int {
+    queuedTrayLabel(queueCount: queueCount).count
+  }
 
   /// Wraps input text into visual lines, adding an extra cursor row when the
   /// last line fills the available width, then clamps to `maxRows` with suffix
@@ -119,7 +127,7 @@ internal enum SlateChatRenderer {
     queuedTrayTexts: [String],
     cols: Int
   ) -> Int {
-    let textWidth = max(0, cols &- queuedTrayGutterColumns)
+    let textWidth = max(0, cols &- queuedTrayGutterWidth(queueCount: queuedTrayTexts.count))
     let lines = queuedTrayVisualLines(queuedTrayTexts: queuedTrayTexts, textWidth: textWidth)
     return lines.count
   }
@@ -214,7 +222,8 @@ internal enum SlateChatRenderer {
     }
 
     let firstInputRow = rows &- inputRowCount
-    let trayTextWidth = max(0, cols &- queuedTrayGutterColumns)
+    let queueCount = queuedTrayTexts.count
+    let trayTextWidth = max(0, cols &- queuedTrayGutterWidth(queueCount: queueCount))
     let rawTrayLines = queuedTrayVisualLines(
       queuedTrayTexts: queuedTrayTexts, textWidth: trayTextWidth)
     let availableTrayRows = max(0, firstInputRow &- headerRows)
@@ -313,7 +322,7 @@ internal enum SlateChatRenderer {
         cols: cols,
         textWidth: trayTextWidth,
         visualLines: trayVisualLines,
-        queueCount: queuedTrayTexts.count,
+        queueCount: queueCount,
         theme: theme)
     }
 
@@ -549,7 +558,7 @@ internal enum SlateChatRenderer {
 
   /// Paints the queued-tray strip that sits between the transcript and the input area:
   /// first row prefixed with `queued (N): ` (orange) plus the next message in dimmed white;
-  /// continuation rows align under the message with an 8-space gutter.
+  /// continuation rows align under the message with a gutter matching the label width.
   static func paintQueuedTrayRows(
     into grid: inout TerminalCellGrid,
     startRow: Int,
@@ -561,9 +570,8 @@ internal enum SlateChatRenderer {
   ) {
     guard !visualLines.isEmpty else { return }
     let bg = theme.inputAreaBg
-    let bufferLabel = "queued (\(queueCount)): "
-    let labelLen = bufferLabel.count
-    let gutterText = String(repeating: " ", count: min(labelLen, cols))
+    let bufferLabel = queuedTrayLabel(queueCount: queueCount)
+    let gutterText = String(repeating: " ", count: min(bufferLabel.count, cols))
     var lineIdx = 0
     while lineIdx < visualLines.count {
       let row = startRow &+ lineIdx
