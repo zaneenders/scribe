@@ -92,3 +92,58 @@ struct SubmitCoordinator {
     return .sendToGate(queued)
   }
 }
+
+// MARK: - Host-side effect application (testable)
+
+/// Host-side mutable state affected by `SubmitEffect` application.
+/// Pure value type — testable without any TUI infrastructure.
+struct HostSubmitState: Equatable {
+  var queuedTrayText: String? = nil
+
+  /// Side effects the host must perform after applying the state transition.
+  struct SideEffects: Equatable {
+    var gateText: String? = nil
+    /// Non-nil tag means the host must request a model interrupt + log with this tag.
+    var interruptLogTag: String? = nil
+    var needsDelayedRenderWake: Bool = false
+    var shouldExit: Bool = false
+  }
+
+  /// Apply a `SubmitEffect` to host state, returning the side effects the
+  /// host must execute (gate completion, interrupt, delayed wake, exit).
+  ///
+  /// This function is pure — all host-side state mutations are captured in
+  /// `state` and all imperative actions are described in the returned
+  /// `SideEffects`.  The host is responsible for executing those effects.
+  static func apply(_ effect: SubmitEffect, to state: inout HostSubmitState) -> SideEffects {
+    var fx = SideEffects()
+    switch effect {
+    case .sendToGate(let text):
+      state.queuedTrayText = nil
+      fx.gateText = text
+      fx.needsDelayedRenderWake = true
+
+    case .interruptAndSend(let text):
+      state.queuedTrayText = nil
+      fx.gateText = text
+      fx.interruptLogTag = "interrupt-and-send"
+      fx.needsDelayedRenderWake = true
+
+    case .setQueued(let text):
+      state.queuedTrayText = text
+
+    case .clearQueued:
+      state.queuedTrayText = nil
+
+    case .interruptModel:
+      fx.interruptLogTag = "requested-by-ctrl-c"
+
+    case .exitChat:
+      fx.shouldExit = true
+
+    case .none:
+      break
+    }
+    return fx
+  }
+}

@@ -947,35 +947,45 @@ internal final class SlateChatHost {
     _ effect: SubmitEffect,
     gate: UserLineGate
   ) -> Bool {
-    switch effect {
-    case .sendToGate(let text):
-      queuedTrayText = nil
-      Task { await gate.complete(text) }
+    var state = HostSubmitState(queuedTrayText: queuedTrayText)
+    let fx = HostSubmitState.apply(effect, to: &state)
+    queuedTrayText = state.queuedTrayText
 
-    case .interruptAndSend(let text):
-      queuedTrayText = nil
+    if let tag = fx.interruptLogTag {
       modelInterruptFlag.request()
-      modelInterruptFlag.logState(log, tag: "interrupt-and-send")
+      modelInterruptFlag.logState(log, tag: tag)
+    }
+    if let text = fx.gateText {
       Task { await gate.complete(text) }
-
-    case .setQueued(let text):
-      queuedTrayText = text
-
-    case .clearQueued:
-      queuedTrayText = nil
-
-    case .interruptModel:
-      modelInterruptFlag.request()
-      modelInterruptFlag.logState(log, tag: "requested-by-ctrl-c")
-
-    case .exitChat:
+    }
+    if fx.needsDelayedRenderWake {
+      // The external wake from requestRender (below) fires through the
+      // throttler immediately, often before the coordinator Task has
+      // enqueued its .userSubmitted / .modelTurnRunning events.  Schedule
+      // a second wake after the throttle interval so the throttler emits
+      // a fresh tick that is guaranteed to land after the coordinator
+      // has populated the event queue.
+      scheduleDelayedRenderWake()
+    }
+    if fx.shouldExit {
       return true
-
-    case .none:
-      break
     }
     renderWake?.requestRender()
     return false
+  }
+
+  /// Request a render after a brief delay, giving the coordinator Task
+  /// time to enqueue transcript events before the next frame is painted.
+  ///
+  /// The delay is set slightly longer than the throttle interval
+  /// (1/60 ≈ 16.67 ms) so the throttler emits this tick as a fresh
+  /// external event rather than coalescing it with the preceding one.
+  private func scheduleDelayedRenderWake() {
+    let wake = renderWake
+    Task {
+      try? await Task.sleep(for: .milliseconds(20))
+      wake?.requestRender()
+    }
   }
 
   // MARK: - Helpers
