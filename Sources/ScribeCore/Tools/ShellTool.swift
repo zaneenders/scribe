@@ -11,6 +11,12 @@ struct ShellToolResult: Encodable, Sendable {
   let pid: pid_t
 }
 
+/// **`shell`** runs commands via `/bin/sh -c`. Stdout and stderr are streamed to per-invocation
+/// temp files (under the system temporary directory, e.g. `/tmp/` on Linux). The tool result
+/// returns `stdoutFile` and `stderrFile` paths rather than inline output — the agent reads them
+/// with `read_file` when it needs the contents. These temp files are not automatically cleaned
+/// up; they persist until the system purges its temp directory (on reboot for Linux tmpfs, or
+/// periodically on macOS).
 public struct ShellTool: ScribeTool {
   public static var name: String { "shell" }
   public static var description: String {

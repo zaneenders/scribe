@@ -67,13 +67,6 @@ Set `SCRIBE_HOME` to override the `~/.scribe` data directory for config, logs, a
 
 Scribe has four built-in tools: `shell`, `read_file`, `write_file`, `edit_file`.
 
-**`shell`** runs commands via `/bin/sh -c`. Stdout and stderr are streamed to per-invocation
-temp files (under the system temporary directory, e.g. `/tmp/` on Linux). The tool result
-returns `stdoutFile` and `stderrFile` paths rather than inline output — the agent reads them
-with `read_file` when it needs the contents. These temp files are not automatically cleaned
-up; they persist until the system purges its temp directory (on reboot for Linux tmpfs, or
-periodically on macOS).
-
 ## Sessions & Logs
 
 Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
@@ -85,34 +78,6 @@ Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
 ├── logs/scribe-{uuid}.log          # one log file per invocation
 ├── sessions/{uuid}/metadata.json   # one directory per session
 └── sessions/{uuid}/messages.jsonl
-```
-
-## Info
-
-Print Scribe's resolved paths and version:
-
-```bash
-scribe --info
-```
-
-## Testing
-
-You can use the following commands to view current test coverage.
-
-**macOS**
-```bash
-swift test --enable-code-coverage
-PROFDATA=$(find .build -name '*.profdata' -print -quit)
-BIN=$(find .build -name 'scribePackageTests' -type f -not -path '*.dSYM*' -print -quit)
-xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
-```
-
-**Linux**
-```bash
-swift test --enable-code-coverage
-PROFDATA=$(find .build -name '*.profdata' -print -quit)
-BIN=$(find .build -name 'scribePackageTests.xctest' -type f -print -quit)
-llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
 ```
 
 ## Documentation
