@@ -13,10 +13,14 @@ struct ToolRunnerShellTests {
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 0)
-    #expect(out.stderr == "")
-    #expect(out.stdout?.trimmingCharacters(in: .whitespacesAndNewlines) == "scribetest")
     #expect(out.pid != nil)
     #expect(out.pid! > 0)
+    // Read stdout from temp file.
+    let stdout = try readFileIfExists(out.stdoutFile)
+    #expect(stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "scribetest")
+    // Stderr should be empty.
+    let stderr = try readFileIfExists(out.stderrFile)
+    #expect(stderr == "")
   }
 
   @Test func honorsWorkingDirectory() async throws {
@@ -31,8 +35,10 @@ struct ToolRunnerShellTests {
       let out = try decodeShell(json)
       #expect(out.ok == true)
       #expect(out.exitCode == 0)
-      #expect(out.stderr == "")
-      #expect(out.stdout == "cwd_ok")
+      let stdout = try readFileIfExists(out.stdoutFile)
+      #expect(stdout == "cwd_ok")
+      let stderr = try readFileIfExists(out.stderrFile)
+      #expect(stderr == "")
     }
   }
 
@@ -64,7 +70,8 @@ struct ToolRunnerShellTests {
       name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
     let out = try decodeShell(json)
     #expect(out.ok == true)
-    #expect(out.stdout?.trimmingCharacters(in: .whitespacesAndNewlines) == "ok")
+    let stdout = try readFileIfExists(out.stdoutFile)
+    #expect(stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "ok")
   }
 
   @Test func invalidWorkingDirectoryFails() async throws {
@@ -174,4 +181,10 @@ private struct InterruptTimeoutError: Error, CustomStringConvertible {
   var description: String {
     "Interrupt test timed out after 15 seconds — the long-running process was not killed."
   }
+}
+
+/// Reads the file at `path`, returning an empty string if the path is nil.
+private func readFileIfExists(_ path: String?) throws -> String {
+  guard let path else { return "" }
+  return try String(contentsOfFile: path, encoding: .utf8)
 }

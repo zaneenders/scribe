@@ -23,8 +23,10 @@ public enum ToolInvocationFormatting {
     let ok: Bool
     let error: String?
     let exitCode: Int?
-    let stdout: String?
-    let stderr: String?
+    let stdout: String?       // legacy; now unused — replaced by stdoutFile
+    let stderr: String?       // legacy; now unused — replaced by stderrFile
+    let stdoutFile: String?
+    let stderrFile: String?
     let content: String?
     let written: Bool?
     let replaced: Bool?
@@ -69,25 +71,20 @@ public enum ToolInvocationFormatting {
 
     switch name {
     case "shell":
-      // Cap each stream at `shellTranscriptStreamLineCap` lines in the transcript display.
-      // The full stdout/stderr is always preserved in the conversation history sent to the
-      // model — this only affects the rendered scrollback. Without this cap, a single
-      // command that prints (e.g.) 114 KB of output added 1500+ wrapped rows to the
-      // transcript and made every subsequent render 100+ ms — long enough to perceptibly
-      // delay keystrokes processed on the same actor.
+      // Output is streamed to temp files on disk — the transcript just shows
+      // the file paths so the human knows where results landed.  The LLM can
+      // use `read_file` to fetch the contents when it needs them.
       var lines: [String] = []
       if let code = decoded.exitCode {
         lines.append("exit \(code)")
       }
-      let out = decoded.stdout ?? ""
-      let err = decoded.stderr ?? ""
-      if !out.isEmpty {
-        lines.append("stdout:")
-        lines += truncatedStreamLines(out)
+      if let outFile = decoded.stdoutFile {
+        let sizeStr = fileSizeString(outFile)
+        lines.append("stdout → \(outFile)\(sizeStr)")
       }
-      if !err.isEmpty {
-        lines.append("stderr:")
-        lines += truncatedStreamLines(err)
+      if let errFile = decoded.stderrFile {
+        let sizeStr = fileSizeString(errFile)
+        lines.append("stderr → \(errFile)\(sizeStr)")
       }
       return lines.isEmpty ? ["(no output)"] : lines
 
@@ -137,29 +134,11 @@ public enum ToolInvocationFormatting {
     return parts.joined(separator: "  ")
   }
 
-  /// Maximum lines of a single shell stream (stdout or stderr) shown in the transcript.
-  /// Picked to keep a single command's display cost bounded while still showing enough
-  /// context for a human skim; the full text remains in the conversation history.
-  internal static let shellTranscriptStreamLineCap = 200
-  internal static let shellTranscriptStreamHeadLines = 120
-  internal static let shellTranscriptStreamTailLines = 60
-
-  /// Splits `text` on newlines and, if it exceeds the cap, returns the head + a truncation
-  /// marker + the tail. Keeping head and tail (instead of just head) means error messages
-  /// at the end of long output (compiler errors, Python tracebacks, etc.) are still visible
-  /// without dumping thousands of intermediate lines.
-  private static func truncatedStreamLines(_ text: String) -> [String] {
-    let split = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    let count = split.count
-    if count <= shellTranscriptStreamLineCap {
-      return split
-    }
-    let hidden = count - shellTranscriptStreamHeadLines - shellTranscriptStreamTailLines
-    let head = Array(split.prefix(shellTranscriptStreamHeadLines))
-    let tail = Array(split.suffix(shellTranscriptStreamTailLines))
-    let marker =
-      "… (\(ScribeUsageFormatting.groupingInt(hidden)) more line\(hidden == 1 ? "" : "s") hidden — full output preserved in conversation) …"
-    return head + [marker] + tail
+  /// Returns a human-readable file size like " (1.2 KB)" or "" if the file can't be stat'd.
+  private static func fileSizeString(_ path: String) -> String {
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+          let size = attrs[.size] as? Int64 else { return "" }
+    return " (\(ScribeUsageFormatting.groupingInt(Int(size))) bytes)"
   }
 
   private static func fallbackPrettyLines(_ jsonOutput: String) -> [String]? {

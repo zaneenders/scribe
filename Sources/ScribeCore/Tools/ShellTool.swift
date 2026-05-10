@@ -4,8 +4,10 @@ import Logging
 struct ShellToolResult: Encodable, Sendable {
   let ok = true
   let exitCode: Int
-  let stdout: String
-  let stderr: String
+  /// Path to temp file containing stdout (always present, may be empty).
+  let stdoutFile: String
+  /// Path to temp file containing stderr (always present, may be empty).
+  let stderrFile: String
   let pid: pid_t
 }
 
@@ -41,13 +43,13 @@ public struct ShellTool: ScribeTool {
       metadata: [
         "pid": "\(result.pid)",
         "exit_code": "\(result.exitCodeForJSON)",
-        "stdout_chars": "\(result.stdout.count)",
-        "stderr_chars": "\(result.stderr.count)",
+        "stdout_file": "\(result.stdoutFile.string)",
+        "stderr_file": "\(result.stderrFile.string)",
       ])
     return ShellToolResult(
       exitCode: result.exitCodeForJSON,
-      stdout: result.stdout,
-      stderr: result.stderr,
+      stdoutFile: result.stdoutFile.string,
+      stderrFile: result.stderrFile.string,
       pid: result.pid
     )
   }
