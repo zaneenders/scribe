@@ -121,18 +121,7 @@ internal final class SlateChatHost {
   private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
-
-  // MARK: - Transcript state (source of truth for rendering)
-
-  /// Completed transcript lines (user messages, finalized assistant turns, tool output).
-  private var transcriptLines: [TLine] = []
-  /// Open line being built during streaming (nil when idle).
-  private var streamingOpenLine: TLine? = nil
-  private var streamingOpenLineRaw: String = ""
-  private var streamingSectionStartLineIndex: Int? = nil
-  private var currentStreamingSection: AssistantStreamSection = .answer
-  /// Bumped when transcript structure changes (for FlattenCache invalidation).
-  private var transcriptGeneration: Int = 0
+  private var transcriptController = TranscriptController()
 
   private var flattenCache = TranscriptLayout.FlattenCache()
 
@@ -217,8 +206,8 @@ internal final class SlateChatHost {
 
         // Replay resume messages into transcript if resuming.
         if !self.resumeMessages.isEmpty {
-          self.transcriptLines = renderMessagesToTranscript(
-            self.resumeMessages, theme: self.theme, renderer: self.markdownRenderer)
+          self.transcriptController.resetCompletedLines(renderMessagesToTranscript(
+            self.resumeMessages, theme: self.theme, renderer: self.markdownRenderer))
         }
 
         let persistURL = self.sessionPersistenceURL
@@ -518,9 +507,9 @@ internal final class SlateChatHost {
           let scrRows = grid.rows
 
           let prepareStart = Date()
-          let completed = self.transcriptLines
-          let open = self.streamingOpenLine
-          let generation = self.transcriptGeneration
+          let completed = self.transcriptController.completedLines
+          let open = self.transcriptController.streamingOpenLine
+          let generation = self.transcriptController.generation
           let flatTranscript = TranscriptLayout.FlattenCache.flatten(
             cache: &self.flattenCache,
             completed: completed,
@@ -589,7 +578,20 @@ internal final class SlateChatHost {
     for event in events {
       switch event {
       case .transcript(let te):
-        handleTranscriptEvent(te)
+        // Usage events are handled directly by the host — they don't
+        // touch the transcript structure.
+        if case .usage(let usage, let tps) = te {
+          handleUsageEvent(usage, tokensPerSecond: tps)
+        } else {
+          let liveRender = viewport.followingLive
+          let result = transcriptController.apply(
+            te, theme: theme, renderer: markdownRenderer,
+            liveRender: liveRender)
+          if result.needsRender { renderWake?.requestRender() }
+          if let drift = result.driftDetail {
+            log.warning("transcript.streaming-drift", metadata: ["detail": .string(drift)])
+          }
+        }
       case .modelTurnRunning(let running):
         modelBusy = running
         if running {
@@ -624,321 +626,45 @@ internal final class SlateChatHost {
     }
   }
 
-  // MARK: - Transcript event handling
+  // MARK: - Usage event handling
 
-  private func handleTranscriptEvent(_ event: TranscriptEvent) {
-    switch event {
-    case .enterAssistantSection(let section, let previous):
-      // Finalize previous open line if any.
-      if let open = streamingOpenLine {
-        transcriptLines.append(open)
-        streamingOpenLine = nil
-      }
-      if previous != nil {
-        if previous == .reasoning && section == .answer {
-          transcriptLines.append(TLine(spans: []))
-        }
-      } else {
-        if let last = transcriptLines.last, isUserSubmissionLine(last) {
-          transcriptLines.append(TLine(spans: []))
-        }
-      }
-      let header = TLine(
-        spans: [
-          StyledSpan(
-            fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:")
-        ])
-      transcriptLines.append(header)
-      switch section {
-      case .reasoning:
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.sectionLabel, bg: theme.background, bold: false,
-                text: "  · reasoning")
-            ]))
-      case .answer:
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.sectionLabel, bg: theme.background, bold: false,
-                text: "  · answer")
-            ]))
-      }
-      streamingOpenLine = TLine(spans: [])
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = transcriptLines.count
-      currentStreamingSection = section
-      renderWake?.requestRender()
-
-    case .appendAssistantText(let section, let text):
-      if streamingOpenLine == nil {
-        streamingOpenLine = TLine(spans: [])
-        streamingOpenLineRaw = ""
-      }
-      streamingOpenLineRaw += text
-      currentStreamingSection = section
-
-      // When the user has scrolled up, skip per-chunk rendering — the
-      // streaming section isn't visible.  Accumulate raw text only; the
-      // next chunk after scrolling back (or finalize) will catch up.
-      guard viewport.followingLive else { return }
-
-      let st = theme.style(for: section)
-
-      // Only render the visible tail during streaming — the full accumulated
-      // text is re-parsed with block-level markdown at finalize anyway.
-      // Keeps per-chunk work bounded to O(screen) instead of O(total-response).
-      let maxVisibleLogicalLines = 200  // generous: 2-4× a typical terminal
-      let tailText: String = {
-        let allLines = streamingOpenLineRaw.split(
-          separator: "\n", omittingEmptySubsequences: false)
-        guard allLines.count > maxVisibleLogicalLines else {
-          return streamingOpenLineRaw
-        }
-        return allLines.suffix(maxVisibleLogicalLines).joined(separator: "\n")
-      }()
-
-      let rendered = markdownRenderer.renderStreaming(
-        text: tailText,
-        baseFG: st.fg,
-        baseBold: st.bold,
-        theme: section == .reasoning ? .grayscale : theme.markdown
-      )
-      if let startIdx = streamingSectionStartLineIndex {
-        let removeCount = max(0, transcriptLines.count - startIdx)
-        if removeCount > 0 {
-          transcriptLines.removeLast(removeCount)
-          transcriptGeneration &+= 1
-        }
-      }
-      if rendered.isEmpty {
-        streamingOpenLine = TLine(spans: [])
-      } else {
-        transcriptLines.append(contentsOf: rendered.dropLast())
-        streamingOpenLine = rendered.last!
-      }
-      renderWake?.requestRender()
-
-    case .finalizeAssistantStream:
-      // Re-render accumulated text with full block-level markdown.
-      if streamingSectionStartLineIndex != nil {
-        let section = currentStreamingSection
-        let st = theme.style(for: section)
-        let mdTheme = section == .reasoning ? MarkdownTheme.grayscale : theme.markdown
-        let fullRender = markdownRenderer.render(
-          text: streamingOpenLineRaw,
-          baseFG: st.fg,
-          baseBold: st.bold,
-          theme: mdTheme
-        )
-        if let startIdx = streamingSectionStartLineIndex {
-          let removeCount = max(0, transcriptLines.count - startIdx)
-          if removeCount > 0 {
-            transcriptLines.removeLast(removeCount)
-            transcriptGeneration &+= 1
-          }
-          if fullRender.isEmpty {
-            streamingOpenLine = TLine(spans: [])
-          } else {
-            transcriptLines.append(contentsOf: fullRender.dropLast())
-            streamingOpenLine = fullRender.last!
-          }
-        }
-      }
-      if let open = streamingOpenLine {
-        transcriptLines.append(open)
-        streamingOpenLine = nil
-      }
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = nil
-      renderWake?.requestRender()
-
-    case .emptyAssistantTurn:
-      let lineA = TLine(
-        spans: [
-          StyledSpan(
-            fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:")
-        ])
-      let lineB = TLine(
-        spans: [
-          StyledSpan(
-            fg: theme.emptyTurn, bg: theme.background, bold: false, text: "(empty turn)")
-        ])
-      transcriptLines.append(lineA)
-      transcriptLines.append(lineB)
-      renderWake?.requestRender()
-
-    case .usage(let usage, let tps):
-      guard let triple = usage.scribeReportedPromptCompletionTotal else { break }
-      usageTurnPrompt += triple.prompt
-      usageTurnCompletion += triple.completion
-      usageTurnTotal += triple.total
-      usageSessionPrompt += triple.prompt
-      usageSessionCompletion += triple.completion
-      usageSessionTotal += triple.total
-      let pct: Int? = {
-        guard let cw = contextWindow, cw > 0, triple.prompt > 0 else { return nil }
-        return min(100, Int(Double(triple.prompt) / Double(cw) * 100))
-      }()
-      usageHUD = UsageHUDSnapshot(
-        roundPrompt: triple.prompt,
-        roundCompletion: triple.completion,
-        roundTotal: triple.total,
-        turnPrompt: usageTurnPrompt,
-        turnCompletion: usageTurnCompletion,
-        turnTotal: usageTurnTotal,
-        sessionPrompt: usageSessionPrompt,
-        sessionCompletion: usageSessionCompletion,
-        sessionTotal: usageSessionTotal,
-        reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
-        cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
-        outputTokensPerSecond: tps,
-        contextWindow: contextWindow,
-        contextWindowUsedPercent: pct
-      )
-      renderWake?.requestRender()
-
-    case .blankLine:
-      transcriptLines.append(TLine(spans: []))
-      renderWake?.requestRender()
-
-    case .toolRoundHeader(let round, let toolNames):
-      let names = toolNames.joined(separator: ", ")
-      let line = TLine(spans: [
-        StyledSpan(
-          fg: theme.toolRoundHeader, bg: theme.background, bold: true,
-          text: "tool round \(round) "),
-        StyledSpan(
-          fg: theme.toolNames, bg: theme.background, bold: false, text: names),
-      ])
-      transcriptLines.append(line)
-      renderWake?.requestRender()
-
-    case .toolInvocation(let name, let arguments, let output):
-      let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: arguments)
-      let outputLines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: output)
-      var spans: [StyledSpan] = [
-        StyledSpan(fg: theme.toolInvocation, bg: theme.background, bold: false, text: "▶ \(name)")
-      ]
-      if let argSummary {
-        spans.append(
-          StyledSpan(
-            fg: theme.toolArgSummary, bg: theme.background, bold: false,
-            text: " \(argSummary)"))
-      }
-      transcriptLines.append(TLine(spans: spans))
-      for ol in outputLines {
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.toolOutput, bg: theme.background, bold: false,
-                text: "  \(ol)")
-            ]))
-      }
-      renderWake?.requestRender()
-
-    case .skippedUnreadableStreamLine:
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.skippedStreamLine, bg: theme.background, bold: false,
-              text: "(skipped one stream line: not valid completion JSON)")
-          ]))
-      renderWake?.requestRender()
-
-    case .harnessError(let error):
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.errorFG, bg: theme.background, bold: false,
-              text: "error: \(error.errorDescription ?? String(describing: error))")
-          ]))
-      renderWake?.requestRender()
-
-    case .turnInterrupted:
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.interruptedFG, bg: theme.background, bold: false,
-              text: "(interrupted)")
-          ]))
-      streamingOpenLine = nil
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = nil
-      renderWake?.requestRender()
-
-    case .userSubmitted(let text):
-      guard !text.isEmpty else { return }
-      let logicalLines =
-        text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.userPrefix, bg: theme.background, bold: false,
-              text: "you:")
-          ]))
-      for row in logicalLines {
-        if row.isEmpty {
-          transcriptLines.append(TLine(spans: []))
-          continue
-        }
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.userBody, bg: theme.background, bold: false,
-                text: "  \(row)")
-            ]))
-      }
-      renderWake?.requestRender()
-
-    case .turnComplete(let referenceMessages):
-      // Finalize any dangling streaming state (should already be done, defensive).
-      if let open = streamingOpenLine {
-        transcriptLines.append(open)
-      }
-      streamingOpenLine = nil
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = nil
-
-      // Compare streaming render against batch render for drift detection.
-      let batchLines = renderMessagesToTranscript(
-        referenceMessages, theme: theme, renderer: markdownRenderer)
-      if transcriptLines != batchLines {
-        let sc = transcriptLines.count
-        let bc = batchLines.count
-        let driftMeta: Logger.Metadata = [
-          "streaming_count": .string("\(sc)"),
-          "batch_count": .string("\(bc)"),
-        ]
-        log.warning("transcript.streaming-drift", metadata: driftMeta)
-        // Log every differing line for easy test-casing.
-        let maxCount = max(sc, bc)
-        for idx in 0..<maxCount {
-          let sLine = idx < sc ? transcriptLines[idx] : nil
-          let bLine = idx < bc ? batchLines[idx] : nil
-          if sLine != bLine {
-            let detailMeta: Logger.Metadata = [
-              "index": .string("\(idx)"),
-              "streaming": .string(sLine.map { spansToDebugString($0) } ?? "(missing)"),
-              "batch": .string(bLine.map { spansToDebugString($0) } ?? "(missing)"),
-            ]
-            log.warning("transcript.streaming-drift.detail", metadata: detailMeta)
-          }
-        }
-      }
-      renderWake?.requestRender()
-    }
+  /// Handle a `.usage` transcript event by updating the usage HUD.
+  /// Usage does not touch the transcript structure — it's a host-side concern.
+  private func handleUsageEvent(
+    _ usage: Components.Schemas.CompletionUsage,
+    tokensPerSecond tps: Double?
+  ) {
+    guard let triple = usage.scribeReportedPromptCompletionTotal else { return }
+    usageTurnPrompt += triple.prompt
+    usageTurnCompletion += triple.completion
+    usageTurnTotal += triple.total
+    usageSessionPrompt += triple.prompt
+    usageSessionCompletion += triple.completion
+    usageSessionTotal += triple.total
+    let pct: Int? = {
+      guard let cw = contextWindow, cw > 0, triple.prompt > 0 else { return nil }
+      return min(100, Int(Double(triple.prompt) / Double(cw) * 100))
+    }()
+    usageHUD = UsageHUDSnapshot(
+      roundPrompt: triple.prompt,
+      roundCompletion: triple.completion,
+      roundTotal: triple.total,
+      turnPrompt: usageTurnPrompt,
+      turnCompletion: usageTurnCompletion,
+      turnTotal: usageTurnTotal,
+      sessionPrompt: usageSessionPrompt,
+      sessionCompletion: usageSessionCompletion,
+      sessionTotal: usageSessionTotal,
+      reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
+      cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
+      outputTokensPerSecond: tps,
+      contextWindow: contextWindow,
+      contextWindowUsedPercent: pct
+    )
+    renderWake?.requestRender()
   }
 
+  // MARK: - Submit effect dispatch
   // MARK: - Submit effect dispatch
 
   /// Execute a `SubmitEffect` against the gate and interrupt flag.
@@ -988,21 +714,6 @@ internal final class SlateChatHost {
     }
   }
 
-  // MARK: - Helpers
-
-  private func isUserSubmissionLine(_ line: TLine) -> Bool {
-    guard line.spans.count == 1 else { return false }
-    let s = line.spans[0]
-    return !s.bold
-      && s.fg == theme.userPrefix
-      && s.bg == theme.background
-      && s.text == "you:"
-  }
-
-  /// Renders a TLine into a compact debug string for log output.
-  private func spansToDebugString(_ line: TLine) -> String {
-    line.spans.map { $0.text }.joined()
-  }
 
   // MARK: - Git branch detection
 
