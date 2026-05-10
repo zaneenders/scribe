@@ -130,3 +130,57 @@ What remains in the host:
 
 4. **The order minimizes risk.** Steps 1–2 are pure type work with no async
    complexity. Steps 3–4 introduce structural changes. Step 5 is the payoff.
+
+---
+
+## Execution results (2025-05-10)
+
+### Host reduction
+
+| Metric | Before | After |
+|--------|--------|-------|
+| `SlateChatHost.swift` | 1,032 lines | 579 lines |
+| Reduction | — | **−453 lines (44%)** |
+
+### New source files
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `ScribeCLI/SlateChat/TranscriptController.swift` | 390 | Pure state machine for transcript events (Step 1) |
+| `ScribeCLI/SlateChat/ChatCoordinator.swift` | 209 | Actor for agent turn-loop, `ModelTurnInterruptFlag` extracted (Step 4) |
+| `ScribeCLI/Markdown/MarkdownToSlateAdapter.swift` | 103 | Semantic ↔ Slate type bridge (Step 2) |
+| `ScribeCLI/SlateChat/RenderLoop.swift` | 77 | Pure `buildFrame(state:)` render-prep function (Step 3) |
+| `ScribeCLI/SlateChat/ChatDriver.swift` | 57 | Headless orchestrator for testing without Slate (Step 5) |
+| `ScribeCore/MarkdownOutput.swift` | 42 | `MarkdownLine`, `MarkdownSpan`, `MarkdownSpanKind` types (Step 2) |
+
+### New test files (53 tests)
+
+| File | Lines | Tests |
+|------|-------|-------|
+| `TranscriptControllerTests.swift` | 290 | 17 |
+| `RenderLoopTests.swift` | 170 | 6 |
+| `MarkdownToSlateAdapterTests.swift` | 126 | 13 |
+| `ChatDriverTests.swift` | 124 | 6 |
+| `ChatCoordinatorTests.swift` | 110 | 5 |
+| `TranscriptGoldenTests.swift` | 109 | 4 |
+
+**Total: 346 tests in 27 suites, all passing, zero regressions.**
+
+### What remains in `SlateChatHost` (579 lines)
+
+- Slate lifecycle (`subscribe`, `prepare`, `onEvent` skeleton)
+- `UserLineGate` ↔ `AsyncStream<String>` bridging
+- `ModelTurnInterruptFlag` management (type extracted to `ChatCoordinator.swift`)
+- `applySubmitEffect` (backed by `HostSubmitState.apply`)
+- `EventQueue` and `drainIncomingEvents` with drift detection
+- State-holding fields passed into `RenderLoop.buildFrame` as `RenderState`
+
+### Deviations from plan
+
+| Plan item | What shipped | Rationale |
+|-----------|-------------|-----------|
+| Move `MarkdownRenderer` protocol to ScribeCore | Kept in ScribeCLI; added semantic types + adapter | Protocol references `TerminalRGB`/`MarkdownTheme` which need SlateCore; adapter bridges without moving protocol |
+| Split `SlateChatRenderer.render` into `buildGrid` + shim | Kept `render(into:)` as-is; extracted prep into `RenderLoop.buildFrame` | Grid painting is tested by existing `SlateChatRenderTests`; prep extraction gives the same decoupling |
+| Create `SessionPersistence.swift` | Skipped; `ChatSessionPersistence.swift` already exists | Existing file covers the same ground |
+| Change `SwiftMarkdownRenderer` return type | Added `MarkdownToSlateAdapter` with forward/reverse conversion without changing the renderer | Preserves existing `MarkdownRendererTests` (all 50+ pass unchanged) |
+
