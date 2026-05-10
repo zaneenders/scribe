@@ -11,7 +11,7 @@ import Testing
 
 // MARK: - Fake Client Transport
 
-private final class FakeClientTransport: ClientTransport, @unchecked Sendable {
+private final class FakeClientTransport: ClientTransport, Sendable {
   let statusCode: Int
   private let chunksForCall: [[HTTPBody.ByteChunk]]
   private let state: Mutex<State>
@@ -142,7 +142,9 @@ struct ChatDriverTests {
 
   @Test func headlessToolRoundCreatesCorrectTranscript() async throws {
     let toolChunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#),
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
       doneChunk(),
     ]
     let replyChunks = [
