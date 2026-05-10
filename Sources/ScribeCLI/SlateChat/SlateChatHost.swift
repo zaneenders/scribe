@@ -61,7 +61,7 @@ enum HostEvent: Sendable {
 extension TranscriptLayout {
   /// Cached flatten results to avoid re-wrapping completed transcript lines
   /// on every render frame.  Reset when width or generation changes.
-  struct FlattenCache {
+  struct FlattenCache: Equatable, Sendable {
     var wrapWidth: Int = -1
     var completedLogicalLines: Int = 0
     var completedFlat: [TLine] = []
@@ -69,38 +69,43 @@ extension TranscriptLayout {
 
     /// Recompute flattened rows for the given completed + optional open line.
     /// Only wraps new lines since the last call when the set of completed lines grows.
+    /// Pure function — returns updated cache and flattened rows without side effects.
     static func flatten(
-      cache: inout FlattenCache,
+      cache: FlattenCache,
       completed: [TLine],
       open: TLine?,
       width: Int,
       generation: Int
-    ) -> [TLine] {
-      if width != cache.wrapWidth || generation != cache.lastGeneration {
-        cache = FlattenCache()
-        cache.wrapWidth = width
-        cache.lastGeneration = generation
-        cache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
-        cache.completedLogicalLines = completed.count
-      } else if completed.count < cache.completedLogicalLines {
+    ) -> (FlattenCache, [TLine]) {
+      var c = cache
+      if width != c.wrapWidth || generation != c.lastGeneration {
+        c = FlattenCache()
+        c.wrapWidth = width
+        c.lastGeneration = generation
+        c.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
+        c.completedLogicalLines = completed.count
+      } else if completed.count < c.completedLogicalLines {
         // Lines were removed (truncation) — full recompute.
-        cache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
-        cache.completedLogicalLines = completed.count
-      } else if completed.count > cache.completedLogicalLines {
+        c.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
+        c.completedLogicalLines = completed.count
+      } else if completed.count > c.completedLogicalLines {
         // New lines appended — only wrap the new ones.
-        let start = cache.completedLogicalLines
+        let start = c.completedLogicalLines
         if start < completed.count {
           let newSlice = completed[start...]
-          cache.completedFlat.append(
+          c.completedFlat.append(
             contentsOf: TranscriptLayout.flattenedRows(from: Array(newSlice), width: width))
         }
-        cache.completedLogicalLines = completed.count
+        c.completedLogicalLines = completed.count
       }
 
+      let flat: [TLine]
       if let open {
-        return cache.completedFlat + TranscriptLayout.flattenedRows(from: [open], width: width)
+        flat = c.completedFlat + TranscriptLayout.flattenedRows(from: [open], width: width)
+      } else {
+        flat = c.completedFlat
       }
-      return cache.completedFlat
+      return (c, flat)
     }
   }
 }
@@ -517,52 +522,41 @@ internal final class SlateChatHost {
           let scrCols = grid.cols
           let scrRows = grid.rows
 
-          let prepareStart = Date()
-          let completed = self.transcriptLines
-          let open = self.streamingOpenLine
-          let generation = self.transcriptGeneration
-          let flatTranscript = TranscriptLayout.FlattenCache.flatten(
-            cache: &self.flattenCache,
-            completed: completed,
-            open: open,
-            width: scrCols,
-            generation: generation)
-          let contentRows = SlateChatRenderer.transcriptContentRows(
-            cols: scrCols,
-            rows: scrRows,
-            banner: self.banner,
-            usage: self.usageHUD,
-            inputLine: self.inputHandler.buffer,
-            waitingForLLM: self.modelBusy,
-            queuedTrayText: self.queuedTrayText)
-          _ = self.viewport.resolve(flatCount: flatTranscript.count, contentRows: contentRows)
-          let transcriptTailStart = self.viewport.firstVisibleRow
-          let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
-
-          let submitStart = Date()
-          SlateChatRenderer.render(
-            into: &grid,
-            cols: scrCols,
-            rows: scrRows,
-            flattenedTranscript: flatTranscript,
-            transcriptTailStart: transcriptTailStart,
-            banner: self.banner,
-            usage: self.usageHUD,
-            inputLine: self.inputHandler.buffer,
-            llmWaitAnimationFrame: self.llmWaitAnimationFrame,
-            waitingForLLM: self.modelBusy,
+          let state = RenderState(
+            inputBuffer: self.inputHandler.buffer,
+            modelBusy: self.modelBusy,
             queuedTrayText: self.queuedTrayText,
-            theme: .default)
-          let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
-          let totalMs = prepareMs &+ submitMs
-          if totalMs >= 50 {
+            banner: self.banner,
+            usage: self.usageHUD,
+            transcriptLines: self.transcriptLines,
+            streamingOpenLine: self.streamingOpenLine,
+            transcriptGeneration: self.transcriptGeneration,
+            flattenCache: self.flattenCache,
+            llmWaitAnimationFrame: self.llmWaitAnimationFrame,
+            viewport: self.viewport,
+            cols: scrCols,
+            rows: scrRows
+          )
+          let frameStart = Date()
+          let output = buildFrame(state: state, theme: .default)
+
+          // Apply state updates
+          self.flattenCache = output.updatedFlattenCache
+          self.viewport = output.updatedViewport
+
+          // Write frame to Slate grid (thin shim)
+          for (row, line) in output.grid.enumerated() {
+            for (col, span) in line.enumerated() {
+              grid[column: col, row: row] = TerminalCell(span: span)
+            }
+          }
+          let frameMs = Int(Date().timeIntervalSince(frameStart) * 1000)
+          if frameMs >= 50 {
             self.log.debug(
               "chat.render.slow",
               metadata: [
-                "elapsed_ms": "\(totalMs)",
-                "prepare_ms": "\(prepareMs)",
-                "submit_ms": "\(submitMs)",
-                "flat_rows": "\(flatTranscript.count)",
+                "elapsed_ms": "\(frameMs)",
+                "flat_rows": "\(output.flatTranscript.count)",
                 "cols": "\(scrCols)",
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",

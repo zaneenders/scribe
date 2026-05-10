@@ -40,14 +40,14 @@ struct RenderState: Equatable, Sendable {
     var queuedTrayText: String?
     var banner: BannerSnapshot?
     var usage: UsageHUDSnapshot?
-    var completedTranscript: [TLine]
+    var transcriptLines: [TLine]
     var streamingOpenLine: TLine?
     var transcriptGeneration: Int
     var flattenCache: TranscriptLayout.FlattenCache
     var llmWaitAnimationFrame: Int
     var viewport: TranscriptViewport
-    var terminalCols: Int
-    var terminalRows: Int
+    var cols: Int
+    var rows: Int
 }
 
 /// The output of one frame render — everything needed to paint the screen.
@@ -74,20 +74,19 @@ The rendering is pure:
 func buildFrame(state: RenderState, theme: CLITheme) -> RenderOutput {
     var viewport = state.viewport
     
-    // 1. Flatten transcript (pure)
-    var cache = state.flattenCache
-    let flatLines = TranscriptLayout.FlattenCache.flatten(
-        cache: &cache,
-        completed: state.completedTranscript,
+    // 1. Flatten transcript (pure — returns updated cache + flat lines)
+    let (cache, flatLines) = TranscriptLayout.FlattenCache.flatten(
+        cache: state.flattenCache,
+        completed: state.transcriptLines,
         open: state.streamingOpenLine,
-        width: state.terminalCols,
+        width: state.cols,
         generation: state.transcriptGeneration
     )
     
     // 2. Calculate content rows (pure)
     let contentRows = SlateChatRenderer.transcriptContentRows(
-        cols: state.terminalCols,
-        rows: state.terminalRows,
+        cols: state.cols,
+        rows: state.rows,
         banner: state.banner,
         usage: state.usage,
         inputLine: state.inputBuffer,
@@ -100,8 +99,8 @@ func buildFrame(state: RenderState, theme: CLITheme) -> RenderOutput {
     
     // 4. Build semantic grid (pure — no SlateCell, just StyledSpan arrays)
     let grid = SlateChatRenderer.buildGrid(
-        cols: state.terminalCols,
-        rows: state.terminalRows,
+        cols: state.cols,
+        rows: state.rows,
         flattenedTranscript: flatLines,
         transcriptTailStart: tailStart,
         banner: state.banner,
@@ -155,14 +154,14 @@ onEvent: { slate, event in
             queuedTrayText: queuedTrayText,
             banner: banner,
             usage: usageHUD,
-            completedTranscript: transcriptController.completedLines,
+            transcriptLines: transcriptController.completedLines,
             streamingOpenLine: transcriptController.streamingOpenLine,
             transcriptGeneration: transcriptController.generation,
             flattenCache: flattenCache,
             llmWaitAnimationFrame: llmWaitAnimationFrame,
             viewport: viewport,
-            terminalCols: slate.cols,
-            terminalRows: slate.rows
+            cols: slate.cols,
+            rows: slate.rows
         )
         let output = buildFrame(state: state, theme: .default)
         
@@ -229,5 +228,5 @@ onEvent: { slate, event in
 |---|---|
 | **New:** `ScribeCLI/SlateChat/RenderLoop.swift` | `buildFrame`, `RenderState`, `RenderOutput` |
 | **Modify:** `SlateChatHost.swift` | Replace inline render logic with `buildFrame(state:)` call |
-| **Modify:** `SlateChatRenderer.swift` | Split `render(into:...)` into `buildGrid(...)` (pure) + grid-writing shim |
+| **Modify:** `SlateChatRenderer.swift` | Delete `render(into:)` and TerminalCell helpers; keep `buildGrid()` (pure) + shared helpers |
 | **New:** `Tests/ScribeCLITests/RenderLoopTests.swift` | Frame-level tests |

@@ -9,7 +9,6 @@ import SlateCore
 /// Simulates the host's render loop: transcript → flatten → viewport → render.
 /// Focused on catching any gap in the first-message scenario.
 @Suite
-@MainActor
 struct TranscriptRenderIntegrationTests {
 
   // MARK: - First-message: empty → non-empty transcript transition
@@ -32,20 +31,20 @@ struct TranscriptRenderIntegrationTests {
     )
 
     // ── Frame 1: Empty transcript (before coordinator runs) ──
-    var grid1 = TerminalCellGrid(cols: cols, rows: rows, filling: .defaultCell)
-    let flat1 = TranscriptLayout.FlattenCache.flatten(
-      cache: &flattenCache,
+    let (cache1, flat1) = TranscriptLayout.FlattenCache.flatten(
+      cache: flattenCache,
       completed: transcriptLines,
       open: nil,
       width: cols,
       generation: 0)
+    flattenCache = cache1
     let contentRows1 = SlateChatRenderer.transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: nil,
       inputLine: "typing...", waitingForLLM: false, queuedTrayText: nil)
     _ = viewport.resolve(flatCount: flat1.count, contentRows: contentRows1)
 
-    SlateChatRenderer.render(
-      into: &grid1, cols: cols, rows: rows,
+    let grid1 = SlateChatRenderer.buildGrid(
+      cols: cols, rows: rows,
       flattenedTranscript: flat1,
       transcriptTailStart: viewport.firstVisibleRow,
       banner: banner, usage: nil,
@@ -58,7 +57,7 @@ struct TranscriptRenderIntegrationTests {
     // Verify: transcript area is blank (only background fill)
     let headerRows = 3
     let rowBelowHeader = headerRows
-    #expect(grid1[column: 0, row: rowBelowHeader].glyph == " ",
+    #expect(grid1[rowBelowHeader][0].text == " ",
       "Frame 1: transcript area should be blank")
 
     // ── Frame 2: User message arrives (after coordinator runs) ──
@@ -68,21 +67,21 @@ struct TranscriptRenderIntegrationTests {
     transcriptLines.append(
       TLine(spans: [StyledSpan(fg: theme.userBody, bg: theme.background, bold: false, text: "  hello")]))
 
-    var grid2 = TerminalCellGrid(cols: cols, rows: rows, filling: .defaultCell)
-    let flat2 = TranscriptLayout.FlattenCache.flatten(
-      cache: &flattenCache,
+    let (cache2, flat2) = TranscriptLayout.FlattenCache.flatten(
+      cache: flattenCache,
       completed: transcriptLines,
       open: nil,
       width: cols,
       generation: 0)  // userSubmitted doesn't increment generation
+    flattenCache = cache2
 
     let contentRows2 = SlateChatRenderer.transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: nil,
       inputLine: "", waitingForLLM: true, queuedTrayText: nil)
     _ = viewport.resolve(flatCount: flat2.count, contentRows: contentRows2)
 
-    SlateChatRenderer.render(
-      into: &grid2, cols: cols, rows: rows,
+    let grid2 = SlateChatRenderer.buildGrid(
+      cols: cols, rows: rows,
       flattenedTranscript: flat2,
       transcriptTailStart: viewport.firstVisibleRow,
       banner: banner, usage: nil,
@@ -97,13 +96,13 @@ struct TranscriptRenderIntegrationTests {
     let expectedFirstContentRow = 3 + (contentRows2 - flat2.count)  // headerRows + topPad
     #expect(expectedFirstContentRow == 21)
 
-    let youCell = grid2[column: 0, row: expectedFirstContentRow]
-    #expect(youCell.glyph == "y",
-      "Frame 2: Expected 'y' from 'you:' at row \(expectedFirstContentRow), got '\(youCell.glyph)'")
+    let youSpan = grid2[expectedFirstContentRow][0]
+    #expect(youSpan.text == "y",
+      "Frame 2: Expected 'y' from 'you:' at row \(expectedFirstContentRow), got '\(youSpan.text)'")
 
-    let helloCell = grid2[column: 2, row: expectedFirstContentRow + 1]
-    #expect(helloCell.glyph == "h",
-      "Frame 2: Expected 'h' from 'hello' at row \(expectedFirstContentRow + 1) col 2, got '\(helloCell.glyph)'")
+    let helloSpan = grid2[expectedFirstContentRow + 1][2]
+    #expect(helloSpan.text == "h",
+      "Frame 2: Expected 'h' from 'hello' at row \(expectedFirstContentRow + 1) col 2, got '\(helloSpan.text)'")
   }
 
   // MARK: - Viewport stays in follow mode through empty→content transition
@@ -135,8 +134,9 @@ struct TranscriptRenderIntegrationTests {
     var cache = TranscriptLayout.FlattenCache()
 
     // First call: empty transcript
-    let flat0 = TranscriptLayout.FlattenCache.flatten(
-      cache: &cache, completed: [], open: nil, width: 80, generation: 0)
+    let (c0, flat0) = TranscriptLayout.FlattenCache.flatten(
+      cache: cache, completed: [], open: nil, width: 80, generation: 0)
+    cache = c0
     #expect(flat0.isEmpty)
 
     // Second call: 2 lines added, same generation
@@ -144,8 +144,9 @@ struct TranscriptRenderIntegrationTests {
       TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "you:")]),
       TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "  hello")]),
     ]
-    let flat1 = TranscriptLayout.FlattenCache.flatten(
-      cache: &cache, completed: lines, open: nil, width: 80, generation: 0)
+    let (c1, flat1) = TranscriptLayout.FlattenCache.flatten(
+      cache: cache, completed: lines, open: nil, width: 80, generation: 0)
+    cache = c1
     #expect(flat1.count == 2, "Expected 2 flattened lines, got \(flat1.count)")
     #expect(flat1[0].spans.first?.text == "you:")
     #expect(flat1[1].spans.first?.text == "  hello")
@@ -160,16 +161,18 @@ struct TranscriptRenderIntegrationTests {
     let lines1: [TLine] = [
       TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")]),
     ]
-    _ = TranscriptLayout.FlattenCache.flatten(
-      cache: &cache, completed: lines1, open: nil, width: 80, generation: 0)
+    let (c0, _) = TranscriptLayout.FlattenCache.flatten(
+      cache: cache, completed: lines1, open: nil, width: 80, generation: 0)
+    cache = c0
 
     // Now generation changes (like when streaming re-renders happen)
     let lines2: [TLine] = [
       TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")]),
       TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "line2")]),
     ]
-    let flat = TranscriptLayout.FlattenCache.flatten(
-      cache: &cache, completed: lines2, open: nil, width: 80, generation: 1)
+    let (c1, flat) = TranscriptLayout.FlattenCache.flatten(
+      cache: cache, completed: lines2, open: nil, width: 80, generation: 1)
+    cache = c1
 
     // Cache should have been reset, then recomputed with the new lines
     #expect(flat.count == 2)

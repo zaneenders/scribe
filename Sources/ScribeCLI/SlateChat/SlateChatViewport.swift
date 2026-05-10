@@ -6,7 +6,7 @@
 /// frame when the flat transcript and content row count are available.  This
 /// avoids double-flattening the transcript (the old code flattened once for
 /// scroll, then again for render).
-struct TranscriptViewport {
+struct TranscriptViewport: Equatable, Sendable {
   /// Line index (in flattened transcript) of the first visible row.
   private(set) var firstVisibleRow: Int = 0
   /// When `true`, the viewport auto-tracks the tail on new output.

@@ -4,13 +4,14 @@ import SlateCore
 
 // MARK: - Grid render
 
-/// Renders the full-screen chat grid: transcript, queued tray, input strip, banner, and usage HUD.
+/// Builds the semantic chat grid: transcript, queued tray, input strip, banner, and usage HUD.
 ///
 /// ## Render pipeline & input responsiveness
 ///
-/// Slate's renderer runs on `@MainActor` — the same actor that drains stdin events
-/// through the wake pump's `onEvent`. Every render builds a cell grid, encodes it
-/// into a single contiguous byte run, and submits it to the controlling tty.
+/// The host's `onEvent` closure captures a `RenderState` snapshot and passes it to the
+/// pure `buildFrame(state:theme:)` function, which produces a `RenderOutput` containing
+/// a `[[StyledSpan]]` grid.  The host then writes each span into Slate's `TerminalCellGrid`
+/// via a thin `TerminalCell(span:)` bridge.  All rendering is pure and nonisolated.
 ///
 /// To keep keystrokes responsive while the model is busy:
 ///
@@ -28,11 +29,10 @@ import SlateCore
 ///    pump with `externalCoalesceMaxFramesPerSecond: 60`, so SSE chunks /
 ///    persistence saves / usage updates produce at most ~60 main-actor renders
 ///    per second regardless of how busy the producer is.
-/// 4. **Slow-frame log line.** `event=chat.render.slow elapsed_ms=… prepare_ms=…
-///    submit_ms=… …` fires when the on-actor portion of a render exceeds 50 ms.
-///    `prepare_ms` covers transcript flatten + layout (CPU on main actor),
-///    `submit_ms` covers grid build + encode + writer submission (also on main
-///    actor; the actual tty drain is off-actor and **not** included).
+/// 4. **Slow-frame log line.** `event=chat.render.slow elapsed_ms=… flat_rows=… …`
+///    fires when the on-actor portion of a render exceeds 50 ms.  `frame_ms`
+///    covers the pure `buildFrame` call plus the grid-to-Slate copy
+///    (the actual tty drain is off-actor and **not** included).
 /// 5. **Tool output truncation in the transcript.** `read_file` results render as
 ///    a single summary line, and shell `stdout` / `stderr` results larger than
 ///    200 lines render as a head + truncation marker + tail (120 + marker + 60).
@@ -49,26 +49,25 @@ import SlateCore
 ///
 /// - ``queuedTrayRowCount(queuedTrayText:cols:)`` returns the number of rows to
 ///   reserve for the queued tray strip (0 when no queued message).
-/// - ``paintQueuedTrayRows(into:startRow:cols:textWidth:visualLines:theme:)``
+/// - ``buildSemanticQueuedTrayRows(_:startRow:cols:textWidth:visualLines:theme:)``
 ///   paints the tray rows: first row prefixed with `queued: ` (orange) plus the
 ///   message in dimmed white; continuation rows align under the message with an
 ///   8-space gutter.
-@MainActor
 internal enum SlateChatRenderer {
   /// Braille spinner (common in TUIs); one cell, advances while waiting for the first token.
-  private static let llmWaitSpinner: [Character] = [
+  private nonisolated static let llmWaitSpinner: [Character] = [
     "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷",
   ]
 
-  private static let inputGutterColumns = 5
+  private nonisolated static let inputGutterColumns = 5
   /// Width of `queued: ` prefix; continuation rows under the queued tray indent to align under text.
-  private static let queuedTrayGutterColumns = 8
+  private nonisolated static let queuedTrayGutterColumns = 8
   /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
-  private static let queuedTrayMaxRows = 4
+  private nonisolated static let queuedTrayMaxRows = 4
 
   /// Wrapped tray rows for an optional queued submission, capped by ``queuedTrayMaxRows``.
   /// Returns an empty array when ``queuedTrayText`` is nil/empty.
-  private static func queuedTrayVisualLines(
+  private nonisolated static func queuedTrayVisualLines(
     queuedTrayText: String?,
     textWidth: Int
   ) -> [String] {
@@ -90,7 +89,7 @@ internal enum SlateChatRenderer {
   }
 
   /// Number of rows to reserve for the queued tray strip (0 when no queued message).
-  static func queuedTrayRowCount(
+  nonisolated static func queuedTrayRowCount(
     queuedTrayText: String?,
     cols: Int
   ) -> Int {
@@ -100,7 +99,7 @@ internal enum SlateChatRenderer {
   }
 
   /// Rows available for transcript text between the fixed header and the input stack (matches ``makeGrid``).
-  static func transcriptContentRows(
+  nonisolated static func transcriptContentRows(
     cols: Int,
     rows: Int,
     banner: BannerSnapshot?,
@@ -142,8 +141,11 @@ internal enum SlateChatRenderer {
     return max(0, firstTrayRow &- headerRows)
   }
 
-  static func render(
-    into grid: inout TerminalCellGrid,
+  // MARK: - Semantic grid builder (pure, Slate-independent)
+
+  /// Builds a semantic grid — a `rows × cols` matrix of single-character `StyledSpan` cells.
+  /// Pure function: no Slate dependency, no side effects.
+  nonisolated static func buildGrid(
     cols: Int,
     rows: Int,
     flattenedTranscript: [TLine],
@@ -155,21 +157,19 @@ internal enum SlateChatRenderer {
     waitingForLLM: Bool,
     queuedTrayText: String?,
     theme: CLITheme
-  ) {
-    // Background fill cells used for clearing regions before painting.
-    let transcriptFill = TerminalCell(
-      glyph: " ", foreground: theme.inputText, background: theme.background, flags: [])
-    let inputFill = TerminalCell(
-      glyph: " ", foreground: theme.inputText,
-      background: theme.inputAreaBg, flags: [])
+  ) -> [[StyledSpan]] {
+    let transcriptFill = StyledSpan(fg: theme.inputText, bg: theme.background, bold: false, text: " ")
+    let inputFill = StyledSpan(fg: theme.inputText, bg: theme.inputAreaBg, bold: false, text: " ")
+
+    // Initialize grid with transcript background
+    var grid = [[StyledSpan]](
+      repeating: [StyledSpan](repeating: transcriptFill, count: cols),
+      count: rows
+    )
 
     let headerRows: Int = {
-      if banner != nil {
-        return min(3, max(0, rows &- 1))
-      }
-      if usage != nil, rows >= 2 {
-        return min(3, max(1, rows &- 1))
-      }
+      if banner != nil { return min(3, max(0, rows &- 1)) }
+      if usage != nil, rows >= 2 { return min(3, max(1, rows &- 1)) }
       return 0
     }()
 
@@ -188,15 +188,11 @@ internal enum SlateChatRenderer {
       inputRowCount = 1
     } else {
       var lines = TranscriptLayout.inputVisualLines(from: inputLine, textWidth: textWidth)
-      let needsExtraCursorRow =
-        lines.last.map { $0.count >= textWidth && textWidth > 0 } ?? false
-      if needsExtraCursorRow {
-        lines.append("")
-      }
+      let needsExtraCursorRow = lines.last.map { $0.count >= textWidth && textWidth > 0 } ?? false
+      if needsExtraCursorRow { lines.append("") }
       let capped = min(maxInputRows, max(1, lines.count))
       inputRowCount = capped
-      visualLines =
-        lines.count > capped
+      visualLines = lines.count > capped
         ? Array(lines.suffix(capped))
         : lines + Array(repeating: "", count: max(0, capped &- lines.count))
     }
@@ -210,73 +206,58 @@ internal enum SlateChatRenderer {
     let trayRowCount = trayVisualLines.count
     let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
 
-    // Targeted background fills (instead of resetting the whole grid).
-    // Only rows that are painted are marked dirty, so idle frames (cursor
-    // blink only) emit minimal CSI via dirty-region encoding.
-    if headerRows > 0 {
-      grid.blit(
-        column: 0, row: 0, width: cols, height: headerRows,
-        repeating: transcriptFill)
-    }
-    // Transcript area — fill the visible portion only.
-    if firstTrayRow > headerRows {
-      grid.blit(
-        column: 0, row: headerRows, width: cols, height: firstTrayRow &- headerRows,
-        repeating: transcriptFill)
-    }
-    // Input/tray background.
+    // Fill input/tray background
     let inputBgRowCount = trayRowCount &+ inputRowCount
     if inputBgRowCount > 0 {
-      grid.blit(
-        column: 0, row: firstTrayRow, width: cols, height: inputBgRowCount,
-        repeating: inputFill)
+      fillSemanticRect(&grid, col: 0, row: firstTrayRow,
+        width: cols, height: inputBgRowCount, with: inputFill)
     }
 
+    // Banner and usage HUD
     let usageReserve: Int = {
       guard let u = usage else { return 0 }
-      let w = usageHUDCharCount(u, maxRows: headerRows, theme: theme)
+      let w = usageHUDSemanticCharCount(u, maxRows: headerRows, theme: theme)
       return min(cols, w &+ 1)
     }()
     let bannerMaxWithUsage = usageReserve > 0 ? max(0, cols &- usageReserve) : cols
 
     if headerRows >= 1 {
       if let banner {
-        paintBannerKV(
-          into: &grid, row: 0, cols: cols, maxWidth: bannerMaxWithUsage, label: "LLM: ",
-          valueSpans: [
-            TerminalStyledSpan(
-              banner.baseURL, foreground: theme.bannerValue, background: theme.background)
-          ], theme: theme)
+        buildSemanticBannerKV(&grid, row: 0, cols: cols, maxWidth: bannerMaxWithUsage,
+          label: "LLM: ",
+          valueSpans: [StyledSpan(fg: theme.bannerValue, bg: theme.background,
+            bold: false, text: banner.baseURL)],
+          theme: theme)
       }
       if let u = usage {
-        paintUsageHUD(into: &grid, cols: cols, usage: u, maxRows: headerRows, theme: theme)
+        buildSemanticUsageHUD(&grid, cols: cols, usage: u, maxRows: headerRows, theme: theme)
       }
     }
 
     if headerRows >= 2, let banner {
       let shortId = String(banner.sessionId.prefix(8))
       let modelWithVersion = "\(banner.model)  v:\(banner.scribeVersion)  sid:\(shortId)"
-      paintBannerKV(
-        into: &grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage, label: "Model: ",
-        valueSpans: [
-          TerminalStyledSpan(
-            modelWithVersion, foreground: theme.bannerValue, background: theme.background)
-        ], theme: theme)
+      buildSemanticBannerKV(&grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage,
+        label: "Model: ",
+        valueSpans: [StyledSpan(fg: theme.bannerValue, bg: theme.background,
+          bold: false, text: modelWithVersion)],
+        theme: theme)
     }
+
     if headerRows >= 3, let banner {
       let bg = theme.background
-      var cwdSpans: [TerminalStyledSpan] = [
-        TerminalStyledSpan(banner.cwd, foreground: theme.bannerValue, background: bg)
+      var cwdSpans: [StyledSpan] = [
+        StyledSpan(fg: theme.bannerValue, bg: bg, bold: false, text: banner.cwd)
       ]
       if let branch = banner.gitBranch {
         cwdSpans.append(
-          TerminalStyledSpan("@\(branch)", foreground: theme.bannerLabel, background: bg))
+          StyledSpan(fg: theme.bannerLabel, bg: bg, bold: false, text: "@\(branch)"))
       }
-      paintBannerKV(
-        into: &grid, row: 2, cols: cols, maxWidth: bannerMaxWithUsage, label: "CWD: ",
-        valueSpans: cwdSpans, theme: theme)
+      buildSemanticBannerKV(&grid, row: 2, cols: cols, maxWidth: bannerMaxWithUsage,
+        label: "CWD: ", valueSpans: cwdSpans, theme: theme)
     }
 
+    // Transcript content
     if contentRows > 0 {
       let flat = flattenedTranscript
       let maxTailStart = max(0, flat.count &- contentRows)
@@ -288,105 +269,265 @@ internal enum SlateChatRenderer {
       let endIdx = tailStart &+ visibleCount
       while idx < endIdx {
         guard y < firstTrayRow else { break }
-        grid.blitSpans(column: 0, row: y, maxWidth: cols, flat[idx].spans)
+        writeSemanticSpans(&grid, col: 0, row: y, maxWidth: cols, spans: flat[idx].spans)
         y &+= 1
         idx &+= 1
       }
     }
 
+    // Queued tray
     if trayRowCount > 0 {
-      paintQueuedTrayRows(
-        into: &grid,
-        startRow: firstTrayRow,
-        cols: cols,
-        textWidth: trayTextWidth,
-        visualLines: trayVisualLines,
-        theme: theme)
+      buildSemanticQueuedTrayRows(&grid, startRow: firstTrayRow, cols: cols,
+        textWidth: trayTextWidth, visualLines: trayVisualLines, theme: theme)
     }
 
-    paintInputRows(
-      into: &grid,
-      startRow: firstInputRow,
-      cols: cols,
-      textWidth: textWidth,
-      visualLines: visualLines,
-      rowCount: inputRowCount,
-      llmWaitAnimationFrame: llmWaitAnimationFrame,
-      showSpinner: showSpinner,
-      theme: theme)
+    // Input rows
+    buildSemanticInputRows(&grid, startRow: firstInputRow, cols: cols,
+      textWidth: textWidth, visualLines: visualLines, rowCount: inputRowCount,
+      llmWaitAnimationFrame: llmWaitAnimationFrame, showSpinner: showSpinner, theme: theme)
+
+    return grid
   }
 
-  private static func formatUsageInt(_ n: Int) -> String {
-    ScribeUsageFormatting.groupingInt(n)
+  // MARK: - Semantic grid helpers (pure, operate on [[StyledSpan]])
+
+  /// Fill a rectangular region of the semantic grid.
+  private nonisolated static func fillSemanticRect(
+    _ grid: inout [[StyledSpan]],
+    col col0: Int, row row0: Int,
+    width: Int, height: Int,
+    with span: StyledSpan
+  ) {
+    let c0 = max(0, col0)
+    let c1 = min(col0 &+ width, grid[0].count)
+    let r0 = max(0, row0)
+    let r1 = min(row0 &+ height, grid.count)
+    guard c1 > c0, r1 > r0 else { return }
+    for r in r0..<r1 {
+      for c in c0..<c1 {
+        grid[r][c] = span
+      }
+    }
   }
 
-  private static func formatUsageIntOpt(_ n: Int?) -> String {
-    guard let n else { return "—" }
-    return formatUsageInt(n)
+  /// Write spans as a horizontal run into the semantic grid.
+  private nonisolated static func writeSemanticSpans(
+    _ grid: inout [[StyledSpan]],
+    col col0: Int, row: Int, maxWidth: Int,
+    spans: [StyledSpan]
+  ) {
+    guard row >= 0, row < grid.count, col0 >= 0, col0 < grid[0].count, maxWidth > 0 else { return }
+    let endCol = min(col0 &+ maxWidth, grid[0].count)
+    var x = col0
+    for span in spans {
+      guard x < endCol else { break }
+      for ch in span.text {
+        guard x < endCol else { break }
+        grid[row][x] = StyledSpan(fg: span.fg, bg: span.bg, bold: span.bold, text: String(ch))
+        x &+= 1
+      }
+    }
   }
 
-  private static func hudSpan(_ fg: TerminalRGB, _ text: String, bg: TerminalRGB, bold: Bool = false)
-    -> TerminalStyledSpan
-  {
-    TerminalStyledSpan(text, foreground: fg, background: bg, flags: bold ? .bold : [])
+  // MARK: - Semantic paint functions
+
+  private nonisolated static func buildSemanticBannerKV(
+    _ grid: inout [[StyledSpan]],
+    row: Int, cols: Int, maxWidth: Int,
+    label: String,
+    valueSpans: [StyledSpan],
+    theme: CLITheme
+  ) {
+    guard row >= 0, row < grid.count, !valueSpans.isEmpty else { return }
+    let bg = theme.background
+    let cap = min(max(0, maxWidth), cols)
+    let maxValueChars = max(0, cap &- label.count)
+
+    var spans = valueSpans
+    let totalChars = spans.reduce(0) { $0 + $1.text.count }
+    if totalChars > maxValueChars {
+      var budget = maxValueChars
+      var trimmed: [StyledSpan] = []
+      for span in spans {
+        guard budget > 0 else { break }
+        if span.text.count <= budget {
+          trimmed.append(span)
+          budget -= span.text.count
+        } else {
+          trimmed.append(
+            StyledSpan(fg: span.fg, bg: span.bg, bold: span.bold,
+              text: String(span.text.prefix(max(0, budget &- 1))) + "…"))
+          budget = 0
+        }
+      }
+      spans = trimmed
+    }
+
+    var allSpans = spans
+    allSpans.insert(
+      StyledSpan(fg: theme.bannerLabel, bg: bg, bold: false, text: label), at: 0)
+    writeSemanticSpans(&grid, col: 0, row: row, maxWidth: cap, spans: allSpans)
   }
 
-  /// Up to three lines of spans for the upper-right HUD.  When `maxRows` is small the
-  /// optional R/cache row is dropped first so totals stay visible.
-  private static func usageHUDSpans(from usage: UsageHUDSnapshot, maxRows: Int, theme: CLITheme)
-    -> [[TerminalStyledSpan]]
-  {
+  private nonisolated static func buildSemanticUsageHUD(
+    _ grid: inout [[StyledSpan]],
+    cols: Int,
+    usage: UsageHUDSnapshot?,
+    maxRows: Int,
+    theme: CLITheme
+  ) {
+    guard let usage, maxRows > 0 else { return }
+    let lines = usageHUDSemanticSpans(from: usage, maxRows: maxRows, theme: theme)
+    for (rowOffset, spans) in lines.enumerated() {
+      guard rowOffset < maxRows else { break }
+      let w = spans.reduce(0) { $0 + $1.text.count }
+      let startCol = max(0, cols &- w)
+      writeSemanticSpans(&grid, col: startCol, row: rowOffset,
+        maxWidth: cols &- startCol, spans: spans)
+    }
+  }
+
+  private nonisolated static func buildSemanticInputRows(
+    _ grid: inout [[StyledSpan]],
+    startRow: Int, cols: Int, textWidth: Int,
+    visualLines: [String], rowCount: Int,
+    llmWaitAnimationFrame: Int, showSpinner: Bool,
+    theme: CLITheme
+  ) {
+    let bg = theme.inputAreaBg
+    let gutter = String(repeating: " ", count: min(inputGutterColumns, cols))
+    var lineIdx = 0
+    while lineIdx < rowCount {
+      let row = startRow &+ lineIdx
+      guard row >= 0, row < grid.count else { break }
+      let onLastInputRow = lineIdx == rowCount &- 1
+
+      var spans: [StyledSpan] = []
+      if showSpinner, onLastInputRow {
+        spans.append(StyledSpan(fg: theme.scribePrefix, bg: bg, bold: false, text: "scribe: "))
+        let frames = llmWaitSpinner
+        let ch = frames[llmWaitAnimationFrame % frames.count]
+        spans.append(StyledSpan(fg: theme.spinnerGlyph, bg: bg, bold: false, text: String(ch)))
+        spans.append(StyledSpan(fg: theme.inputCursor, bg: bg, bold: false, text: "▏"))
+      } else if lineIdx == 0 {
+        spans.append(StyledSpan(fg: theme.userPrefix, bg: bg, bold: false, text: "you: "))
+        if lineIdx < visualLines.count, textWidth > 0 {
+          spans.append(
+            StyledSpan(fg: theme.inputText, bg: bg, bold: false,
+              text: String(visualLines[lineIdx].prefix(textWidth))))
+        }
+        if onLastInputRow {
+          spans.append(StyledSpan(fg: theme.inputCursor, bg: bg, bold: false, text: "▏"))
+        }
+      } else {
+        spans.append(StyledSpan(fg: theme.inputGutter, bg: bg, bold: false, text: gutter))
+        if lineIdx < visualLines.count, textWidth > 0 {
+          spans.append(
+            StyledSpan(fg: theme.inputText, bg: bg, bold: false,
+              text: String(visualLines[lineIdx].prefix(textWidth))))
+        }
+        if onLastInputRow {
+          spans.append(StyledSpan(fg: theme.inputCursor, bg: bg, bold: false, text: "▏"))
+        }
+      }
+      writeSemanticSpans(&grid, col: 0, row: row, maxWidth: cols, spans: spans)
+      lineIdx &+= 1
+    }
+  }
+
+  private nonisolated static func buildSemanticQueuedTrayRows(
+    _ grid: inout [[StyledSpan]],
+    startRow: Int, cols: Int, textWidth: Int,
+    visualLines: [String],
+    theme: CLITheme
+  ) {
+    guard !visualLines.isEmpty else { return }
+    let bg = theme.inputAreaBg
+    let gutterText = String(repeating: " ", count: min(queuedTrayGutterColumns, cols))
+    var lineIdx = 0
+    while lineIdx < visualLines.count {
+      let row = startRow &+ lineIdx
+      guard row >= 0, row < grid.count else { break }
+
+      var spans: [StyledSpan] = []
+      if lineIdx == 0 {
+        spans.append(StyledSpan(fg: theme.queuedPrefix, bg: bg, bold: false, text: "queued: "))
+      } else {
+        spans.append(StyledSpan(fg: theme.queuedGutter, bg: bg, bold: false, text: gutterText))
+      }
+      if textWidth > 0 {
+        spans.append(
+          StyledSpan(fg: theme.queuedText, bg: bg, bold: false,
+            text: String(visualLines[lineIdx].prefix(textWidth))))
+      }
+      writeSemanticSpans(&grid, col: 0, row: row, maxWidth: cols, spans: spans)
+      lineIdx &+= 1
+    }
+  }
+
+  // MARK: - Semantic HUD helpers (StyledSpan versions)
+
+  private nonisolated static func semanticHudSpan(
+    _ fg: TerminalRGB, _ text: String, bg: TerminalRGB, bold: Bool = false
+  ) -> StyledSpan {
+    StyledSpan(fg: fg, bg: bg, bold: bold, text: text)
+  }
+
+  private nonisolated static func usageHUDSemanticSpans(
+    from usage: UsageHUDSnapshot, maxRows: Int, theme: CLITheme
+  ) -> [[StyledSpan]] {
     let sep = "  ·  "
     let bg = theme.background
 
-    var row0: [TerminalStyledSpan] = [
-      hudSpan(theme.usageLabel, "in ", bg: bg),
-      hudSpan(theme.usagePrompt, formatUsageIntOpt(usage.roundPrompt), bg: bg),
-      hudSpan(theme.usageMuted, sep, bg: bg),
-      hudSpan(theme.usageLabel, "out ", bg: bg),
-      hudSpan(theme.usageCompletion, formatUsageIntOpt(usage.roundCompletion), bg: bg),
+    var row0: [StyledSpan] = [
+      semanticHudSpan(theme.usageLabel, "in ", bg: bg),
+      semanticHudSpan(theme.usagePrompt, formatUsageIntOpt(usage.roundPrompt), bg: bg),
+      semanticHudSpan(theme.usageMuted, sep, bg: bg),
+      semanticHudSpan(theme.usageLabel, "out ", bg: bg),
+      semanticHudSpan(theme.usageCompletion, formatUsageIntOpt(usage.roundCompletion), bg: bg),
     ]
     if let tps = usage.outputTokensPerSecond {
-      row0.append(hudSpan(theme.usageMuted, sep, bg: bg))
-      row0.append(hudSpan(theme.usageLabel, "rate ", bg: bg))
-      row0.append(hudSpan(theme.usageRate, String(format: "%.1f/s", tps), bg: bg))
+      row0.append(semanticHudSpan(theme.usageMuted, sep, bg: bg))
+      row0.append(semanticHudSpan(theme.usageLabel, "rate ", bg: bg))
+      row0.append(semanticHudSpan(theme.usageRate, String(format: "%.1f/s", tps), bg: bg))
     }
     if let pct = usage.contextWindowUsedPercent {
-      row0.append(hudSpan(theme.usageMuted, sep, bg: bg))
-      row0.append(hudSpan(theme.usageLabel, "ctx ", bg: bg))
+      row0.append(semanticHudSpan(theme.usageMuted, sep, bg: bg))
+      row0.append(semanticHudSpan(theme.usageLabel, "ctx ", bg: bg))
       let pctColor: TerminalRGB =
-        pct >= 90 ? theme.usageCtxPctDanger : (pct >= 75 ? theme.usageCtxPctWarn : theme.usageCtxPctNormal)
-      row0.append(hudSpan(pctColor, "\(pct)%", bg: bg))
+        pct >= 90 ? theme.usageCtxPctDanger
+          : (pct >= 75 ? theme.usageCtxPctWarn : theme.usageCtxPctNormal)
+      row0.append(semanticHudSpan(pctColor, "\(pct)%", bg: bg))
     }
 
     let hasR = (usage.reasoningTokens ?? 0) > 0
     let hasCache = (usage.cachedPromptTokens ?? 0) > 0
-    let lineDetail: [TerminalStyledSpan]? = {
+    let lineDetail: [StyledSpan]? = {
       guard hasR || hasCache else { return nil }
-      var row1: [TerminalStyledSpan] = []
+      var row1: [StyledSpan] = []
       if hasR {
-        row1.append(hudSpan(theme.usageLabel, "reasoning ", bg: bg))
-        row1.append(hudSpan(theme.usageReasoning, formatUsageInt(usage.reasoningTokens!), bg: bg))
+        row1.append(semanticHudSpan(theme.usageLabel, "reasoning ", bg: bg))
+        row1.append(semanticHudSpan(theme.usageReasoning, formatUsageInt(usage.reasoningTokens!), bg: bg))
       }
       if hasR && hasCache {
-        row1.append(hudSpan(theme.usageMuted, sep, bg: bg))
+        row1.append(semanticHudSpan(theme.usageMuted, sep, bg: bg))
       }
       if hasCache {
-        row1.append(hudSpan(theme.usageLabel, "cache ", bg: bg))
-        row1.append(hudSpan(theme.usageCache, formatUsageInt(usage.cachedPromptTokens!), bg: bg))
+        row1.append(semanticHudSpan(theme.usageLabel, "cache ", bg: bg))
+        row1.append(semanticHudSpan(theme.usageCache, formatUsageInt(usage.cachedPromptTokens!), bg: bg))
       }
       return row1
     }()
 
-    let lineSums: [TerminalStyledSpan] = [
-      hudSpan(theme.usageLabel, "turn Σ ", bg: bg),
-      hudSpan(theme.usageTurnSum, formatUsageInt(usage.turnTotal), bg: bg, bold: true),
-      hudSpan(theme.usageMuted, sep, bg: bg),
-      hudSpan(theme.usageLabel, "all Σ ", bg: bg),
-      hudSpan(theme.usageSessionSum, formatUsageInt(usage.sessionTotal), bg: bg, bold: true),
+    let lineSums: [StyledSpan] = [
+      semanticHudSpan(theme.usageLabel, "turn Σ ", bg: bg),
+      semanticHudSpan(theme.usageTurnSum, formatUsageInt(usage.turnTotal), bg: bg, bold: true),
+      semanticHudSpan(theme.usageMuted, sep, bg: bg),
+      semanticHudSpan(theme.usageLabel, "all Σ ", bg: bg),
+      semanticHudSpan(theme.usageSessionSum, formatUsageInt(usage.sessionTotal), bg: bg, bold: true),
     ]
 
-    var full: [[TerminalStyledSpan]] = [row0]
+    var full: [[StyledSpan]] = [row0]
     if let lineDetail { full.append(lineDetail) }
     full.append(lineSums)
 
@@ -397,158 +538,34 @@ internal enum SlateChatRenderer {
     return Array(full.prefix(maxRows))
   }
 
-  private static func usageHUDCharCount(_ usage: UsageHUDSnapshot, maxRows: Int, theme: CLITheme) -> Int {
-    usageHUDSpans(from: usage, maxRows: maxRows, theme: theme)
+  private nonisolated static func usageHUDSemanticCharCount(
+    _ usage: UsageHUDSnapshot, maxRows: Int, theme: CLITheme
+  ) -> Int {
+    usageHUDSemanticSpans(from: usage, maxRows: maxRows, theme: theme)
       .map { $0.reduce(0) { $0 + $1.text.count } }.max() ?? 0
   }
 
-  private static func paintBannerKV(
-    into grid: inout TerminalCellGrid,
-    row: Int,
-    cols: Int,
-    maxWidth: Int,
-    label: String,
-    valueSpans: [TerminalStyledSpan],
-    theme: CLITheme
-  ) {
-    guard row >= 0, row < grid.rows, !valueSpans.isEmpty else { return }
-    let bg = theme.background
-    let cap = min(max(0, maxWidth), cols)
-    let maxValueChars = max(0, cap &- label.count)
-
-    var spans = valueSpans
-    let totalChars = spans.reduce(0) { $0 + $1.text.count }
-    if totalChars > maxValueChars {
-      var budget = maxValueChars
-      var trimmed: [TerminalStyledSpan] = []
-      for span in spans {
-        guard budget > 0 else { break }
-        if span.text.count <= budget {
-          trimmed.append(span)
-          budget -= span.text.count
-        } else {
-          trimmed.append(
-            TerminalStyledSpan(
-              String(span.text.prefix(max(0, budget &- 1))) + "…",
-              foreground: span.foreground,
-              background: span.background,
-              flags: span.flags))
-          budget = 0
-        }
-      }
-      spans = trimmed
-    }
-
-    // Build spans with label prepended in one allocation.
-    var allSpans = spans
-    allSpans.insert(TerminalStyledSpan(label, foreground: theme.bannerLabel, background: bg), at: 0)
-    grid.blitSpans(
-      column: 0, row: row, maxWidth: cap, allSpans)
+  private nonisolated static func formatUsageInt(_ n: Int) -> String {
+    ScribeUsageFormatting.groupingInt(n)
   }
 
-  private static func paintUsageHUD(
-    into grid: inout TerminalCellGrid,
-    cols: Int,
-    usage: UsageHUDSnapshot?,
-    maxRows: Int,
-    theme: CLITheme
-  ) {
-    guard let usage, maxRows > 0 else { return }
-    let lines = usageHUDSpans(from: usage, maxRows: maxRows, theme: theme)
-    for (row, spans) in lines.enumerated() {
-      guard row >= 0, row < grid.rows else { break }
-      let w = spans.reduce(0) { $0 + $1.text.count }
-      let startCol = max(0, cols &- w)
-      grid.blitSpans(column: startCol, row: row, maxWidth: cols &- startCol, spans)
-    }
+  private nonisolated static func formatUsageIntOpt(_ n: Int?) -> String {
+    guard let n else { return "—" }
+    return formatUsageInt(n)
   }
 
-  /// Paints the input stack: first row `you: `, continuation rows gutter-indented; caret on the last row.
-  private static func paintInputRows(
-    into grid: inout TerminalCellGrid,
-    startRow: Int,
-    cols: Int,
-    textWidth: Int,
-    visualLines: [String],
-    rowCount: Int,
-    llmWaitAnimationFrame: Int,
-    showSpinner: Bool,
-    theme: CLITheme
-  ) {
-    let bg = theme.inputAreaBg
-    let gutter = String(repeating: " ", count: min(inputGutterColumns, cols))
-    var lineIdx = 0
-    while lineIdx < rowCount {
-      let row = startRow &+ lineIdx
-      guard row >= 0, row < grid.rows else { break }
-      let onLastInputRow = lineIdx == rowCount &- 1
+}
 
-      var spans: [TerminalStyledSpan] = []
-      if showSpinner, onLastInputRow {
-        spans.append(TerminalStyledSpan("scribe: ", foreground: theme.scribePrefix, background: bg))
-        let frames = llmWaitSpinner
-        let ch = frames[llmWaitAnimationFrame % frames.count]
-        spans.append(TerminalStyledSpan(String(ch), foreground: theme.spinnerGlyph, background: bg))
-        spans.append(TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))
-      } else if lineIdx == 0 {
-        spans.append(TerminalStyledSpan("you: ", foreground: theme.userPrefix, background: bg))
-        if lineIdx < visualLines.count, textWidth > 0 {
-          spans.append(
-            TerminalStyledSpan(
-              String(visualLines[lineIdx].prefix(textWidth)), foreground: theme.inputText, background: bg))
-        }
-        if onLastInputRow {
-          spans.append(TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))
-        }
-      } else {
-        spans.append(TerminalStyledSpan(gutter, foreground: theme.inputGutter, background: bg))
-        if lineIdx < visualLines.count, textWidth > 0 {
-          spans.append(
-            TerminalStyledSpan(
-              String(visualLines[lineIdx].prefix(textWidth)), foreground: theme.inputText, background: bg))
-        }
-        if onLastInputRow {
-          spans.append(TerminalStyledSpan("▏", foreground: theme.inputCursor, background: bg))
-        }
-      }
-      grid.blitSpans(column: 0, row: row, maxWidth: cols, spans)
-      lineIdx &+= 1
-    }
-  }
+// MARK: - TerminalCell + StyledSpan bridge
 
-  /// Paints the queued-tray strip that sits between the transcript and the input area:
-  /// first row prefixed with `queued: ` (orange) plus the message in dimmed white;
-  /// continuation rows align under the message with an 8-space gutter.
-  private static func paintQueuedTrayRows(
-    into grid: inout TerminalCellGrid,
-    startRow: Int,
-    cols: Int,
-    textWidth: Int,
-    visualLines: [String],
-    theme: CLITheme
-  ) {
-    guard !visualLines.isEmpty else { return }
-    let bg = theme.inputAreaBg
-    let gutterText = String(repeating: " ", count: min(queuedTrayGutterColumns, cols))
-    var lineIdx = 0
-    while lineIdx < visualLines.count {
-      let row = startRow &+ lineIdx
-      guard row >= 0, row < grid.rows else { break }
-
-      var spans: [TerminalStyledSpan] = []
-      if lineIdx == 0 {
-        spans.append(TerminalStyledSpan("queued: ", foreground: theme.queuedPrefix, background: bg))
-      } else {
-        spans.append(TerminalStyledSpan(gutterText, foreground: theme.queuedGutter, background: bg))
-      }
-      if textWidth > 0 {
-        spans.append(
-          TerminalStyledSpan(
-            String(visualLines[lineIdx].prefix(textWidth)),
-            foreground: theme.queuedText, background: bg))
-      }
-      grid.blitSpans(column: 0, row: row, maxWidth: cols, spans)
-      lineIdx &+= 1
-    }
+extension TerminalCell {
+  /// Create a `TerminalCell` from a `StyledSpan` whose text is a single character.
+  init(span: StyledSpan) {
+    self.init(
+      glyph: span.text.first ?? " ",
+      foreground: span.fg,
+      background: span.bg,
+      flags: span.bold ? .bold : []
+    )
   }
 }

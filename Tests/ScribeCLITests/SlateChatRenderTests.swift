@@ -9,7 +9,6 @@ import SlateCore
 /// Tests that the render pipeline correctly paints transcript content
 /// for the first-message scenario and during transcript growth.
 @Suite
-@MainActor
 struct SlateChatRenderTests {
 
   // MARK: - First message: transcript appears at the bottom
@@ -17,7 +16,6 @@ struct SlateChatRenderTests {
   @Test func firstUserMessageAppearsInTranscriptArea() {
     let cols = 80
     let rows = 24
-    var grid = TerminalCellGrid(cols: cols, rows: rows, filling: .defaultCell)
 
     // Simulate: user submitted "hello", model becomes busy
     let transcriptLines: [TLine] = [
@@ -41,8 +39,7 @@ struct SlateChatRenderTests {
     )
 
     // Important: modelBusy = true, inputLine = "" (buffer taken after submit)
-    SlateChatRenderer.render(
-      into: &grid,
+    let grid = SlateChatRenderer.buildGrid(
       cols: cols,
       rows: rows,
       flattenedTranscript: flatTranscript,
@@ -63,20 +60,19 @@ struct SlateChatRenderTests {
 
     // Check that rows 21-22 contain our transcript content
     let row21 = transcriptStartRow + 18  // headerRows + topPad
-    let cell21 = grid[column: 0, row: row21]
-    #expect(cell21.glyph == "y", "Expected 'y' from 'you:' at row \(row21), got '\(cell21.glyph)'")
+    let span21 = grid[row21][0]
+    #expect(span21.text == "y", "Expected 'y' from 'you:' at row \(row21), got '\(span21.text)'")
 
-    let cell22 = grid[column: 0, row: row21 + 1]
+    let span22 = grid[row21 + 1][0]
     // Second line starts with "  hello", first char is space
-    #expect(cell22.glyph == " ", "Expected space at row \(row21 + 1), got '\(cell22.glyph)'")
-    let cell22Text = grid[column: 2, row: row21 + 1]
-    #expect(cell22Text.glyph == "h", "Expected 'h' from 'hello' at row \(row21 + 1), col 2, got '\(cell22Text.glyph)'")
+    #expect(span22.text == " ", "Expected space at row \(row21 + 1), got '\(span22.text)'")
+    let span22Text = grid[row21 + 1][2]
+    #expect(span22Text.text == "h", "Expected 'h' from 'hello' at row \(row21 + 1), col 2, got '\(span22Text.text)'")
 
     // The rows above the content should be blank (transcript background fill)
     if row21 > transcriptStartRow {
-      let blankRow = transcriptStartRow
-      let blankCell = grid[column: 0, row: blankRow]
-      #expect(blankCell.glyph == " ", "Expected blank (space) at row \(blankRow), got '\(blankCell.glyph)'")
+      let blankSpan = grid[transcriptStartRow][0]
+      #expect(blankSpan.text == " ", "Expected blank (space) at row \(transcriptStartRow), got '\(blankSpan.text)'")
     }
   }
 
@@ -85,7 +81,6 @@ struct SlateChatRenderTests {
   @Test func transcriptGrowthTracksTail() {
     let cols = 80
     let rows = 24
-    var grid = TerminalCellGrid(cols: cols, rows: rows, filling: .defaultCell)
 
     let banner = BannerSnapshot(
       baseURL: "https://api.example.com",
@@ -103,8 +98,7 @@ struct SlateChatRenderTests {
     ]
     let flat1 = TranscriptLayout.flattenedRows(from: lines1, width: cols)
 
-    SlateChatRenderer.render(
-      into: &grid,
+    let grid1 = SlateChatRenderer.buildGrid(
       cols: cols,
       rows: rows,
       flattenedTranscript: flat1,
@@ -119,7 +113,7 @@ struct SlateChatRenderTests {
     )
 
     // Verify first message is visible
-    #expect(grid[column: 0, row: 21].glyph == "y")
+    #expect(grid1[21][0].text == "y")
 
     // Now the assistant responds — transcript grows to many lines
     var lines2 = lines1
@@ -135,8 +129,7 @@ struct SlateChatRenderTests {
     // contentRows = 20, flatCount = lots
     let tailStart = max(0, flat2.count - 20)
 
-    SlateChatRenderer.render(
-      into: &grid,
+    let grid2 = SlateChatRenderer.buildGrid(
       cols: cols,
       rows: rows,
       flattenedTranscript: flat2,
@@ -154,8 +147,8 @@ struct SlateChatRenderTests {
     // First content row is headerRows (3). Should show tail of transcript.
     let firstContentRow = 3
     // Should NOT be "you:" at the top (that's scrolled off)
-    let topCell = grid[column: 0, row: firstContentRow]
-    #expect(topCell.glyph != "y", "Expected first message to be scrolled off, but 'y' found at row \(firstContentRow)")
+    let topSpan = grid2[firstContentRow][0]
+    #expect(topSpan.text != "y", "Expected first message to be scrolled off, but 'y' found at row \(firstContentRow)")
   }
 
   // MARK: - Empty transcript renders blank area correctly
@@ -163,7 +156,6 @@ struct SlateChatRenderTests {
   @Test func emptyTranscriptRendersBlank() {
     let cols = 80
     let rows = 24
-    var grid = TerminalCellGrid(cols: cols, rows: rows, filling: .defaultCell)
 
     let banner = BannerSnapshot(
       baseURL: "https://api.example.com",
@@ -174,8 +166,7 @@ struct SlateChatRenderTests {
       sessionId: "test-sid"
     )
 
-    SlateChatRenderer.render(
-      into: &grid,
+    let grid = SlateChatRenderer.buildGrid(
       cols: cols,
       rows: rows,
       flattenedTranscript: [],
@@ -191,8 +182,7 @@ struct SlateChatRenderTests {
 
     // Transcript area below header should be blank (filled with spaces)
     let headerRows = 3
-    let firstBlankRow = headerRows
-    let cell = grid[column: 0, row: firstBlankRow]
-    #expect(cell.glyph == " ", "Expected blank transcript area, got '\(cell.glyph)' at row \(firstBlankRow)")
+    let span = grid[headerRows][0]
+    #expect(span.text == " ", "Expected blank transcript area, got '\(span.text)' at row \(headerRows)")
   }
 }
