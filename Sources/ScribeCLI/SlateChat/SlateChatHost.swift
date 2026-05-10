@@ -3,6 +3,7 @@ import Logging
 import ScribeCore
 import ScribeLLM
 import SlateCore
+import Synchronization
 
 // MARK: - User input gate
 
