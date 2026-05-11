@@ -32,7 +32,6 @@ struct TranscriptRenderIntegrationTests {
     )
 
     // ── Frame 1: Empty transcript (before coordinator runs) ──
-    var grid1 = TerminalCellGrid(cols: cols, rows: rows, filling: .defaultCell)
     let flat1 = TranscriptLayout.FlattenCache.flatten(
       cache: &flattenCache,
       completed: transcriptLines,
@@ -44,8 +43,8 @@ struct TranscriptRenderIntegrationTests {
       inputLine: "typing...", waitingForLLM: false, queuedTrayText: nil)
     _ = viewport.resolve(flatCount: flat1.count, contentRows: contentRows1)
 
-    SlateChatRenderer.render(
-      into: &grid1, cols: cols, rows: rows,
+    let grid1 = SlateChatRenderer.buildGrid(
+      cols: cols, rows: rows,
       flattenedTranscript: flat1,
       transcriptTailStart: viewport.firstVisibleRow,
       banner: banner, usage: nil,
@@ -59,7 +58,7 @@ struct TranscriptRenderIntegrationTests {
     let headerRows = 3
     let rowBelowHeader = headerRows
     #expect(
-      grid1[column: 0, row: rowBelowHeader].glyph == " ",
+      grid1[rowBelowHeader][0].text == " ",
       "Frame 1: transcript area should be blank")
 
     // ── Frame 2: User message arrives (after coordinator runs) ──
@@ -69,7 +68,7 @@ struct TranscriptRenderIntegrationTests {
     transcriptLines.append(
       TLine(spans: [StyledSpan(fg: theme.userBody, bg: theme.background, bold: false, text: "  hello")]))
 
-    var grid2 = TerminalCellGrid(cols: cols, rows: rows, filling: .defaultCell)
+
     let flat2 = TranscriptLayout.FlattenCache.flatten(
       cache: &flattenCache,
       completed: transcriptLines,
@@ -82,8 +81,8 @@ struct TranscriptRenderIntegrationTests {
       inputLine: "", waitingForLLM: true, queuedTrayText: nil)
     _ = viewport.resolve(flatCount: flat2.count, contentRows: contentRows2)
 
-    SlateChatRenderer.render(
-      into: &grid2, cols: cols, rows: rows,
+    let grid2 = SlateChatRenderer.buildGrid(
+      cols: cols, rows: rows,
       flattenedTranscript: flat2,
       transcriptTailStart: viewport.firstVisibleRow,
       banner: banner, usage: nil,
@@ -98,15 +97,15 @@ struct TranscriptRenderIntegrationTests {
     let expectedFirstContentRow = 3 + (contentRows2 - flat2.count)  // headerRows + topPad
     #expect(expectedFirstContentRow == 21)
 
-    let youCell = grid2[column: 0, row: expectedFirstContentRow]
+    let youCell = grid2[expectedFirstContentRow][0]
     #expect(
-      youCell.glyph == "y",
-      "Frame 2: Expected 'y' from 'you:' at row \(expectedFirstContentRow), got '\(youCell.glyph)'")
+      youCell.text == "y",
+      "Frame 2: Expected 'y' from 'you:' at row \(expectedFirstContentRow), got '\(youCell.text)'")
 
-    let helloCell = grid2[column: 2, row: expectedFirstContentRow + 1]
+    let helloCell = grid2[expectedFirstContentRow + 1][2]
     #expect(
-      helloCell.glyph == "h",
-      "Frame 2: Expected 'h' from 'hello' at row \(expectedFirstContentRow + 1) col 2, got '\(helloCell.glyph)'")
+      helloCell.text == "h",
+      "Frame 2: Expected 'h' from 'hello' at row \(expectedFirstContentRow + 1) col 2, got '\(helloCell.text)'")
   }
 
   // MARK: - Viewport stays in follow mode through empty→content transition

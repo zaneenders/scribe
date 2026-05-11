@@ -123,6 +123,8 @@ internal final class SlateChatHost {
 
   // MARK: - UI state
 
+  private var inputBuffer: String = ""
+  private var inPaste: Bool = false
   private var modelBusy: Bool = false
   private var coordinatorFinished: Bool = false
   private var queuedTrayText: String? = nil
@@ -282,16 +284,26 @@ internal final class SlateChatHost {
 
           for action in actions {
             switch action {
+            case .bracketedPasteStart:
+              self.inPaste = true
+            case .bracketedPasteEnd:
+              self.inPaste = false
+
             case .enter:
-              let text = self.inputHandler.takeBuffer()
+              if self.inPaste {
+                self.inputBuffer.append("\n")
+              } else {
+              let text = self.inputBuffer
+              self.inputBuffer = ""
               self.submitCoordinator.setModelBusy(self.modelBusy)
               let effect = self.submitCoordinator.handleEnter(text: text)
               shouldStop = self.applySubmitEffect(effect, gate: gate)
+              }
 
             case .ctrlC:
               let (effect, recallText) = self.submitCoordinator.handleCtrlC()
               if let recall = recallText {
-                self.inputHandler.setBuffer(recall)
+                self.inputBuffer = recall
                 self.queuedTrayText = nil
                 self.renderWake?.requestRender()
               }
@@ -314,17 +326,25 @@ internal final class SlateChatHost {
             case .end:
               self.viewport.queueGoToBottom()
 
-            case .newline:
+            case .escape:
+              break
+
+            case .shiftEnter:
+              self.inputBuffer.append("\n")
               self.log.debug(
                 "chat.user.input.newline",
                 metadata: [
                   "source": "paste-or-shift-enter",
-                  "buffer_chars": "\(self.inputHandler.buffer.count)",
+                  "buffer_chars": "\(self.inputBuffer.count)",
                   "has_queue": "\(self.submitCoordinator.queuedText != nil)",
                 ])
 
-            case .character, .backspace, .tab:
-              break  // Buffer already mutated by TerminalInputHandler
+            case .character(let ch):
+              self.inputBuffer.append(ch)
+            case .backspace:
+              if !self.inputBuffer.isEmpty { self.inputBuffer.removeLast() }
+            case .tab:
+              self.inputBuffer.append("\t")
             }
           }
 
@@ -362,7 +382,7 @@ internal final class SlateChatHost {
             flattenCache: self.flattenCache,
             banner: self.banner,
             usageHUD: self.transcriptState.usageHUD,
-            inputBuffer: self.inputHandler.buffer,
+            inputBuffer: self.inputBuffer,
             modelBusy: self.modelBusy,
             queuedTrayText: self.queuedTrayText,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
@@ -376,19 +396,29 @@ internal final class SlateChatHost {
           let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
 
           let submitStart = Date()
-          SlateChatRenderer.render(
-            into: &grid,
+          let spanGrid = SlateChatRenderer.buildGrid(
             cols: scrCols,
             rows: scrRows,
             flattenedTranscript: output.flattenedTranscript,
             transcriptTailStart: output.transcriptTailStart,
             banner: self.banner,
             usage: self.transcriptState.usageHUD,
-            inputLine: self.inputHandler.buffer,
+            inputLine: self.inputBuffer,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
             queuedTrayText: self.queuedTrayText,
             theme: .default)
+          // Paint semantic spans into the terminal grid
+          for (row, spanRow) in spanGrid.enumerated() {
+            for (col, span) in spanRow.enumerated() {
+              let ch = span.text.first ?? " "
+              grid[column: col, row: row] = TerminalCell(
+                glyph: ch,
+                foreground: span.foreground,
+                background: span.background,
+                flags: span.flags)
+            }
+          }
           let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
           let totalMs = prepareMs &+ submitMs
           if totalMs >= 50 {
@@ -403,7 +433,7 @@ internal final class SlateChatHost {
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
                 "queue_chars": "\(self.submitCoordinator.queuedText?.count ?? 0)",
-                "buffer_chars": "\(self.inputHandler.buffer.count)",
+                "buffer_chars": "\(self.inputBuffer.count)",
               ])
           }
         }
