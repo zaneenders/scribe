@@ -61,7 +61,7 @@ struct AgentStateSnapshot: Sendable {
 /// for await event in stream.events { /* render */ }
 /// let result = try await stream.result.value
 /// ```
-public struct ScribeAgent: Sendable {
+public struct ScribeAgent: Sendable, AgentProtocol {
 
   // ── Internal mutable state (actor) ──────────────────
 

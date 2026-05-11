@@ -50,6 +50,23 @@ enum HostEvent: Sendable {
   case coordinatorFinished
 }
 
+extension HostEvent: Equatable {
+  static func == (lhs: HostEvent, rhs: HostEvent) -> Bool {
+    switch (lhs, rhs) {
+    case (.coordinatorFinished, .coordinatorFinished):
+      return true
+    case (.modelTurnRunning(let a), .modelTurnRunning(let b)):
+      return a == b
+    case (.transcript, .transcript):
+      // TranscriptEvent is not Equatable; treat all transcript
+      // events as equal for host-level matching.
+      return true
+    default:
+      return false
+    }
+  }
+}
+
 // MARK: - Transcript flatten cache
 
 extension TranscriptLayout {
@@ -134,23 +151,6 @@ internal final class SlateChatHost {
   // Usage tracking is in transcriptState — no separate fields needed.
 
   // MARK: - Coordinator communication
-
-  /// Thread-safe event queue for coordinator → host communication.
-  private final class EventQueue: Sendable {
-    private let events: Mutex<[HostEvent]> = Mutex([])
-
-    func enqueue(_ event: HostEvent) {
-      events.withLock { $0.append(event) }
-    }
-
-    func drain() -> [HostEvent] {
-      events.withLock {
-        let copy = $0
-        $0 = []
-        return copy
-      }
-    }
-  }
 
   private let eventQueue = EventQueue()
   private let markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()
@@ -245,7 +245,13 @@ internal final class SlateChatHost {
           persistURL: persistURL,
           sessionId: self.sessionId,
           sessionCreatedAt: self.sessionCreatedAt,
-          lines: lineStream
+          lines: lineStream,
+          makeAgent: { [configuration, systemPrompt] initialMessages in
+            try ScribeAgent(
+              configuration: configuration,
+              systemPrompt: systemPrompt,
+              initialMessages: initialMessages)
+          }
         )
         self.coordinatorTask = Task {
           await coordinator.run()

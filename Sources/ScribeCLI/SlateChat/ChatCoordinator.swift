@@ -7,12 +7,13 @@ import Synchronization
 // MARK: - ChatCoordinator
 
 /// Actor that owns the agent-turn loop: reads user input lines from an AsyncStream,
-/// processes them through `ScribeAgent`, and emits `HostEvent`s to a callback.
+/// processes them through an `AgentProtocol` implementation, and emits `HostEvent`s
+/// to a callback.
 ///
 /// Extracted from `SlateChatHost` to make the turn-loop testable without a TUI.
 actor ChatCoordinator {
 
-  private let configuration: ScribeConfig
+  private let makeAgent: AgentFactory
   private let systemPrompt: String
   private let resumeSnapshot: [Components.Schemas.ChatMessage]
   private let interruptFlag: ModelTurnInterruptFlag
@@ -22,6 +23,7 @@ actor ChatCoordinator {
   private let sessionId: UUID
   private let sessionCreatedAt: Date
   private let lines: AsyncStream<String>
+  private let configuration: ScribeConfig
 
   init(
     configuration: ScribeConfig,
@@ -33,7 +35,8 @@ actor ChatCoordinator {
     persistURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,
-    lines: AsyncStream<String>
+    lines: AsyncStream<String>,
+    makeAgent: @escaping AgentFactory
   ) {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
@@ -45,10 +48,11 @@ actor ChatCoordinator {
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.lines = lines
+    self.makeAgent = makeAgent
   }
 
   func run() async {
-    func persistNew(from agent: ScribeAgent, since count: Int) async {
+    func persistNew(from agent: any AgentProtocol, since count: Int) async {
       let newMessages = await agent.messages(since: count)
       guard !newMessages.isEmpty else { return }
       do {
@@ -83,11 +87,7 @@ actor ChatCoordinator {
         initialMessages = [.init(role: .system, content: systemPrompt)]
       }
 
-      let agent = try ScribeAgent(
-        configuration: configuration,
-        systemPrompt: systemPrompt,
-        initialMessages: initialMessages
-      )
+      let agent = try await makeAgent(initialMessages)
 
       // Write metadata on first persist (new sessions only).
       if resumeSnapshot.isEmpty {
