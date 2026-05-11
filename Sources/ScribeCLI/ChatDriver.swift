@@ -21,7 +21,7 @@ public struct ChatDriver: Sendable {
     public var agent: ScribeAgent
     /// Theme for render output.
     public var theme: CLITheme
-    /// If true, collect a `RenderOutput` snapshot after every `TranscriptEvent`.
+    /// If true, collect a `HeadlessRenderOutput` snapshot after every `TranscriptEvent`.
     public var captureEveryEvent: Bool
     /// Virtual terminal width for frame rendering.
     public var terminalCols: Int
@@ -153,7 +153,7 @@ public struct ChatDriver: Sendable {
     )
   }
 
-  /// Build a `RenderOutput` from the current transcript state (pure function).
+  /// Build a `HeadlessRenderOutput` from the current transcript state (pure function).
   ///
   /// Renders the flattened transcript into simple text lines — no TUI grid needed.
   /// Each `TLine` becomes one text line with ANSI-like prefix markers stripped.
@@ -162,14 +162,13 @@ public struct ChatDriver: Sendable {
     theme: CLITheme,
     cols: Int,
     rows: Int
-  ) -> RenderOutput {
+  ) -> HeadlessRenderOutput {
     let completed = controller.completedLines
     let open = controller.streamingOpenLine
     let generation = controller.generation
 
-    var cache = TranscriptLayout.FlattenCache()
-    let flatTranscript = TranscriptLayout.FlattenCache.flatten(
-      cache: &cache,
+    let (_, flatTranscript) = TranscriptLayout.FlattenCache.flatten(
+      cache: TranscriptLayout.FlattenCache(),
       completed: completed,
       open: open,
       width: cols,
@@ -181,14 +180,14 @@ public struct ChatDriver: Sendable {
       line.spans.map { $0.text }.joined()
     }
 
-    // Build RenderCell rows from text.
-    let renderedLines: [RenderLine] = textLines.enumerated().map { (i, text) in
-      var cells: [RenderCell] = []
+    // Build HeadlessRenderCell rows from text.
+    let renderedLines: [HeadlessRenderLine] = textLines.enumerated().map { (i, text) in
+      var cells: [HeadlessRenderCell] = []
       for (j, ch) in text.enumerated() {
         // Use the first span's styling if available.
         let span = i < flatTranscript.count && j < flatTranscript[i].spans.count
           ? flatTranscript[i].spans.first : nil
-        cells.append(RenderCell(
+        cells.append(HeadlessRenderCell(
           glyph: ch,
           foreground: span?.fg ?? theme.inputText,
           background: span?.bg ?? theme.background,
@@ -196,16 +195,16 @@ public struct ChatDriver: Sendable {
       }
       // Pad to full width with spaces.
       while cells.count < cols {
-        cells.append(RenderCell(
+        cells.append(HeadlessRenderCell(
           glyph: " ",
           foreground: theme.inputText,
           background: theme.background,
           bold: false))
       }
-      return RenderLine(cells: cells)
+      return HeadlessRenderLine(cells: cells)
     }
 
-    return RenderOutput(
+    return HeadlessRenderOutput(
       cols: cols,
       rows: rows,
       flatTranscript: flatTranscript,
@@ -227,14 +226,14 @@ public struct RunResult: Sendable {
   /// The final transcript (completed lines).
   public var finalTranscript: [TLine]
   /// The final render output.
-  public var finalRender: RenderOutput
+  public var finalRender: HeadlessRenderOutput
 
   public init(
     outcome: TurnOutcome,
     messages: [Components.Schemas.ChatMessage],
     transcriptHistory: [TranscriptSnapshot],
     finalTranscript: [TLine],
-    finalRender: RenderOutput
+    finalRender: HeadlessRenderOutput
   ) {
     self.outcome = outcome
     self.messages = messages
@@ -244,10 +243,10 @@ public struct RunResult: Sendable {
   }
 }
 
-// MARK: - RenderOutput
+// MARK: - HeadlessRenderOutput
 
 /// A snapshot of the rendered terminal grid, inspectable in tests.
-public struct RenderOutput: Equatable, Sendable {
+public struct HeadlessRenderOutput: Equatable, Sendable {
   /// Grid width in cells.
   public var cols: Int
   /// Grid height in cells.
@@ -255,13 +254,13 @@ public struct RenderOutput: Equatable, Sendable {
   /// The flattened transcript that was rendered.
   public var flatTranscript: [TLine]
   /// The rendered cell grid, row by row.
-  public var renderedLines: [RenderLine]
+  public var renderedLines: [HeadlessRenderLine]
 
   public init(
     cols: Int,
     rows: Int,
     flatTranscript: [TLine],
-    renderedLines: [RenderLine]
+    renderedLines: [HeadlessRenderLine]
   ) {
     self.cols = cols
     self.rows = rows
@@ -277,7 +276,7 @@ public struct RenderOutput: Equatable, Sendable {
   }
 
   /// Returns all cells on the given row.
-  public func row(_ index: Int) -> RenderLine? {
+  public func row(_ index: Int) -> HeadlessRenderLine? {
     guard index >= 0, index < renderedLines.count else { return nil }
     return renderedLines[index]
   }
@@ -295,10 +294,10 @@ public struct RenderOutput: Equatable, Sendable {
 }
 
 /// One row of rendered cells.
-public struct RenderLine: Equatable, Sendable {
-  public var cells: [RenderCell]
+public struct HeadlessRenderLine: Equatable, Sendable {
+  public var cells: [HeadlessRenderCell]
 
-  public init(cells: [RenderCell]) {
+  public init(cells: [HeadlessRenderCell]) {
     self.cells = cells
   }
 
@@ -309,7 +308,7 @@ public struct RenderLine: Equatable, Sendable {
 }
 
 /// One cell in the rendered grid.
-public struct RenderCell: Equatable, Sendable {
+public struct HeadlessRenderCell: Equatable, Sendable {
   public var glyph: Character
   public var foreground: TerminalRGB
   public var background: TerminalRGB
