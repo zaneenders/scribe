@@ -208,7 +208,20 @@ enum Shell {
           // Kill the process tree first so the async sequences hit EOF.
           // writeStream will drain any remaining buffered output and
           // return naturally — do NOT close handles here or we lose
-          // partial output that hasn't been delivered yet.
+          // partial output that hasn't been delivered yet. The body's
+          // `catch is CancellationError` path closes handles once drain
+          // returns and reads partial sizes from disk.
+          //
+          // Previously this also spawned an unstructured `Task { sleep
+          // 500ms; close handles }` as a safety net. That was removed:
+          //   1. Closing the *write* side of the temp file does nothing
+          //      to unblock the *read* side of the subprocess stdout
+          //      pipe owned by swift-subprocess, so it never actually
+          //      saved a hanging drain.
+          //   2. Each interrupted shell left an orphan Task on the
+          //      cooperative pool holding two FileHandle references for
+          //      ≥500 ms, which under repeated Ctrl-C accumulated FDs
+          //      and contributed to the spin reports.
           do {
             #if os(Windows)
             logger.trace("shell-onCancel-kill-windows", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
@@ -237,17 +250,6 @@ enum Shell {
                 "shell_id": "\(id)", "pid": "\(pid)",
                 "error": "\(String(describing: error))",
               ])
-          }
-
-          // Safety net: if the process didn't die quickly enough, close
-          // handles after a short grace period so writeStream can't hang
-          // indefinitely.  The unstructured task avoids blocking onCancel.
-          let captureStdout = stdoutHandle
-          let captureStderr = stderrHandle
-          Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            try? captureStdout.close()
-            try? captureStderr.close()
           }
 
           logger.trace(
@@ -374,8 +376,17 @@ enum Shell {
         "cancelled": "\(Task.isCancelled)",
       ])
 
+    // Once `stopWriting` flips we keep iterating the producer's sequence so
+    // the underlying pipe drains — otherwise the subprocess blocks on its
+    // next stdout write, the AsyncBufferSequence never EOFs, and a
+    // SIGKILL'd process can leave this drain hanging forever (one of the
+    // suspected sources of the historical 100% CPU spin reports).
+    // Cancellation is the only signal that breaks out hard, since by then
+    // onCancel has already SIGKILL'd the process tree.
+    var stopWriting = false
+    var stopReason = "eof"
+
     for try await buffer in sequence {
-      // Record how long we waited for this chunk (helps detect hangs).
       let waitUs = t0.duration(to: .now).microseconds
       if chunkCount == 0 {
         logger.trace(
@@ -388,9 +399,7 @@ enum Shell {
       }
 
       chunkCount += 1
-      totalBytes += buffer.count
 
-      // Periodic heartbeat — proves we're still processing, not stuck.
       if chunkCount % heartbeatInterval == 0 {
         logger.trace(
           "write-stream-heartbeat",
@@ -399,26 +408,37 @@ enum Shell {
             "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
             "elapsed_us": "\(waitUs)",
             "cancelled": "\(Task.isCancelled)",
+            "stop_writing": "\(stopWriting)",
           ])
       }
 
-      // Write first, then check cancellation — preserves this chunk even when
-      // a Ctrl-C arrives while we're draining.  If the handle was already
-      // slammed shut by onCancel the write will fail and we stop cleanly.
-      do {
-        try handle.write(contentsOf: Data(buffer: buffer))
-      } catch {
-        logger.trace(
-          "write-stream-write-failed",
+      if !stopWriting {
+        do {
+          try handle.write(contentsOf: Data(buffer: buffer))
+          totalBytes += buffer.count
+        } catch {
+          logger.trace(
+            "write-stream-write-failed",
+            metadata: [
+              "shell_id": "\(shellID)", "stream": "\(label)",
+              "error": "\(String(describing: error))",
+              "chunks_written": "\(chunkCount - 1)",
+              "bytes_before_failure": "\(totalBytes)",
+            ])
+          stopWriting = true
+          stopReason = "write-failed"
+        }
+      }
+
+      if !stopWriting && chunkCount == maxChunks {
+        logger.warning(
+          "write-stream-chunk-cap-hit",
           metadata: [
             "shell_id": "\(shellID)", "stream": "\(label)",
-            "error": "\(String(describing: error))",
-            "chunks_written": "\(chunkCount - 1)",
-            "bytes_before_failure": "\(totalBytes - buffer.count)",
+            "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
           ])
-        // Don't count this chunk since the write failed.
-        totalBytes -= buffer.count
-        break
+        stopWriting = true
+        stopReason = "cap"
       }
 
       if Task.isCancelled {
@@ -428,16 +448,7 @@ enum Shell {
             "shell_id": "\(shellID)", "stream": "\(label)",
             "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
           ])
-        break
-      }
-
-      if chunkCount >= maxChunks {
-        logger.warning(
-          "write-stream-chunk-cap-hit",
-          metadata: [
-            "shell_id": "\(shellID)", "stream": "\(label)",
-            "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
-          ])
+        stopReason = "cancelled"
         break
       }
     }
@@ -450,7 +461,7 @@ enum Shell {
         "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
         "elapsed_us": "\(elapsedUs)",
         "cancelled_at_exit": "\(Task.isCancelled)",
-        "exit_reason": Task.isCancelled ? "cancelled" : (chunkCount >= maxChunks ? "cap" : "eof"),
+        "exit_reason": "\(stopReason)",
       ])
     return totalBytes
   }

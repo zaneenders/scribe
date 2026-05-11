@@ -125,6 +125,14 @@ public struct ToolRegistry: Sendable {
               "tool": "\(name)"
             ])
           var ticks = 0
+          // 200ms strikes a balance between abort latency (still imperceptible)
+          // and background cost (4× fewer wake-ups than the prior 50ms when
+          // many tools run in parallel).  Pre-tool/post-tool/post-stream sites
+          // in `runAgentLoop` also check `shouldAbortTurn()` synchronously, so
+          // this poll only matters during long-running tool execution.
+          // TODO: replace polling with an event-driven abort (AsyncStream<Void>
+          // signalled by ScribeAgent.abort()) once the public surface is
+          // refactored to pass an abort source rather than a closure.
           while true {
             if shouldAbortTurn() {
               Self.logger.trace(
@@ -134,7 +142,7 @@ public struct ToolRegistry: Sendable {
                 ])
               throw AgentTurnInterruptedError()
             }
-            try await Task.sleep(for: .milliseconds(50))
+            try await Task.sleep(for: .milliseconds(200))
             ticks += 1
           }
         }

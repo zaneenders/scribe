@@ -94,7 +94,12 @@ final class FileSink: Sendable {
 
   func write(_ data: Data) {
     try? handle.write(contentsOf: data)
-    try? handle.synchronize()
+    // fsync is intentionally NOT called per write. With `logging.level = trace`,
+    // a single shell drain emits hundreds of trace lines per second, and an
+    // fsync per line was a major hot path (each one is a kernel round-trip and
+    // shows up as ~100% CPU during noisy shells). Durability is bounded by the
+    // deinit fsync below; for crash-grade durability use a write-through file
+    // system or rotate to an os_log-backed handler.
   }
 
   deinit {
