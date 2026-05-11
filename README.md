@@ -63,6 +63,10 @@ Set `SCRIBE_HOME` to override the `~/.scribe` data directory for config, logs, a
 
 > Only OpenAI-compatible `completions` APIs are supported right now.
 
+## Tools
+
+Scribe has four built-in tools: `shell`, `read_file`, `write_file`, `edit_file`.
+
 ## Sessions & Logs
 
 Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
@@ -74,34 +78,6 @@ Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
 ├── logs/scribe-{uuid}.log          # one log file per invocation
 ├── sessions/{uuid}/metadata.json   # one directory per session
 └── sessions/{uuid}/messages.jsonl
-```
-
-## Info
-
-Print Scribe's resolved paths and version:
-
-```bash
-scribe --info
-```
-
-## Testing
-
-You can use the following commands to view current test coverage.
-
-**macOS**
-```bash
-swift test --enable-code-coverage
-PROFDATA=$(find .build -name '*.profdata' -print -quit)
-BIN=$(find .build -name 'scribePackageTests' -type f -not -path '*.dSYM*' -print -quit)
-xcrun llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
-```
-
-**Linux**
-```bash
-swift test --enable-code-coverage
-PROFDATA=$(find .build -name '*.profdata' -print -quit)
-BIN=$(find .build -name 'scribePackageTests.xctest' -type f -print -quit)
-llvm-cov report "$BIN" --instr-profile="$PROFDATA" --ignore-filename-regex='\.build/'
 ```
 
 ## Documentation

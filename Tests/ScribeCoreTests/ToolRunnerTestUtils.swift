@@ -3,8 +3,8 @@ import Foundation
 struct ShellPayload: Decodable {
   let ok: Bool
   let exitCode: Int?
-  let stdout: String?
-  let stderr: String?
+  let stdoutFile: String?
+  let stderrFile: String?
   let pid: Int?
 }
 
