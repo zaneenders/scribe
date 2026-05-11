@@ -10,6 +10,7 @@ import Synchronization
 private actor UserLineGate {
   private var waiting: CheckedContinuation<String?, Never>?
   private var queue: [String] = []
+  private var streamContinuation: AsyncStream<String>.Continuation?
 
   func nextLine() async -> String? {
     if !queue.isEmpty {
@@ -27,7 +28,26 @@ private actor UserLineGate {
     } else if let line {
       queue.append(line)
     }
+    // Also bridge to AsyncStream for ChatCoordinator.
+    if let line {
+      streamContinuation?.yield(line)
+    } else {
+      streamContinuation?.finish()
+    }
   }
+
+  func setStreamContinuation(_ cont: AsyncStream<String>.Continuation) {
+    streamContinuation = cont
+  }
+}
+
+// MARK: - Host event channel
+
+/// Events the coordinator task sends to the host for rendering.
+enum HostEvent: Sendable {
+  case transcript(TranscriptEvent)
+  case modelTurnRunning(Bool)
+  case coordinatorFinished
 }
 
 // MARK: - Transcript flatten cache
@@ -35,7 +55,7 @@ private actor UserLineGate {
 extension TranscriptLayout {
   /// Cached flatten results to avoid re-wrapping completed transcript lines
   /// on every render frame.  Reset when width or generation changes.
-  struct FlattenCache: Equatable, Sendable {
+  struct FlattenCache {
     var wrapWidth: Int = -1
     var completedLogicalLines: Int = 0
     var completedFlat: [TLine] = []
@@ -43,43 +63,38 @@ extension TranscriptLayout {
 
     /// Recompute flattened rows for the given completed + optional open line.
     /// Only wraps new lines since the last call when the set of completed lines grows.
-    /// Pure function — returns updated cache and flattened rows without side effects.
     static func flatten(
-      cache: FlattenCache,
+      cache: inout FlattenCache,
       completed: [TLine],
       open: TLine?,
       width: Int,
       generation: Int
-    ) -> (FlattenCache, [TLine]) {
-      var c = cache
-      if width != c.wrapWidth || generation != c.lastGeneration {
-        c = FlattenCache()
-        c.wrapWidth = width
-        c.lastGeneration = generation
-        c.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
-        c.completedLogicalLines = completed.count
-      } else if completed.count < c.completedLogicalLines {
+    ) -> [TLine] {
+      if width != cache.wrapWidth || generation != cache.lastGeneration {
+        cache = FlattenCache()
+        cache.wrapWidth = width
+        cache.lastGeneration = generation
+        cache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
+        cache.completedLogicalLines = completed.count
+      } else if completed.count < cache.completedLogicalLines {
         // Lines were removed (truncation) — full recompute.
-        c.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
-        c.completedLogicalLines = completed.count
-      } else if completed.count > c.completedLogicalLines {
+        cache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
+        cache.completedLogicalLines = completed.count
+      } else if completed.count > cache.completedLogicalLines {
         // New lines appended — only wrap the new ones.
-        let start = c.completedLogicalLines
+        let start = cache.completedLogicalLines
         if start < completed.count {
           let newSlice = completed[start...]
-          c.completedFlat.append(
+          cache.completedFlat.append(
             contentsOf: TranscriptLayout.flattenedRows(from: Array(newSlice), width: width))
         }
-        c.completedLogicalLines = completed.count
+        cache.completedLogicalLines = completed.count
       }
 
-      let flat: [TLine]
       if let open {
-        flat = c.completedFlat + TranscriptLayout.flattenedRows(from: [open], width: width)
-      } else {
-        flat = c.completedFlat
+        return cache.completedFlat + TranscriptLayout.flattenedRows(from: [open], width: width)
       }
-      return (c, flat)
+      return cache.completedFlat
     }
   }
 }
@@ -98,41 +113,25 @@ internal final class SlateChatHost {
 
   // Extracted concerns
   private var inputHandler = TerminalInputHandler()
-  private var inputBuffer = ""
-  private var inPaste = false
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
 
   // MARK: - Transcript state (source of truth for rendering)
 
-  /// Completed transcript lines (user messages, finalized assistant turns, tool output).
-  private var transcriptLines: [TLine] = []
-  /// Open line being built during streaming (nil when idle).
-  private var streamingOpenLine: TLine? = nil
-  private var streamingOpenLineRaw: String = ""
-  private var streamingSectionStartLineIndex: Int? = nil
-  private var currentStreamingSection: AssistantStreamSection = .answer
-  /// Bumped when transcript structure changes (for FlattenCache invalidation).
-  private var transcriptGeneration: Int = 0
-
+  private var transcriptState = TranscriptState()
   private var flattenCache = TranscriptLayout.FlattenCache()
 
   // MARK: - UI state
 
+  private var inputBuffer: String = ""
+  private var inPaste: Bool = false
   private var modelBusy: Bool = false
   private var coordinatorFinished: Bool = false
   private var queuedTrayText: String? = nil
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
 
-  // Usage tracking
-  private var usageTurnPrompt: Int = 0
-  private var usageTurnCompletion: Int = 0
-  private var usageTurnTotal: Int = 0
-  private var usageSessionPrompt: Int = 0
-  private var usageSessionCompletion: Int = 0
-  private var usageSessionTotal: Int = 0
-  private var usageHUD: UsageHUDSnapshot? = nil
+  // Usage tracking is in transcriptState — no separate fields needed.
 
   // MARK: - Coordinator communication
 
@@ -156,17 +155,6 @@ internal final class SlateChatHost {
   private let eventQueue = EventQueue()
   private let markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()
   private let theme: CLITheme = .default
-  private var markdownAdapter: MarkdownToSlateAdapter {
-    MarkdownToSlateAdapter(
-      theme: theme.markdown,
-      bodyFG: theme.answerBaseFG,
-      bodyBold: false)
-  }
-  private func markdownAdapter(for section: AssistantStreamSection) -> MarkdownToSlateAdapter {
-    let st = theme.style(for: section)
-    let mdTheme = section == .reasoning ? MarkdownTheme.grayscale : theme.markdown
-    return MarkdownToSlateAdapter(theme: mdTheme, bodyFG: st.fg, bodyBold: st.bold)
-  }
 
   private var renderWake: ExternalWake?
   private var llmWaitAnimationFrame: Int = 0
@@ -208,9 +196,11 @@ internal final class SlateChatHost {
 
         // Replay resume messages into transcript if resuming.
         if !self.resumeMessages.isEmpty {
-          self.transcriptLines = renderMessagesToTranscript(
+          self.transcriptState.lines = renderMessagesToTranscript(
             self.resumeMessages, theme: self.theme, renderer: self.markdownRenderer)
         }
+
+        let persistURL = self.sessionPersistenceURL
 
         let cwd = FileManager.default.currentDirectoryPath
         self.banner = BannerSnapshot(
@@ -240,53 +230,25 @@ internal final class SlateChatHost {
           }
         }
 
-        let eventQueue = self.eventQueue
-        let sessionLog = self.log
-        let persistence = SessionPersistence(
-          url: self.sessionPersistenceURL,
+        let (lineStream, lineCont) = AsyncStream<String>.makeStream()
+        Task { await gate.setStreamContinuation(lineCont) }
+
+        let coordinator = ChatCoordinator(
+          configuration: configuration,
+          systemPrompt: systemPrompt,
+          resumeSnapshot: self.resumeMessages,
+          interruptFlag: self.modelInterruptFlag,
+          log: self.log,
+          enqueue: { [eventQueue] event in
+            eventQueue.enqueue(event)
+          },
+          persistURL: persistURL,
           sessionId: self.sessionId,
-          createdAt: self.sessionCreatedAt
+          sessionCreatedAt: self.sessionCreatedAt,
+          lines: lineStream
         )
-
-        // Bridge UserLineGate → AsyncStream<String> for the coordinator.
-        let (inputStream, inputContinuation) = AsyncStream<String>.makeStream()
-        let bridgeGate = gate
-        let coordConfig = self.configuration
-        let coordSystemPrompt = self.systemPrompt
-        let coordResumeMessages = self.resumeMessages
-        self.coordinatorTask = Task { [inputStream, interruptFlag = self.modelInterruptFlag] in
-          // Feed gate lines into the stream from this detached context.
-          let bridgeTask = Task {
-            while let line = await bridgeGate.nextLine() {
-              inputContinuation.yield(line)
-            }
-            inputContinuation.finish()
-          }
-          defer { bridgeTask.cancel() }
-
-          do {
-            let coordinator = try ChatCoordinator(
-              configuration: coordConfig,
-              systemPrompt: coordSystemPrompt,
-              initialMessages: coordResumeMessages,
-              persistence: persistence,
-              eventSink: { event in eventQueue.enqueue(event) },
-              log: sessionLog
-            )
-            _ = await coordinator.run(
-              input: inputStream,
-              interruptFlag: interruptFlag
-            )
-          } catch {
-            let se = (error as? ScribeError) ?? .generic(String(describing: error))
-            eventQueue.enqueue(.transcript(.harnessError(se)))
-            sessionLog.error(
-              "chat.coordinator.fail",
-              metadata: [
-                "err": "\(se.errorDescription ?? String(describing: se))"
-              ])
-          }
-          eventQueue.enqueue(.coordinatorFinished)
+        self.coordinatorTask = Task {
+          await coordinator.run()
         }
 
         self.spinnerTask?.cancel()
@@ -322,23 +284,20 @@ internal final class SlateChatHost {
 
           for action in actions {
             switch action {
+            case .bracketedPasteStart:
+              self.inPaste = true
+            case .bracketedPasteEnd:
+              self.inPaste = false
+
             case .enter:
               if self.inPaste {
                 self.inputBuffer.append("\n")
-                self.log.debug(
-                  "chat.user.input.newline",
-                  metadata: [
-                    "source": "enter",
-                    "buffer_chars": "\(self.inputBuffer.count)",
-                    "has_queue": "\(self.submitCoordinator.queuedText != nil)",
-                    "inPaste": "true",
-                  ])
               } else {
-                let text = self.inputBuffer
-                self.inputBuffer = ""
-                self.submitCoordinator.setModelBusy(self.modelBusy)
-                let effect = self.submitCoordinator.handleEnter(text: text)
-                shouldStop = self.applySubmitEffect(effect, gate: gate)
+              let text = self.inputBuffer
+              self.inputBuffer = ""
+              self.submitCoordinator.setModelBusy(self.modelBusy)
+              let effect = self.submitCoordinator.handleEnter(text: text)
+              shouldStop = self.applySubmitEffect(effect, gate: gate)
               }
 
             case .ctrlC:
@@ -349,9 +308,11 @@ internal final class SlateChatHost {
                 self.renderWake?.requestRender()
               }
               shouldStop = self.applySubmitEffect(effect, gate: gate)
+
             case .ctrlD:
               self.log.debug("chat.user.ctrl-d", metadata: ["action": "exit"])
               shouldStop = true
+
             case .arrowUp:
               self.viewport.queueScroll(by: -1)
             case .arrowDown:
@@ -364,33 +325,26 @@ internal final class SlateChatHost {
               self.viewport.queueGoToTop()
             case .end:
               self.viewport.queueGoToBottom()
-            case .backspace:
-              if !self.inPaste, !self.inputBuffer.isEmpty { self.inputBuffer.removeLast() }
-            case .bracketedPasteStart:
-              self.inPaste = true
-              self.log.debug(
-                "chat.user.input.paste-begin",
-                metadata: ["buffer_chars": "\(self.inputBuffer.count)"])
-            case .bracketedPasteEnd:
-              self.inPaste = false
-              self.log.debug(
-                "chat.user.input.paste-end",
-                metadata: ["buffer_chars": "\(self.inputBuffer.count)"])
+
+            case .escape:
+              break
+
             case .shiftEnter:
               self.inputBuffer.append("\n")
               self.log.debug(
                 "chat.user.input.newline",
                 metadata: [
-                  "source": "shift-enter",
+                  "source": "paste-or-shift-enter",
                   "buffer_chars": "\(self.inputBuffer.count)",
                   "has_queue": "\(self.submitCoordinator.queuedText != nil)",
                 ])
-            case .tab:
-              self.inputBuffer.append("\t")
+
             case .character(let ch):
               self.inputBuffer.append(ch)
-            case .escape:
-              break
+            case .backspace:
+              if !self.inputBuffer.isEmpty { self.inputBuffer.removeLast() }
+            case .tab:
+              self.inputBuffer.append("\t")
             }
           }
 
@@ -420,41 +374,61 @@ internal final class SlateChatHost {
           let scrCols = grid.cols
           let scrRows = grid.rows
 
-          let state = RenderState(
+          let prepareStart = Date()
+          var renderState = RenderState(
+            transcriptLines: self.transcriptState.lines,
+            streamingOpenLine: self.transcriptState.streamingOpenLine,
+            generation: self.transcriptState.generation,
+            flattenCache: self.flattenCache,
+            banner: self.banner,
+            usageHUD: self.transcriptState.usageHUD,
             inputBuffer: self.inputBuffer,
             modelBusy: self.modelBusy,
             queuedTrayText: self.queuedTrayText,
-            banner: self.banner,
-            usage: self.usageHUD,
-            transcriptLines: self.transcriptLines,
-            streamingOpenLine: self.streamingOpenLine,
-            transcriptGeneration: self.transcriptGeneration,
-            flattenCache: self.flattenCache,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             viewport: self.viewport,
             cols: scrCols,
             rows: scrRows
           )
-          let frameStart = Date()
-          let output = buildFrame(state: state, theme: .default)
+          let output = RenderLoop.buildFrame(state: &renderState)
+          self.flattenCache = output.flattenCache
+          self.viewport = output.viewport
+          let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
 
-          // Apply state updates
-          self.flattenCache = output.updatedFlattenCache
-          self.viewport = output.updatedViewport
-
-          // Write frame to Slate grid (thin shim)
-          for (row, line) in output.grid.enumerated() {
-            for (col, span) in line.enumerated() {
-              grid[column: col, row: row] = TerminalCell(span: span)
+          let submitStart = Date()
+          let spanGrid = SlateChatRenderer.buildGrid(
+            cols: scrCols,
+            rows: scrRows,
+            flattenedTranscript: output.flattenedTranscript,
+            transcriptTailStart: output.transcriptTailStart,
+            banner: self.banner,
+            usage: self.transcriptState.usageHUD,
+            inputLine: self.inputBuffer,
+            llmWaitAnimationFrame: self.llmWaitAnimationFrame,
+            waitingForLLM: self.modelBusy,
+            queuedTrayText: self.queuedTrayText,
+            theme: .default)
+          // Paint semantic spans into the terminal grid
+          for (row, spanRow) in spanGrid.enumerated() {
+            for (col, span) in spanRow.enumerated() {
+              let ch = span.text.first ?? " "
+              grid[column: col, row: row] = TerminalCell(
+                glyph: ch,
+                foreground: span.foreground,
+                background: span.background,
+                flags: span.flags)
             }
           }
-          let frameMs = Int(Date().timeIntervalSince(frameStart) * 1000)
-          if frameMs >= 50 {
+          let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
+          let totalMs = prepareMs &+ submitMs
+          if totalMs >= 50 {
             self.log.debug(
               "chat.render.slow",
               metadata: [
-                "elapsed_ms": "\(frameMs)",
-                "flat_rows": "\(output.flatTranscript.count)",
+                "elapsed_ms": "\(totalMs)",
+                "prepare_ms": "\(prepareMs)",
+                "submit_ms": "\(submitMs)",
+                "flat_rows": "\(output.flattenedTranscript.count)",
                 "cols": "\(scrCols)",
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
@@ -481,14 +455,51 @@ internal final class SlateChatHost {
     for event in events {
       switch event {
       case .transcript(let te):
-        handleTranscriptEvent(te)
+        let effects = TranscriptController.apply(
+          te,
+          to: &transcriptState,
+          theme: theme,
+          renderer: markdownRenderer,
+          followingLive: viewport.followingLive,
+          contextWindow: contextWindow
+        )
+        // Drift detection for turnComplete
+        if case .turnComplete(let referenceMessages) = te {
+          let batchLines = renderMessagesToTranscript(
+            referenceMessages, theme: theme, renderer: markdownRenderer)
+          if transcriptState.lines != batchLines {
+            let sc = transcriptState.lines.count
+            let bc = batchLines.count
+            let driftMeta: Logger.Metadata = [
+              "streaming_count": .string("\(sc)"),
+              "batch_count": .string("\(bc)"),
+            ]
+            log.warning("transcript.streaming-drift", metadata: driftMeta)
+            let maxCount = max(sc, bc)
+            for idx in 0..<maxCount {
+              let sLine = idx < sc ? transcriptState.lines[idx] : nil
+              let bLine = idx < bc ? batchLines[idx] : nil
+              if sLine != bLine {
+                let detailMeta: Logger.Metadata = [
+                  "index": .string("\(idx)"),
+                  "streaming": .string(sLine.map { spansToDebugString($0) } ?? "(missing)"),
+                  "batch": .string(bLine.map { spansToDebugString($0) } ?? "(missing)"),
+                ]
+                log.warning("transcript.streaming-drift.detail", metadata: detailMeta)
+              }
+            }
+          }
+        }
+        if effects.needsRender {
+          renderWake?.requestRender()
+        }
       case .modelTurnRunning(let running):
         modelBusy = running
         if running {
-          usageTurnPrompt = 0
-          usageTurnCompletion = 0
-          usageTurnTotal = 0
-          if var u = usageHUD {
+          transcriptState.usageTurnPrompt = 0
+          transcriptState.usageTurnCompletion = 0
+          transcriptState.usageTurnTotal = 0
+          if var u = transcriptState.usageHUD {
             u.roundPrompt = nil
             u.roundCompletion = nil
             u.roundTotal = nil
@@ -498,11 +509,9 @@ internal final class SlateChatHost {
             u.outputTokensPerSecond = nil
             u.reasoningTokens = nil
             u.cachedPromptTokens = nil
-            usageHUD = u
+            transcriptState.usageHUD = u
           }
         } else {
-          // Model turn ended — trigger a delayed render so the final frame
-          // catches the transition.
           if let wake = renderWake {
             Task.detached(priority: .userInitiated) {
               try? await Task.sleep(for: .milliseconds(50))
@@ -513,311 +522,6 @@ internal final class SlateChatHost {
       case .coordinatorFinished:
         coordinatorFinished = true
       }
-    }
-  }
-
-  // MARK: - Transcript event handling
-
-  private func handleTranscriptEvent(_ event: TranscriptEvent) {
-    switch event {
-    case .enterAssistantSection(let section, let previous):
-      // Finalize previous open line if any.
-      if let open = streamingOpenLine {
-        transcriptLines.append(open)
-        streamingOpenLine = nil
-      }
-      if previous != nil {
-        if previous == .reasoning && section == .answer {
-          transcriptLines.append(TLine(spans: []))
-        }
-      } else {
-        if let last = transcriptLines.last, isUserSubmissionLine(last) {
-          transcriptLines.append(TLine(spans: []))
-        }
-      }
-      let header = TLine(
-        spans: [
-          StyledSpan(
-            fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:")
-        ])
-      transcriptLines.append(header)
-      switch section {
-      case .reasoning:
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.sectionLabel, bg: theme.background, bold: false,
-                text: "  · reasoning")
-            ]))
-      case .answer:
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.sectionLabel, bg: theme.background, bold: false,
-                text: "  · answer")
-            ]))
-      }
-      streamingOpenLine = TLine(spans: [])
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = transcriptLines.count
-      currentStreamingSection = section
-      renderWake?.requestRender()
-
-    case .appendAssistantText(let section, let text):
-      if streamingOpenLine == nil {
-        streamingOpenLine = TLine(spans: [])
-        streamingOpenLineRaw = ""
-      }
-      streamingOpenLineRaw += text
-      currentStreamingSection = section
-
-      // When the user has scrolled up, skip per-chunk rendering — the
-      // streaming section isn't visible.  Accumulate raw text only; the
-      // next chunk after scrolling back (or finalize) will catch up.
-      guard viewport.followingLive else { return }
-
-      // Only render the visible tail during streaming — the full accumulated
-      // text is re-parsed with block-level markdown at finalize anyway.
-      // Keeps per-chunk work bounded to O(screen) instead of O(total-response).
-      let maxVisibleLogicalLines = 200  // generous: 2-4× a typical terminal
-      let tailText: String = {
-        let allLines = streamingOpenLineRaw.split(
-          separator: "\n", omittingEmptySubsequences: false)
-        guard allLines.count > maxVisibleLogicalLines else {
-          return streamingOpenLineRaw
-        }
-        return allLines.suffix(maxVisibleLogicalLines).joined(separator: "\n")
-      }()
-
-      let rendered = markdownRenderer.renderStreaming(text: tailText)
-      let adapter = markdownAdapter(for: section)
-      let tlines = adapter.convert(rendered)
-      if let startIdx = streamingSectionStartLineIndex {
-        let removeCount = max(0, transcriptLines.count - startIdx)
-        if removeCount > 0 {
-          transcriptLines.removeLast(removeCount)
-          transcriptGeneration &+= 1
-        }
-      }
-      if tlines.isEmpty {
-        streamingOpenLine = TLine(spans: [])
-      } else {
-        transcriptLines.append(contentsOf: tlines.dropLast())
-        streamingOpenLine = tlines.last!
-      }
-      renderWake?.requestRender()
-
-    case .finalizeAssistantStream:
-      // Re-render accumulated text with full block-level markdown.
-      if streamingSectionStartLineIndex != nil {
-        let section = currentStreamingSection
-        let fullRender = markdownRenderer.render(text: streamingOpenLineRaw)
-        let adapter = markdownAdapter(for: section)
-        let tlines = adapter.convert(fullRender)
-        if let startIdx = streamingSectionStartLineIndex {
-          let removeCount = max(0, transcriptLines.count - startIdx)
-          if removeCount > 0 {
-            transcriptLines.removeLast(removeCount)
-            transcriptGeneration &+= 1
-          }
-          if tlines.isEmpty {
-            streamingOpenLine = TLine(spans: [])
-          } else {
-            transcriptLines.append(contentsOf: tlines.dropLast())
-            streamingOpenLine = tlines.last!
-          }
-        }
-      }
-      if let open = streamingOpenLine {
-        transcriptLines.append(open)
-        streamingOpenLine = nil
-      }
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = nil
-      renderWake?.requestRender()
-
-    case .emptyAssistantTurn:
-      let lineA = TLine(
-        spans: [
-          StyledSpan(
-            fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:")
-        ])
-      let lineB = TLine(
-        spans: [
-          StyledSpan(
-            fg: theme.emptyTurn, bg: theme.background, bold: false, text: "(empty turn)")
-        ])
-      transcriptLines.append(lineA)
-      transcriptLines.append(lineB)
-      renderWake?.requestRender()
-
-    case .usage(let usage, let tps):
-      guard let triple = usage.scribeReportedPromptCompletionTotal else { break }
-      usageTurnPrompt += triple.prompt
-      usageTurnCompletion += triple.completion
-      usageTurnTotal += triple.total
-      usageSessionPrompt += triple.prompt
-      usageSessionCompletion += triple.completion
-      usageSessionTotal += triple.total
-      let pct: Int? = {
-        guard let cw = contextWindow, cw > 0, triple.prompt > 0 else { return nil }
-        return min(100, Int(Double(triple.prompt) / Double(cw) * 100))
-      }()
-      usageHUD = UsageHUDSnapshot(
-        roundPrompt: triple.prompt,
-        roundCompletion: triple.completion,
-        roundTotal: triple.total,
-        turnPrompt: usageTurnPrompt,
-        turnCompletion: usageTurnCompletion,
-        turnTotal: usageTurnTotal,
-        sessionPrompt: usageSessionPrompt,
-        sessionCompletion: usageSessionCompletion,
-        sessionTotal: usageSessionTotal,
-        reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
-        cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
-        outputTokensPerSecond: tps,
-        contextWindow: contextWindow,
-        contextWindowUsedPercent: pct
-      )
-      renderWake?.requestRender()
-
-    case .blankLine:
-      transcriptLines.append(TLine(spans: []))
-      renderWake?.requestRender()
-
-    case .toolRoundHeader(let round, let toolNames):
-      let names = toolNames.joined(separator: ", ")
-      let line = TLine(spans: [
-        StyledSpan(
-          fg: theme.toolRoundHeader, bg: theme.background, bold: true,
-          text: "tool round \(round) "),
-        StyledSpan(
-          fg: theme.toolNames, bg: theme.background, bold: false, text: names),
-      ])
-      transcriptLines.append(line)
-      renderWake?.requestRender()
-
-    case .toolInvocation(let name, let arguments, let output):
-      let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: arguments)
-      let outputLines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: output)
-      var spans: [StyledSpan] = [
-        StyledSpan(fg: theme.toolInvocation, bg: theme.background, bold: false, text: "▶ \(name)")
-      ]
-      if let argSummary {
-        spans.append(
-          StyledSpan(
-            fg: theme.toolArgSummary, bg: theme.background, bold: false,
-            text: " \(argSummary)"))
-      }
-      transcriptLines.append(TLine(spans: spans))
-      for ol in outputLines {
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.toolOutput, bg: theme.background, bold: false,
-                text: "  \(ol)")
-            ]))
-      }
-      renderWake?.requestRender()
-
-    case .skippedUnreadableStreamLine:
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.skippedStreamLine, bg: theme.background, bold: false,
-              text: "(skipped one stream line: not valid completion JSON)")
-          ]))
-      renderWake?.requestRender()
-
-    case .harnessError(let error):
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.errorFG, bg: theme.background, bold: false,
-              text: "error: \(error.errorDescription ?? String(describing: error))")
-          ]))
-      renderWake?.requestRender()
-
-    case .turnInterrupted:
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.interruptedFG, bg: theme.background, bold: false,
-              text: "(interrupted)")
-          ]))
-      streamingOpenLine = nil
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = nil
-      renderWake?.requestRender()
-
-    case .userSubmitted(let text):
-      guard !text.isEmpty else { return }
-      let logicalLines =
-        text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-      transcriptLines.append(
-        TLine(
-          spans: [
-            StyledSpan(
-              fg: theme.userPrefix, bg: theme.background, bold: false,
-              text: "you:")
-          ]))
-      for row in logicalLines {
-        if row.isEmpty {
-          transcriptLines.append(TLine(spans: []))
-          continue
-        }
-        transcriptLines.append(
-          TLine(
-            spans: [
-              StyledSpan(
-                fg: theme.userBody, bg: theme.background, bold: false,
-                text: "  \(row)")
-            ]))
-      }
-      renderWake?.requestRender()
-
-    case .turnComplete(let referenceMessages):
-      // Finalize any dangling streaming state (should already be done, defensive).
-      if let open = streamingOpenLine {
-        transcriptLines.append(open)
-      }
-      streamingOpenLine = nil
-      streamingOpenLineRaw = ""
-      streamingSectionStartLineIndex = nil
-
-      // Compare streaming render against batch render for drift detection.
-      let batchLines = renderMessagesToTranscript(
-        referenceMessages, theme: theme, renderer: markdownRenderer)
-      if transcriptLines != batchLines {
-        let sc = transcriptLines.count
-        let bc = batchLines.count
-        let driftMeta: Logger.Metadata = [
-          "streaming_count": .string("\(sc)"),
-          "batch_count": .string("\(bc)"),
-        ]
-        log.warning("transcript.streaming-drift", metadata: driftMeta)
-        // Log every differing line for easy test-casing.
-        let maxCount = max(sc, bc)
-        for idx in 0..<maxCount {
-          let sLine = idx < sc ? transcriptLines[idx] : nil
-          let bLine = idx < bc ? batchLines[idx] : nil
-          if sLine != bLine {
-            let detailMeta: Logger.Metadata = [
-              "index": .string("\(idx)"),
-              "streaming": .string(sLine.map { spansToDebugString($0) } ?? "(missing)"),
-              "batch": .string(bLine.map { spansToDebugString($0) } ?? "(missing)"),
-            ]
-            log.warning("transcript.streaming-drift.detail", metadata: detailMeta)
-          }
-        }
-      }
-      renderWake?.requestRender()
     }
   }
 
@@ -871,15 +575,6 @@ internal final class SlateChatHost {
   }
 
   // MARK: - Helpers
-
-  private func isUserSubmissionLine(_ line: TLine) -> Bool {
-    guard line.spans.count == 1 else { return false }
-    let s = line.spans[0]
-    return !s.bold
-      && s.fg == theme.userPrefix
-      && s.bg == theme.background
-      && s.text == "you:"
-  }
 
   /// Renders a TLine into a compact debug string for log output.
   private func spansToDebugString(_ line: TLine) -> String {

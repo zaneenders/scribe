@@ -1,51 +1,103 @@
 import ScribeCore
 import SlateCore
 
-/// Maps semantic `MarkdownSpan` → SlateCore `StyledSpan` using `MarkdownTheme` colors.
-public struct MarkdownToSlateAdapter {
-    public let theme: MarkdownTheme
-    /// Foreground color for `.body` spans (typically stream section color, e.g. cyan or grayLight).
-    public let bodyFG: TerminalRGB
-    /// Bold flag for `.body` spans (typically from stream section).
-    public let bodyBold: Bool
+// MARK: - MarkdownToSlateAdapter
 
-    public init(theme: MarkdownTheme, bodyFG: TerminalRGB, bodyBold: Bool = false) {
-        self.theme = theme
-        self.bodyFG = bodyFG
-        self.bodyBold = bodyBold
-    }
+/// Converts between semantic `MarkdownLine`/`MarkdownSpan` types (ScribeCore, no Slate deps)
+/// and Slate `TLine`/`StyledSpan` types (ScribeCLI, Slate deps).
+///
+/// This is the bridge between the semantic markdown output and the terminal rendering layer.
+struct MarkdownToSlateAdapter {
 
-    public func convert(_ lines: [MarkdownLine]) -> [TLine] {
-        lines.map { line in
-            TLine(spans: line.spans.map { convert($0) })
-        }
-    }
+  /// Convert a `MarkdownLine` to a `TLine` using the given styles.
+  static func convert(
+    _ line: MarkdownLine,
+    baseFG: TerminalRGB,
+    baseBold: Bool,
+    theme: MarkdownTheme
+  ) -> TLine {
+    TLine(spans: line.spans.map { convert($0, baseFG: baseFG, baseBold: baseBold, theme: theme) })
+  }
 
-    public func convert(_ span: MarkdownSpan) -> StyledSpan {
-        let bg = theme.background
-        switch span {
-        case .body(let text):
-            return StyledSpan(fg: bodyFG, bg: bg, bold: bodyBold, text: text)
-        case .bold(let text):
-            return StyledSpan(fg: theme.bold, bg: bg, bold: true, text: text)
-        case .italic(let text):
-            return StyledSpan(fg: theme.italic, bg: bg, bold: false, text: text)
-        case .code(let text):
-            return StyledSpan(fg: theme.code, bg: bg, bold: false, text: text)
-        case .codeBlock(let text):
-            return StyledSpan(fg: theme.codeBlock, bg: bg, bold: false, text: text)
-        case .heading(let text):
-            return StyledSpan(fg: theme.heading, bg: bg, bold: true, text: text)
-        case .blockquote(let text):
-            return StyledSpan(fg: theme.blockquote, bg: bg, bold: false, text: text)
-        case .listMarker(let text):
-            return StyledSpan(fg: theme.listMarker, bg: bg, bold: false, text: text)
-        case .thematicBreak:
-            return StyledSpan(fg: theme.hr, bg: bg, bold: false, text: "---")
-        case .link(let text, _):
-            return StyledSpan(fg: theme.link, bg: bg, bold: false, text: text)
-        case .strikethrough(let text):
-            return StyledSpan(fg: theme.muted, bg: bg, bold: false, text: text)
-        }
+  /// Convert an array of `MarkdownLine` to `[TLine]`.
+  static func convert(
+    _ lines: [MarkdownLine],
+    baseFG: TerminalRGB,
+    baseBold: Bool,
+    theme: MarkdownTheme
+  ) -> [TLine] {
+    lines.map { convert($0, baseFG: baseFG, baseBold: baseBold, theme: theme) }
+  }
+
+  /// Convert a `StyledSpan` back to a `MarkdownSpan` by inspecting its colors/bold.
+  /// This is used when adapting existing Slate-producing renderers to the semantic path.
+  static func convert(_ span: StyledSpan, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> MarkdownSpan {
+    let kind = inferKind(fg: span.fg, bold: span.bold, baseFG: baseFG, baseBold: baseBold, theme: theme)
+    return MarkdownSpan(text: span.text, kind: kind)
+  }
+
+  /// Convert a `TLine` to a `MarkdownLine`.
+  static func convert(_ line: TLine, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> MarkdownLine {
+    MarkdownLine(spans: line.spans.map { convert($0, baseFG: baseFG, baseBold: baseBold, theme: theme) })
+  }
+
+  // MARK: - Private
+
+  private static func convert(
+    _ span: MarkdownSpan,
+    baseFG: TerminalRGB,
+    baseBold: Bool,
+    theme: MarkdownTheme
+  ) -> StyledSpan {
+    switch span.kind {
+    case .plain:
+      StyledSpan(fg: baseFG, bg: theme.background, bold: baseBold, text: span.text)
+    case .bold:
+      StyledSpan(fg: theme.bold, bg: theme.background, bold: true, text: span.text)
+    case .italic:
+      StyledSpan(fg: theme.italic, bg: theme.background, bold: baseBold, text: span.text)
+    case .code:
+      StyledSpan(fg: theme.code, bg: theme.background, bold: false, text: span.text)
+    case .headingPrefix:
+      StyledSpan(fg: theme.headingPrefix, bg: theme.background, bold: false, text: span.text)
+    case .heading:
+      StyledSpan(fg: theme.heading, bg: theme.background, bold: true, text: span.text)
+    case .listMarker:
+      StyledSpan(fg: theme.listMarker, bg: theme.background, bold: false, text: span.text)
+    case .blockquote:
+      StyledSpan(fg: theme.blockquote, bg: theme.background, bold: false, text: span.text)
+    case .link:
+      StyledSpan(fg: theme.link, bg: theme.background, bold: baseBold, text: span.text)
+    case .codeBlock:
+      StyledSpan(fg: theme.codeBlock, bg: theme.background, bold: false, text: span.text)
+    case .thematicBreak:
+      StyledSpan(fg: theme.hr, bg: theme.background, bold: false, text: span.text)
+    case .tableBorder:
+      StyledSpan(fg: theme.muted, bg: theme.background, bold: false, text: span.text)
+    case .muted:
+      StyledSpan(fg: theme.muted, bg: theme.background, bold: false, text: span.text)
     }
+  }
+
+  private static func inferKind(
+    fg: TerminalRGB,
+    bold: Bool,
+    baseFG: TerminalRGB,
+    baseBold: Bool,
+    theme: MarkdownTheme
+  ) -> MarkdownSpanKind {
+    if fg == theme.bold && bold { return .bold }
+    if fg == theme.italic { return .italic }
+    if fg == theme.code { return .code }
+    if fg == theme.headingPrefix { return .headingPrefix(level: 0) }
+    if fg == theme.heading && bold { return .heading(level: 0) }
+    if fg == theme.listMarker { return .listMarker }
+    if fg == theme.blockquote { return .blockquote }
+    if fg == theme.link { return .link }
+    if fg == theme.codeBlock { return .codeBlock }
+    if fg == theme.hr { return .thematicBreak }
+    if fg == theme.muted { return .muted }
+    if fg == baseFG && bold == baseBold { return .plain }
+    return .plain
+  }
 }

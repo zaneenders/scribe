@@ -1,203 +1,290 @@
 import Foundation
 import ScribeCore
-import SlateCore
+import ScribeLLM
 import Testing
 
 @testable import ScribeCLI
 
 // MARK: - TranscriptController tests
 
-/// Tests for `TranscriptController` — a pure state machine that builds
-/// transcript lines from `TranscriptEvent` values.
+/// Tests for the `TranscriptController` pure state machine — every event arm
+/// is exercised without a running TUI, Slate, or async machinery.
 @Suite
 struct TranscriptControllerTests {
 
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
-  // MARK: - User submission
+  // MARK: - .userSubmitted
 
-  @Test func userSubmittedAddsYouLine() {
-    var controller = TranscriptController()
-    controller.apply(.userSubmitted("hello world"), theme: theme, renderer: renderer)
-
-    #expect(controller.completedLines.count >= 2)
-    // First line: "you:"
-    #expect(controller.completedLines[0].spans.first?.text == "you:")
-    // Second line: "  hello world"
-    #expect(controller.completedLines[1].spans.first?.text == "  hello world")
-    #expect(controller.streamingOpenLine == nil)
-    #expect(controller.generation > 0)
+  @Test func userSubmittedProducesYouPrefix() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .userSubmitted("hello"), to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count == 2)
+    #expect(state.lines[0].spans[0].text == "you:")
+    #expect(state.lines[1].spans[0].text.contains("hello"))
   }
 
-  @Test func userSubmittedWithNewlinesCreatesMultipleLines() {
-    var controller = TranscriptController()
-    controller.apply(.userSubmitted("line1\nline2\nline3"), theme: theme, renderer: renderer)
-
-    // "you:" + "  line1" + "  line2" + "  line3" = 4 lines
-    #expect(controller.completedLines.count == 4)
-    #expect(controller.completedLines[0].spans.first?.text == "you:")
-    #expect(controller.completedLines[1].spans.first?.text == "  line1")
-    #expect(controller.completedLines[2].spans.first?.text == "  line2")
-    #expect(controller.completedLines[3].spans.first?.text == "  line3")
+  @Test func userSubmittedEmptyNoOp() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .userSubmitted(""), to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(!effects.needsRender)
+    #expect(state.lines.isEmpty)
   }
 
-  @Test func userSubmittedEmptyTextDoesNothing() {
-    var controller = TranscriptController()
-    controller.apply(.userSubmitted(""), theme: theme, renderer: renderer)
-
-    #expect(controller.completedLines.isEmpty)
-    #expect(controller.generation == 0)
+  @Test func userSubmittedMultiLine() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .userSubmitted("hello\nworld"), to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count == 3)  // "you:" + "  hello" + "  world"
+    #expect(state.lines[0].spans[0].text == "you:")
+    #expect(state.lines[1].spans[0].text.contains("hello"))
+    #expect(state.lines[2].spans[0].text.contains("world"))
   }
 
-  // MARK: - Assistant section
+  // MARK: - .blankLine
 
-  @Test func enterAssistantSectionAddsHeader() {
-    var controller = TranscriptController()
-    // First add a user line so we get the separator behavior.
-    controller.apply(.userSubmitted("test"), theme: theme, renderer: renderer)
-    controller.apply(.enterAssistantSection(.answer, previous: nil), theme: theme, renderer: renderer)
-
-    // Should have: "you:", "  test", "scribe:", "  · answer"
-    // (The blank separator only inserts when the last completed line is the "you:" prefix)
-    #expect(controller.completedLines.count == 4)
-    // Check for scribe prefix.
-    let scribeLine = controller.completedLines.first { line in
-      line.spans.first?.text == "scribe:"
-    }
-    #expect(scribeLine != nil)
-    // Check for section label.
-    let sectionLine = controller.completedLines.first { line in
-      line.spans.first?.text == "  · answer"
-    }
-    #expect(sectionLine != nil)
-    // Streaming open line should be initialized.
-    #expect(controller.streamingOpenLine != nil)
+  @Test func blankLine() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .blankLine, to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count == 1)
+    #expect(state.lines[0].spans.isEmpty)
   }
 
-  // MARK: - Append text
+  // MARK: - .toolRoundHeader
 
-  @Test func appendAssistantTextBuildsStreamingContent() {
-    var controller = TranscriptController()
-    controller.apply(.userSubmitted("test"), theme: theme, renderer: renderer)
-    controller.apply(.enterAssistantSection(.answer, previous: nil), theme: theme, renderer: renderer)
-    controller.apply(.appendAssistantText(.answer, text: "Hello"), theme: theme, renderer: renderer)
-    controller.apply(.appendAssistantText(.answer, text: ", world!"), theme: theme, renderer: renderer)
-
-    // After streaming, the open line should contain the text.
-    #expect(controller.streamingOpenLineRaw == "Hello, world!")
-  }
-
-  // MARK: - Finalize
-
-  @Test func finalizeAssistantStreamCommitsOpenLine() {
-    var controller = TranscriptController()
-    controller.apply(.userSubmitted("test"), theme: theme, renderer: renderer)
-    controller.apply(.enterAssistantSection(.answer, previous: nil), theme: theme, renderer: renderer)
-    controller.apply(.appendAssistantText(.answer, text: "Hello"), theme: theme, renderer: renderer)
-    controller.apply(.finalizeAssistantStream, theme: theme, renderer: renderer)
-
-    // Streaming should be done.
-    #expect(controller.streamingOpenLine == nil)
-    #expect(controller.streamingOpenLineRaw == "")
-    // The text should be in completed lines.
-    let allText = controller.completedLines.flatMap { $0.spans }.map { $0.text }.joined()
-    #expect(allText.contains("Hello"))
-  }
-
-  // MARK: - Tool round
-
-  @Test func toolRoundHeaderAddsHeaderLine() {
-    var controller = TranscriptController()
-    controller.apply(.toolRoundHeader(round: 1, toolNames: ["read_file", "shell"]), theme: theme, renderer: renderer)
-
-    #expect(controller.completedLines.count == 1)
-    let text = controller.completedLines[0].spans.map { $0.text }.joined()
+  @Test func toolRoundHeader() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .toolRoundHeader(round: 1, toolNames: ["shell", "read_file"]),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count == 1)
+    let text = state.lines[0].spans.map(\.text).joined()
     #expect(text.contains("tool round 1"))
-    #expect(text.contains("read_file"))
     #expect(text.contains("shell"))
+    #expect(text.contains("read_file"))
   }
 
-  @Test func toolInvocationAddsLines() {
-    var controller = TranscriptController()
-    controller.apply(
-      .toolInvocation(name: "read_file", arguments: #"{"path":"/tmp/test.txt"}"#, output: #"{"ok":true}"#),
-      theme: theme, renderer: renderer)
+  // MARK: - .toolInvocation
 
-    // Should have: "▶ read_file ...", output line(s)
-    #expect(controller.completedLines.count >= 1)
-    let firstLine = controller.completedLines[0].spans.map { $0.text }.joined()
-    #expect(firstLine.contains("▶ read_file"))
-    #expect(firstLine.contains("/tmp/test.txt"))
+  @Test func toolInvocation() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .toolInvocation(name: "shell", arguments: #"{"command":"ls"}"#, output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count >= 1)
+    let firstLine = state.lines[0].spans.map(\.text).joined()
+    #expect(firstLine.contains("shell"))
   }
 
-  // MARK: - Error
+  // MARK: - .harnessError
 
-  @Test func harnessErrorAddsErrorLine() {
-    var controller = TranscriptController()
-    controller.apply(.harnessError(.generic("something went wrong")), theme: theme, renderer: renderer)
-
-    #expect(controller.completedLines.count == 1)
-    let text = controller.completedLines[0].spans.map { $0.text }.joined()
-    #expect(text.contains("error:"))
-    #expect(text.contains("something went wrong"))
+  @Test func harnessError() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .harnessError(.generic("test error")),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count == 1)
+    #expect(state.lines[0].spans.map(\.text).joined().contains("test error"))
   }
 
-  // MARK: - Interrupted
+  // MARK: - .turnInterrupted
 
-  @Test func turnInterruptedAddsInterruptedLine() {
-    var controller = TranscriptController()
-    controller.apply(.turnInterrupted, theme: theme, renderer: renderer)
+  @Test func turnInterrupted() {
+    var state = TranscriptState()
+    state.streamingOpenLine = TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "partial")])
+    state.streamingOpenLineRaw = "partial"
+    state.streamingSectionStartLineIndex = 3
 
-    #expect(controller.completedLines.count == 1)
-    let text = controller.completedLines[0].spans.map { $0.text }.joined()
-    #expect(text.contains("(interrupted)"))
-    #expect(controller.streamingOpenLine == nil)
-    #expect(controller.streamingOpenLineRaw == "")
+    let effects = TranscriptController.apply(
+      .turnInterrupted, to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.streamingOpenLine == nil)
+    #expect(state.streamingOpenLineRaw.isEmpty)
+    #expect(state.streamingSectionStartLineIndex == nil)
+    #expect(state.lines.last?.spans.map(\.text).joined() == "(interrupted)")
   }
 
-  // MARK: - Empty assistant turn
+  // MARK: - .emptyAssistantTurn
 
-  @Test func emptyAssistantTurnAddsPlaceholder() {
-    var controller = TranscriptController()
-    controller.apply(.emptyAssistantTurn, theme: theme, renderer: renderer)
-
-    #expect(controller.completedLines.count == 2)
-    let text = controller.completedLines.flatMap { $0.spans }.map { $0.text }.joined()
-    #expect(text.contains("scribe:"))
-    #expect(text.contains("(empty turn)"))
+  @Test func emptyAssistantTurn() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .emptyAssistantTurn, to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count == 2)
+    #expect(state.lines[0].spans[0].text == "scribe:")
+    #expect(state.lines[1].spans[0].text == "(empty turn)")
   }
 
-  // MARK: - Blank line
+  // MARK: - .enterAssistantSection
 
-  @Test func blankLineAddsEmptyLine() {
-    var controller = TranscriptController()
-    controller.apply(.blankLine, theme: theme, renderer: renderer)
+  @Test func enterAssistantSectionAnswer() {
+    var state = TranscriptState()
+    _ = TranscriptController.apply(
+      .userSubmitted("test"), to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
 
-    #expect(controller.completedLines.count == 1)
-    #expect(controller.completedLines[0].spans.isEmpty)
+    let effects = TranscriptController.apply(
+      .enterAssistantSection(.answer, previous: nil),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    // Should have: "you:", "  test", blank, "scribe:", "  · answer"
+    #expect(state.lines.count >= 5)
+    let scribeLine = state.lines[state.lines.count - 2].spans[0].text
+    #expect(scribeLine == "scribe:")
+    let labelLine = state.lines[state.lines.count - 1].spans[0].text
+    #expect(labelLine == "  · answer")
   }
 
-  // MARK: - applyAll
+  @Test func enterAssistantSectionReasoning() {
+    var state = TranscriptState()
+    _ = TranscriptController.apply(
+      .userSubmitted("test"), to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
 
-  @Test func applyAllReturnsHistory() {
-    var controller = TranscriptController()
-    let events: [TranscriptEvent] = [
-      .userSubmitted("one"),
-      .blankLine,
-      .userSubmitted("two"),
-    ]
+    let effects = TranscriptController.apply(
+      .enterAssistantSection(.reasoning, previous: nil),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    let labelLine = state.lines.last?.spans[0].text
+    #expect(labelLine == "  · reasoning")
+  }
 
-    let history = controller.applyAll(events, theme: theme, renderer: renderer)
+  // MARK: - .usage
 
-    #expect(history.count == 3)
-    #expect(controller.completedLines.count > 0)
+  @Test func usageUpdatesHUD() {
+    var state = TranscriptState()
+    let usage = Components.Schemas.CompletionUsage(
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+      promptTokensDetails: nil,
+      completionTokensDetails: nil
+    )
+    let effects = TranscriptController.apply(
+      .usage(usage, tokensPerSecond: 10.5),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: 4000)
+    #expect(effects.needsRender)
+    #expect(state.usageTurnPrompt == 100)
+    #expect(state.usageTurnCompletion == 50)
+    #expect(state.usageTurnTotal == 150)
+    #expect(state.usageHUD?.roundPrompt == 100)
+    #expect(state.usageHUD?.outputTokensPerSecond == 10.5)
+  }
 
-    // Each snapshot should reflect the state after its event.
-    if case .userSubmitted(let text) = history[0].event {
-      #expect(text == "one")
-    } else {
-      #expect(Bool(false))
+  @Test func usageAccumulatesTurnTotals() {
+    var state = TranscriptState()
+    let u1 = Components.Schemas.CompletionUsage(
+      promptTokens: 10, completionTokens: 5, totalTokens: 15,
+      promptTokensDetails: nil, completionTokensDetails: nil)
+    _ = TranscriptController.apply(
+      .usage(u1, tokensPerSecond: nil),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    let u2 = Components.Schemas.CompletionUsage(
+      promptTokens: 20, completionTokens: 10, totalTokens: 30,
+      promptTokensDetails: nil, completionTokensDetails: nil)
+    _ = TranscriptController.apply(
+      .usage(u2, tokensPerSecond: nil),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(state.usageTurnPrompt == 30)
+    #expect(state.usageTurnCompletion == 15)
+    #expect(state.usageTurnTotal == 45)
+  }
+
+  @Test func usageContextWindowPct() {
+    var state = TranscriptState()
+    let usage = Components.Schemas.CompletionUsage(
+      promptTokens: 2000, completionTokens: 100, totalTokens: 2100,
+      promptTokensDetails: nil, completionTokensDetails: nil)
+    _ = TranscriptController.apply(
+      .usage(usage, tokensPerSecond: nil),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: 4000)
+    #expect(state.usageHUD?.contextWindowUsedPercent == 50)
+  }
+
+  // MARK: - .turnComplete
+
+  @Test func turnCompleteFinalizesStreamingState() {
+    var state = TranscriptState()
+    state.streamingOpenLine = TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "remaining")])
+    state.streamingOpenLineRaw = "remaining"
+    state.streamingSectionStartLineIndex = 0
+
+    _ = TranscriptController.apply(
+      .turnComplete(referenceMessages: []),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(state.streamingOpenLine == nil)
+    #expect(state.streamingOpenLineRaw.isEmpty)
+    #expect(state.streamingSectionStartLineIndex == nil)
+  }
+
+  // MARK: - .skippedUnreadableStreamLine
+
+  @Test func skippedUnreadableStreamLine() {
+    var state = TranscriptState()
+    let effects = TranscriptController.apply(
+      .skippedUnreadableStreamLine, to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+    #expect(effects.needsRender)
+    #expect(state.lines.count == 1)
+    #expect(state.lines[0].spans.map(\.text).joined().contains("skipped"))
+  }
+
+  // MARK: - Streaming rendering respects followingLive
+
+  @Test func appendAssistantTextSkipsRenderWhenScrolledUp() {
+    var state = TranscriptState()
+    // Set up a streaming section
+    _ = TranscriptController.apply(
+      .enterAssistantSection(.answer, previous: nil),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: nil)
+
+    // Now append text while NOT following live (user scrolled up)
+    let effects = TranscriptController.apply(
+      .appendAssistantText(.answer, text: "some text"),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: false, contextWindow: nil)
+    #expect(!effects.needsRender)
+    #expect(state.streamingOpenLineRaw == "some text")
+  }
+
+  // MARK: - Idempotency
+
+  @Test func multipleBlankLines() {
+    var state = TranscriptState()
+    for _ in 0..<5 {
+      _ = TranscriptController.apply(
+        .blankLine, to: &state, theme: theme, renderer: renderer,
+        followingLive: true, contextWindow: nil)
     }
+    #expect(state.lines.count == 5)
+    #expect(state.lines.allSatisfy { $0.spans.isEmpty })
   }
 }
