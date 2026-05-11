@@ -556,4 +556,44 @@ struct ConfigLoaderIntegrationTests {
       unsetenv("SCRIBE_CONFIG_PATH")
     }
   }
+
+  @Test
+  func emptyConfigFileThrows() async throws {
+    let configPath = try makeTempConfig("")
+    setenv("SCRIBE_CONFIG_PATH", configPath, 1)
+    defer { unsetenv("SCRIBE_CONFIG_PATH") }
+
+    await #expect(throws: (any Error).self) {
+      _ = try await ConfigLoader.load()
+    }
+  }
+
+  @Test
+  func invalidJSONThrows() async throws {
+    let json = "{ not valid json at all ["
+    let configPath = try makeTempConfig(json)
+    setenv("SCRIBE_CONFIG_PATH", configPath, 1)
+    defer { unsetenv("SCRIBE_CONFIG_PATH") }
+
+    await #expect(throws: (any Error).self) {
+      _ = try await ConfigLoader.load()
+    }
+  }
+
+  @Test
+  func missingLoggingSectionThrows() async throws {
+    let json = """
+      {
+        "api": { "baseUrl": "http://127.0.0.1:11434", "apiKey": "" },
+        "agent": { "model": "m", "contextWindow": 4096, "contextWindowThreshold": 0.5 }
+      }
+      """
+    let configPath = try makeTempConfig(json)
+    setenv("SCRIBE_CONFIG_PATH", configPath, 1)
+    defer { unsetenv("SCRIBE_CONFIG_PATH") }
+
+    await #expect(throws: (any Error).self) {
+      _ = try await ConfigLoader.load()
+    }
+  }
 }

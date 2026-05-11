@@ -313,6 +313,47 @@ struct InputVisualLinesTests {
     let expected = buffer.replacingOccurrences(of: "\n", with: "")
     #expect(reconstructed == expected)
   }
+
+  // MARK: - CRLF normalization
+
+  @Test func crlfNormalizedToLF() {
+    // \r\n should be treated the same as \n
+    let lines = TranscriptLayout.inputVisualLines(from: "line1\r\nline2\r\nline3", textWidth: 80)
+    #expect(lines == ["line1", "line2", "line3"])
+  }
+
+  @Test func crlfWithTrailingCR() {
+    let lines = TranscriptLayout.inputVisualLines(from: "hello\r\n", textWidth: 80)
+    #expect(lines == ["hello", ""])
+  }
+
+  @Test func crlfMixedWithPlainLF() {
+    let lines = TranscriptLayout.inputVisualLines(from: "a\r\nb\nc\r\nd", textWidth: 80)
+    #expect(lines == ["a", "b", "c", "d"])
+  }
+
+  @Test func crlfPreservedThroughWrapping() {
+    let lines = TranscriptLayout.inputVisualLines(from: "ab\r\ncd", textWidth: 1)
+    #expect(lines == ["a", "b", "c", "d"])
+  }
+
+  // MARK: - Very long lines
+
+  @Test func veryLongLineSplitsCorrectly() {
+    let longText = String(repeating: "x", count: 10_000)
+    let lines = TranscriptLayout.inputVisualLines(from: longText, textWidth: 80)
+    #expect(lines.count == 125) // 10000 / 80 = 125
+    for line in lines {
+      #expect(line.count <= 80)
+    }
+  }
+
+  @Test func veryLongLineAtWidthOne() {
+    let longText = String(repeating: "y", count: 5000)
+    let lines = TranscriptLayout.inputVisualLines(from: longText, textWidth: 1)
+    #expect(lines.count == 5000)
+    #expect(lines.allSatisfy { $0.count <= 1 })
+  }
 }
 
 

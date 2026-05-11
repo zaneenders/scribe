@@ -156,8 +156,9 @@ internal enum TranscriptLayout {
   static func inputVisualLines(from buffer: String, textWidth: Int) -> [String] {
     guard textWidth > 0 else { return buffer.isEmpty ? [""] : [] }
     if buffer.isEmpty { return [""] }
+    let normalized = buffer.replacingOccurrences(of: "\r\n", with: "\n")
     var rows: [String] = []
-    for logical in buffer.split(separator: "\n", omittingEmptySubsequences: false) {
+    for logical in normalized.split(separator: "\n", omittingEmptySubsequences: false) {
       let line = String(logical)
       if line.isEmpty {
         rows.append("")
