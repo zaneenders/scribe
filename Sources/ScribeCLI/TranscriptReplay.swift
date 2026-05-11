@@ -80,8 +80,7 @@ public func renderMessagesToTranscript(
         let st = theme.style(for: .reasoning)
         let adapter = MarkdownToSlateAdapter(
           theme: .grayscale, bodyFG: st.fg, bodyBold: st.bold)
-        let rendered = renderer.render(
-          text: reasoning, baseFG: .dim, baseBold: st.bold, theme: .grayscale)
+        let rendered = renderer.render(text: reasoning)
         lines.append(contentsOf: adapter.convert(rendered))
         section = .reasoning
       }
@@ -107,8 +106,7 @@ public func renderMessagesToTranscript(
           let st = theme.style(for: .answer)
           let adapter = MarkdownToSlateAdapter(
             theme: theme.markdown, bodyFG: st.fg, bodyBold: st.bold)
-          let rendered = renderer.render(
-            text: text, baseFG: .body, baseBold: st.bold, theme: .default)
+          let rendered = renderer.render(text: text)
           lines.append(contentsOf: adapter.convert(rendered))
         }
       }

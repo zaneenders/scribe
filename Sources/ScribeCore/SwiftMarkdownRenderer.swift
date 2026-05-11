@@ -12,29 +12,21 @@ public struct SwiftMarkdownRenderer: MarkdownRenderer {
         self.codeBlockHighlighter = codeBlockHighlighter
     }
 
-    public func render(
-        text: String, baseFG: MarkdownColorRole, baseBold: Bool, theme: MarkdownColorTheme
-    ) -> [MarkdownLine] {
+    public func render(text: String) -> [MarkdownLine] {
         let document = Document(parsing: text)
         var walker = TerminalMarkdownWalker(
-            baseFG: baseFG,
-            baseBold: baseBold,
-            codeBlockHighlighter: codeBlockHighlighter,
-            theme: theme
+            codeBlockHighlighter: codeBlockHighlighter
         )
         walker.visit(document)
-        return walker.lines.map { styleRemainingMarkdown(in: $0, baseFG: baseFG, baseBold: baseBold, theme: theme) }
+        return walker.lines.map { styleRemainingMarkdown(in: $0) }
     }
 
     /// Fast streaming path: inline-only styling without block-level parsing.
     /// Splits on newlines and applies the safety-net inline pattern styler
     /// (`**bold**`, `*italic*`, `` `code` ``) to each line.
-    public func renderStreaming(
-        text: String, baseFG: MarkdownColorRole, baseBold: Bool, theme: MarkdownColorTheme
-    ) -> [MarkdownLine] {
+    public func renderStreaming(text: String) -> [MarkdownLine] {
         text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
-            let spans = splitMarkdownPatterns(
-                in: String(line), baseFG: baseFG, baseBold: baseBold, theme: theme)
+            let spans = splitMarkdownPatterns(in: String(line))
             return MarkdownLine(spans: spans)
         }
     }
@@ -47,9 +39,7 @@ public struct SwiftMarkdownRenderer: MarkdownRenderer {
 ///
 /// Processes *contiguous runs* of body-styled spans together so patterns that
 /// the parser split across multiple nodes are still caught.
-private func styleRemainingMarkdown(
-    in line: MarkdownLine, baseFG: MarkdownColorRole, baseBold: Bool, theme: MarkdownColorTheme
-) -> MarkdownLine {
+private func styleRemainingMarkdown(in line: MarkdownLine) -> MarkdownLine {
     guard !line.spans.isEmpty else { return line }
 
     var newSpans: [MarkdownSpan] = []
@@ -79,7 +69,7 @@ private func styleRemainingMarkdown(
         }
 
         // Run the safety net on the concatenated text.
-        let styled = splitMarkdownPatterns(in: concatenated, baseFG: baseFG, baseBold: baseBold, theme: theme)
+        let styled = splitMarkdownPatterns(in: concatenated)
         newSpans.append(contentsOf: styled)
         i = runEnd
     }
@@ -88,9 +78,7 @@ private func styleRemainingMarkdown(
 }
 
 /// Splits plain text into semantic spans, styling any inline markdown delimiters found.
-private func splitMarkdownPatterns(
-    in text: String, baseFG: MarkdownColorRole, baseBold: Bool, theme: MarkdownColorTheme
-) -> [MarkdownSpan] {
+private func splitMarkdownPatterns(in text: String) -> [MarkdownSpan] {
     var spans: [MarkdownSpan] = []
     var remaining = text
 
@@ -123,34 +111,22 @@ private func splitMarkdownPatterns(
         }
 
         guard let open = earliest else {
-            // No more delimiters — append rest as plain text.
-            if baseBold {
-                spans.append(.bold(remaining))
-            } else {
-                spans.append(.body(remaining))
-            }
+            // No more delimiters — append rest as plain body text.
+            spans.append(.body(remaining))
             break
         }
 
         // Append plain text before the opener.
         if open.range.lowerBound > remaining.startIndex {
             let prefix = String(remaining[..<open.range.lowerBound])
-            if baseBold {
-                spans.append(.bold(prefix))
-            } else {
-                spans.append(.body(prefix))
-            }
+            spans.append(.body(prefix))
         }
 
         // Look for the matching closer after the opener.
         let afterOpen = open.range.upperBound
         guard let closeRange = remaining[afterOpen...].range(of: delimiterText(for: open.kind)) else {
             // No closer — treat the opener as literal text and continue after it.
-            if baseBold {
-                spans.append(.bold(delimiterText(for: open.kind)))
-            } else {
-                spans.append(.body(delimiterText(for: open.kind)))
-            }
+            spans.append(.body(delimiterText(for: open.kind)))
             remaining = String(remaining[afterOpen...])
             continue
         }
@@ -205,22 +181,14 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     var lines: [MarkdownLine] = []
     var currentLine = MarkdownLine(spans: [])
 
-    var bold: Bool
+    var bold: Bool = false
     var spanContext: SpanContext = .body
     var inlineContext: InlineContext = .none
 
     let codeBlockHighlighter: MarkdownCodeBlockHighlighter
-    let theme: MarkdownColorTheme
 
-    init(
-        baseFG: MarkdownColorRole,
-        baseBold: Bool,
-        codeBlockHighlighter: MarkdownCodeBlockHighlighter,
-        theme: MarkdownColorTheme
-    ) {
-        self.bold = baseBold
+    init(codeBlockHighlighter: MarkdownCodeBlockHighlighter) {
         self.codeBlockHighlighter = codeBlockHighlighter
-        self.theme = theme
     }
 
     // MARK: Helpers
@@ -241,15 +209,17 @@ private struct TerminalMarkdownWalker: MarkupWalker {
         switch inlineContext {
         case .none:
             switch spanContext {
-            case .body, .heading:
+            case .body:
                 span = useBold ? .bold(text) : .body(text)
+            case .heading:
+                span = .heading(text)
             case .blockquote:
                 span = useBold ? .bold(text) : .blockquote(text)
             }
         case .emphasis:
             span = .italic(text)
         case .strikethrough:
-            span = .body(text)
+            span = .strikethrough(text)
         case .link(let url):
             span = .link(text: text, url: url)
         }
@@ -273,14 +243,11 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     mutating func visitHeading(_ heading: Heading) {
         let prefix = String(repeating: "#", count: heading.level) + " "
         appendSpan(.body(prefix))
-        let savedBold = bold
         let savedContext = spanContext
         spanContext = .heading
-        bold = true
         for child in heading.inlineChildren {
             visit(child)
         }
-        bold = savedBold
         spanContext = savedContext
         if !currentLine.spans.isEmpty {
             flushLine()
@@ -490,7 +457,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     }
 
     mutating func visitHTMLBlock(_ html: HTMLBlock) {
-        appendSpan(.body(html.rawHTML))
+        appendSpan(.strikethrough(html.rawHTML))
         if !currentLine.spans.isEmpty {
             flushLine()
         }
@@ -501,10 +468,11 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     mutating func visitText(_ text: Text) {
         // Safety-net: if the parser left `**`, `*`, or `` ` `` unparsed in a
         // plain Text node, style them now before they reach the span buffer.
-        let spans = splitMarkdownPatterns(in: text.string, baseFG: .body, baseBold: bold, theme: theme)
+        let spans = splitMarkdownPatterns(in: text.string)
         for sp in spans {
-            // If the safety-net produced a plain .body or .bold span, re-wrap it
-            // through appendText so the current inlineContext is applied.
+            // Re-wrap through appendText so the current inlineContext and
+            // spanContext are applied.  The safety-net always produces .body
+            // for base text and .bold/.italic/.code for matched delimiters.
             switch sp {
             case .body(let t):
                 appendText(t)
@@ -559,7 +527,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
 
     mutating func visitImage(_ image: Image) {
         let alt = image.plainText
-        appendSpan(.body("[\(alt)]"))
+        appendSpan(.link(text: "[\(alt)]", url: ""))
     }
 
     mutating func visitLineBreak(_: LineBreak) {
@@ -571,7 +539,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     }
 
     mutating func visitInlineHTML(_ inlineHTML: InlineHTML) {
-        appendSpan(.body(inlineHTML.rawHTML))
+        appendSpan(.strikethrough(inlineHTML.rawHTML))
     }
 }
 
@@ -591,6 +559,7 @@ extension MarkdownSpan {
         case .listMarker(let t): return t
         case .thematicBreak: return "---"
         case .link(let t, _): return t
+        case .strikethrough(let t): return t
         }
     }
 }

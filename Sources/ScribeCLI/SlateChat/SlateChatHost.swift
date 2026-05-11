@@ -697,8 +697,6 @@ internal final class SlateChatHost {
       // next chunk after scrolling back (or finalize) will catch up.
       guard viewport.followingLive else { return }
 
-      let st = theme.style(for: section)
-
       // Only render the visible tail during streaming — the full accumulated
       // text is re-parsed with block-level markdown at finalize anyway.
       // Keeps per-chunk work bounded to O(screen) instead of O(total-response).
@@ -712,14 +710,7 @@ internal final class SlateChatHost {
         return allLines.suffix(maxVisibleLogicalLines).joined(separator: "\n")
       }()
 
-      let colorRole: MarkdownColorRole = section == .reasoning ? .dim : .body
-      let colorTheme: MarkdownColorTheme = section == .reasoning ? .grayscale : .default
-      let rendered = markdownRenderer.renderStreaming(
-        text: tailText,
-        baseFG: colorRole,
-        baseBold: st.bold,
-        theme: colorTheme
-      )
+      let rendered = markdownRenderer.renderStreaming(text: tailText)
       let adapter = markdownAdapter(for: section)
       let tlines = adapter.convert(rendered)
       if let startIdx = streamingSectionStartLineIndex {
@@ -741,15 +732,7 @@ internal final class SlateChatHost {
       // Re-render accumulated text with full block-level markdown.
       if streamingSectionStartLineIndex != nil {
         let section = currentStreamingSection
-        let st = theme.style(for: section)
-        let colorRole: MarkdownColorRole = section == .reasoning ? .dim : .body
-        let colorTheme: MarkdownColorTheme = section == .reasoning ? .grayscale : .default
-        let fullRender = markdownRenderer.render(
-          text: streamingOpenLineRaw,
-          baseFG: colorRole,
-          baseBold: st.bold,
-          theme: colorTheme
-        )
+        let fullRender = markdownRenderer.render(text: streamingOpenLineRaw)
         let adapter = markdownAdapter(for: section)
         let tlines = adapter.convert(fullRender)
         if let startIdx = streamingSectionStartLineIndex {

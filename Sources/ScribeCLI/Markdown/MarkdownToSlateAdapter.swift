@@ -44,6 +44,8 @@ public struct MarkdownToSlateAdapter {
             return StyledSpan(fg: theme.hr, bg: bg, bold: false, text: "---")
         case .link(let text, _):
             return StyledSpan(fg: theme.link, bg: bg, bold: false, text: text)
+        case .strikethrough(let text):
+            return StyledSpan(fg: theme.muted, bg: bg, bold: false, text: text)
         }
     }
 }

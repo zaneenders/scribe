@@ -8,16 +8,14 @@ import Testing
 
 /// Renders markdown incrementally, simulating streaming SSE chunks.
 private func renderIncremental(
-    chunks: [String],
-    baseFG: MarkdownColorRole = .body,
-    baseBold: Bool = false
+    chunks: [String]
 ) -> [[MarkdownLine]] {
     let renderer = SwiftMarkdownRenderer()
     var buffer = ""
     var snapshots: [[MarkdownLine]] = []
     for chunk in chunks {
         buffer += chunk
-        let snapshot = renderer.render(text: buffer, baseFG: baseFG, baseBold: baseBold, theme: .default)
+        let snapshot = renderer.render(text: buffer)
         snapshots.append(snapshot)
     }
     return snapshots
@@ -25,11 +23,9 @@ private func renderIncremental(
 
 /// Renders markdown in one shot.
 private func render(
-    _ text: String,
-    baseFG: MarkdownColorRole = .body,
-    baseBold: Bool = false
+    _ text: String
 ) -> [MarkdownLine] {
-    SwiftMarkdownRenderer().render(text: text, baseFG: baseFG, baseBold: baseBold, theme: .default)
+    SwiftMarkdownRenderer().render(text: text)
 }
 
 /// Joins all span plain text in a line into a single string.
@@ -182,7 +178,8 @@ struct MarkdownRendererTests {
     @Test func headingWithInlineFormatting() {
         let lines = render("# Hello **bold** and *italic*")
         let allSpans = lines.flatMap(\.spans)
-        #expect(allSpans.contains { if case .bold = $0 { return true } else { return false } })
+        // Bold within a heading is folded into .heading (heading text is always bold).
+        #expect(allSpans.contains { if case .heading(let t) = $0, t.contains("bold") { return true } else { return false } })
         #expect(allSpans.contains { if case .italic = $0 { return true } else { return false } })
     }
 
@@ -740,14 +737,14 @@ struct MarkdownRendererTests {
     // MARK: - Base-style preservation
 
     @Test func baseStyleAppliedToPlainText() {
-        let lines = render("plain text", baseFG: .body, baseBold: false)
+        let lines = render("plain text")
         let plainSpans = lines.flatMap(\.spans).filter { $0.plainText.contains("plain") }
         #expect(plainSpans.allSatisfy { if case .body = $0 { return true } else { return false } })
     }
 
-    @Test func baseBoldApplied() {
-        let lines = render("bold base", baseFG: .body, baseBold: true)
-        let plainSpans = lines.flatMap(\.spans).filter { $0.plainText.contains("bold base") }
-        #expect(plainSpans.allSatisfy { if case .bold = $0 { return true } else { return false } })
+    @Test func boldTextRendersAsBold() {
+        let lines = render("**bold base**")
+        let boldSpans = lines.flatMap(\.spans).filter { $0.plainText.contains("bold base") }
+        #expect(boldSpans.allSatisfy { if case .bold = $0 { return true } else { return false } })
     }
 }
