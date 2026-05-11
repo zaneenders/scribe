@@ -158,8 +158,19 @@ internal enum TranscriptLayout {
     if buffer.isEmpty { return [""] }
     var rows: [String] = []
     for logical in buffer.split(separator: "\n", omittingEmptySubsequences: false) {
-      let wrapped = wrappedPlainLines(String(logical), width: textWidth)
-      rows.append(contentsOf: wrapped)
+      let line = String(logical)
+      if line.isEmpty {
+        rows.append("")
+      } else {
+        var pos = line.startIndex
+        while pos < line.endIndex {
+          let remaining = line.distance(from: pos, to: line.endIndex)
+          let chunkLen = min(textWidth, remaining)
+          let end = line.index(pos, offsetBy: chunkLen)
+          rows.append(String(line[pos..<end]))
+          pos = end
+        }
+      }
     }
     return rows
   }

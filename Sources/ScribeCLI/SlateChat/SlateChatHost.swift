@@ -93,6 +93,8 @@ internal final class SlateChatHost {
 
   // Extracted concerns
   private var inputHandler = TerminalInputHandler()
+  private var inputBuffer = ""
+  private var inPaste = false
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
 
@@ -305,24 +307,35 @@ internal final class SlateChatHost {
           for action in actions {
             switch action {
             case .enter:
-              let text = self.inputHandler.takeBuffer()
-              self.submitCoordinator.setModelBusy(self.modelBusy)
-              let effect = self.submitCoordinator.handleEnter(text: text)
-              shouldStop = self.applySubmitEffect(effect, gate: gate)
+              if self.inPaste {
+                self.inputBuffer.append("\n")
+                self.log.debug(
+                  "chat.user.input.newline",
+                  metadata: [
+                    "source": "enter",
+                    "buffer_chars": "\(self.inputBuffer.count)",
+                    "has_queue": "\(self.submitCoordinator.queuedText != nil)",
+                    "inPaste": "true",
+                  ])
+              } else {
+                let text = self.inputBuffer
+                self.inputBuffer = ""
+                self.submitCoordinator.setModelBusy(self.modelBusy)
+                let effect = self.submitCoordinator.handleEnter(text: text)
+                shouldStop = self.applySubmitEffect(effect, gate: gate)
+              }
 
             case .ctrlC:
               let (effect, recallText) = self.submitCoordinator.handleCtrlC()
               if let recall = recallText {
-                self.inputHandler.setBuffer(recall)
+                self.inputBuffer = recall
                 self.queuedTrayText = nil
                 self.renderWake?.requestRender()
               }
               shouldStop = self.applySubmitEffect(effect, gate: gate)
-
             case .ctrlD:
               self.log.debug("chat.user.ctrl-d", metadata: ["action": "exit"])
               shouldStop = true
-
             case .arrowUp:
               self.viewport.queueScroll(by: -1)
             case .arrowDown:
@@ -335,18 +348,33 @@ internal final class SlateChatHost {
               self.viewport.queueGoToTop()
             case .end:
               self.viewport.queueGoToBottom()
-
-            case .newline:
+            case .backspace:
+              if !self.inPaste, !self.inputBuffer.isEmpty { self.inputBuffer.removeLast() }
+            case .bracketedPasteStart:
+              self.inPaste = true
+              self.log.debug(
+                "chat.user.input.paste-begin",
+                metadata: ["buffer_chars": "\(self.inputBuffer.count)"])
+            case .bracketedPasteEnd:
+              self.inPaste = false
+              self.log.debug(
+                "chat.user.input.paste-end",
+                metadata: ["buffer_chars": "\(self.inputBuffer.count)"])
+            case .shiftEnter:
+              self.inputBuffer.append("\n")
               self.log.debug(
                 "chat.user.input.newline",
                 metadata: [
-                  "source": "paste-or-shift-enter",
-                  "buffer_chars": "\(self.inputHandler.buffer.count)",
+                  "source": "shift-enter",
+                  "buffer_chars": "\(self.inputBuffer.count)",
                   "has_queue": "\(self.submitCoordinator.queuedText != nil)",
                 ])
-
-            case .character, .backspace, .tab:
-              break  // Buffer already mutated by TerminalInputHandler
+            case .tab:
+              self.inputBuffer.append("\t")
+            case .character(let ch):
+              self.inputBuffer.append(ch)
+            case .escape:
+              break
             }
           }
 
@@ -391,7 +419,7 @@ internal final class SlateChatHost {
             rows: scrRows,
             banner: self.banner,
             usage: self.usageHUD,
-            inputLine: self.inputHandler.buffer,
+            inputLine: self.inputBuffer,
             waitingForLLM: self.modelBusy,
             queuedTrayText: self.queuedTrayText)
           _ = self.viewport.resolve(flatCount: flatTranscript.count, contentRows: contentRows)
@@ -407,7 +435,7 @@ internal final class SlateChatHost {
             transcriptTailStart: transcriptTailStart,
             banner: self.banner,
             usage: self.usageHUD,
-            inputLine: self.inputHandler.buffer,
+            inputLine: self.inputBuffer,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
             queuedTrayText: self.queuedTrayText,
@@ -426,7 +454,7 @@ internal final class SlateChatHost {
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
                 "queue_chars": "\(self.submitCoordinator.queuedText?.count ?? 0)",
-                "buffer_chars": "\(self.inputHandler.buffer.count)",
+                "buffer_chars": "\(self.inputBuffer.count)",
               ])
           }
         }
