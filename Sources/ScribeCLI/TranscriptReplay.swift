@@ -78,9 +78,10 @@ public func renderMessagesToTranscript(
                 text: "  · reasoning")
             ]))
         let st = theme.style(for: .reasoning)
-        let rendered = renderer.render(
-          text: reasoning, baseFG: st.fg, baseBold: st.bold, theme: .grayscale)
-        lines.append(contentsOf: rendered)
+        let adapter = MarkdownToSlateAdapter(
+          theme: .grayscale, bodyFG: st.fg, bodyBold: st.bold)
+        let rendered = renderer.render(text: reasoning)
+        lines.append(contentsOf: adapter.convert(rendered))
         section = .reasoning
       }
 
@@ -103,9 +104,10 @@ public func renderMessagesToTranscript(
             ]))
         if !text.isEmpty {
           let st = theme.style(for: .answer)
-          let rendered = renderer.render(
-            text: text, baseFG: st.fg, baseBold: st.bold, theme: theme.markdown)
-          lines.append(contentsOf: rendered)
+          let adapter = MarkdownToSlateAdapter(
+            theme: theme.markdown, bodyFG: st.fg, bodyBold: st.bold)
+          let rendered = renderer.render(text: text)
+          lines.append(contentsOf: adapter.convert(rendered))
         }
       }
 

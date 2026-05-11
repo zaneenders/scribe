@@ -156,6 +156,17 @@ internal final class SlateChatHost {
   private let eventQueue = EventQueue()
   private let markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()
   private let theme: CLITheme = .default
+  private var markdownAdapter: MarkdownToSlateAdapter {
+    MarkdownToSlateAdapter(
+      theme: theme.markdown,
+      bodyFG: theme.answerBaseFG,
+      bodyBold: false)
+  }
+  private func markdownAdapter(for section: AssistantStreamSection) -> MarkdownToSlateAdapter {
+    let st = theme.style(for: section)
+    let mdTheme = section == .reasoning ? MarkdownTheme.grayscale : theme.markdown
+    return MarkdownToSlateAdapter(theme: mdTheme, bodyFG: st.fg, bodyBold: st.bold)
+  }
 
   private var renderWake: ExternalWake?
   private var llmWaitAnimationFrame: Int = 0
@@ -567,8 +578,6 @@ internal final class SlateChatHost {
       // next chunk after scrolling back (or finalize) will catch up.
       guard viewport.followingLive else { return }
 
-      let st = theme.style(for: section)
-
       // Only render the visible tail during streaming — the full accumulated
       // text is re-parsed with block-level markdown at finalize anyway.
       // Keeps per-chunk work bounded to O(screen) instead of O(total-response).
@@ -582,12 +591,9 @@ internal final class SlateChatHost {
         return allLines.suffix(maxVisibleLogicalLines).joined(separator: "\n")
       }()
 
-      let rendered = markdownRenderer.renderStreaming(
-        text: tailText,
-        baseFG: st.fg,
-        baseBold: st.bold,
-        theme: section == .reasoning ? .grayscale : theme.markdown
-      )
+      let rendered = markdownRenderer.renderStreaming(text: tailText)
+      let adapter = markdownAdapter(for: section)
+      let tlines = adapter.convert(rendered)
       if let startIdx = streamingSectionStartLineIndex {
         let removeCount = max(0, transcriptLines.count - startIdx)
         if removeCount > 0 {
@@ -595,11 +601,11 @@ internal final class SlateChatHost {
           transcriptGeneration &+= 1
         }
       }
-      if rendered.isEmpty {
+      if tlines.isEmpty {
         streamingOpenLine = TLine(spans: [])
       } else {
-        transcriptLines.append(contentsOf: rendered.dropLast())
-        streamingOpenLine = rendered.last!
+        transcriptLines.append(contentsOf: tlines.dropLast())
+        streamingOpenLine = tlines.last!
       }
       renderWake?.requestRender()
 
@@ -607,25 +613,20 @@ internal final class SlateChatHost {
       // Re-render accumulated text with full block-level markdown.
       if streamingSectionStartLineIndex != nil {
         let section = currentStreamingSection
-        let st = theme.style(for: section)
-        let mdTheme = section == .reasoning ? MarkdownTheme.grayscale : theme.markdown
-        let fullRender = markdownRenderer.render(
-          text: streamingOpenLineRaw,
-          baseFG: st.fg,
-          baseBold: st.bold,
-          theme: mdTheme
-        )
+        let fullRender = markdownRenderer.render(text: streamingOpenLineRaw)
+        let adapter = markdownAdapter(for: section)
+        let tlines = adapter.convert(fullRender)
         if let startIdx = streamingSectionStartLineIndex {
           let removeCount = max(0, transcriptLines.count - startIdx)
           if removeCount > 0 {
             transcriptLines.removeLast(removeCount)
             transcriptGeneration &+= 1
           }
-          if fullRender.isEmpty {
+          if tlines.isEmpty {
             streamingOpenLine = TLine(spans: [])
           } else {
-            transcriptLines.append(contentsOf: fullRender.dropLast())
-            streamingOpenLine = fullRender.last!
+            transcriptLines.append(contentsOf: tlines.dropLast())
+            streamingOpenLine = tlines.last!
           }
         }
       }

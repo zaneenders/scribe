@@ -50,6 +50,7 @@ let package = Package(
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "_RopeModule", package: "swift-collections"),
+        .product(name: "Markdown", package: "swift-markdown"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -63,7 +64,6 @@ let package = Package(
         "ScribeLLM",
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
-        .product(name: "Markdown", package: "swift-markdown"),
         .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
       ],
       swiftSettings: [
@@ -82,7 +82,6 @@ let package = Package(
         "ScribeLLM",
         "ScribeCLI",
         .product(name: "SlateCore", package: "slate"),
-        .product(name: "Markdown", package: "swift-markdown"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
