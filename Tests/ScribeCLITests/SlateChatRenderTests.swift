@@ -186,3 +186,131 @@ struct SlateChatRenderTests {
     #expect(span.text == " ", "Expected blank transcript area, got '\(span.text)' at row \(headerRows)")
   }
 }
+
+// MARK: - TranscriptLayout.inputVisualLines tests
+
+/// Tests for `TranscriptLayout.inputVisualLines` — the pure function that splits
+/// a multi-line input buffer into visual lines for the input area.
+///
+/// The function must:
+/// - Split the buffer on `\n` into logical lines
+/// - Word-wrap each logical line at the given text width
+/// - Return a flat array of visual rows (order = top-to-bottom as rendered)
+@Suite
+struct InputVisualLinesTests {
+
+  // MARK: - Empty / zero-width
+
+  @Test func emptyBufferReturnsSingleEmptyLine() {
+    let lines = TranscriptLayout.inputVisualLines(from: "", textWidth: 80)
+    #expect(lines == [""])
+  }
+
+  @Test func zeroWidthReturnsSingleEmptyLineForEmptyBuffer() {
+    let lines = TranscriptLayout.inputVisualLines(from: "", textWidth: 0)
+    #expect(lines == [""])
+  }
+
+  @Test func zeroWidthReturnsEmptyForNonEmptyBuffer() {
+    let lines = TranscriptLayout.inputVisualLines(from: "hello", textWidth: 0)
+    #expect(lines == [])
+  }
+
+  // MARK: - Single line (no newlines)
+
+  @Test func singleShortLine() {
+    let lines = TranscriptLayout.inputVisualLines(from: "hello", textWidth: 80)
+    #expect(lines == ["hello"])
+  }
+
+  @Test func singleLineExactlyAtWidth() {
+    let lines = TranscriptLayout.inputVisualLines(from: "12345", textWidth: 5)
+    #expect(lines == ["12345"])
+  }
+
+  @Test func singleLineWrapsAtWidth() {
+    // character-level: "hello " (6) + "world" (5)
+    let lines = TranscriptLayout.inputVisualLines(from: "hello world", textWidth: 6)
+    #expect(lines == ["hello ", "world"])
+  }
+
+  @Test func singleLongWordSplitsByWidth() {
+    let lines = TranscriptLayout.inputVisualLines(from: "abcdefghij", textWidth: 3)
+    #expect(lines == ["abc", "def", "ghi", "j"])
+  }
+
+  // MARK: - Multi-line from newlines
+
+  @Test func multipleLinesPreserveNewlineSplits() {
+    let lines = TranscriptLayout.inputVisualLines(from: "line1\nline2\nline3", textWidth: 80)
+    #expect(lines == ["line1", "line2", "line3"])
+  }
+
+  @Test func trailingNewlineProducesEmptyFinalLine() {
+    let lines = TranscriptLayout.inputVisualLines(from: "hello\n", textWidth: 80)
+    #expect(lines == ["hello", ""])
+  }
+
+  @Test func leadingNewlineProducesEmptyFirstLine() {
+    let lines = TranscriptLayout.inputVisualLines(from: "\nworld", textWidth: 80)
+    #expect(lines == ["", "world"])
+  }
+
+  @Test func consecutiveNewlinesProduceEmptyLinesBetween() {
+    let lines = TranscriptLayout.inputVisualLines(from: "a\n\nb", textWidth: 80)
+    #expect(lines == ["a", "", "b"])
+  }
+
+  @Test func onlyNewlinesProducesEmptyLines() {
+    let lines = TranscriptLayout.inputVisualLines(from: "\n\n", textWidth: 80)
+    #expect(lines == ["", "", ""])
+  }
+
+  // MARK: - Multi-line with wrapping
+
+  @Test func multiLineWithWrapping() {
+    // Character-level wrapping: each logical line split every 6 characters
+    // "abcdef ghijkl" → "abcdef", " ghijk", "l"
+    // "mnopqr stuvwx" → "mnopqr", " stuvw", "x"
+    let lines = TranscriptLayout.inputVisualLines(from: "abcdef ghijkl\nmnopqr stuvwx", textWidth: 6)
+    #expect(lines == ["abcdef", " ghijk", "l", "mnopqr", " stuvw", "x"])
+  }
+
+  @Test func mixedShortAndWrappedLines() {
+    // Character-level wrapping at width 20:
+    // "this is a longer line that wraps" (35 chars)
+    // → "this is a longer lin" (20) + "e that wraps" (15)
+    let lines = TranscriptLayout.inputVisualLines(from: "short\nthis is a longer line that wraps", textWidth: 20)
+    #expect(lines == [
+      "short",
+      "this is a longer lin",
+      "e that wraps",
+    ])
+  }
+
+  // MARK: - Whitespace handling
+
+  @Test func leadingWhitespaceOnLogicalLineIsPreserved() {
+    let lines = TranscriptLayout.inputVisualLines(from: "  indented", textWidth: 80)
+    #expect(lines == ["  indented"])
+  }
+
+  @Test func multiLineWithIndentation() {
+    let buffer = "  func foo() {\n    bar()\n  }"
+    let lines = TranscriptLayout.inputVisualLines(from: buffer, textWidth: 80)
+    #expect(lines == ["  func foo() {", "    bar()", "  }"])
+  }
+
+  // MARK: - Pass-through invariant: visual wrapping is lossless
+
+  @Test func visualWrappingPreservesOriginalContent() {
+    // The visual lines joined together (without any separator) should
+    // equal the original buffer with newlines removed, since wrapping
+    // is purely visual — it doesn't drop or rearrange characters.
+    let buffer = "line1\nline2 that is quite long and wraps\nline3"
+    let lines = TranscriptLayout.inputVisualLines(from: buffer, textWidth: 12)
+    let reconstructed = lines.joined()
+    let expected = buffer.replacingOccurrences(of: "\n", with: "")
+    #expect(reconstructed == expected)
+  }
+}

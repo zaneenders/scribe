@@ -30,32 +30,6 @@ private actor UserLineGate {
   }
 }
 
-// MARK: - Model turn interrupt flag
-
-/// Cooperative abort for Ctrl+C during an assistant/tool round without
-/// cancelling the long-lived coordinator task.
-private final class ModelTurnInterruptFlag: Sendable {
-  private let lock = Mutex(false)
-
-  func clear() { lock.withLock { $0 = false } }
-  func request() { lock.withLock { $0 = true } }
-  func peek() -> Bool { lock.withLock { $0 } }
-
-  func logState(_ logger: Logger, tag: String) {
-    let val = peek()
-    logger.trace("chat.interrupt-flag.\(tag)", metadata: ["value": "\(val)"])
-  }
-}
-
-// MARK: - Host event channel
-
-/// Events the coordinator task sends to the host for rendering.
-enum HostEvent: Sendable {
-  case transcript(TranscriptEvent)
-  case modelTurnRunning(Bool)
-  case coordinatorFinished
-}
-
 // MARK: - Transcript flatten cache
 
 extension TranscriptLayout {
@@ -124,6 +98,8 @@ internal final class SlateChatHost {
 
   // Extracted concerns
   private var inputHandler = TerminalInputHandler()
+  private var inputBuffer = ""
+  private var inPaste = false
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
 
@@ -225,8 +201,6 @@ internal final class SlateChatHost {
             self.resumeMessages, theme: self.theme, renderer: self.markdownRenderer)
         }
 
-        let persistURL = self.sessionPersistenceURL
-
         let cwd = FileManager.default.currentDirectoryPath
         self.banner = BannerSnapshot(
           baseURL: self.configuration.serverURL,
@@ -255,165 +229,53 @@ internal final class SlateChatHost {
           }
         }
 
-        let interruptFlag = self.modelInterruptFlag
-        let sessionLog = self.log
         let eventQueue = self.eventQueue
-        let sidUUID = self.sessionId
-        let createdAt = self.sessionCreatedAt
-        self.coordinatorTask = Task {
-          [
-            configuration, systemPrompt, gate, resumeSnapshot = self.resumeMessages,
-            interruptFlag, sessionLog, eventQueue, persistURL, sidUUID, createdAt
-          ] in
+        let sessionLog = self.log
+        let persistence = SessionPersistence(
+          url: self.sessionPersistenceURL,
+          sessionId: self.sessionId,
+          createdAt: self.sessionCreatedAt
+        )
 
-          func enqueue(_ event: HostEvent) {
-            eventQueue.enqueue(event)
-          }
-
-          func persistNew(from agent: ScribeAgent, since count: Int) async {
-            let newMessages = await agent.messages(since: count)
-            guard !newMessages.isEmpty else { return }
-            do {
-              try ChatSessionStore.appendMessages(newMessages, to: persistURL)
-              let total = await agent.messages.count
-              sessionLog.trace(
-                "chat.persist.append",
-                metadata: [
-                  "new": "\(newMessages.count)",
-                  "total": "\(total)",
-                  "path": "\(persistURL.path)",
-                ])
-            } catch {
-              sessionLog.error(
-                "chat.persist.fail",
-                metadata: [
-                  "path": "\(persistURL.path)",
-                  "err": "\(error.localizedDescription)",
-                ])
+        // Bridge UserLineGate → AsyncStream<String> for the coordinator.
+        let (inputStream, inputContinuation) = AsyncStream<String>.makeStream()
+        let bridgeGate = gate
+        let coordConfig = self.configuration
+        let coordSystemPrompt = self.systemPrompt
+        let coordResumeMessages = self.resumeMessages
+        self.coordinatorTask = Task { [inputStream, interruptFlag = self.modelInterruptFlag] in
+          // Feed gate lines into the stream from this detached context.
+          let bridgeTask = Task {
+            while let line = await bridgeGate.nextLine() {
+              inputContinuation.yield(line)
             }
+            inputContinuation.finish()
           }
+          defer { bridgeTask.cancel() }
 
           do {
-            let initialMessages: [Components.Schemas.ChatMessage]
-            if !resumeSnapshot.isEmpty {
-              guard resumeSnapshot.first?.role == .system else {
-                throw ScribeError.sessionCorrupted(
-                  reason: "Resumed conversation must begin with a system message.")
-              }
-              initialMessages = resumeSnapshot
-            } else {
-              initialMessages = [.init(role: .system, content: systemPrompt)]
-            }
-
-            let agent = try ScribeAgent(
-              configuration: configuration,
-              systemPrompt: systemPrompt,
-              initialMessages: initialMessages
+            let coordinator = try ChatCoordinator(
+              configuration: coordConfig,
+              systemPrompt: coordSystemPrompt,
+              initialMessages: coordResumeMessages,
+              persistence: persistence,
+              eventSink: { event in eventQueue.enqueue(event) },
+              log: sessionLog
             )
-
-            // Write metadata on first persist (new sessions only).
-            if resumeSnapshot.isEmpty {
-              let cwd = FileManager.default.currentDirectoryPath
-              let meta = ChatSessionMetadata(
-                id: sidUUID,
-                createdAt: createdAt,
-                model: configuration.agentModel,
-                cwd: cwd,
-                baseURL: configuration.serverURL,
-                scribeVersion: GitVersion.hash
-              )
-              try? ChatSessionStore.saveMetadata(meta, to: persistURL)
-            }
-
-            try ChatSessionStore.appendMessages(initialMessages, to: persistURL)
-            var persistedCount = initialMessages.count
-
-            let msgCount = initialMessages.count
-            sessionLog.debug(
-              "event=chat.coordinator.start messages=\(msgCount) resumed=\(!resumeSnapshot.isEmpty)")
-
-            let tracker = TokenTracker(
-              contextWindow: configuration.contextWindow,
-              threshold: configuration.contextWindowThreshold
+            _ = await coordinator.run(
+              input: inputStream,
+              interruptFlag: interruptFlag
             )
-
-            while true {
-              guard let line = await gate.nextLine() else {
-                sessionLog.info("event=chat.user.eof reason=stdin-closed")
-                break
-              }
-              let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-              if trimmed == "exit" {
-                sessionLog.notice("event=chat.user.exit-command")
-                break
-              }
-              if trimmed.isEmpty {
-                sessionLog.trace("event=chat.user.empty-skip")
-                continue
-              }
-
-              // Record user submission into transcript.
-              enqueue(.transcript(.userSubmitted(trimmed)))
-              sessionLog.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
-
-              interruptFlag.clear()
-              interruptFlag.logState(sessionLog, tag: "cleared-for-new-turn")
-              enqueue(.modelTurnRunning(true))
-              defer { enqueue(.modelTurnRunning(false)) }
-
-              let options = AgentRunOptions(
-                shouldAbortTurn: {
-                  let v = interruptFlag.peek()
-                  if v { sessionLog.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
-                  return v
-                }
-              )
-
-              do {
-                let ts = await agent.prompt(trimmed, options: options, log: sessionLog)
-                for await event in ts.events {
-                  if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
-                  enqueue(.transcript(event))
-                }
-                let result = try await ts.result.value
-                switch result.outcome {
-                case .completed:
-                  sessionLog.info("event=agent.turn.end status=completed")
-                  tracker.logStatus(logger: sessionLog)
-                case .interrupted:
-                  sessionLog.notice("event=agent.turn.end status=interrupted")
-                  enqueue(.transcript(.turnInterrupted))
-                case .toolRoundLimit(let max):
-                  sessionLog.notice("event=agent.turn.end status=tool-round-limit limit=\(max)")
-                  enqueue(.transcript(.turnInterrupted))
-                }
-              } catch {
-                let se = (error as? ScribeError) ?? .generic(String(describing: error))
-                sessionLog.error(
-                  "event=agent.turn.end status=error err=\"\(se.errorDescription ?? String(describing: se))\"")
-                enqueue(.transcript(.harnessError(se)))
-              }
-              await persistNew(from: agent, since: persistedCount)
-              persistedCount = await agent.messages.count
-
-              // Turn complete — tell host to finalize and optionally
-              // compare streaming render against the batch render.
-              let committed = await agent.messages
-              enqueue(.transcript(.turnComplete(referenceMessages: committed)))
-            }
-            await persistNew(from: agent, since: persistedCount)
-            let finalMsgCount = await agent.messages.count
-            sessionLog.debug("event=chat.coordinator.end transcript_messages=\(finalMsgCount)")
           } catch {
-            let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-            enqueue(.transcript(.harnessError(scribeError)))
+            let se = (error as? ScribeError) ?? .generic(String(describing: error))
+            eventQueue.enqueue(.transcript(.harnessError(se)))
             sessionLog.error(
               "chat.coordinator.fail",
               metadata: [
-                "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
+                "err": "\(se.errorDescription ?? String(describing: se))"
               ])
           }
-          enqueue(.coordinatorFinished)
+          eventQueue.enqueue(.coordinatorFinished)
         }
 
         self.spinnerTask?.cancel()
@@ -450,24 +312,35 @@ internal final class SlateChatHost {
           for action in actions {
             switch action {
             case .enter:
-              let text = self.inputHandler.takeBuffer()
-              self.submitCoordinator.setModelBusy(self.modelBusy)
-              let effect = self.submitCoordinator.handleEnter(text: text)
-              shouldStop = self.applySubmitEffect(effect, gate: gate)
+              if self.inPaste {
+                self.inputBuffer.append("\n")
+                self.log.debug(
+                  "chat.user.input.newline",
+                  metadata: [
+                    "source": "enter",
+                    "buffer_chars": "\(self.inputBuffer.count)",
+                    "has_queue": "\(self.submitCoordinator.queuedText != nil)",
+                    "inPaste": "true",
+                  ])
+              } else {
+                let text = self.inputBuffer
+                self.inputBuffer = ""
+                self.submitCoordinator.setModelBusy(self.modelBusy)
+                let effect = self.submitCoordinator.handleEnter(text: text)
+                shouldStop = self.applySubmitEffect(effect, gate: gate)
+              }
 
             case .ctrlC:
               let (effect, recallText) = self.submitCoordinator.handleCtrlC()
               if let recall = recallText {
-                self.inputHandler.setBuffer(recall)
+                self.inputBuffer = recall
                 self.queuedTrayText = nil
                 self.renderWake?.requestRender()
               }
               shouldStop = self.applySubmitEffect(effect, gate: gate)
-
             case .ctrlD:
               self.log.debug("chat.user.ctrl-d", metadata: ["action": "exit"])
               shouldStop = true
-
             case .arrowUp:
               self.viewport.queueScroll(by: -1)
             case .arrowDown:
@@ -480,18 +353,33 @@ internal final class SlateChatHost {
               self.viewport.queueGoToTop()
             case .end:
               self.viewport.queueGoToBottom()
-
-            case .newline:
+            case .backspace:
+              if !self.inPaste, !self.inputBuffer.isEmpty { self.inputBuffer.removeLast() }
+            case .bracketedPasteStart:
+              self.inPaste = true
+              self.log.debug(
+                "chat.user.input.paste-begin",
+                metadata: ["buffer_chars": "\(self.inputBuffer.count)"])
+            case .bracketedPasteEnd:
+              self.inPaste = false
+              self.log.debug(
+                "chat.user.input.paste-end",
+                metadata: ["buffer_chars": "\(self.inputBuffer.count)"])
+            case .shiftEnter:
+              self.inputBuffer.append("\n")
               self.log.debug(
                 "chat.user.input.newline",
                 metadata: [
-                  "source": "paste-or-shift-enter",
-                  "buffer_chars": "\(self.inputHandler.buffer.count)",
+                  "source": "shift-enter",
+                  "buffer_chars": "\(self.inputBuffer.count)",
                   "has_queue": "\(self.submitCoordinator.queuedText != nil)",
                 ])
-
-            case .character, .backspace, .tab:
-              break  // Buffer already mutated by TerminalInputHandler
+            case .tab:
+              self.inputBuffer.append("\t")
+            case .character(let ch):
+              self.inputBuffer.append(ch)
+            case .escape:
+              break
             }
           }
 
@@ -522,7 +410,7 @@ internal final class SlateChatHost {
           let scrRows = grid.rows
 
           let state = RenderState(
-            inputBuffer: self.inputHandler.buffer,
+            inputBuffer: self.inputBuffer,
             modelBusy: self.modelBusy,
             queuedTrayText: self.queuedTrayText,
             banner: self.banner,
@@ -560,7 +448,7 @@ internal final class SlateChatHost {
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
                 "queue_chars": "\(self.submitCoordinator.queuedText?.count ?? 0)",
-                "buffer_chars": "\(self.inputHandler.buffer.count)",
+                "buffer_chars": "\(self.inputBuffer.count)",
               ])
           }
         }
