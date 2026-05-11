@@ -314,3 +314,426 @@ struct InputVisualLinesTests {
     #expect(reconstructed == expected)
   }
 }
+
+
+// MARK: - SlateChatRenderer queued tray tests
+
+@Suite
+struct QueuedTrayTests {
+
+    // MARK: - queuedTrayRowCount
+
+    @Test func rowCountNilText() {
+        #expect(SlateChatRenderer.queuedTrayRowCount(queuedTrayText: nil, cols: 80) == 0)
+    }
+
+    @Test func rowCountEmptyText() {
+        #expect(SlateChatRenderer.queuedTrayRowCount(queuedTrayText: "", cols: 80) == 0)
+    }
+
+    @Test func rowCountSingleLine() {
+        #expect(SlateChatRenderer.queuedTrayRowCount(queuedTrayText: "hello", cols: 80) == 1)
+    }
+
+    @Test func rowCountMultiLine() {
+        #expect(SlateChatRenderer.queuedTrayRowCount(queuedTrayText: "a\nb\nc", cols: 80) == 3)
+    }
+
+    @Test func rowCountWrappedLine() {
+        // A long line that wraps at width 10 (gutter=8, so textWidth=72 for cols=80)
+        // "queuedTrayRowCount" has gutter 8, so for cols=18, textWidth=10
+        let longLine = String(repeating: "x", count: 50)
+        // At textWidth=10, 50 chars → 5 visual lines, capped at 4
+        let rows = SlateChatRenderer.queuedTrayRowCount(queuedTrayText: longLine, cols: 18)
+        #expect(rows > 0)
+    }
+}
+
+// MARK: - SlateChatRenderer banner tests
+
+@Suite
+struct BannerRenderTests {
+
+    @Test func buildGridWithBannerShowsLLMRow() {
+        let cols = 80
+        let rows = 24
+        let banner = BannerSnapshot(
+            baseURL: "https://api.example.com",
+            model: "test-model",
+            cwd: "/tmp",
+            scribeVersion: "0.0.1",
+            gitBranch: nil,
+            sessionId: "test-sid"
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: banner, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let row0Text = grid[0].map(\.text).joined()
+        #expect(row0Text.contains("LLM:"))
+        #expect(row0Text.contains("api.example.com"))
+    }
+
+    @Test func buildGridWithBannerShowsModelRow() {
+        let cols = 80
+        let rows = 24
+        let banner = BannerSnapshot(
+            baseURL: "https://api.example.com",
+            model: "test-model",
+            cwd: "/tmp",
+            scribeVersion: "0.0.1",
+            gitBranch: nil,
+            sessionId: "test-sid"
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: banner, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let row1Text = grid[1].map(\.text).joined()
+        #expect(row1Text.contains("Model:"))
+        #expect(row1Text.contains("test-model"))
+    }
+
+    @Test func buildGridWithBannerShowsCWDRow() {
+        let cols = 80
+        let rows = 24
+        let banner = BannerSnapshot(
+            baseURL: "https://api.example.com",
+            model: "test-model",
+            cwd: "/home/user/project",
+            scribeVersion: "0.0.1",
+            gitBranch: nil,
+            sessionId: "test-sid"
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: banner, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let row2Text = grid[2].map(\.text).joined()
+        #expect(row2Text.contains("CWD:"))
+        #expect(row2Text.contains("/home/user/project"))
+    }
+
+    @Test func bannerWithGitBranchShowsBranch() {
+        let cols = 80
+        let rows = 24
+        let banner = BannerSnapshot(
+            baseURL: "https://api.example.com",
+            model: "test-model",
+            cwd: "/tmp",
+            scribeVersion: "0.0.1",
+            gitBranch: "main",
+            sessionId: "test-sid"
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: banner, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let row2Text = grid[2].map(\.text).joined()
+        #expect(row2Text.contains("@main"))
+    }
+
+    @Test func tinyTerminalNoBannerRows() {
+        let cols = 40
+        let rows = 1
+        let banner = BannerSnapshot(
+            baseURL: "u", model: "m", cwd: "/",
+            scribeVersion: "v", gitBranch: nil, sessionId: "s"
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: banner, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        #expect(grid.count == 1)
+        #expect(grid[0].count == 40)
+    }
+}
+
+// MARK: - SlateChatRenderer usage HUD tests
+
+@Suite
+struct UsageHUDRenderTests {
+
+    @Test func buildGridWithUsageShowsHUD() {
+        let cols = 80
+        let rows = 24
+        let usage = UsageHUDSnapshot(
+            roundPrompt: 500, roundCompletion: 200, roundTotal: 700,
+            turnPrompt: 1500, turnCompletion: 800, turnTotal: 2300,
+            sessionPrompt: 5000, sessionCompletion: 3000, sessionTotal: 8000,
+            reasoningTokens: nil, cachedPromptTokens: nil,
+            outputTokensPerSecond: nil, contextWindow: nil, contextWindowUsedPercent: nil
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: usage,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let topRight = grid[0][cols - 1].text
+        #expect(!topRight.isEmpty)
+    }
+
+    @Test func usageHUDWithContextWindowPercentShowsPct() {
+        let cols = 100
+        let rows = 24
+        let usage = UsageHUDSnapshot(
+            roundPrompt: 1000, roundCompletion: 500, roundTotal: 1500,
+            turnPrompt: 3000, turnCompletion: 1500, turnTotal: 4500,
+            sessionPrompt: 10000, sessionCompletion: 5000, sessionTotal: 15000,
+            reasoningTokens: nil, cachedPromptTokens: nil,
+            outputTokensPerSecond: 42.5, contextWindow: 128000, contextWindowUsedPercent: 85
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: usage,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let hudText = grid[0].map(\.text).joined()
+        #expect(hudText.contains("85%"))
+        #expect(hudText.contains("42.5/s"))
+    }
+
+    @Test func usageHUDWithReasoningTokens() {
+        let cols = 100
+        let rows = 24
+        let usage = UsageHUDSnapshot(
+            roundPrompt: 100, roundCompletion: 50, roundTotal: 150,
+            turnPrompt: 200, turnCompletion: 100, turnTotal: 300,
+            sessionPrompt: 500, sessionCompletion: 300, sessionTotal: 800,
+            reasoningTokens: 120, cachedPromptTokens: nil,
+            outputTokensPerSecond: nil, contextWindow: nil, contextWindowUsedPercent: nil
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: usage,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let row1Text = grid[1].map(\.text).joined()
+        #expect(row1Text.contains("reasoning"))
+    }
+
+    @Test func usageHUDWithCachedPromptTokens() {
+        let cols = 100
+        let rows = 24
+        let usage = UsageHUDSnapshot(
+            roundPrompt: 100, roundCompletion: 50, roundTotal: 150,
+            turnPrompt: 200, turnCompletion: 100, turnTotal: 300,
+            sessionPrompt: 500, sessionCompletion: 300, sessionTotal: 800,
+            reasoningTokens: nil, cachedPromptTokens: 75,
+            outputTokensPerSecond: nil, contextWindow: nil, contextWindowUsedPercent: nil
+        )
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: usage,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let row1Text = grid[1].map(\.text).joined()
+        #expect(row1Text.contains("cache"))
+    }
+}
+
+// MARK: - SlateChatRenderer spinner tests
+
+@Suite
+struct SpinnerRenderTests {
+
+    @Test func buildGridShowsSpinnerWhenWaitingAndEmptyInput() {
+        let cols = 80
+        let rows = 24
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: true, queuedTrayText: nil,
+            theme: .default
+        )
+        let inputRow = rows - 1
+        let inputText = grid[inputRow].map(\.text).joined()
+        #expect(inputText.contains("scribe:"))
+    }
+
+    @Test func spinnerAdvancesWithFrame() {
+        let cols = 80
+        let rows = 24
+        let grid0 = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: true, queuedTrayText: nil,
+            theme: .default
+        )
+        let grid1 = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 1,
+            waitingForLLM: true, queuedTrayText: nil,
+            theme: .default
+        )
+        let inputRow = rows - 1
+        let text0 = grid0[inputRow].map(\.text).joined()
+        let text1 = grid1[inputRow].map(\.text).joined()
+        #expect(text0 != text1)
+    }
+
+    @Test func noSpinnerWhenNotWaiting() {
+        let cols = 80
+        let rows = 24
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: nil,
+            inputLine: "typing...", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default
+        )
+        let inputRow = rows - 1
+        let inputText = grid[inputRow].map(\.text).joined()
+        #expect(inputText.contains("you:"))
+        #expect(!inputText.contains("scribe:"))
+    }
+}
+
+// MARK: - SlateChatRenderer queued tray in grid tests
+
+@Suite
+struct QueuedTrayGridTests {
+
+    @Test func buildGridWithQueuedTrayShowsQueuedPrefix() {
+        let cols = 80
+        let rows = 24
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: true, queuedTrayText: "fix the bug",
+            theme: .default
+        )
+        let trayRow = rows - 2
+        let trayText = grid[trayRow].map(\.text).joined()
+        #expect(trayText.contains("queued:"))
+    }
+}
+
+// MARK: - TranscriptLayout.flattenedRows edge case tests
+
+@Suite
+struct FlattenedRowsEdgeCaseTests {
+
+    @Test func zeroWidthReturnsEmpty() {
+        let lines: [TLine] = [
+            TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "hello")])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 0)
+        #expect(result.isEmpty)
+    }
+
+    @Test func emptySpansProducesBlankLine() {
+        let lines: [TLine] = [TLine(spans: [])]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 80)
+        #expect(result.count == 1)
+        #expect(result[0].spans.isEmpty)
+    }
+
+    @Test func spansWithNewlinesAreSplit() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .white, bg: .black, bold: false, text: "line1\nline2")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 80)
+        #expect(result.count == 2)
+        #expect(result[0].spans.first?.text == "line1")
+        #expect(result[1].spans.first?.text == "line2")
+    }
+
+    @Test func consecutiveNewlinesProduceBlankLines() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .white, bg: .black, bold: false, text: "a\n\nb")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 80)
+        #expect(result.count == 3)
+        #expect(result[0].spans.first?.text == "a")
+        #expect(result[1].spans.isEmpty)
+        #expect(result[2].spans.first?.text == "b")
+    }
+
+    @Test func longWordSplitsAcrossLines() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .white, bg: .black, bold: false, text: "abcdefghijklmnop")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 5)
+        #expect(result.count == 4)
+        #expect(result[0].spans.first?.text == "abcde")
+        #expect(result[1].spans.first?.text == "fghij")
+        #expect(result[2].spans.first?.text == "klmno")
+        #expect(result[3].spans.first?.text == "p")
+    }
+
+    @Test func mixedShortAndLongTokensWrapCorrectly() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .white, bg: .black, bold: false, text: "hi there world")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 8)
+        #expect(result.count == 2)
+        #expect(result[0].spans.first?.text == "hi there")
+        #expect(result[1].spans.first?.text == " world")
+    }
+
+    @Test func spanStylePreservedAcrossWraps() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .red, bg: .black, bold: true, text: "abcdefghij")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 4)
+        #expect(result.count == 3)
+        for line in result {
+            for span in line.spans {
+                #expect(span.bold == true)
+                #expect(span.fg == .red)
+            }
+        }
+    }
+}

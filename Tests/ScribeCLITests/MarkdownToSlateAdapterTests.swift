@@ -124,3 +124,132 @@ struct MarkdownToSlateAdapterTests {
     #expect(back.spans[1].kind == MarkdownSpanKind.bold)
   }
 }
+
+// MARK: - Reverse conversion completeness tests
+
+@Suite
+struct MarkdownToSlateReverseConversionTests {
+
+    private let theme = MarkdownTheme.vibrant
+    private let baseFG: TerminalRGB = ScribePalette.cyan
+    private let baseBold = false
+
+    @Test func reverseConvertItalic() {
+        let span = StyledSpan(fg: theme.italic, bg: theme.background, bold: false, text: "italic")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.italic)
+    }
+
+    @Test func reverseConvertCode() {
+        let span = StyledSpan(fg: theme.code, bg: theme.background, bold: false, text: "code")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.code)
+    }
+
+    @Test func reverseConvertHeadingPrefix() {
+        let span = StyledSpan(fg: theme.headingPrefix, bg: theme.background, bold: false, text: "## ")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        if case .headingPrefix = result.kind {
+            // expected
+        } else {
+            #expect(Bool(false), "expected headingPrefix, got \(result.kind)")
+        }
+    }
+
+    @Test func reverseConvertHeading() {
+        let span = StyledSpan(fg: theme.heading, bg: theme.background, bold: true, text: "Title")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        if case .heading = result.kind {
+            // expected
+        } else {
+            #expect(Bool(false), "expected heading, got \(result.kind)")
+        }
+    }
+
+    @Test func reverseConvertListMarker() {
+        let span = StyledSpan(fg: theme.listMarker, bg: theme.background, bold: false, text: "- ")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.listMarker)
+    }
+
+    @Test func reverseConvertBlockquote() {
+        let span = StyledSpan(fg: theme.blockquote, bg: theme.background, bold: false, text: "> q")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.blockquote)
+    }
+
+    @Test func reverseConvertLink() {
+        let span = StyledSpan(fg: theme.link, bg: theme.background, bold: false, text: "click")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.link)
+    }
+
+    @Test func reverseConvertCodeBlock() {
+        let span = StyledSpan(fg: theme.codeBlock, bg: theme.background, bold: false, text: "code")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.codeBlock)
+    }
+
+    @Test func reverseConvertThematicBreak() {
+        let span = StyledSpan(fg: theme.hr, bg: theme.background, bold: false, text: "---")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.thematicBreak)
+    }
+
+    @Test func reverseConvertMuted() {
+        let span = StyledSpan(fg: theme.muted, bg: theme.background, bold: false, text: "muted")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.muted)
+    }
+
+    @Test func reverseConvertUnknownFallsBackToPlain() {
+        // A color that doesn't match any theme color → .plain
+        let span = StyledSpan(fg: TerminalRGB(r: 255, g: 0, b: 255), bg: theme.background, bold: false, text: "unknown")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.plain)
+    }
+
+    @Test func reverseConvertBoldBaseBoldPlainMatchesBase() {
+        // When base is bold and the span matches base FG + bold → plain
+        let span = StyledSpan(fg: baseFG, bg: theme.background, bold: true, text: "plain but bold")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: true, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.plain)
+    }
+
+    @Test func reverseConvertTLineFullRoundTrip() {
+        // Every kind round-trips through TLine → MarkdownLine → TLine
+        let original: [MarkdownSpanKind] = [
+            .plain, .bold, .italic, .code,
+            .headingPrefix(level: 2), .heading(level: 1),
+            .listMarker, .blockquote, .link, .codeBlock,
+            .thematicBreak, .muted,
+        ]
+        let texts = [
+            "plain", "bold", "italic", "code",
+            "## ", "Title",
+            "- ", "> q", "link", "code", "---", "muted",
+        ]
+
+        for (kind, text) in zip(original, texts) {
+            let markdownLine = MarkdownLine(spans: [MarkdownSpan(text: text, kind: kind)])
+            let tLine = MarkdownToSlateAdapter.convert(markdownLine, baseFG: baseFG, baseBold: baseBold, theme: theme)
+            let back = MarkdownToSlateAdapter.convert(tLine, baseFG: baseFG, baseBold: baseBold, theme: theme)
+            #expect(back.spans[0].text == text)
+            // The inferred kind should match (or at minimum not be wrong)
+            // For heading/headingPrefix the level may be lost (inferKind uses level:0),
+            // so we only check that the base kind category matches.
+            switch (kind, back.spans[0].kind) {
+            case (.plain, .plain), (.bold, .bold), (.italic, .italic),
+                 (.code, .code), (.listMarker, .listMarker),
+                 (.blockquote, .blockquote), (.link, .link),
+                 (.codeBlock, .codeBlock), (.thematicBreak, .thematicBreak),
+                 (.muted, .muted):
+                break // OK
+            case (.headingPrefix, .headingPrefix), (.heading, .heading):
+                break // OK
+            default:
+                #expect(Bool(false), "Round-trip mismatch: \(kind) → \(back.spans[0].kind)")
+            }
+        }
+    }
+}

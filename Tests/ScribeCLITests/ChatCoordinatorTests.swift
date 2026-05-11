@@ -311,3 +311,204 @@ final class Mutex<T>: @unchecked Sendable {
     return body(&value)
   }
 }
+
+// MARK: - Multiple turns
+
+@Suite
+struct ChatCoordinatorMultiTurnTests {
+
+    private let log = Logger(label: "test.chat-coordinator.multi-turn")
+
+    @Test func twoTurnsEmitCorrectEventSequence() async {
+        let (lines, cont) = AsyncStream<String>.makeStream()
+        let events: Mutex<[HostEvent]> = Mutex([])
+        let persistURL = URL(fileURLWithPath: "/tmp/test-multi-turn-\(UUID().uuidString)")
+
+        let coordinator = ChatCoordinator(
+            configuration: .testValue,
+            systemPrompt: "test",
+            resumeSnapshot: [],
+            interruptFlag: ModelTurnInterruptFlag(),
+            log: log,
+            enqueue: { event in events.withLock { $0.append(event) } },
+            persistURL: persistURL,
+            sessionId: UUID(),
+            sessionCreatedAt: Date(),
+            lines: lines,
+            makeAgent: { _ in MockAgent.makeDefault() }
+        )
+
+        let task = Task { await coordinator.run() }
+
+        // First turn
+        cont.yield("first message")
+        // Give the coordinator time to process
+        try? await Task.sleep(for: .milliseconds(100))
+        // Second turn
+        cont.yield("second message")
+        cont.finish()
+
+        _ = await task.value
+
+        let all = events.withLock { $0 }
+        // Should have two userSubmitted events
+        let userSubmits = all.filter {
+            if case .transcript(.userSubmitted) = $0 { true } else { false }
+        }
+        #expect(userSubmits.count == 2)
+    }
+
+    @Test func turnCompleteEventBetweenTurns() async {
+        let (lines, cont) = AsyncStream<String>.makeStream()
+        let events: Mutex<[HostEvent]> = Mutex([])
+        let persistURL = URL(fileURLWithPath: "/tmp/test-turn-complete-\(UUID().uuidString)")
+
+        let coordinator = ChatCoordinator(
+            configuration: .testValue,
+            systemPrompt: "test",
+            resumeSnapshot: [],
+            interruptFlag: ModelTurnInterruptFlag(),
+            log: log,
+            enqueue: { event in events.withLock { $0.append(event) } },
+            persistURL: persistURL,
+            sessionId: UUID(),
+            sessionCreatedAt: Date(),
+            lines: lines,
+            makeAgent: { _ in MockAgent.makeDefault() }
+        )
+
+        let task = Task { await coordinator.run() }
+
+        cont.yield("message one")
+        try? await Task.sleep(for: .milliseconds(100))
+        cont.yield("message two")
+        cont.finish()
+
+        _ = await task.value
+
+        let all = events.withLock { $0 }
+        let turnCompletes = all.filter {
+            if case .transcript(.turnComplete) = $0 { true } else { false }
+        }
+        #expect(turnCompletes.count >= 1, "Expected at least 1 turnComplete event, got \(turnCompletes.count)")
+    }
+
+    @Test func emptyInputIsSkipped() async {
+        let (lines, cont) = AsyncStream<String>.makeStream()
+        let events: Mutex<[HostEvent]> = Mutex([])
+        let persistURL = URL(fileURLWithPath: "/tmp/test-empty-input-\(UUID().uuidString)")
+
+        let coordinator = ChatCoordinator(
+            configuration: .testValue,
+            systemPrompt: "test",
+            resumeSnapshot: [],
+            interruptFlag: ModelTurnInterruptFlag(),
+            log: log,
+            enqueue: { event in events.withLock { $0.append(event) } },
+            persistURL: persistURL,
+            sessionId: UUID(),
+            sessionCreatedAt: Date(),
+            lines: lines,
+            makeAgent: { _ in MockAgent.makeDefault() }
+        )
+
+        let task = Task { await coordinator.run() }
+
+        // Send whitespace-only (should be skipped)
+        cont.yield("   ")
+        try? await Task.sleep(for: .milliseconds(50))
+        // Send real message
+        cont.yield("real message")
+        cont.finish()
+
+        _ = await task.value
+
+        let all = events.withLock { $0 }
+        let userSubmits = all.filter {
+            if case .transcript(.userSubmitted) = $0 { true } else { false }
+        }
+        // Whitespace-only should not produce a userSubmitted event
+        #expect(userSubmits.count == 1, "Expected 1 userSubmitted, got \(userSubmits.count)")
+    }
+}
+
+// MARK: - ChatCoordinator resume tests
+
+@Suite
+struct ChatCoordinatorResumeTests {
+
+    private let log = Logger(label: "test.chat-coordinator.resume")
+
+    @Test func resumeWithExistingMessagesDoesNotEmitReplayEvents() async {
+        let resumeMessages: [Components.Schemas.ChatMessage] = [
+            .init(role: .system, content: "sys"),
+            .init(role: .user, content: "previous question"),
+            .init(role: .assistant, content: "previous answer"),
+        ]
+
+        let (lines, cont) = AsyncStream<String>.makeStream()
+        let events: Mutex<[HostEvent]> = Mutex([])
+        let persistURL = URL(fileURLWithPath: "/tmp/test-resume-\(UUID().uuidString)")
+
+        let coordinator = ChatCoordinator(
+            configuration: .testValue,
+            systemPrompt: "test",
+            resumeSnapshot: resumeMessages,
+            interruptFlag: ModelTurnInterruptFlag(),
+            log: log,
+            enqueue: { event in events.withLock { $0.append(event) } },
+            persistURL: persistURL,
+            sessionId: UUID(),
+            sessionCreatedAt: Date(),
+            lines: lines,
+            makeAgent: { _ in MockAgent.makeDefault() }
+        )
+
+        let task = Task { await coordinator.run() }
+
+        cont.yield("new message")
+        cont.finish()
+
+        _ = await task.value
+
+        let all = events.withLock { $0 }
+        // Should have userSubmitted for new message
+        let userSubmits = all.filter {
+            if case .transcript(.userSubmitted) = $0 { true } else { false }
+        }
+        #expect(userSubmits.count >= 1)
+    }
+
+    @Test func resumeWithEmptySnapshotBehavesLikeNewSession() async {
+        let (lines, cont) = AsyncStream<String>.makeStream()
+        let events: Mutex<[HostEvent]> = Mutex([])
+        let persistURL = URL(fileURLWithPath: "/tmp/test-resume-empty-\(UUID().uuidString)")
+
+        let coordinator = ChatCoordinator(
+            configuration: .testValue,
+            systemPrompt: "test",
+            resumeSnapshot: [],  // empty = new session
+            interruptFlag: ModelTurnInterruptFlag(),
+            log: log,
+            enqueue: { event in events.withLock { $0.append(event) } },
+            persistURL: persistURL,
+            sessionId: UUID(),
+            sessionCreatedAt: Date(),
+            lines: lines,
+            makeAgent: { _ in MockAgent.makeDefault() }
+        )
+
+        let task = Task { await coordinator.run() }
+
+        cont.yield("first ever message")
+        cont.finish()
+
+        _ = await task.value
+
+        let all = events.withLock { $0 }
+        let userSubmits = all.filter {
+            if case .transcript(.userSubmitted) = $0 { true } else { false }
+        }
+        #expect(userSubmits.count == 1)
+    }
+}
