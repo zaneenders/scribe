@@ -736,4 +736,167 @@ struct FlattenedRowsEdgeCaseTests {
             }
         }
     }
+
+    // MARK: - width=1 edge cases
+
+    @Test func widthOneSplitsEveryCharacter() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .white, bg: .black, bold: false, text: "abc")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 1)
+        #expect(result.count == 3)
+        #expect(result[0].spans.first?.text == "a")
+        #expect(result[1].spans.first?.text == "b")
+        #expect(result[2].spans.first?.text == "c")
+    }
+
+    @Test func widthOneWithNewline() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .white, bg: .black, bold: false, text: "a\nb")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 1)
+        #expect(result.count == 2)
+        #expect(result[0].spans.first?.text == "a")
+        #expect(result[1].spans.first?.text == "b")
+    }
+
+    @Test func widthOneSingleCharacter() {
+        let lines: [TLine] = [
+            TLine(spans: [
+                StyledSpan(fg: .white, bg: .black, bold: false, text: "x")
+            ])
+        ]
+        let result = TranscriptLayout.flattenedRows(from: lines, width: 1)
+        #expect(result.count == 1)
+        #expect(result[0].spans.first?.text == "x")
+    }
+}
+
+// MARK: - transcriptContentRows edge case tests
+
+@Suite
+struct TranscriptContentRowsEdgeCaseTests {
+
+    @Test func withBannerAndUsageAndQueuedTray() {
+        let banner = BannerSnapshot(
+            baseURL: "http://api", model: "m", cwd: "/",
+            scribeVersion: "v", gitBranch: nil, sessionId: "s")
+        let usage = UsageHUDSnapshot(
+            roundPrompt: 100, roundCompletion: 50, roundTotal: 150,
+            turnPrompt: 200, turnCompletion: 100, turnTotal: 300,
+            sessionPrompt: 500, sessionCompletion: 300, sessionTotal: 800,
+            reasoningTokens: nil, cachedPromptTokens: nil,
+            outputTokensPerSecond: nil, contextWindow: nil, contextWindowUsedPercent: nil)
+        let rows = SlateChatRenderer.transcriptContentRows(
+            cols: 80, rows: 24, banner: banner, usage: usage,
+            inputLine: "hello", waitingForLLM: false,
+            queuedTrayText: "pending work")
+        // headerRows = 3 (banner), tray row, input row = 24-3-1-1 = 19 left for content
+        #expect(rows > 0)
+    }
+
+    @Test func tinyTerminalReturnsZeroContentRows() {
+        // rows=3: 3 header (banner), no room for content
+        let banner = BannerSnapshot(
+            baseURL: "u", model: "m", cwd: "/",
+            scribeVersion: "v", gitBranch: nil, sessionId: "s")
+        let rows = SlateChatRenderer.transcriptContentRows(
+            cols: 10, rows: 3, banner: banner, usage: nil,
+            inputLine: "", waitingForLLM: false,
+            queuedTrayText: nil)
+        #expect(rows == 0)
+    }
+
+    @Test func exactlyOneContentRow() {
+        // rows=5: 3 header, 1 tray, 1 input = 0 content rows
+        // Actually let's do: rows=5, no tray, no spinner, short input
+        let banner = BannerSnapshot(
+            baseURL: "u", model: "m", cwd: "/",
+            scribeVersion: "v", gitBranch: nil, sessionId: "s")
+        let rows = SlateChatRenderer.transcriptContentRows(
+            cols: 80, rows: 5, banner: banner, usage: nil,
+            inputLine: "x", waitingForLLM: false,
+            queuedTrayText: nil)
+        #expect(rows == 1) // 5 - 3 header - 1 input = 1 content
+    }
+
+    @Test func noBannerNoUsageNoTray() {
+        let rows = SlateChatRenderer.transcriptContentRows(
+            cols: 80, rows: 24, banner: nil, usage: nil,
+            inputLine: "hello", waitingForLLM: false,
+            queuedTrayText: nil)
+        // No header, 1 input row -> 23 content rows
+        #expect(rows == 23)
+    }
+
+    @Test func waitingForLLMNoInputHasSpinner() {
+        let rows = SlateChatRenderer.transcriptContentRows(
+            cols: 80, rows: 24, banner: nil, usage: nil,
+            inputLine: "", waitingForLLM: true,
+            queuedTrayText: nil)
+        // spinner takes 1 row, no header -> 23 content rows
+        #expect(rows == 23)
+    }
+}
+
+// MARK: - buildGrid with banner and usage HUD simultaneously
+
+@Suite
+struct BuildGridBannerAndUsageTests {
+
+    @Test func buildGridWithBannerAndUsage() {
+        let cols = 100
+        let rows = 24
+        let banner = BannerSnapshot(
+            baseURL: "https://api.example.com",
+            model: "test-model",
+            cwd: "/home/user/project",
+            scribeVersion: "0.0.1",
+            gitBranch: "feature/foo",
+            sessionId: "test-sid")
+        let usage = UsageHUDSnapshot(
+            roundPrompt: 500, roundCompletion: 200, roundTotal: 700,
+            turnPrompt: 1500, turnCompletion: 800, turnTotal: 2300,
+            sessionPrompt: 5000, sessionCompletion: 3000, sessionTotal: 8000,
+            reasoningTokens: nil, cachedPromptTokens: nil,
+            outputTokensPerSecond: nil, contextWindow: nil, contextWindowUsedPercent: nil)
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: banner, usage: usage,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: false, queuedTrayText: nil,
+            theme: .default)
+        // Should have banner in row 0 and usage HUD also in top-right
+        #expect(grid.count == 24)
+        let row0Text = grid[0].map(\.text).joined()
+        #expect(row0Text.contains("LLM:"))
+        #expect(row0Text.contains("api.example.com"))
+        // Usage HUD text should appear in the top right
+        let topRight = grid[0][cols - 1].text
+        #expect(!topRight.isEmpty)
+    }
+
+    @Test func buildGridWithQueuedTrayAndSpinner() {
+        let cols = 80
+        let rows = 24
+        let grid = SlateChatRenderer.buildGrid(
+            cols: cols, rows: rows,
+            flattenedTranscript: [], transcriptTailStart: 0,
+            banner: nil, usage: nil,
+            inputLine: "", llmWaitAnimationFrame: 0,
+            waitingForLLM: true, queuedTrayText: "pending task",
+            theme: .default)
+        // Spinner row should show scribe: prefix, queued tray above it
+        let inputRow = rows - 1
+        let inputText = grid[inputRow].map(\.text).joined()
+        #expect(inputText.contains("scribe:"))
+        let trayRow = rows - 2
+        let trayText = grid[trayRow].map(\.text).joined()
+        #expect(trayText.contains("queued:"))
+    }
 }

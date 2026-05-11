@@ -114,3 +114,37 @@ struct DurationMicrosecondsTests {
         #expect(d.microseconds == 500)
     }
 }
+
+// MARK: - Shell.run() empty command test
+
+@Suite
+struct ShellRunEmptyCommandTests {
+
+    @Test func emptyCommandThrowsShellError() async {
+        do {
+            _ = try await Shell.run(
+                command: "",
+                cwd: nil,
+                workingDirectory: ScribeFilePath("/tmp"))
+            #expect(Bool(false), "expected ShellError")
+        } catch let error as Shell.ShellError {
+            #expect(error.description == "command is empty")
+        } catch {
+            #expect(Bool(false), "unexpected error type: \(error)")
+        }
+    }
+
+    @Test func whitespaceOnlyCommandThrowsShellError() async {
+        do {
+            _ = try await Shell.run(
+                command: "   \n  \t  ",
+                cwd: nil,
+                workingDirectory: ScribeFilePath("/tmp"))
+            #expect(Bool(false), "expected ShellError")
+        } catch let error as Shell.ShellError {
+            #expect(error.description == "command is empty")
+        } catch {
+            #expect(Bool(false), "unexpected error type: \(error)")
+        }
+    }
+}

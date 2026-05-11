@@ -204,10 +204,6 @@ extension ScribeCLI {
     try? FileHandle.standardError.write(contentsOf: text)
   }
 
-  private static func escapeForSingleQuotedPOSIXPath(_ path: String) -> String {
-    path.replacingOccurrences(of: "'", with: "'\"'\"'")
-  }
-
   // MARK: - Session listing helpers
 
   func relativeTime(from date: Date) -> String {

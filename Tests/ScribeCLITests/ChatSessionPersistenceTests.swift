@@ -228,4 +228,110 @@ struct ChatSessionPersistenceTests {
     #expect(loadedMeta.baseURL == "http://localhost:11434")
     #expect(loadedMeta.scribeVersion == "abc123")
   }
+
+  // MARK: - Error paths
+
+  @Test func loadMetadataFromCorruptJSONThrows() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Write garbage to metadata.json
+    let metaURL = dir.appendingPathComponent("metadata.json", isDirectory: false)
+    try "not valid json {{{".write(to: metaURL, atomically: false, encoding: .utf8)
+
+    #expect(throws: (any Error).self) {
+      _ = try ChatSessionStore.loadMetadata(from: dir)
+    }
+  }
+
+  @Test func loadMessagesFromMissingFileReturnsEmpty() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // No messages.jsonl file exists — should return []
+    let messages = try ChatSessionStore.loadMessages(from: dir)
+    #expect(messages.isEmpty)
+  }
+
+  @Test func loadMessagesFromCorruptJSONLReturnsEmpty() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Write garbage JSONL
+    let msgURL = dir.appendingPathComponent("messages.jsonl", isDirectory: false)
+    try "this is not valid json\n".write(to: msgURL, atomically: false, encoding: .utf8)
+
+    // Should not throw, just skip corrupt lines
+    let messages = try ChatSessionStore.loadMessages(from: dir)
+    #expect(messages.isEmpty)
+  }
+
+  @Test func resolveLatestWithNoSessionsThrows() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    #expect(throws: (any Error).self) {
+      _ = try ChatSessionStore.resolveResumeURL(
+        specifier: "latest", sessionsDirectoryPath: tempRoot.path)
+    }
+  }
+
+  @Test func resolveAmbiguousPrefixThrows() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    // Create two session dirs with same prefix
+    let id1 = UUID(uuidString: "AAAAAA00-0000-0000-0000-000000000000")!
+    let id2 = UUID(uuidString: "AAAAAA11-0000-0000-0000-000000000000")!
+
+    let stamp = Date(timeIntervalSince1970: 1_705_000_000)
+    let meta1 = ChatSessionMetadata(id: id1, createdAt: stamp, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
+    let meta2 = ChatSessionMetadata(id: id2, createdAt: stamp, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
+
+    let dir1 = try ChatSessionStore.sessionDirectoryURL(sessionId: id1, sessionsDirectoryPath: tempRoot.path)
+    let dir2 = try ChatSessionStore.sessionDirectoryURL(sessionId: id2, sessionsDirectoryPath: tempRoot.path)
+
+    try ChatSessionStore.saveMetadata(meta1, to: dir1)
+    try ChatSessionStore.saveMetadata(meta2, to: dir2)
+
+    // Both share prefix "aaaaaa" — should throw ambiguous
+    #expect(throws: (any Error).self) {
+      _ = try ChatSessionStore.resolveResumeURL(
+        specifier: "AAAAAA", sessionsDirectoryPath: tempRoot.path)
+    }
+  }
+
+  @Test func resolveEmptySpecifierThrows() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    #expect(throws: (any Error).self) {
+      _ = try ChatSessionStore.resolveResumeURL(
+        specifier: "", sessionsDirectoryPath: tempRoot.path)
+    }
+  }
+
+  @Test func resolveWhitespaceOnlySpecifierThrows() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    #expect(throws: (any Error).self) {
+      _ = try ChatSessionStore.resolveResumeURL(
+        specifier: "   ", sessionsDirectoryPath: tempRoot.path)
+    }
+  }
 }

@@ -253,3 +253,55 @@ struct MarkdownToSlateReverseConversionTests {
         }
     }
 }
+
+// MARK: - inferKind edge case tests
+
+@Suite
+struct InferKindEdgeCaseTests {
+
+    private let theme = MarkdownTheme.vibrant
+    private let baseFG: TerminalRGB = ScribePalette.cyan
+    private let baseBold = false
+
+    /// fg == theme.bold but bold == false → should NOT be .bold
+    @Test func boldColorWithoutBoldFlagFallsThroughToPlain() {
+        let span = StyledSpan(fg: theme.bold, bg: theme.background, bold: false, text: "not really bold")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.plain)
+    }
+
+    /// fg == theme.heading but bold == false → should NOT be .heading
+    @Test func headingColorWithoutBoldFlagFallsThroughToPlain() {
+        let span = StyledSpan(fg: theme.heading, bg: theme.background, bold: false, text: "not really heading")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.plain)
+    }
+
+    /// fg == baseFG but bold != baseBold (baseBold=true, span.bold=false)
+    @Test func baseFGWithoutBaseBoldFallsThroughToPlain() {
+        let span = StyledSpan(fg: baseFG, bg: theme.background, bold: false, text: "plain mismatch")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: true, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.plain)
+    }
+
+    /// fg == baseFG and bold == baseBold (both true)
+    @Test func baseFGWithMatchingBoldReturnsPlain() {
+        let span = StyledSpan(fg: baseFG, bg: theme.background, bold: true, text: "plain match")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: true, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.plain)
+    }
+
+    /// fg == theme.codeBlock but bold == true → codeBlock should still match
+    @Test func codeBlockColorWithBoldStillMatchesCodeBlock() {
+        let span = StyledSpan(fg: theme.codeBlock, bg: theme.background, bold: true, text: "bold code block")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.codeBlock)
+    }
+
+    /// fg == theme.hr with bold flag → should still match thematicBreak
+    @Test func hrColorWithBoldStillMatchesThematicBreak() {
+        let span = StyledSpan(fg: theme.hr, bg: theme.background, bold: true, text: "---")
+        let result = MarkdownToSlateAdapter.convert(span, baseFG: baseFG, baseBold: false, theme: theme)
+        #expect(result.kind == MarkdownSpanKind.thematicBreak)
+    }
+}
