@@ -2,7 +2,6 @@ import Foundation
 import Logging
 import ScribeCore
 import ScribeLLM
-import Synchronization
 
 // MARK: - ChatCoordinator
 
@@ -140,7 +139,8 @@ actor ChatCoordinator {
             let v = interruptFlag.peek()
             if v { log.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
             return v
-          }
+          },
+          abortNotifier: interruptFlag.notifier
         )
 
         do {
@@ -195,12 +195,17 @@ actor ChatCoordinator {
 
 /// Cooperative abort for Ctrl+C during an assistant/tool round without
 /// cancelling the long-lived coordinator task.
+///
+/// Backed by an `AbortNotifier` so in-flight tools wake event-driven instead
+/// of waiting for the 200 ms poll tick. The synchronous `peek()` API is
+/// preserved for `AgentRunOptions.shouldAbortTurn` and for the host's own
+/// tray rendering.
 final class ModelTurnInterruptFlag: Sendable {
-  private let lock = Mutex(false)
+  let notifier = AbortNotifier()
 
-  func clear() { lock.withLock { $0 = false } }
-  func request() { lock.withLock { $0 = true } }
-  func peek() -> Bool { lock.withLock { $0 } }
+  func clear() { notifier.clear() }
+  func request() { notifier.request() }
+  func peek() -> Bool { notifier.isAborted() }
 
   func logState(_ logger: Logger, tag: String) {
     let val = peek()

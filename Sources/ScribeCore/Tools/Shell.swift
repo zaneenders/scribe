@@ -142,16 +142,27 @@ enum Shell {
             ])
           let tDrain = ContinuousClock.now
 
-          async let outBytes = writeStream(
-            from: outputSequence, to: stdoutHandle,
-            label: "\(id)/stdout", pid: pid, shellID: id)
-          async let errBytes = writeStream(
-            from: errorSequence, to: stderrHandle,
-            label: "\(id)/stderr", pid: pid, shellID: id)
+          // Detach the drain so it can outlive parent-task cancellation. We
+          // explicitly bound the post-cancel wait via `awaitDrainWithDeadline`
+          // below; if a setsid grandchild keeps the subprocess stdout pipe
+          // open after SIGKILL, the deadline fires and we settle for whatever
+          // partial output is on disk instead of hanging this task forever.
+          let drainTask = Task.detached(priority: .userInitiated) {
+            [outputSequence, errorSequence, stdoutHandle, stderrHandle, id, pid]
+            () async throws -> (Int, Int) in
+            async let out = Self.writeStream(
+              from: outputSequence, to: stdoutHandle,
+              label: "\(id)/stdout", pid: pid, shellID: id)
+            async let err = Self.writeStream(
+              from: errorSequence, to: stderrHandle,
+              label: "\(id)/stderr", pid: pid, shellID: id)
+            return try await (out, err)
+          }
 
           let result: (pid_t, Int, Int)
           do {
-            result = try await (pid, outBytes, errBytes)
+            let r = try await drainTask.value
+            result = (pid, r.0, r.1)
             logger.trace(
               "shell-drain-complete",
               metadata: [
@@ -161,23 +172,43 @@ enum Shell {
                 "cancelled": "\(Task.isCancelled)",
               ])
           } catch is CancellationError {
-            // writeStream now handles cancellation gracefully (writes chunk,
-            // then breaks), so this path should rarely be hit.  But if we
-            // do land here — e.g. a CancellationError from somewhere else —
-            // close handles and read whatever made it to disk.
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
-            let outSize = Int(fileSize(url: stdoutURL))
-            let errSize = Int(fileSize(url: stderrURL))
-            logger.trace(
-              "shell-drain-cancellation-caught",
-              metadata: [
-                "shell_id": "\(id)", "pid": "\(pid)",
-                "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
-                "out_bytes_on_disk": "\(outSize)", "err_bytes_on_disk": "\(errSize)",
-              ])
-            result = (pid, outSize, errSize)
+            // Parent cancelled mid-drain. The kill in onCancel should have
+            // SIGKILL'd the subprocess, so the pipes should EOF momentarily
+            // and the detached drain should return naturally. Race the drain
+            // against a hard deadline so a surviving setsid grandchild that
+            // keeps the pipe open can't hang us indefinitely.
+            //
+            // The race itself runs in a fresh detached task so it isn't
+            // subject to the calling task's now-sticky cancellation flag
+            // (which would otherwise make Task.sleep throw immediately and
+            // collapse the deadline to zero).
+            let bytes = await Self.awaitDrainWithDeadline(
+              drainTask: drainTask, deadlineMs: 2_000, shellID: id)
+            if let bytes {
+              result = (pid, bytes.out, bytes.err)
+              logger.trace(
+                "shell-drain-completed-after-cancel",
+                metadata: [
+                  "shell_id": "\(id)", "pid": "\(pid)",
+                  "out_bytes": "\(bytes.out)", "err_bytes": "\(bytes.err)",
+                  "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                ])
+            } else {
+              try? stdoutHandle.close()
+              try? stderrHandle.close()
+              let outSize = Int(fileSize(url: stdoutURL))
+              let errSize = Int(fileSize(url: stderrURL))
+              logger.trace(
+                "shell-drain-deadline-reached",
+                metadata: [
+                  "shell_id": "\(id)", "pid": "\(pid)",
+                  "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                  "out_bytes_on_disk": "\(outSize)", "err_bytes_on_disk": "\(errSize)",
+                ])
+              result = (pid, outSize, errSize)
+            }
           } catch {
+            drainTask.cancel()
             logger.trace(
               "shell-drain-error",
               metadata: [
@@ -350,6 +381,69 @@ enum Shell {
     return trimmed.split(separator: " ").compactMap { pid_t($0) }
   }
   #endif
+
+  // MARK: - Drain deadline
+
+  /// Bytes counted off each pipe by a successful drain.
+  private struct DrainBytes: Sendable {
+    let out: Int
+    let err: Int
+  }
+
+  /// Race a detached drain task against a fixed deadline.  Returns the
+  /// drain's byte counts when the drain completes first, or `nil` when the
+  /// deadline fires (in which case the caller should close handles and
+  /// settle for whatever's already on disk).
+  ///
+  /// The race itself runs in a fresh detached task so it isn't subject to
+  /// the calling task's cancellation state — otherwise `Task.sleep` would
+  /// throw immediately on a cancelled parent and collapse the deadline.
+  private static func awaitDrainWithDeadline(
+    drainTask: Task<(Int, Int), Error>,
+    deadlineMs: Int,
+    shellID: UUID
+  ) async -> DrainBytes? {
+    enum RaceOutcome: Sendable {
+      case completed(out: Int, err: Int)
+      case deadline
+      case errored
+    }
+    return await Task.detached(priority: .userInitiated) {
+      [drainTask] () async -> DrainBytes? in
+      await withTaskGroup(of: RaceOutcome.self) { group in
+        group.addTask {
+          do {
+            let r = try await drainTask.value
+            return .completed(out: r.0, err: r.1)
+          } catch {
+            return .errored
+          }
+        }
+        group.addTask {
+          try? await Task.sleep(for: .milliseconds(deadlineMs))
+          return .deadline
+        }
+        let first = await group.next()!
+        group.cancelAll()
+        switch first {
+        case .completed(let out, let err):
+          return DrainBytes(out: out, err: err)
+        case .deadline:
+          // Try to push the drain to exit; the parent will fall back to
+          // disk-side byte counts regardless.
+          drainTask.cancel()
+          Self.logger.trace(
+            "shell-drain-deadline-fired",
+            metadata: [
+              "shell_id": "\(shellID)", "deadline_ms": "\(deadlineMs)",
+            ])
+          return nil
+        case .errored:
+          return nil
+        }
+      }
+    }.value
+  }
 
   // MARK: - Stream to file
 

@@ -10,15 +10,24 @@ public struct AgentRunOptions: Sendable {
   public var temperature: Double
   public var maxToolRounds: Int
   public var shouldAbortTurn: (@Sendable () -> Bool)?
+  /// Optional event-driven abort source. When provided, in-flight tools wake
+  /// up the moment `notifier.request()` is called instead of waiting for the
+  /// next 200 ms poll tick (the closure-only fallback path). Wire your
+  /// interrupt source so it both calls `notifier.request()` and causes
+  /// `shouldAbortTurn` to subsequently return true — the closure remains the
+  /// authoritative "should I throw" check on each wake.
+  public var abortNotifier: AbortNotifier?
 
   public init(
     temperature: Double = 0,
     maxToolRounds: Int = .max,
-    shouldAbortTurn: (@Sendable () -> Bool)? = nil
+    shouldAbortTurn: (@Sendable () -> Bool)? = nil,
+    abortNotifier: AbortNotifier? = nil
   ) {
     self.temperature = temperature
     self.maxToolRounds = maxToolRounds
     self.shouldAbortTurn = shouldAbortTurn
+    self.abortNotifier = abortNotifier
   }
 }
 
@@ -282,7 +291,8 @@ public struct ScribeAgent: Sendable {
           config: config,
           emit: { continuation.yield($0) },
           log: log,
-          shouldAbortTurn: shouldAbort
+          shouldAbortTurn: shouldAbort,
+          abortNotifier: options.abortNotifier
         )
         switch result.termination {
         case .completed:

@@ -42,7 +42,8 @@ func runAgentLoop(
   config: AgentLoopConfig,
   emit: @escaping @Sendable (TranscriptEvent) -> Void,
   log: Logger,
-  shouldAbortTurn: @escaping @Sendable () -> Bool
+  shouldAbortTurn: @escaping @Sendable () -> Bool,
+  abortNotifier: AbortNotifier? = nil
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
@@ -132,7 +133,9 @@ func runAgentLoop(
         do {
           jsonOutput = try await config.registry.run(
             name: inv.name, arguments: inv.arguments,
-            workingDirectory: config.workingDirectory, abortVia: shouldAbortTurn)
+            workingDirectory: config.workingDirectory,
+            abortVia: shouldAbortTurn,
+            abortNotifier: abortNotifier)
         } catch is AgentTurnInterruptedError {
           currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
           newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)

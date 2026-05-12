@@ -23,9 +23,17 @@ public struct ToolRegistry: Sendable {
 
   /// Execute a tool by name with cooperative abort support.
   ///
-  /// A task group runs the tool while another task polls `shouldAbortTurn()`.
-  /// If the abort condition fires, the tool task is cancelled — tools that use
-  /// `withTaskCancellationHandler` (e.g. Shell sends SIGKILL) respond promptly.
+  /// A task group runs the tool while another task watches for an abort
+  /// signal. When `abortNotifier` is supplied, that watcher is event-driven
+  /// (it sleeps inside `notifier.signals()` until `request()` fires); when
+  /// it isn't, the watcher falls back to polling `shouldAbortTurn()` every
+  /// 200 ms. In both cases, `shouldAbortTurn()` remains the authoritative
+  /// "should I throw" check on each wake — the notifier is only a wakeup
+  /// hint.
+  ///
+  /// If abort fires, the tool task is cancelled — tools that use
+  /// `withTaskCancellationHandler` (e.g. Shell sends SIGKILL) respond
+  /// promptly.
   ///
   /// Pass `abortVia: { false }` when abort support is not needed.
   ///
@@ -36,7 +44,8 @@ public struct ToolRegistry: Sendable {
     name: String,
     arguments: String,
     workingDirectory: ScribeFilePath,
-    abortVia shouldAbortTurn: @escaping @Sendable () -> Bool
+    abortVia shouldAbortTurn: @escaping @Sendable () -> Bool,
+    abortNotifier: AbortNotifier? = nil
   ) async throws -> String {
     guard let tool = tools[name] else {
       Self.logger.debug(
@@ -119,31 +128,53 @@ public struct ToolRegistry: Sendable {
           }
         }
         group.addTask {
-          Self.logger.trace(
-            "agent.tool.polling.start",
-            metadata: [
-              "tool": "\(name)"
-            ])
-          var ticks = 0
-          // 200ms strikes a balance between abort latency (still imperceptible)
-          // and background cost (4× fewer wake-ups than the prior 50ms when
-          // many tools run in parallel).  Pre-tool/post-tool/post-stream sites
-          // in `runAgentLoop` also check `shouldAbortTurn()` synchronously, so
-          // this poll only matters during long-running tool execution.
-          // TODO: replace polling with an event-driven abort (AsyncStream<Void>
-          // signalled by ScribeAgent.abort()) once the public surface is
-          // refactored to pass an abort source rather than a closure.
-          while true {
-            if shouldAbortTurn() {
-              Self.logger.trace(
-                "agent.tool.polling.abort-detected",
-                metadata: [
-                  "tool": "\(name)", "polling_ticks": "\(ticks)",
-                ])
-              throw AgentTurnInterruptedError()
+          if let abortNotifier {
+            // Event-driven path: wake the moment `notifier.request()` fires.
+            // The closure remains authoritative — re-check it on each wake
+            // before throwing so spurious yields (e.g. late subscribers
+            // catching an already-set flag from a *previous* turn that the
+            // host hasn't cleared yet) don't false-fire.
+            Self.logger.trace(
+              "agent.tool.abort-watch.start",
+              metadata: ["tool": "\(name)", "mode": "event-driven"])
+            for await _ in abortNotifier.signals() {
+              if shouldAbortTurn() {
+                Self.logger.trace(
+                  "agent.tool.abort-watch.fired",
+                  metadata: ["tool": "\(name)"])
+                throw AgentTurnInterruptedError()
+              }
             }
-            try await Task.sleep(for: .milliseconds(200))
-            ticks += 1
+            // Stream ended without an abort — only happens when this watch
+            // task itself is cancelled (the tool task already won).  Throw
+            // CancellationError to satisfy the throwing-task-group's
+            // `String` return contract; the group has already accepted the
+            // tool's result, so this error is dropped.
+            throw CancellationError()
+          } else {
+            // Polled fallback when caller didn't supply a notifier. 200 ms
+            // strikes a balance between abort latency (still imperceptible)
+            // and background cost (4× fewer wake-ups than the prior 50 ms
+            // when many tools run in parallel).  Pre-tool/post-tool/post-
+            // stream sites in `runAgentLoop` also check `shouldAbortTurn()`
+            // synchronously, so this poll only matters during long-running
+            // tool execution.
+            Self.logger.trace(
+              "agent.tool.abort-watch.start",
+              metadata: ["tool": "\(name)", "mode": "poll"])
+            var ticks = 0
+            while true {
+              if shouldAbortTurn() {
+                Self.logger.trace(
+                  "agent.tool.abort-watch.fired",
+                  metadata: [
+                    "tool": "\(name)", "polling_ticks": "\(ticks)",
+                  ])
+                throw AgentTurnInterruptedError()
+              }
+              try await Task.sleep(for: .milliseconds(200))
+              ticks += 1
+            }
           }
         }
         let winner = try await group.next()!
