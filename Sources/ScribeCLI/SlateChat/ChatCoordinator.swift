@@ -5,45 +5,79 @@ import ScribeLLM
 
 // MARK: - ChatCoordinator
 
-/// Actor that owns the agent-turn loop: reads user input lines from an AsyncStream,
+/// Owns the agent-turn loop: reads user input lines from an AsyncStream,
 /// processes them through `ScribeAgent`, and emits `HostEvent`s to a callback.
 ///
 /// Extracted from `SlateChatHost` to make the turn-loop testable without a TUI.
-actor ChatCoordinator {
+///
+/// Implemented as a `final class` rather than an `actor` because every
+/// instance property is `let` — `run()` is the only entry point that does
+/// any work and all of its mutable state is local. Using a class lets
+/// `interrupt()` and the `agent` property be reachable from any thread
+/// without the `nonisolated` ceremony an actor would require, and avoids
+/// the one-hop overhead on every `await coordinator.run()`.
+final class ChatCoordinator: Sendable {
 
   private let configuration: ScribeConfig
-  private let systemPrompt: String
   private let resumeSnapshot: [Components.Schemas.ChatMessage]
-  private let interruptNotifier: AbortNotifier
   private let log: Logger
-  private let enqueue: (HostEvent) -> Void
+  private let enqueue: @Sendable (HostEvent) -> Void
   private let persistURL: URL
   private let sessionId: UUID
   private let sessionCreatedAt: Date
   private let lines: AsyncStream<String>
 
+  /// Constructed eagerly so `interrupt()` can call `agent.abort()`
+  /// directly. `ScribeAgent` is a Sendable struct whose mutable state is
+  /// reference-typed (storage actor, abort notifier), so the value-copy
+  /// stored here shares the right state with whatever `run()` is using.
+  private let agent: ScribeAgent
+
+  /// Computed in init so we can hand it to the agent up front; also used
+  /// in `run()` for first-persist and as the seed transcript.
+  private let initialMessages: [Components.Schemas.ChatMessage]
+
   init(
     configuration: ScribeConfig,
     systemPrompt: String,
     resumeSnapshot: [Components.Schemas.ChatMessage],
-    interruptNotifier: AbortNotifier,
     log: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
     persistURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,
     lines: AsyncStream<String>
-  ) {
+  ) throws {
+    if !resumeSnapshot.isEmpty {
+      guard resumeSnapshot.first?.role == .system else {
+        throw ScribeError.sessionCorrupted(
+          reason: "Resumed conversation must begin with a system message.")
+      }
+      self.initialMessages = resumeSnapshot
+    } else {
+      self.initialMessages = [.init(role: .system, content: systemPrompt)]
+    }
+    self.agent = try ScribeAgent(
+      configuration: configuration,
+      systemPrompt: systemPrompt,
+      initialMessages: self.initialMessages
+    )
     self.configuration = configuration
-    self.systemPrompt = systemPrompt
     self.resumeSnapshot = resumeSnapshot
-    self.interruptNotifier = interruptNotifier
     self.log = log
     self.enqueue = enqueue
     self.persistURL = persistURL
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.lines = lines
+  }
+
+  /// Interrupt the in-flight turn (if any) — synchronous and safe to
+  /// call from any thread. Forwards to `ScribeAgent.abort()`, which is a
+  /// no-op when no turn is in flight (the agent clears its abort notifier
+  /// at the top of every `prompt()`).
+  func interrupt() {
+    agent.abort()
   }
 
   func run() async {
@@ -71,22 +105,8 @@ actor ChatCoordinator {
     }
 
     do {
-      let initialMessages: [Components.Schemas.ChatMessage]
-      if !resumeSnapshot.isEmpty {
-        guard resumeSnapshot.first?.role == .system else {
-          throw ScribeError.sessionCorrupted(
-            reason: "Resumed conversation must begin with a system message.")
-        }
-        initialMessages = resumeSnapshot
-      } else {
-        initialMessages = [.init(role: .system, content: systemPrompt)]
-      }
-
-      let agent = try ScribeAgent(
-        configuration: configuration,
-        systemPrompt: systemPrompt,
-        initialMessages: initialMessages
-      )
+      // `agent` and `initialMessages` are constructed in `init` so the
+      // nonisolated `interrupt()` path doesn't need a Mutex slot.
 
       // Write metadata on first persist (new sessions only).
       if resumeSnapshot.isEmpty {
@@ -129,17 +149,14 @@ actor ChatCoordinator {
         enqueue(.transcript(.userSubmitted(trimmed)))
         log.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
 
-        interruptNotifier.clear()
-        log.trace(
-          "chat.interrupt-flag.cleared-for-new-turn",
-          metadata: ["value": "false"])
+        // No need to clear an interrupt flag here — `agent.prompt()`
+        // resets its private abort notifier at the top of each turn, so
+        // a stray Ctrl+C between prompts can't bleed into the next one.
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
-        let options = AgentRunOptions(abortNotifier: interruptNotifier)
-
         do {
-          let ts = await agent.prompt(trimmed, options: options, log: log)
+          let ts = await agent.prompt(trimmed, log: log)
           for await event in ts.events {
             if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))

@@ -160,7 +160,10 @@ internal final class SlateChatHost {
   private var llmWaitAnimationFrame: Int = 0
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
-  private let modelInterruptNotifier = AbortNotifier()
+  /// Held so the Ctrl+C path can call `interrupt()` synchronously
+  /// (`nonisolated` on the coordinator) without going through the agent's
+  /// abort notifier directly. The host doesn't see `AbortNotifier` at all.
+  private var coordinator: ChatCoordinator?
   private let log: Logger
 
   init(
@@ -233,20 +236,37 @@ internal final class SlateChatHost {
         let (lineStream, lineCont) = AsyncStream<String>.makeStream()
         Task { await gate.setStreamContinuation(lineCont) }
 
-        let coordinator = ChatCoordinator(
-          configuration: configuration,
-          systemPrompt: systemPrompt,
-          resumeSnapshot: self.resumeMessages,
-          interruptNotifier: self.modelInterruptNotifier,
-          log: self.log,
-          enqueue: { [eventQueue] event in
-            eventQueue.enqueue(event)
-          },
-          persistURL: persistURL,
-          sessionId: self.sessionId,
-          sessionCreatedAt: self.sessionCreatedAt,
-          lines: lineStream
-        )
+        // Construct the coordinator eagerly — this throws if the resume
+        // snapshot is malformed or the agent's transport can't be built.
+        // Surface failures through the same event pipe `run()` would have
+        // used so the TUI shows them; then skip the coordinator task.
+        let coordinator: ChatCoordinator
+        do {
+          coordinator = try ChatCoordinator(
+            configuration: configuration,
+            systemPrompt: systemPrompt,
+            resumeSnapshot: self.resumeMessages,
+            log: self.log,
+            enqueue: { [eventQueue] event in
+              eventQueue.enqueue(event)
+            },
+            persistURL: persistURL,
+            sessionId: self.sessionId,
+            sessionCreatedAt: self.sessionCreatedAt,
+            lines: lineStream
+          )
+        } catch {
+          let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
+          eventQueue.enqueue(.transcript(.harnessError(scribeError)))
+          eventQueue.enqueue(.coordinatorFinished)
+          self.log.error(
+            "chat.coordinator.init.fail",
+            metadata: [
+              "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
+            ])
+          return
+        }
+        self.coordinator = coordinator
         self.coordinatorTask = Task {
           await coordinator.run()
         }
@@ -538,10 +558,10 @@ internal final class SlateChatHost {
     queuedTrayText = state.queuedTrayText
 
     if let tag = fx.interruptLogTag {
-      modelInterruptNotifier.request()
+      coordinator?.interrupt()
       log.trace(
         "chat.interrupt-flag.\(tag)",
-        metadata: ["value": "\(modelInterruptNotifier.isAborted())"])
+        metadata: ["coordinator": coordinator == nil ? "nil" : "live"])
     }
     if let text = fx.gateText {
       Task { await gate.complete(text) }
