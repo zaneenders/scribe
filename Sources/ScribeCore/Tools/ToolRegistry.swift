@@ -42,7 +42,7 @@ public struct ToolRegistry: Sendable {
     name: String,
     arguments: String,
     workingDirectory: ScribeFilePath,
-    abortObserver: any AbortObserver
+    abortObserver: some AbortObserver
   ) async throws -> String {
     guard let tool = tools[name] else {
       Self.logger.debug(
