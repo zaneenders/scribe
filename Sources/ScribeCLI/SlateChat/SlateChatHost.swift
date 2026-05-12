@@ -5,8 +5,6 @@ import ScribeLLM
 import SlateCore
 import Synchronization
 
-// MARK: - User input gate
-
 private actor UserLineGate {
   private var waiting: CheckedContinuation<String?, Never>?
   private var queue: [String] = []
@@ -41,28 +39,19 @@ private actor UserLineGate {
   }
 }
 
-// MARK: - Host event channel
-
-/// Events the coordinator task sends to the host for rendering.
 enum HostEvent: Sendable {
   case transcript(TranscriptEvent)
   case modelTurnRunning(Bool)
   case coordinatorFinished
 }
 
-// MARK: - Transcript flatten cache
-
 extension TranscriptLayout {
-  /// Cached flatten results to avoid re-wrapping completed transcript lines
-  /// on every render frame.  Reset when width or generation changes.
   struct FlattenCache {
     var wrapWidth: Int = -1
     var completedLogicalLines: Int = 0
     var completedFlat: [TLine] = []
     var lastGeneration: Int = -1
 
-    /// Recompute flattened rows for the given completed + optional open line.
-    /// Only wraps new lines since the last call when the set of completed lines grows.
     static func flatten(
       cache: inout FlattenCache,
       completed: [TLine],
@@ -99,8 +88,6 @@ extension TranscriptLayout {
   }
 }
 
-// MARK: - SlateChatHost
-
 @MainActor
 internal final class SlateChatHost {
 
@@ -111,17 +98,12 @@ internal final class SlateChatHost {
   private let sessionId: UUID
   private let sessionCreatedAt: Date
 
-  // Extracted concerns
   private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
 
-  // MARK: - Transcript state (source of truth for rendering)
-
   private var transcriptState = TranscriptState()
   private var flattenCache = TranscriptLayout.FlattenCache()
-
-  // MARK: - UI state
 
   private var inputBuffer: String = ""
   private var inPaste: Bool = false
@@ -131,11 +113,6 @@ internal final class SlateChatHost {
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
 
-  // Usage tracking is in transcriptState — no separate fields needed.
-
-  // MARK: - Coordinator communication
-
-  /// Thread-safe event queue for coordinator → host communication.
   private final class EventQueue: Sendable {
     private let events: Mutex<[HostEvent]> = Mutex([])
 
@@ -160,9 +137,6 @@ internal final class SlateChatHost {
   private var llmWaitAnimationFrame: Int = 0
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
-  /// Held so the Ctrl+C path can call `interrupt()` synchronously
-  /// (`nonisolated` on the coordinator) without going through the agent's
-  /// abort notifier directly. The host doesn't see `AbortNotifier` at all.
   private var coordinator: ChatCoordinator?
   private let log: Logger
 
@@ -236,10 +210,6 @@ internal final class SlateChatHost {
         let (lineStream, lineCont) = AsyncStream<String>.makeStream()
         Task { await gate.setStreamContinuation(lineCont) }
 
-        // Construct the coordinator eagerly — this throws if the resume
-        // snapshot is malformed or the agent's transport can't be built.
-        // Surface failures through the same event pipe `run()` would have
-        // used so the TUI shows them; then skip the coordinator task.
         let coordinator: ChatCoordinator
         do {
           coordinator = try ChatCoordinator(
@@ -313,11 +283,11 @@ internal final class SlateChatHost {
               if self.inPaste {
                 self.inputBuffer.append("\n")
               } else {
-              let text = self.inputBuffer
-              self.inputBuffer = ""
-              self.submitCoordinator.setModelBusy(self.modelBusy)
-              let effect = self.submitCoordinator.handleEnter(text: text)
-              shouldStop = self.applySubmitEffect(effect, gate: gate)
+                let text = self.inputBuffer
+                self.inputBuffer = ""
+                self.submitCoordinator.setModelBusy(self.modelBusy)
+                let effect = self.submitCoordinator.handleEnter(text: text)
+                shouldStop = self.applySubmitEffect(effect, gate: gate)
               }
 
             case .ctrlC:
@@ -374,7 +344,6 @@ internal final class SlateChatHost {
           }
         }
 
-        // Auto-flush a queued tray message when the agent finishes a turn naturally.
         let nowBusy = self.modelBusy
         self.submitCoordinator.setModelBusy(nowBusy)
         let flushEffect = self.submitCoordinator.handleModelTurnEnd()
@@ -386,10 +355,8 @@ internal final class SlateChatHost {
           Task { await gate.complete(text) }
         }
 
-        // Drain incoming events from coordinator before rendering.
         self.drainIncomingEvents()
 
-        // Render frame.
         slate.with { grid in
           let scrCols = grid.cols
           let scrRows = grid.rows
@@ -468,8 +435,6 @@ internal final class SlateChatHost {
     await gate.complete(nil)
   }
 
-  // MARK: - Event draining
-
   private func drainIncomingEvents() {
     let events = eventQueue.drain()
     for event in events {
@@ -545,10 +510,6 @@ internal final class SlateChatHost {
     }
   }
 
-  // MARK: - Submit effect dispatch
-
-  /// Execute a `SubmitEffect` against the gate and interrupt flag.
-  /// Returns `true` if the chat loop should stop.
   private func applySubmitEffect(
     _ effect: SubmitEffect,
     gate: UserLineGate
@@ -567,12 +528,6 @@ internal final class SlateChatHost {
       Task { await gate.complete(text) }
     }
     if fx.needsDelayedRenderWake {
-      // The external wake from requestRender (below) fires through the
-      // throttler immediately, often before the coordinator Task has
-      // enqueued its .userSubmitted / .modelTurnRunning events.  Schedule
-      // a second wake after the throttle interval so the throttler emits
-      // a fresh tick that is guaranteed to land after the coordinator
-      // has populated the event queue.
       scheduleDelayedRenderWake()
     }
     if fx.shouldExit {
@@ -582,12 +537,6 @@ internal final class SlateChatHost {
     return false
   }
 
-  /// Request a render after a brief delay, giving the coordinator Task
-  /// time to enqueue transcript events before the next frame is painted.
-  ///
-  /// The delay is set slightly longer than the throttle interval
-  /// (1/60 ≈ 16.67 ms) so the throttler emits this tick as a fresh
-  /// external event rather than coalescing it with the preceding one.
   private func scheduleDelayedRenderWake() {
     let wake = renderWake
     Task {
@@ -596,18 +545,12 @@ internal final class SlateChatHost {
     }
   }
 
-  // MARK: - Helpers
-
-  /// Renders a TLine into a compact debug string for log output.
   private func spansToDebugString(_ line: TLine) -> String {
     line.spans.map { $0.text }.joined()
   }
 
-  // MARK: - Git branch detection
-
-  /// Runs `git branch --show-current` in `cwd` and returns the branch name,
-  /// or nil if not in a git repo.
   private nonisolated static func detectGitBranch(cwd: String) -> String? {
+    // TODO: Do something else here
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     process.arguments = ["branch", "--show-current"]

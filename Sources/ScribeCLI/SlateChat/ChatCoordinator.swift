@@ -3,19 +3,6 @@ import Logging
 import ScribeCore
 import ScribeLLM
 
-// MARK: - ChatCoordinator
-
-/// Owns the agent-turn loop: reads user input lines from an AsyncStream,
-/// processes them through `ScribeAgent`, and emits `HostEvent`s to a callback.
-///
-/// Extracted from `SlateChatHost` to make the turn-loop testable without a TUI.
-///
-/// Implemented as a `final class` rather than an `actor` because every
-/// instance property is `let` — `run()` is the only entry point that does
-/// any work and all of its mutable state is local. Using a class lets
-/// `interrupt()` and the `agent` property be reachable from any thread
-/// without the `nonisolated` ceremony an actor would require, and avoids
-/// the one-hop overhead on every `await coordinator.run()`.
 final class ChatCoordinator: Sendable {
 
   private let configuration: ScribeConfig
@@ -27,14 +14,8 @@ final class ChatCoordinator: Sendable {
   private let sessionCreatedAt: Date
   private let lines: AsyncStream<String>
 
-  /// Constructed eagerly so `interrupt()` can call `agent.abort()`
-  /// directly. `ScribeAgent` is a Sendable struct whose mutable state is
-  /// reference-typed (storage actor, abort notifier), so the value-copy
-  /// stored here shares the right state with whatever `run()` is using.
   private let agent: ScribeAgent
 
-  /// Computed in init so we can hand it to the agent up front; also used
-  /// in `run()` for first-persist and as the seed transcript.
   private let initialMessages: [Components.Schemas.ChatMessage]
 
   init(
@@ -72,10 +53,6 @@ final class ChatCoordinator: Sendable {
     self.lines = lines
   }
 
-  /// Interrupt the in-flight turn (if any) — synchronous and safe to
-  /// call from any thread. Forwards to `ScribeAgent.abort()`, which is a
-  /// no-op when no turn is in flight (the agent clears its abort notifier
-  /// at the top of every `prompt()`).
   func interrupt() {
     agent.abort()
   }
@@ -202,4 +179,3 @@ final class ChatCoordinator: Sendable {
     enqueue(.coordinatorFinished)
   }
 }
-

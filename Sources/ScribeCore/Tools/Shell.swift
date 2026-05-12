@@ -2,7 +2,6 @@ import Foundation
 import Logging
 import Subprocess
 
-// Set by the CLI layer at session start so all tool/shell logs route to the session file.
 // TODO: Address logging mess.
 package nonisolated(unsafe) var scribeSessionLogger: Logger?
 
@@ -17,13 +16,10 @@ import Musl
 enum Shell {
   struct Result: Sendable {
     let exitCode: TerminationStatus
-    /// Path to a temp file containing stdout (always set, may be an empty file).
     let stdoutFile: ScribeFilePath
-    /// Path to a temp file containing stderr (always set, may be an empty file).
     let stderrFile: ScribeFilePath
     let pid: pid_t
 
-    /// `JSONSerialization` only accepts Foundation types; ``TerminationStatus`` is not one of them.
     var exitCodeForJSON: Int {
       switch exitCode {
       case .exited(let code):
@@ -59,8 +55,6 @@ enum Shell {
       throw ShellError(description: "command is empty")
     }
 
-    // Log entry immediately — before any filesystem work — so we can confirm
-    // Shell.run was reached even when logs aren't flushed later.
     logger.trace(
       "shell-run-entry",
       metadata: [
@@ -76,14 +70,12 @@ enum Shell {
       shellCwd = nil
     }
 
-    // Temp files for stdout and stderr.
     let tmpDir = FileManager.default.temporaryDirectory
     let stdoutURL = tmpDir.appendingPathComponent("scribe-shell-\(id.uuidString)-stdout.txt")
     let stderrURL = tmpDir.appendingPathComponent("scribe-shell-\(id.uuidString)-stderr.txt")
     let stdoutPath = ScribeFilePath(stdoutURL.path)
     let stderrPath = ScribeFilePath(stderrURL.path)
 
-    // Ensure empty files exist so the paths are always valid even with zero output.
     try "".write(to: stdoutURL, atomically: false, encoding: .utf8)
     try "".write(to: stderrURL, atomically: false, encoding: .utf8)
 
@@ -94,7 +86,6 @@ enum Shell {
         "stdout_file": "\(stdoutURL.path)", "stderr_file": "\(stderrURL.path)",
       ])
 
-    // Open file handles up front so onCancel can close them as a safety net.
     guard let stdoutHandle = try? FileHandle(forWritingTo: stdoutURL),
       let stderrHandle = try? FileHandle(forWritingTo: stderrURL)
     else {
@@ -325,8 +316,6 @@ enum Shell {
     )
   }
 
-  // MARK: - Process tree kill (Linux)
-
   #if os(Linux)
   /// Recursively kills `pid` and all its descendants by walking `/proc`.
   /// Returns the total number of processes signalled (including the root).
@@ -382,9 +371,6 @@ enum Shell {
   }
   #endif
 
-  // MARK: - Drain deadline
-
-  /// Bytes counted off each pipe by a successful drain.
   private struct DrainBytes: Sendable {
     let out: Int
     let err: Int
@@ -445,10 +431,6 @@ enum Shell {
     }.value
   }
 
-  // MARK: - Stream to file
-
-  /// Writes all chunks from an `AsyncBufferSequence` to a file handle, returning the total byte count.
-  /// The caller owns the handle and must close it.
   private static func writeStream(
     from sequence: AsyncBufferSequence,
     to handle: FileHandle,
@@ -559,8 +541,6 @@ enum Shell {
       ])
     return totalBytes
   }
-
-  // MARK: - Helpers
 
   private static func fileSize(url: URL) -> Int64 {
     (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? -1
