@@ -1,6 +1,7 @@
 import Foundation
-import ScribeCore
 import Testing
+
+@testable import ScribeCore
 
 @Suite
 struct ToolRunnerRouterTests {
@@ -8,7 +9,7 @@ struct ToolRunnerRouterTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     do {
       _ = try await registry.run(
-        name: "not_a_registered_tool", arguments: "{}", workingDirectory: ScribeFilePath("/tmp"), abortNotifier: AbortNotifier())
+        name: "not_a_registered_tool", arguments: "{}", workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
       #expect(Bool(false), "expected ScribeError.toolUnknown")
     } catch let error as ScribeError {
       guard case .toolUnknown(let name) = error else {

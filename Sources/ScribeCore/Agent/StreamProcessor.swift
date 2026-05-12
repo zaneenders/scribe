@@ -13,10 +13,10 @@ import ScribeLLM
 /// `StreamProcessor` only inspects deltas read-only to decide which events
 /// to emit, eliminating the double-processing that previously existed when
 /// both `processStreamChunks` and `turn.apply` iterated the same fields.
-struct StreamProcessor {
+struct StreamProcessor<AO: AbortObserver> {
   private let onEvent: (TranscriptEvent) -> Void
   private let logger: Logger
-  private let abortNotifier: AbortNotifier
+  private let abortObserver: AO
   private let clock = ContinuousClock()
 
   // MARK: - Result fields (read by caller after `process` completes)
@@ -32,12 +32,12 @@ struct StreamProcessor {
   init(
     onEvent: @escaping (TranscriptEvent) -> Void,
     logger: Logger,
-    abortNotifier: AbortNotifier,
+    abortObserver: AO,
     streamWallStart: ContinuousClock.Instant
   ) {
     self.onEvent = onEvent
     self.logger = logger
-    self.abortNotifier = abortNotifier
+    self.abortObserver = abortObserver
     self.streamWallStart = streamWallStart
   }
 
@@ -58,7 +58,7 @@ struct StreamProcessor {
     let streamProgressEvery = 200
 
     for try await sse in sseStream {
-      if abortNotifier.isAborted() {
+      if abortObserver.isAborted() {
         logger.notice(
           """
           event=agent.stream.abort \

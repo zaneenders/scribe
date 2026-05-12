@@ -133,7 +133,7 @@ private func runLoop(
   prompt: String,
   context: AgentContext = AgentContext(systemPrompt: "You are a test agent.", messages: []),
   config: AgentLoopConfig,
-  abortNotifier: AbortNotifier = AbortNotifier()
+  abortObserver: any AbortObserver = AbortNotifier()
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
   let userMsg = Components.Schemas.ChatMessage(role: .user, content: prompt)
   return try await runAgentLoop(
@@ -142,7 +142,7 @@ private func runLoop(
     config: config,
     emit: { _ in },
     log: testLogger,
-    abortNotifier: abortNotifier
+    abortObserver: abortObserver
   )
 }
 
@@ -261,7 +261,7 @@ struct AgentLoopTests {
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks),
-      abortNotifier: notifier
+      abortObserver: notifier
     )
     expectTermination(termination, .interrupted)
     // prompt message is appended before abort check
@@ -283,7 +283,7 @@ struct AgentLoopTests {
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      abortNotifier: CountingAbortNotifier(triggerAt: 2)  // post-stream-pre-tools check
+      abortObserver: CountingAbortObserver(triggerAt: 2)  // post-stream-pre-tools check
     )
     expectTermination(termination, .interrupted)
     // prompt message remains; round messages rolled back
@@ -304,7 +304,7 @@ struct AgentLoopTests {
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      abortNotifier: CountingAbortNotifier(triggerAt: 3)  // pre-tool check
+      abortObserver: CountingAbortObserver(triggerAt: 3)  // pre-tool check
     )
     expectTermination(termination, .interrupted)
     #expect(messages.count == 1)
@@ -326,7 +326,7 @@ struct AgentLoopTests {
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      abortNotifier: CountingAbortNotifier(triggerAt: 4)  // registry.run before-start check
+      abortObserver: CountingAbortObserver(triggerAt: 4)  // registry.run before-start check
     )
     expectTermination(termination, .interrupted)
     #expect(messages.count == 1)
@@ -458,7 +458,7 @@ struct AgentLoopTests {
       config: makeConfig(chunks: chunks),
       emit: { event in events.withLock { $0.append(event) } },
       log: testLogger,
-      abortNotifier: AbortNotifier()
+      abortObserver: AbortNotifier()
     )
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
@@ -509,7 +509,7 @@ struct AgentLoopTests {
       config: makeConfig(chunks: chunks),
       emit: { _ in },
       log: testLogger,
-      abortNotifier: AbortNotifier()
+      abortObserver: AbortNotifier()
     )
     expectTermination(termination, .completed)
     // Only the new assistant message is returned
@@ -602,7 +602,7 @@ struct AgentLoopTests {
       let (messages, termination) = try await runLoop(
         prompt: "test",
         config: makeConfig(chunks: chunks),
-        abortNotifier: CountingAbortNotifier(triggerAt: 1)  // mid-stream (call 0: before-http)
+        abortObserver: CountingAbortObserver(triggerAt: 1)  // mid-stream (call 0: before-http)
       )
       expectTermination(termination, .interrupted)
       _ = messages  // silence unused warning

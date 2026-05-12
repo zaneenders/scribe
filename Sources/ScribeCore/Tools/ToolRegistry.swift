@@ -24,16 +24,16 @@ public struct ToolRegistry: Sendable {
   /// Execute a tool by name with cooperative abort support.
   ///
   /// A task group runs the tool while a watch task sleeps inside
-  /// `abortNotifier.signals()`. When `abortNotifier.request()` fires the
-  /// watch task wakes, re-checks `abortNotifier.isAborted()` (cheap defence
-  /// against spurious yields from late subscribers catching a residual
-  /// signal), and throws `AgentTurnInterruptedError` — which cancels the
-  /// tool task. Tools that use `withTaskCancellationHandler` (e.g. Shell
-  /// sends SIGKILL) respond promptly.
+  /// `abortObserver.signals()`. When the upstream notifier fires, the
+  /// watch task wakes, re-checks `abortObserver.isAborted()` (cheap
+  /// defence against spurious yields from late subscribers catching a
+  /// residual signal), and throws `AgentTurnInterruptedError` — which
+  /// cancels the tool task. Tools that use `withTaskCancellationHandler`
+  /// (e.g. Shell sends SIGKILL) respond promptly.
   ///
-  /// Pass `abortNotifier: AbortNotifier()` when abort support isn't needed
-  /// — that notifier never fires and the watch task simply suspends until
-  /// the tool finishes and the group is cancelled.
+  /// Pass `abortObserver: AbortNotifier()` when abort support isn't
+  /// needed — that notifier never fires and the watch task simply
+  /// suspends until the tool finishes and the group is cancelled.
   ///
   /// - Throws: `AgentTurnInterruptedError` if abort fires.
   /// - Throws: `ScribeError.toolUnknown` if the tool `name` is not in the registry.
@@ -42,7 +42,7 @@ public struct ToolRegistry: Sendable {
     name: String,
     arguments: String,
     workingDirectory: ScribeFilePath,
-    abortNotifier: AbortNotifier
+    abortObserver: any AbortObserver
   ) async throws -> String {
     guard let tool = tools[name] else {
       Self.logger.debug(
@@ -65,7 +65,7 @@ public struct ToolRegistry: Sendable {
     // Abort before starting the tool if the flag is already set — avoids
     // a race where the tool completes but the watch task wakes before we
     // dequeue.
-    if abortNotifier.isAborted() {
+    if abortObserver.isAborted() {
       Self.logger.debug(
         "agent.tool.aborted-before-start",
         metadata: [
@@ -135,8 +135,8 @@ public struct ToolRegistry: Sendable {
           Self.logger.trace(
             "agent.tool.abort-watch.start",
             metadata: ["tool": "\(name)"])
-          for await _ in abortNotifier.signals() {
-            if abortNotifier.isAborted() {
+          for await _ in abortObserver.signals() {
+            if abortObserver.isAborted() {
               Self.logger.trace(
                 "agent.tool.abort-watch.fired",
                 metadata: ["tool": "\(name)"])
