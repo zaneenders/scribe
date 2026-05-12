@@ -16,7 +16,7 @@ import ScribeLLM
 struct StreamProcessor {
   private let onEvent: (TranscriptEvent) -> Void
   private let logger: Logger
-  private let shouldAbortTurn: () -> Bool
+  private let abortNotifier: AbortNotifier
   private let clock = ContinuousClock()
 
   // MARK: - Result fields (read by caller after `process` completes)
@@ -32,12 +32,12 @@ struct StreamProcessor {
   init(
     onEvent: @escaping (TranscriptEvent) -> Void,
     logger: Logger,
-    shouldAbortTurn: @escaping () -> Bool,
+    abortNotifier: AbortNotifier,
     streamWallStart: ContinuousClock.Instant
   ) {
     self.onEvent = onEvent
     self.logger = logger
-    self.shouldAbortTurn = shouldAbortTurn
+    self.abortNotifier = abortNotifier
     self.streamWallStart = streamWallStart
   }
 
@@ -58,7 +58,7 @@ struct StreamProcessor {
     let streamProgressEvery = 200
 
     for try await sse in sseStream {
-      if shouldAbortTurn() {
+      if abortNotifier.isAborted() {
         logger.notice(
           """
           event=agent.stream.abort \

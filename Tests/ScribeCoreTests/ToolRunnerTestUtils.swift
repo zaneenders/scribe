@@ -1,4 +1,7 @@
 import Foundation
+import Synchronization
+
+@testable import ScribeCore
 
 struct ShellPayload: Decodable {
   let ok: Bool
@@ -107,4 +110,26 @@ func withTemporaryDirectory<T>(
 final class AbortState: @unchecked Sendable {
   var value = false
   func set(_ newValue: Bool) { value = newValue }
+}
+
+/// Test-only `AbortNotifier` that returns `false` for the first `triggerAt`
+/// calls to `isAborted()` and `true` from then on. Used by `AgentLoopTests`
+/// to verify abort-checks fire at specific positions in the loop without
+/// needing a real interrupt source. Only `isAborted()` is overridden — the
+/// underlying notifier state, `request()`, `clear()`, and `signals()` keep
+/// their default behaviour.
+final class CountingAbortNotifier: AbortNotifier, @unchecked Sendable {
+  let counter = Atomic<Int>(0)
+  private let triggerAt: Int
+
+  init(triggerAt: Int) {
+    self.triggerAt = triggerAt
+    super.init()
+  }
+
+  override func isAborted() -> Bool {
+    let c = counter.load(ordering: .sequentiallyConsistent)
+    counter.store(c + 1, ordering: .sequentiallyConsistent)
+    return c >= triggerAt
+  }
 }

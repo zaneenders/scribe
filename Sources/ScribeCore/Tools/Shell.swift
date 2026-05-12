@@ -2,7 +2,6 @@ import Foundation
 import Logging
 import Subprocess
 
-// Set by the CLI layer at session start so all tool/shell logs route to the session file.
 // TODO: Address logging mess.
 package nonisolated(unsafe) var scribeSessionLogger: Logger?
 
@@ -17,13 +16,10 @@ import Musl
 enum Shell {
   struct Result: Sendable {
     let exitCode: TerminationStatus
-    /// Path to a temp file containing stdout (always set, may be an empty file).
     let stdoutFile: ScribeFilePath
-    /// Path to a temp file containing stderr (always set, may be an empty file).
     let stderrFile: ScribeFilePath
     let pid: pid_t
 
-    /// `JSONSerialization` only accepts Foundation types; ``TerminationStatus`` is not one of them.
     var exitCodeForJSON: Int {
       switch exitCode {
       case .exited(let code):
@@ -59,8 +55,6 @@ enum Shell {
       throw ShellError(description: "command is empty")
     }
 
-    // Log entry immediately — before any filesystem work — so we can confirm
-    // Shell.run was reached even when logs aren't flushed later.
     logger.trace(
       "shell-run-entry",
       metadata: [
@@ -76,14 +70,12 @@ enum Shell {
       shellCwd = nil
     }
 
-    // Temp files for stdout and stderr.
     let tmpDir = FileManager.default.temporaryDirectory
     let stdoutURL = tmpDir.appendingPathComponent("scribe-shell-\(id.uuidString)-stdout.txt")
     let stderrURL = tmpDir.appendingPathComponent("scribe-shell-\(id.uuidString)-stderr.txt")
     let stdoutPath = ScribeFilePath(stdoutURL.path)
     let stderrPath = ScribeFilePath(stderrURL.path)
 
-    // Ensure empty files exist so the paths are always valid even with zero output.
     try "".write(to: stdoutURL, atomically: false, encoding: .utf8)
     try "".write(to: stderrURL, atomically: false, encoding: .utf8)
 
@@ -94,7 +86,6 @@ enum Shell {
         "stdout_file": "\(stdoutURL.path)", "stderr_file": "\(stderrURL.path)",
       ])
 
-    // Open file handles up front so onCancel can close them as a safety net.
     guard let stdoutHandle = try? FileHandle(forWritingTo: stdoutURL),
       let stderrHandle = try? FileHandle(forWritingTo: stderrURL)
     else {
@@ -142,16 +133,27 @@ enum Shell {
             ])
           let tDrain = ContinuousClock.now
 
-          async let outBytes = writeStream(
-            from: outputSequence, to: stdoutHandle,
-            label: "\(id)/stdout", pid: pid, shellID: id)
-          async let errBytes = writeStream(
-            from: errorSequence, to: stderrHandle,
-            label: "\(id)/stderr", pid: pid, shellID: id)
+          // Detach the drain so it can outlive parent-task cancellation. We
+          // explicitly bound the post-cancel wait via `awaitDrainWithDeadline`
+          // below; if a setsid grandchild keeps the subprocess stdout pipe
+          // open after SIGKILL, the deadline fires and we settle for whatever
+          // partial output is on disk instead of hanging this task forever.
+          let drainTask = Task.detached(priority: .userInitiated) {
+            [outputSequence, errorSequence, stdoutHandle, stderrHandle, id, pid]
+            () async throws -> (Int, Int) in
+            async let out = Self.writeStream(
+              from: outputSequence, to: stdoutHandle,
+              label: "\(id)/stdout", pid: pid, shellID: id)
+            async let err = Self.writeStream(
+              from: errorSequence, to: stderrHandle,
+              label: "\(id)/stderr", pid: pid, shellID: id)
+            return try await (out, err)
+          }
 
           let result: (pid_t, Int, Int)
           do {
-            result = try await (pid, outBytes, errBytes)
+            let r = try await drainTask.value
+            result = (pid, r.0, r.1)
             logger.trace(
               "shell-drain-complete",
               metadata: [
@@ -161,23 +163,43 @@ enum Shell {
                 "cancelled": "\(Task.isCancelled)",
               ])
           } catch is CancellationError {
-            // writeStream now handles cancellation gracefully (writes chunk,
-            // then breaks), so this path should rarely be hit.  But if we
-            // do land here — e.g. a CancellationError from somewhere else —
-            // close handles and read whatever made it to disk.
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
-            let outSize = Int(fileSize(url: stdoutURL))
-            let errSize = Int(fileSize(url: stderrURL))
-            logger.trace(
-              "shell-drain-cancellation-caught",
-              metadata: [
-                "shell_id": "\(id)", "pid": "\(pid)",
-                "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
-                "out_bytes_on_disk": "\(outSize)", "err_bytes_on_disk": "\(errSize)",
-              ])
-            result = (pid, outSize, errSize)
+            // Parent cancelled mid-drain. The kill in onCancel should have
+            // SIGKILL'd the subprocess, so the pipes should EOF momentarily
+            // and the detached drain should return naturally. Race the drain
+            // against a hard deadline so a surviving setsid grandchild that
+            // keeps the pipe open can't hang us indefinitely.
+            //
+            // The race itself runs in a fresh detached task so it isn't
+            // subject to the calling task's now-sticky cancellation flag
+            // (which would otherwise make Task.sleep throw immediately and
+            // collapse the deadline to zero).
+            let bytes = await Self.awaitDrainWithDeadline(
+              drainTask: drainTask, deadlineMs: 2_000, shellID: id)
+            if let bytes {
+              result = (pid, bytes.out, bytes.err)
+              logger.trace(
+                "shell-drain-completed-after-cancel",
+                metadata: [
+                  "shell_id": "\(id)", "pid": "\(pid)",
+                  "out_bytes": "\(bytes.out)", "err_bytes": "\(bytes.err)",
+                  "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                ])
+            } else {
+              try? stdoutHandle.close()
+              try? stderrHandle.close()
+              let outSize = Int(fileSize(url: stdoutURL))
+              let errSize = Int(fileSize(url: stderrURL))
+              logger.trace(
+                "shell-drain-deadline-reached",
+                metadata: [
+                  "shell_id": "\(id)", "pid": "\(pid)",
+                  "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                  "out_bytes_on_disk": "\(outSize)", "err_bytes_on_disk": "\(errSize)",
+                ])
+              result = (pid, outSize, errSize)
+            }
           } catch {
+            drainTask.cancel()
             logger.trace(
               "shell-drain-error",
               metadata: [
@@ -208,7 +230,20 @@ enum Shell {
           // Kill the process tree first so the async sequences hit EOF.
           // writeStream will drain any remaining buffered output and
           // return naturally — do NOT close handles here or we lose
-          // partial output that hasn't been delivered yet.
+          // partial output that hasn't been delivered yet. The body's
+          // `catch is CancellationError` path closes handles once drain
+          // returns and reads partial sizes from disk.
+          //
+          // Previously this also spawned an unstructured `Task { sleep
+          // 500ms; close handles }` as a safety net. That was removed:
+          //   1. Closing the *write* side of the temp file does nothing
+          //      to unblock the *read* side of the subprocess stdout
+          //      pipe owned by swift-subprocess, so it never actually
+          //      saved a hanging drain.
+          //   2. Each interrupted shell left an orphan Task on the
+          //      cooperative pool holding two FileHandle references for
+          //      ≥500 ms, which under repeated Ctrl-C accumulated FDs
+          //      and contributed to the spin reports.
           do {
             #if os(Windows)
             logger.trace("shell-onCancel-kill-windows", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
@@ -237,17 +272,6 @@ enum Shell {
                 "shell_id": "\(id)", "pid": "\(pid)",
                 "error": "\(String(describing: error))",
               ])
-          }
-
-          // Safety net: if the process didn't die quickly enough, close
-          // handles after a short grace period so writeStream can't hang
-          // indefinitely.  The unstructured task avoids blocking onCancel.
-          let captureStdout = stdoutHandle
-          let captureStderr = stderrHandle
-          Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            try? captureStdout.close()
-            try? captureStderr.close()
           }
 
           logger.trace(
@@ -291,8 +315,6 @@ enum Shell {
       pid: outcome.value.0
     )
   }
-
-  // MARK: - Process tree kill (Linux)
 
   #if os(Linux)
   /// Recursively kills `pid` and all its descendants by walking `/proc`.
@@ -349,10 +371,66 @@ enum Shell {
   }
   #endif
 
-  // MARK: - Stream to file
+  private struct DrainBytes: Sendable {
+    let out: Int
+    let err: Int
+  }
 
-  /// Writes all chunks from an `AsyncBufferSequence` to a file handle, returning the total byte count.
-  /// The caller owns the handle and must close it.
+  /// Race a detached drain task against a fixed deadline.  Returns the
+  /// drain's byte counts when the drain completes first, or `nil` when the
+  /// deadline fires (in which case the caller should close handles and
+  /// settle for whatever's already on disk).
+  ///
+  /// The race itself runs in a fresh detached task so it isn't subject to
+  /// the calling task's cancellation state — otherwise `Task.sleep` would
+  /// throw immediately on a cancelled parent and collapse the deadline.
+  private static func awaitDrainWithDeadline(
+    drainTask: Task<(Int, Int), Error>,
+    deadlineMs: Int,
+    shellID: UUID
+  ) async -> DrainBytes? {
+    enum RaceOutcome: Sendable {
+      case completed(out: Int, err: Int)
+      case deadline
+      case errored
+    }
+    return await Task.detached(priority: .userInitiated) {
+      [drainTask] () async -> DrainBytes? in
+      await withTaskGroup(of: RaceOutcome.self) { group in
+        group.addTask {
+          do {
+            let r = try await drainTask.value
+            return .completed(out: r.0, err: r.1)
+          } catch {
+            return .errored
+          }
+        }
+        group.addTask {
+          try? await Task.sleep(for: .milliseconds(deadlineMs))
+          return .deadline
+        }
+        let first = await group.next()!
+        group.cancelAll()
+        switch first {
+        case .completed(let out, let err):
+          return DrainBytes(out: out, err: err)
+        case .deadline:
+          // Try to push the drain to exit; the parent will fall back to
+          // disk-side byte counts regardless.
+          drainTask.cancel()
+          Self.logger.trace(
+            "shell-drain-deadline-fired",
+            metadata: [
+              "shell_id": "\(shellID)", "deadline_ms": "\(deadlineMs)",
+            ])
+          return nil
+        case .errored:
+          return nil
+        }
+      }
+    }.value
+  }
+
   private static func writeStream(
     from sequence: AsyncBufferSequence,
     to handle: FileHandle,
@@ -374,8 +452,17 @@ enum Shell {
         "cancelled": "\(Task.isCancelled)",
       ])
 
+    // Once `stopWriting` flips we keep iterating the producer's sequence so
+    // the underlying pipe drains — otherwise the subprocess blocks on its
+    // next stdout write, the AsyncBufferSequence never EOFs, and a
+    // SIGKILL'd process can leave this drain hanging forever (one of the
+    // suspected sources of the historical 100% CPU spin reports).
+    // Cancellation is the only signal that breaks out hard, since by then
+    // onCancel has already SIGKILL'd the process tree.
+    var stopWriting = false
+    var stopReason = "eof"
+
     for try await buffer in sequence {
-      // Record how long we waited for this chunk (helps detect hangs).
       let waitUs = t0.duration(to: .now).microseconds
       if chunkCount == 0 {
         logger.trace(
@@ -388,9 +475,7 @@ enum Shell {
       }
 
       chunkCount += 1
-      totalBytes += buffer.count
 
-      // Periodic heartbeat — proves we're still processing, not stuck.
       if chunkCount % heartbeatInterval == 0 {
         logger.trace(
           "write-stream-heartbeat",
@@ -399,26 +484,37 @@ enum Shell {
             "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
             "elapsed_us": "\(waitUs)",
             "cancelled": "\(Task.isCancelled)",
+            "stop_writing": "\(stopWriting)",
           ])
       }
 
-      // Write first, then check cancellation — preserves this chunk even when
-      // a Ctrl-C arrives while we're draining.  If the handle was already
-      // slammed shut by onCancel the write will fail and we stop cleanly.
-      do {
-        try handle.write(contentsOf: Data(buffer: buffer))
-      } catch {
-        logger.trace(
-          "write-stream-write-failed",
+      if !stopWriting {
+        do {
+          try handle.write(contentsOf: Data(buffer: buffer))
+          totalBytes += buffer.count
+        } catch {
+          logger.trace(
+            "write-stream-write-failed",
+            metadata: [
+              "shell_id": "\(shellID)", "stream": "\(label)",
+              "error": "\(String(describing: error))",
+              "chunks_written": "\(chunkCount - 1)",
+              "bytes_before_failure": "\(totalBytes)",
+            ])
+          stopWriting = true
+          stopReason = "write-failed"
+        }
+      }
+
+      if !stopWriting && chunkCount == maxChunks {
+        logger.warning(
+          "write-stream-chunk-cap-hit",
           metadata: [
             "shell_id": "\(shellID)", "stream": "\(label)",
-            "error": "\(String(describing: error))",
-            "chunks_written": "\(chunkCount - 1)",
-            "bytes_before_failure": "\(totalBytes - buffer.count)",
+            "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
           ])
-        // Don't count this chunk since the write failed.
-        totalBytes -= buffer.count
-        break
+        stopWriting = true
+        stopReason = "cap"
       }
 
       if Task.isCancelled {
@@ -428,16 +524,7 @@ enum Shell {
             "shell_id": "\(shellID)", "stream": "\(label)",
             "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
           ])
-        break
-      }
-
-      if chunkCount >= maxChunks {
-        logger.warning(
-          "write-stream-chunk-cap-hit",
-          metadata: [
-            "shell_id": "\(shellID)", "stream": "\(label)",
-            "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
-          ])
+        stopReason = "cancelled"
         break
       }
     }
@@ -450,12 +537,10 @@ enum Shell {
         "chunks": "\(chunkCount)", "total_bytes": "\(totalBytes)",
         "elapsed_us": "\(elapsedUs)",
         "cancelled_at_exit": "\(Task.isCancelled)",
-        "exit_reason": Task.isCancelled ? "cancelled" : (chunkCount >= maxChunks ? "cap" : "eof"),
+        "exit_reason": "\(stopReason)",
       ])
     return totalBytes
   }
-
-  // MARK: - Helpers
 
   private static func fileSize(url: URL) -> Int64 {
     (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? -1
