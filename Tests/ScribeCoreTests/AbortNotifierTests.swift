@@ -102,7 +102,7 @@ struct AbortNotifierTests {
             name: "sleepy",
             arguments: "{}",
             workingDirectory: ScribeFilePath("/tmp"),
-            abortNotifier: notifier)
+            abortObserver: notifier)
         }
         group.addTask {
           // Let the tool start, then signal abort.

@@ -167,7 +167,7 @@ public struct ScribeAgent: Sendable {
           config: config,
           emit: { continuation.yield($0) },
           log: log,
-          abortNotifier: abortNotifier
+          abortObserver: abortNotifier
         )
         switch result.termination {
         case .completed:

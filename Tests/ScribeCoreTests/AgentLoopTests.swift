@@ -142,7 +142,24 @@ private func runLoop(
     config: config,
     emit: { _ in },
     log: testLogger,
-    abortNotifier: abortNotifier
+    abortObserver: abortNotifier
+  )
+}
+
+private func runLoop(
+  prompt: String,
+  context: AgentContext = AgentContext(systemPrompt: "You are a test agent.", messages: []),
+  config: AgentLoopConfig,
+  countingAbortObserver: CountingAbortObserver = CountingAbortObserver(triggerAt: 1)
+) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
+  let userMsg = Components.Schemas.ChatMessage(role: .user, content: prompt)
+  return try await runAgentLoop(
+    promptMessages: [userMsg],
+    context: context,
+    config: config,
+    emit: { _ in },
+    log: testLogger,
+    abortObserver: countingAbortObserver
   )
 }
 
@@ -172,7 +189,7 @@ struct AgentLoopTests {
       doneChunk(),
     ]
     let (messages, termination) = try await runLoop(
-      prompt: "hello", config: makeConfig(chunks: chunks))
+      prompt: "hello", config: makeConfig(chunks: chunks), abortNotifier: AbortNotifier())
     expectTermination(termination, .completed)
     #expect(messages.count == 2)  // user + assistant
     #expect(messages[0].role == .user)
@@ -188,7 +205,7 @@ struct AgentLoopTests {
       doneChunk(),
     ]
     let (messages, termination) = try await runLoop(
-      prompt: "hello", config: makeConfig(chunks: chunks))
+      prompt: "hello", config: makeConfig(chunks: chunks), abortNotifier: AbortNotifier())
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(messages[1].role == .assistant)
@@ -206,7 +223,7 @@ struct AgentLoopTests {
     ]
     let config = makeConfig(chunks: chunks, tools: [FakeTool()], maxToolRounds: 1)
     let (messages, termination) = try await runLoop(
-      prompt: "test", config: config)
+      prompt: "test", config: config, abortNotifier: AbortNotifier())
     expectTermination(termination, .toolRoundLimit(rounds: 1))
     // Only the user message survives (round messages rolled back)
     #expect(messages.count == 1)
@@ -237,7 +254,7 @@ struct AgentLoopTests {
       maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
     let (messages, termination) = try await runLoop(
-      prompt: "test", config: config)
+      prompt: "test", config: config, abortNotifier: AbortNotifier())
     expectTermination(termination, .completed)
     // user + assistant(tool-calling) + tool(result) + assistant(done)
     #expect(messages.count == 4)
@@ -283,7 +300,7 @@ struct AgentLoopTests {
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      abortNotifier: CountingAbortNotifier(triggerAt: 2)  // post-stream-pre-tools check
+      countingAbortObserver: CountingAbortObserver(triggerAt: 2)  // post-stream-pre-tools check
     )
     expectTermination(termination, .interrupted)
     // prompt message remains; round messages rolled back
@@ -304,7 +321,7 @@ struct AgentLoopTests {
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      abortNotifier: CountingAbortNotifier(triggerAt: 3)  // pre-tool check
+      countingAbortObserver: CountingAbortObserver(triggerAt: 3)  // pre-tool check
     )
     expectTermination(termination, .interrupted)
     #expect(messages.count == 1)
@@ -326,7 +343,7 @@ struct AgentLoopTests {
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      abortNotifier: CountingAbortNotifier(triggerAt: 4)  // registry.run before-start check
+      countingAbortObserver: CountingAbortObserver(triggerAt: 4)  // registry.run before-start check
     )
     expectTermination(termination, .interrupted)
     #expect(messages.count == 1)
@@ -359,7 +376,7 @@ struct AgentLoopTests {
       )
       let (messages, termination) = try await runLoop(
         prompt: "test",
-        config: config
+        config: config, abortNotifier: AbortNotifier()
       )
       expectTermination(termination, .completed)
       // The unknown tool error becomes a tool message with jsonError.
@@ -377,7 +394,7 @@ struct AgentLoopTests {
   @Test func http404Error() async throws {
     let config = makeConfig(statusCode: 404, chunks: [errorBody("not found")])
     do {
-      _ = try await runLoop(prompt: "test", config: config)
+      _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
       #expect(Bool(false), "expected error")
     } catch let error as ScribeError {
       guard case .apiHTTPError(let code, _, let hint) = error else {
@@ -394,7 +411,7 @@ struct AgentLoopTests {
       statusCode: 404,
       chunks: [errorBody("The model `gpt-999` was not found")])
     do {
-      _ = try await runLoop(prompt: "test", config: config)
+      _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
       #expect(Bool(false), "expected error")
     } catch let error as ScribeError {
       guard case .apiHTTPError(let code, _, let hint) = error else {
@@ -409,7 +426,7 @@ struct AgentLoopTests {
   @Test func http400ErrorWarningLevel() async throws {
     let config = makeConfig(statusCode: 400, chunks: [errorBody("bad request")])
     do {
-      _ = try await runLoop(prompt: "test", config: config)
+      _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
       #expect(Bool(false), "expected error")
     } catch let error as ScribeError {
       guard case .apiHTTPError(let code, let detail, let hint) = error else {
@@ -428,7 +445,7 @@ struct AgentLoopTests {
       let longMessage = String(repeating: "x", count: 600)
       let config = makeConfig(statusCode: 500, chunks: [errorBody(longMessage)])
       do {
-        _ = try await runLoop(prompt: "test", config: config)
+        _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
         #expect(Bool(false), "expected error")
       } catch let error as ScribeError {
         guard case .apiHTTPError(let code, let detail, _) = error else {
@@ -458,7 +475,7 @@ struct AgentLoopTests {
       config: makeConfig(chunks: chunks),
       emit: { event in events.withLock { $0.append(event) } },
       log: testLogger,
-      abortNotifier: AbortNotifier()
+      abortObserver: AbortNotifier()
     )
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
@@ -481,7 +498,7 @@ struct AgentLoopTests {
       doneChunk(),
     ]
     let (messages, termination) = try await runLoop(
-      prompt: "test", config: makeConfig(chunks: chunks))
+      prompt: "test", config: makeConfig(chunks: chunks), abortNotifier: AbortNotifier())
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(messages[1].role == .assistant)
@@ -509,7 +526,7 @@ struct AgentLoopTests {
       config: makeConfig(chunks: chunks),
       emit: { _ in },
       log: testLogger,
-      abortNotifier: AbortNotifier()
+      abortObserver: AbortNotifier()
     )
     expectTermination(termination, .completed)
     // Only the new assistant message is returned
@@ -542,7 +559,7 @@ struct AgentLoopTests {
       maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
     let (messages, termination) = try await runLoop(
-      prompt: "test", config: config)
+      prompt: "test", config: config, abortNotifier: AbortNotifier())
     expectTermination(termination, .completed)
     // user + assistant(tool-calling) + tool(c1) + tool(c2) + assistant(done)
     #expect(messages.count == 5)
@@ -580,7 +597,7 @@ struct AgentLoopTests {
       maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
     let (messages, termination) = try await runLoop(
-      prompt: "test", config: config)
+      prompt: "test", config: config, abortNotifier: AbortNotifier())
     // The tool throws AgentTurnInterruptedError from run(), but ToolRegistry
     // catches it in the tool task and converts to jsonError. So it does NOT
     // terminate the loop — it becomes a tool message with an error.
@@ -602,7 +619,7 @@ struct AgentLoopTests {
       let (messages, termination) = try await runLoop(
         prompt: "test",
         config: makeConfig(chunks: chunks),
-        abortNotifier: CountingAbortNotifier(triggerAt: 1)  // mid-stream (call 0: before-http)
+        countingAbortObserver: CountingAbortObserver(triggerAt: 1)  // mid-stream (call 0: before-http)
       )
       expectTermination(termination, .interrupted)
       _ = messages  // silence unused warning
