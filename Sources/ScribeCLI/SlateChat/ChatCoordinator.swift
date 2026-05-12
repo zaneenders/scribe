@@ -82,10 +82,6 @@ final class ChatCoordinator: Sendable {
     }
 
     do {
-      // `agent` and `initialMessages` are constructed in `init` so the
-      // nonisolated `interrupt()` path doesn't need a Mutex slot.
-
-      // Write metadata on first persist (new sessions only).
       if resumeSnapshot.isEmpty {
         let cwd = FileManager.default.currentDirectoryPath
         let meta = ChatSessionMetadata(
@@ -122,13 +118,9 @@ final class ChatCoordinator: Sendable {
           continue
         }
 
-        // Record user submission into transcript.
         enqueue(.transcript(.userSubmitted(trimmed)))
         log.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
 
-        // No need to clear an interrupt flag here — `agent.prompt()`
-        // resets its private abort notifier at the top of each turn, so
-        // a stray Ctrl+C between prompts can't bleed into the next one.
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
@@ -160,7 +152,6 @@ final class ChatCoordinator: Sendable {
         await persistNew(from: agent, since: persistedCount)
         persistedCount = await agent.messages.count
 
-        // Turn complete — tell host to finalize.
         let committed = await agent.messages
         enqueue(.transcript(.turnComplete(referenceMessages: committed)))
       }
