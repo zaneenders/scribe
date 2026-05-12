@@ -38,7 +38,7 @@ public struct ToolRegistry: Sendable {
   /// - Throws: `AgentTurnInterruptedError` if abort fires.
   /// - Throws: `ScribeError.toolUnknown` if the tool `name` is not in the registry.
   /// - Returns: JSON-encoded tool result (or JSON error string for tool failures).
-  public func run(
+  internal func run(
     name: String,
     arguments: String,
     workingDirectory: ScribeFilePath,

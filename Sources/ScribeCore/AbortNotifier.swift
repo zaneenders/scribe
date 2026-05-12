@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-public final class AbortNotifier: Sendable {
+internal final class AbortNotifier: Sendable {
 
   private struct State {
     var isSet = false
@@ -11,13 +11,13 @@ public final class AbortNotifier: Sendable {
 
   private let state = Mutex(State())
 
-  public init() {}
+  init() {}
 
-  public func isAborted() -> Bool {
+  func isAborted() -> Bool {
     state.withLock { $0.isSet }
   }
 
-  public func request() {
+  func request() {
     let conts: [AsyncStream<Void>.Continuation] = state.withLock { s in
       s.isSet = true
       return Array(s.continuations.values)
@@ -25,11 +25,11 @@ public final class AbortNotifier: Sendable {
     for c in conts { c.yield() }
   }
 
-  public func clear() {
+  func clear() {
     state.withLock { $0.isSet = false }
   }
 
-  public func signals() -> AsyncStream<Void> {
+  func signals() -> AsyncStream<Void> {
     AsyncStream { continuation in
       let id: UInt64 = state.withLock { s in
         let id = s.nextID
