@@ -9,24 +9,23 @@ import Synchronization
 public struct AgentRunOptions: Sendable {
   public var temperature: Double
   public var maxToolRounds: Int
-  public var shouldAbortTurn: (@Sendable () -> Bool)?
-  /// Optional event-driven abort source. When provided, in-flight tools wake
-  /// up the moment `notifier.request()` is called instead of waiting for the
-  /// next 200 ms poll tick (the closure-only fallback path). Wire your
-  /// interrupt source so it both calls `notifier.request()` and causes
-  /// `shouldAbortTurn` to subsequently return true — the closure remains the
-  /// authoritative "should I throw" check on each wake.
-  public var abortNotifier: AbortNotifier?
+  /// Event-driven abort source. Wakes in-flight tool watch tasks the moment
+  /// `notifier.request()` fires and is also polled synchronously at every
+  /// pre-tool / post-tool / post-stream / per-chunk checkpoint via
+  /// `notifier.isAborted()`. The default is a fresh notifier that no one
+  /// signals — equivalent to "abort never fires for this turn." Pass your
+  /// own notifier (and call `request()` on it from your Ctrl+C handler) to
+  /// drive aborts; `ScribeAgent.abort()` also forwards to whichever notifier
+  /// the in-flight prompt is using.
+  public var abortNotifier: AbortNotifier
 
   public init(
     temperature: Double = 0,
     maxToolRounds: Int = .max,
-    shouldAbortTurn: (@Sendable () -> Bool)? = nil,
-    abortNotifier: AbortNotifier? = nil
+    abortNotifier: AbortNotifier = AbortNotifier()
   ) {
     self.temperature = temperature
     self.maxToolRounds = maxToolRounds
-    self.shouldAbortTurn = shouldAbortTurn
     self.abortNotifier = abortNotifier
   }
 }
@@ -138,11 +137,21 @@ public struct ScribeAgent: Sendable {
   /// Absolute working directory for tool path resolution.
   private let workingDirectory: ScribeFilePath
 
-  /// Synchronous abort flag checked by the run loop without `await`.
-  private final class AbortFlag: Sendable {
-    let value = Atomic<Bool>(false)
+  /// Per-prompt notifier captured here so `abort()` can forward to whichever
+  /// notifier the in-flight turn is using (either the caller's, supplied via
+  /// `AgentRunOptions.abortNotifier`, or the default fresh one). Reset to
+  /// `nil` between prompts so a stray `abort()` after the turn ends is a
+  /// no-op rather than firing a stale notifier.
+  private final class CurrentTurnNotifier: Sendable {
+    private let storage = Mutex<AbortNotifier?>(nil)
+    func set(_ notifier: AbortNotifier?) {
+      storage.withLock { $0 = notifier }
+    }
+    func get() -> AbortNotifier? {
+      storage.withLock { $0 }
+    }
   }
-  private let abortFlag = AbortFlag()
+  private let currentTurnNotifier = CurrentTurnNotifier()
 
   // MARK: - Constructor
 
@@ -251,22 +260,26 @@ public struct ScribeAgent: Sendable {
     // Take a single snapshot before the task starts
     let snapshot = await storage.snapshot()
     await storage.setStreaming(true)
-    abortFlag.value.store(false, ordering: .sequentiallyConsistent)
+
+    // Capture the notifier for `abort()` to target. We don't `clear()` here
+    // — the caller owns the notifier's lifecycle (e.g. the CLI's
+    // `ChatCoordinator` clears its own notifier at the top of each turn). A
+    // notifier already in the aborted state when `prompt()` is called will
+    // cause the loop to return `.interrupted` on its first checkpoint, which
+    // is the desired behaviour (callers signalling abort before the prompt
+    // even starts shouldn't have that signal silently swallowed).
+    let notifier = options.abortNotifier
+    currentTurnNotifier.set(notifier)
 
     let task = Task {
       [
         storage, registry, client, promptMessages, options, log,
-        abortFlag
+        currentTurnNotifier
       ] in
       defer {
         continuation.finish()
+        currentTurnNotifier.set(nil)
         Task { await storage.setStreaming(false) }
-      }
-
-      // Combine agent-level abort with caller-level abort
-      let shouldAbort: @Sendable () -> Bool = {
-        abortFlag.value.load(ordering: .sequentiallyConsistent)
-          || options.shouldAbortTurn?() == true
       }
 
       // Build context from snapshot (messages BEFORE the prompt)
@@ -291,7 +304,6 @@ public struct ScribeAgent: Sendable {
           config: config,
           emit: { continuation.yield($0) },
           log: log,
-          shouldAbortTurn: shouldAbort,
           abortNotifier: options.abortNotifier
         )
         switch result.termination {
@@ -318,7 +330,15 @@ public struct ScribeAgent: Sendable {
   // MARK: - Abort
 
   /// Abort the current run, if one is active.
+  ///
+  /// Forwards to whichever `AbortNotifier` the in-flight `prompt(...)` call
+  /// is using (either the caller's, supplied via `AgentRunOptions.abortNotifier`,
+  /// or the default fresh one). If no turn is in flight this is a no-op.
+  ///
+  /// Callers who hold a notifier directly (e.g. the CLI host that wired its
+  /// own `AbortNotifier` into `AgentRunOptions`) can also call
+  /// `notifier.request()` directly — it's the same signal.
   public func abort() {
-    abortFlag.value.store(true, ordering: .sequentiallyConsistent)
+    currentTurnNotifier.get()?.request()
   }
 }

@@ -86,14 +86,13 @@ struct AbortNotifierTests {
 
   // MARK: - ToolRegistry integration
 
-  /// Confirms the event-driven abort path in `ToolRegistry.run` actually
-  /// uses the notifier — abort latency should be well under the 200 ms
-  /// fallback poll interval. We use a tool that sleeps for a long time
-  /// inside its run() body so the only way out is the watch task firing.
+  /// Confirms the event-driven abort path in `ToolRegistry.run` wakes the
+  /// watch task essentially immediately. We use a tool that sleeps for a
+  /// long time inside its run() body so the only way out is the watch task
+  /// firing.
   @Test func toolRegistryWakesPromptlyOnNotifierRequest() async throws {
     let registry = ToolRegistry(tools: [SleepyTool()])
     let notifier = AbortNotifier()
-    let abort = AbortState()
 
     let start = ContinuousClock.now
     do {
@@ -103,15 +102,11 @@ struct AbortNotifierTests {
             name: "sleepy",
             arguments: "{}",
             workingDirectory: ScribeFilePath("/tmp"),
-            abortVia: { abort.value },
             abortNotifier: notifier)
         }
         group.addTask {
-          // Let the tool start, then signal abort *immediately* via the
-          // notifier — should wake the watch task in microseconds, not at
-          // the next 200 ms poll tick.
+          // Let the tool start, then signal abort.
           try await Task.sleep(for: .milliseconds(50))
-          abort.set(true)
           notifier.request()
           try await Task.sleep(for: .seconds(2))
           throw NotifierWakeTimeoutError()
@@ -123,7 +118,6 @@ struct AbortNotifierTests {
     } catch is AgentTurnInterruptedError {
       let elapsed = start.duration(to: .now)
       // Generous bound: even on slow CI the wake should land in <100 ms.
-      // The poll-fallback path would take 200–250 ms in the worst case.
       #expect(
         elapsed < .milliseconds(150),
         "event-driven abort should land well under 150 ms; took \(elapsed)")

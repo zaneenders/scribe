@@ -133,7 +133,7 @@ private func runLoop(
   prompt: String,
   context: AgentContext = AgentContext(systemPrompt: "You are a test agent.", messages: []),
   config: AgentLoopConfig,
-  shouldAbortTurn: @escaping @Sendable () -> Bool = { false }
+  abortNotifier: AbortNotifier = AbortNotifier()
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
   let userMsg = Components.Schemas.ChatMessage(role: .user, content: prompt)
   return try await runAgentLoop(
@@ -142,7 +142,7 @@ private func runLoop(
     config: config,
     emit: { _ in },
     log: testLogger,
-    shouldAbortTurn: shouldAbortTurn
+    abortNotifier: abortNotifier
   )
 }
 
@@ -256,10 +256,12 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hello"}}]}"#),
       doneChunk(),
     ]
+    let notifier = AbortNotifier()
+    notifier.request()
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks),
-      shouldAbortTurn: { true }
+      abortNotifier: notifier
     )
     expectTermination(termination, .interrupted)
     // prompt message is appended before abort check
@@ -278,16 +280,10 @@ struct AgentLoopTests {
       ),
       doneChunk(),
     ]
-    let counter = Atomic<Int>(0)
-    let shouldAbortTurn: @Sendable () -> Bool = {
-      let c = counter.load(ordering: .sequentiallyConsistent)
-      counter.store(c + 1, ordering: .sequentiallyConsistent)
-      return c == 2  // post-stream-pre-tools check
-    }
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      shouldAbortTurn: shouldAbortTurn
+      abortNotifier: CountingAbortNotifier(triggerAt: 2)  // post-stream-pre-tools check
     )
     expectTermination(termination, .interrupted)
     // prompt message remains; round messages rolled back
@@ -305,16 +301,10 @@ struct AgentLoopTests {
       ),
       doneChunk(),
     ]
-    let counter = Atomic<Int>(0)
-    let shouldAbortTurn: @Sendable () -> Bool = {
-      let c = counter.load(ordering: .sequentiallyConsistent)
-      counter.store(c + 1, ordering: .sequentiallyConsistent)
-      return c == 3  // pre-tool check
-    }
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      shouldAbortTurn: shouldAbortTurn
+      abortNotifier: CountingAbortNotifier(triggerAt: 3)  // pre-tool check
     )
     expectTermination(termination, .interrupted)
     #expect(messages.count == 1)
@@ -324,7 +314,7 @@ struct AgentLoopTests {
   // MARK: - Abort: during tool execution (AgentTurnInterruptedError from registry)
 
   /// Calls: 0:before-http 1:mid-stream 2:post-stream-pre-tools 3:pre-tool
-  ///        4:registry.before-start  5:registry.polling-loop
+  ///        4:registry.before-start  5:registry.watch-loop
   /// Return true at call 4 → before-start check throws AgentTurnInterruptedError.
   @Test func abortDuringToolExecutionViaBeforeStart() async throws {
     let chunks = [
@@ -333,16 +323,10 @@ struct AgentLoopTests {
       ),
       doneChunk(),
     ]
-    let counter = Atomic<Int>(0)
-    let shouldAbortTurn: @Sendable () -> Bool = {
-      let c = counter.load(ordering: .sequentiallyConsistent)
-      counter.store(c + 1, ordering: .sequentiallyConsistent)
-      return c == 4  // registry.run before-start check
-    }
     let (messages, termination) = try await runLoop(
       prompt: "test",
       config: makeConfig(chunks: chunks, tools: [FakeTool()]),
-      shouldAbortTurn: shouldAbortTurn
+      abortNotifier: CountingAbortNotifier(triggerAt: 4)  // registry.run before-start check
     )
     expectTermination(termination, .interrupted)
     #expect(messages.count == 1)
@@ -474,7 +458,7 @@ struct AgentLoopTests {
       config: makeConfig(chunks: chunks),
       emit: { event in events.withLock { $0.append(event) } },
       log: testLogger,
-      shouldAbortTurn: { false }
+      abortNotifier: AbortNotifier()
     )
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
@@ -525,7 +509,7 @@ struct AgentLoopTests {
       config: makeConfig(chunks: chunks),
       emit: { _ in },
       log: testLogger,
-      shouldAbortTurn: { false }
+      abortNotifier: AbortNotifier()
     )
     expectTermination(termination, .completed)
     // Only the new assistant message is returned
@@ -615,16 +599,10 @@ struct AgentLoopTests {
         sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hello"}}]}"#),
         doneChunk(),
       ]
-      let counter = Atomic<Int>(0)
-      let shouldAbortTurn: @Sendable () -> Bool = {
-        let c = counter.load(ordering: .sequentiallyConsistent)
-        counter.store(c + 1, ordering: .sequentiallyConsistent)
-        return c == 1  // mid-stream check (call 0: before-http, call 1: mid-stream)
-      }
       let (messages, termination) = try await runLoop(
         prompt: "test",
         config: makeConfig(chunks: chunks),
-        shouldAbortTurn: shouldAbortTurn
+        abortNotifier: CountingAbortNotifier(triggerAt: 1)  // mid-stream (call 0: before-http)
       )
       expectTermination(termination, .interrupted)
       _ = messages  // silence unused warning

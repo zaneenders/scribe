@@ -290,7 +290,7 @@ struct ScribeAgentTests {
     #expect(eventCount == 0)
   }
 
-  // MARK: - prompt: shouldAbortTurn
+  // MARK: - prompt: abort
 
   @Test func promptAbortReturnsInterrupted() async throws {
     let chunks = [
@@ -298,7 +298,9 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let options = AgentRunOptions(shouldAbortTurn: { true })
+    let notifier = AbortNotifier()
+    notifier.request()  // pre-set so the first checkpoint fires .interrupted
+    let options = AgentRunOptions(abortNotifier: notifier)
     let ts = await agent.prompt("test", options: options, log: testLogger)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value

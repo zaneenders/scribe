@@ -23,29 +23,26 @@ public struct ToolRegistry: Sendable {
 
   /// Execute a tool by name with cooperative abort support.
   ///
-  /// A task group runs the tool while another task watches for an abort
-  /// signal. When `abortNotifier` is supplied, that watcher is event-driven
-  /// (it sleeps inside `notifier.signals()` until `request()` fires); when
-  /// it isn't, the watcher falls back to polling `shouldAbortTurn()` every
-  /// 200 ms. In both cases, `shouldAbortTurn()` remains the authoritative
-  /// "should I throw" check on each wake — the notifier is only a wakeup
-  /// hint.
+  /// A task group runs the tool while a watch task sleeps inside
+  /// `abortNotifier.signals()`. When `abortNotifier.request()` fires the
+  /// watch task wakes, re-checks `abortNotifier.isAborted()` (cheap defence
+  /// against spurious yields from late subscribers catching a residual
+  /// signal), and throws `AgentTurnInterruptedError` — which cancels the
+  /// tool task. Tools that use `withTaskCancellationHandler` (e.g. Shell
+  /// sends SIGKILL) respond promptly.
   ///
-  /// If abort fires, the tool task is cancelled — tools that use
-  /// `withTaskCancellationHandler` (e.g. Shell sends SIGKILL) respond
-  /// promptly.
+  /// Pass `abortNotifier: AbortNotifier()` when abort support isn't needed
+  /// — that notifier never fires and the watch task simply suspends until
+  /// the tool finishes and the group is cancelled.
   ///
-  /// Pass `abortVia: { false }` when abort support is not needed.
-  ///
-  /// - Throws: `AgentTurnInterruptedError` if `shouldAbortTurn()` returns true.
+  /// - Throws: `AgentTurnInterruptedError` if abort fires.
   /// - Throws: `ScribeError.toolUnknown` if the tool `name` is not in the registry.
   /// - Returns: JSON-encoded tool result (or JSON error string for tool failures).
   public func run(
     name: String,
     arguments: String,
     workingDirectory: ScribeFilePath,
-    abortVia shouldAbortTurn: @escaping @Sendable () -> Bool,
-    abortNotifier: AbortNotifier? = nil
+    abortNotifier: AbortNotifier
   ) async throws -> String {
     guard let tool = tools[name] else {
       Self.logger.debug(
@@ -66,8 +63,9 @@ public struct ToolRegistry: Sendable {
       ])
 
     // Abort before starting the tool if the flag is already set — avoids
-    // a race where the tool completes but the poller ticks before we dequeue.
-    if shouldAbortTurn() {
+    // a race where the tool completes but the watch task wakes before we
+    // dequeue.
+    if abortNotifier.isAborted() {
       Self.logger.debug(
         "agent.tool.aborted-before-start",
         metadata: [
@@ -128,54 +126,29 @@ public struct ToolRegistry: Sendable {
           }
         }
         group.addTask {
-          if let abortNotifier {
-            // Event-driven path: wake the moment `notifier.request()` fires.
-            // The closure remains authoritative — re-check it on each wake
-            // before throwing so spurious yields (e.g. late subscribers
-            // catching an already-set flag from a *previous* turn that the
-            // host hasn't cleared yet) don't false-fire.
-            Self.logger.trace(
-              "agent.tool.abort-watch.start",
-              metadata: ["tool": "\(name)", "mode": "event-driven"])
-            for await _ in abortNotifier.signals() {
-              if shouldAbortTurn() {
-                Self.logger.trace(
-                  "agent.tool.abort-watch.fired",
-                  metadata: ["tool": "\(name)"])
-                throw AgentTurnInterruptedError()
-              }
-            }
-            // Stream ended without an abort — only happens when this watch
-            // task itself is cancelled (the tool task already won).  Throw
-            // CancellationError to satisfy the throwing-task-group's
-            // `String` return contract; the group has already accepted the
-            // tool's result, so this error is dropped.
-            throw CancellationError()
-          } else {
-            // Polled fallback when caller didn't supply a notifier. 200 ms
-            // strikes a balance between abort latency (still imperceptible)
-            // and background cost (4× fewer wake-ups than the prior 50 ms
-            // when many tools run in parallel).  Pre-tool/post-tool/post-
-            // stream sites in `runAgentLoop` also check `shouldAbortTurn()`
-            // synchronously, so this poll only matters during long-running
-            // tool execution.
-            Self.logger.trace(
-              "agent.tool.abort-watch.start",
-              metadata: ["tool": "\(name)", "mode": "poll"])
-            var ticks = 0
-            while true {
-              if shouldAbortTurn() {
-                Self.logger.trace(
-                  "agent.tool.abort-watch.fired",
-                  metadata: [
-                    "tool": "\(name)", "polling_ticks": "\(ticks)",
-                  ])
-                throw AgentTurnInterruptedError()
-              }
-              try await Task.sleep(for: .milliseconds(200))
-              ticks += 1
+          // Watch task: sleeps inside `notifier.signals()` until
+          // `request()` fires, then re-checks `isAborted()` as a cheap
+          // defence against spurious yields (e.g. a late subscriber
+          // catching a residual signal from a previous turn that the host
+          // hasn't cleared yet).  Zero idle wake-ups — the AsyncStream
+          // suspends until either signal or task-group cancellation.
+          Self.logger.trace(
+            "agent.tool.abort-watch.start",
+            metadata: ["tool": "\(name)"])
+          for await _ in abortNotifier.signals() {
+            if abortNotifier.isAborted() {
+              Self.logger.trace(
+                "agent.tool.abort-watch.fired",
+                metadata: ["tool": "\(name)"])
+              throw AgentTurnInterruptedError()
             }
           }
+          // Stream ended without an abort — only happens when this watch
+          // task itself is cancelled (the tool task already won).  Throw
+          // CancellationError to satisfy the throwing-task-group's
+          // `String` return contract; the group has already accepted the
+          // tool's result, so this error is dropped.
+          throw CancellationError()
         }
         let winner = try await group.next()!
         // Tool task completed — cancel the polling task so the group

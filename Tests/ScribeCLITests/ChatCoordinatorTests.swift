@@ -18,14 +18,14 @@ struct ChatCoordinatorTests {
 
   @Test func coordinatorInitialization() async {
     let (lines, _) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
+    let interruptNotifier = AbortNotifier()
     let events: Mutex<[HostEvent]> = Mutex([])
 
     let coordinator = ChatCoordinator(
       configuration: .testValue,
       systemPrompt: "test prompt",
       resumeSnapshot: [],
-      interruptFlag: interruptFlag,
+      interruptNotifier: interruptNotifier,
       log: log,
       enqueue: { event in
         events.withLock { $0.append(event) }
@@ -40,44 +40,10 @@ struct ChatCoordinatorTests {
     _ = coordinator  // silence unused warning
   }
 
-  // MARK: - ModelTurnInterruptFlag
-
-  @Test func interruptFlagInitiallyNotSet() {
-    let flag = ModelTurnInterruptFlag()
-    #expect(!flag.peek())
-  }
-
-  @Test func interruptFlagSetAndPeek() {
-    let flag = ModelTurnInterruptFlag()
-    flag.request()
-    #expect(flag.peek())
-  }
-
-  @Test func interruptFlagClear() {
-    let flag = ModelTurnInterruptFlag()
-    flag.request()
-    flag.clear()
-    #expect(!flag.peek())
-  }
-
-  @Test func interruptFlagConcurrentAccess() async {
-    let flag = ModelTurnInterruptFlag()
-    await withTaskGroup(of: Void.self) { group in
-      for _ in 0..<100 {
-        group.addTask {
-          flag.request()
-        }
-        group.addTask {
-          _ = flag.peek()
-        }
-        group.addTask {
-          flag.clear()
-        }
-      }
-    }
-    // Should not crash — final state is deterministic per last write wins.
-    _ = flag.peek()
-  }
+  // (The previous `ModelTurnInterruptFlag` tests were removed alongside the
+  // wrapper itself; the underlying `AbortNotifier` is exercised directly in
+  // `ScribeCoreTests/AbortNotifierTests`, which covers fresh state, set,
+  // clear, late subscribers, and multi-subscriber broadcast.)
 }
 
 // MARK: - Test helpers

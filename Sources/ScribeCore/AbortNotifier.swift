@@ -39,7 +39,7 @@ import Synchronization
 /// // From a Ctrl+C handler:
 /// notifier.request()
 /// ```
-public final class AbortNotifier: Sendable {
+open class AbortNotifier: @unchecked Sendable {
 
   private struct State {
     var isSet = false
@@ -52,7 +52,13 @@ public final class AbortNotifier: Sendable {
   public init() {}
 
   /// Whether `request()` has been called since the last `clear()`.
-  public func isAborted() -> Bool {
+  ///
+  /// Open for test override; production callers should use the default
+  /// implementation. (Subclasses that override `isAborted()` are
+  /// responsible for keeping it consistent with `signals()` if they also
+  /// rely on the event-driven path — most tests only stub `isAborted()`
+  /// and exercise sites that poll synchronously.)
+  open func isAborted() -> Bool {
     state.withLock { $0.isSet }
   }
 
@@ -60,7 +66,7 @@ public final class AbortNotifier: Sendable {
   ///
   /// Future `signals()` calls will yield once immediately while the flag
   /// remains set, so late subscribers don't miss an in-flight abort.
-  public func request() {
+  open func request() {
     let conts: [AsyncStream<Void>.Continuation] = state.withLock { s in
       s.isSet = true
       return Array(s.continuations.values)
@@ -69,7 +75,7 @@ public final class AbortNotifier: Sendable {
   }
 
   /// Clear the internal flag without disturbing existing subscriptions.
-  public func clear() {
+  open func clear() {
     state.withLock { $0.isSet = false }
   }
 
@@ -78,7 +84,7 @@ public final class AbortNotifier: Sendable {
   /// If the notifier is already in the aborted state, the stream yields
   /// once immediately on first iteration so subscribers can't miss an
   /// already-set abort.
-  public func signals() -> AsyncStream<Void> {
+  open func signals() -> AsyncStream<Void> {
     AsyncStream { continuation in
       let id: UInt64 = state.withLock { s in
         let id = s.nextID

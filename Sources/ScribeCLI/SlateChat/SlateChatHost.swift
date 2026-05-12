@@ -160,7 +160,7 @@ internal final class SlateChatHost {
   private var llmWaitAnimationFrame: Int = 0
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
-  private let modelInterruptFlag = ModelTurnInterruptFlag()
+  private let modelInterruptNotifier = AbortNotifier()
   private let log: Logger
 
   init(
@@ -237,7 +237,7 @@ internal final class SlateChatHost {
           configuration: configuration,
           systemPrompt: systemPrompt,
           resumeSnapshot: self.resumeMessages,
-          interruptFlag: self.modelInterruptFlag,
+          interruptNotifier: self.modelInterruptNotifier,
           log: self.log,
           enqueue: { [eventQueue] event in
             eventQueue.enqueue(event)
@@ -538,8 +538,10 @@ internal final class SlateChatHost {
     queuedTrayText = state.queuedTrayText
 
     if let tag = fx.interruptLogTag {
-      modelInterruptFlag.request()
-      modelInterruptFlag.logState(log, tag: tag)
+      modelInterruptNotifier.request()
+      log.trace(
+        "chat.interrupt-flag.\(tag)",
+        metadata: ["value": "\(modelInterruptNotifier.isAborted())"])
     }
     if let text = fx.gateText {
       Task { await gate.complete(text) }

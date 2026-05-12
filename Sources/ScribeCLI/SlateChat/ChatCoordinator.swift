@@ -14,7 +14,7 @@ actor ChatCoordinator {
   private let configuration: ScribeConfig
   private let systemPrompt: String
   private let resumeSnapshot: [Components.Schemas.ChatMessage]
-  private let interruptFlag: ModelTurnInterruptFlag
+  private let interruptNotifier: AbortNotifier
   private let log: Logger
   private let enqueue: (HostEvent) -> Void
   private let persistURL: URL
@@ -26,7 +26,7 @@ actor ChatCoordinator {
     configuration: ScribeConfig,
     systemPrompt: String,
     resumeSnapshot: [Components.Schemas.ChatMessage],
-    interruptFlag: ModelTurnInterruptFlag,
+    interruptNotifier: AbortNotifier,
     log: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
     persistURL: URL,
@@ -37,7 +37,7 @@ actor ChatCoordinator {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
     self.resumeSnapshot = resumeSnapshot
-    self.interruptFlag = interruptFlag
+    self.interruptNotifier = interruptNotifier
     self.log = log
     self.enqueue = enqueue
     self.persistURL = persistURL
@@ -129,19 +129,14 @@ actor ChatCoordinator {
         enqueue(.transcript(.userSubmitted(trimmed)))
         log.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
 
-        interruptFlag.clear()
-        interruptFlag.logState(log, tag: "cleared-for-new-turn")
+        interruptNotifier.clear()
+        log.trace(
+          "chat.interrupt-flag.cleared-for-new-turn",
+          metadata: ["value": "false"])
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
-        let options = AgentRunOptions(
-          shouldAbortTurn: { [interruptFlag, log] in
-            let v = interruptFlag.peek()
-            if v { log.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
-            return v
-          },
-          abortNotifier: interruptFlag.notifier
-        )
+        let options = AgentRunOptions(abortNotifier: interruptNotifier)
 
         do {
           let ts = await agent.prompt(trimmed, options: options, log: log)
@@ -191,24 +186,3 @@ actor ChatCoordinator {
   }
 }
 
-// MARK: - ModelTurnInterruptFlag (extracted from host)
-
-/// Cooperative abort for Ctrl+C during an assistant/tool round without
-/// cancelling the long-lived coordinator task.
-///
-/// Backed by an `AbortNotifier` so in-flight tools wake event-driven instead
-/// of waiting for the 200 ms poll tick. The synchronous `peek()` API is
-/// preserved for `AgentRunOptions.shouldAbortTurn` and for the host's own
-/// tray rendering.
-final class ModelTurnInterruptFlag: Sendable {
-  let notifier = AbortNotifier()
-
-  func clear() { notifier.clear() }
-  func request() { notifier.request() }
-  func peek() -> Bool { notifier.isAborted() }
-
-  func logState(_ logger: Logger, tag: String) {
-    let val = peek()
-    logger.trace("chat.interrupt-flag.\(tag)", metadata: ["value": "\(val)"])
-  }
-}

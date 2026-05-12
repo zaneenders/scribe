@@ -9,7 +9,7 @@ struct ToolRunnerShellTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/echo scribetest"])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortNotifier: AbortNotifier())
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 0)
@@ -31,7 +31,7 @@ struct ToolRunnerShellTests {
 
       let args = try jsonArguments(["command": "/bin/cat only_here.txt", "cwd": dir.path])
       let json = try! await registry.run(
-        name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+        name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortNotifier: AbortNotifier())
       let out = try decodeShell(json)
       #expect(out.ok == true)
       #expect(out.exitCode == 0)
@@ -46,7 +46,7 @@ struct ToolRunnerShellTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/sh -c 'exit 7'"])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortNotifier: AbortNotifier())
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 7)
@@ -56,7 +56,7 @@ struct ToolRunnerShellTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "   "])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortNotifier: AbortNotifier())
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("command is empty") == true)
@@ -67,7 +67,7 @@ struct ToolRunnerShellTests {
     // Passing cwd as empty string exercises the if-let-empty-to-nil conversion.
     let args = try jsonArguments(["command": "/bin/echo ok", "cwd": ""])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortNotifier: AbortNotifier())
     let out = try decodeShell(json)
     #expect(out.ok == true)
     let stdout = try readFileIfExists(out.stdoutFile)
@@ -81,15 +81,15 @@ struct ToolRunnerShellTests {
       .appendingPathComponent("scribe-no-such-cwd-\(UUID().uuidString)", isDirectory: true)
     let args = try jsonArguments(["command": "/bin/true", "cwd": bogusDir.path])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortNotifier: AbortNotifier())
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)
   }
 
   /// Start a command that counts to a billion (should take many minutes),
-  /// trigger an abort via `shouldAbortTurn`, and confirm the process is
-  /// killed in well under 5 seconds.
+  /// trigger an abort via `AbortNotifier`, and confirm the process is killed
+  /// in well under 5 seconds.
   @Test func interruptKillsLongRunningCommand() async throws {
     let registry = ToolRegistry(tools: [ShellTool()])
     // Pure shell loop — no external binaries, no output on stdout/stderr.
@@ -97,7 +97,7 @@ struct ToolRunnerShellTests {
       "command": "i=0; while [ $i -lt 1000000000 ]; do i=$((i+1)); done"
     ])
 
-    let abortState = AbortState()
+    let notifier = AbortNotifier()
     let start = ContinuousClock.now
 
     do {
@@ -106,13 +106,14 @@ struct ToolRunnerShellTests {
           try await registry.run(
             name: "shell",
             arguments: args,
-            workingDirectory: ScribeFilePath("/tmp"), abortVia: { abortState.value }
+            workingDirectory: ScribeFilePath("/tmp"),
+            abortNotifier: notifier
           )
         }
         group.addTask {
           // Let the process start up, then trigger the abort.
           try await Task.sleep(for: .milliseconds(200))
-          abortState.set(true)
+          notifier.request()
           // Wait for the abort to complete. Timeout if something is stuck.
           try await Task.sleep(for: .seconds(5))
           throw InterruptTimeoutError()
@@ -145,7 +146,7 @@ struct ToolRunnerShellTests {
       """
     ])
 
-    let abortState = AbortState()
+    let notifier = AbortNotifier()
     let start = ContinuousClock.now
 
     do {
@@ -154,13 +155,14 @@ struct ToolRunnerShellTests {
           try await registry.run(
             name: "shell",
             arguments: args,
-            workingDirectory: ScribeFilePath("/tmp"), abortVia: { abortState.value }
+            workingDirectory: ScribeFilePath("/tmp"),
+            abortNotifier: notifier
           )
         }
         group.addTask {
           // Give the child time to start.
           try await Task.sleep(for: .milliseconds(500))
-          abortState.set(true)
+          notifier.request()
           try await Task.sleep(for: .seconds(5))
           throw InterruptTimeoutError()
         }
