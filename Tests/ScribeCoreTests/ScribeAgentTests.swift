@@ -61,6 +61,22 @@ private struct FakeTool: ScribeTool {
   func run(arguments: String, workingDirectory: ScribeCore.ScribeFilePath) async throws -> Encodable { Result() }
 }
 
+/// Sleeps until cancelled — used by `promptAbortReturnsInterrupted` to keep
+/// the agent loop parked in its tool watch task while the test fires
+/// `agent.abort()`. The 60-second sleep is throwing so the watch task's
+/// cancellation surfaces as a clean abort rather than a hang.
+private struct SleepyAgentTool: ScribeTool {
+  static var name: String { "sleepy" }
+  static var description: String { "Sleeps until cancelled." }
+  static var parameters: [ScribeToolParameter] { [] }
+  static var promptHint: String? { nil }
+  struct Result: Encodable { let ok = true }
+  func run(arguments: String, workingDirectory: ScribeCore.ScribeFilePath) async throws -> Encodable {
+    try await Task.sleep(for: .seconds(60))
+    return Result()
+  }
+}
+
 // MARK: - SSE chunk helpers
 
 private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
@@ -290,19 +306,45 @@ struct ScribeAgentTests {
     #expect(eventCount == 0)
   }
 
-  // MARK: - prompt: shouldAbortTurn
+  // MARK: - prompt: abort
 
+  /// Verify `agent.abort()` interrupts an in-flight turn. We can't pre-set
+  /// abort before `prompt()` because the agent clears its private notifier
+  /// at the top of each turn (so a stray Ctrl+C between prompts can't
+  /// bleed into the next one). Instead we start a tool call against a
+  /// long-sleeping tool so the loop is stuck in the watch task, then call
+  /// `abort()` to wake it.
   @Test func promptAbortReturnsInterrupted() async throws {
+    let toolCallChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"sleepy","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let agent = makeAgent(chunks: toolCallChunks, tools: [SleepyAgentTool()])
+    let ts = await agent.prompt("test", log: testLogger)
+    let drain = Task { for await _ in ts.events {} }
+    // Give the loop a beat to enter the tool watch task before aborting.
+    try await Task.sleep(for: .milliseconds(50))
+    agent.abort()
+    let result = try await ts.result.value
+    await drain.value
+    #expect(result.outcome == .interrupted)
+  }
+
+  /// Aborting between prompts is intentionally a no-op. The next `prompt()`
+  /// clears the notifier and runs to completion.
+  @Test func abortBetweenPromptsDoesNotLeak() async throws {
     let chunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hello"}}]}"#),
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let options = AgentRunOptions(shouldAbortTurn: { true })
-    let ts = await agent.prompt("test", options: options, log: testLogger)
+    agent.abort()  // fired with no in-flight turn
+    let ts = await agent.prompt("test", log: testLogger)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
-    #expect(result.outcome == .interrupted)
+    #expect(result.outcome == .completed)
   }
 
   // MARK: - messages(since:)

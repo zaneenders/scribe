@@ -7,8 +7,8 @@ import ScribeLLM
 /// Protocol abstracting the agent turn-loop so `ChatCoordinator` can be tested
 /// with a mock instead of requiring a live LLM connection.
 ///
-/// Conforming types must be `actor` (or otherwise `Sendable`) because the
-/// coordinator accesses agent state from its own actor context.
+/// Conforming types must be `Sendable` because the coordinator accesses agent
+/// state from its own context.
 public protocol AgentProtocol: Sendable {
   /// All messages in the conversation transcript.
   var messages: [Components.Schemas.ChatMessage] { get async }
@@ -23,6 +23,10 @@ public protocol AgentProtocol: Sendable {
     options: AgentRunOptions,
     log: Logger
   ) async -> TurnStream
+
+  /// Request abort of the current turn, if one is active.
+  /// Safe to call at any time (no-op when no turn is in flight).
+  func abort()
 }
 
 // MARK: - AgentFactory

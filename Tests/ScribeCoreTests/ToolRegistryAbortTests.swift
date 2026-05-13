@@ -43,10 +43,11 @@ struct ToolRegistryAbortTests {
 
     @Test func unknownToolThrowsTypedError() async throws {
         let registry = ToolRegistry(tools: [ShellTool()])
+        let notifier = AbortNotifier()
         do {
             _ = try await registry.run(
                 name: "nonexistent", arguments: "{}",
-                workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+                workingDirectory: ScribeFilePath("/tmp"), abortObserver: notifier)
             #expect(Bool(false), "expected ScribeError.toolUnknown")
         } catch let error as ScribeError {
             guard case .toolUnknown(let name) = error else {
@@ -64,11 +65,13 @@ struct ToolRegistryAbortTests {
     @Test func abortBeforeStartThrowsInterrupted() async {
         let tool = EchoTool(value: "should not run")
         let registry = ToolRegistry(tools: [tool])
+        let notifier = AbortNotifier()
+        notifier.request()
 
         do {
             _ = try await registry.run(
                 name: "echo", arguments: "{}",
-                workingDirectory: ScribeFilePath("/tmp"), abortVia: { true })
+                workingDirectory: ScribeFilePath("/tmp"), abortObserver: notifier)
             #expect(Bool(false), "expected AgentTurnInterruptedError")
         } catch is AgentTurnInterruptedError {
             // expected
@@ -92,17 +95,17 @@ struct ToolRegistryAbortTests {
         }
 
         let registry = ToolRegistry(tools: [SlowTool()])
-        let abortState = AbortState()
+        let notifier = AbortNotifier()
 
         let task = Task {
             try await registry.run(
                 name: "slow", arguments: "{}",
-                workingDirectory: ScribeFilePath("/tmp"), abortVia: { abortState.value })
+                workingDirectory: ScribeFilePath("/tmp"), abortObserver: notifier)
         }
 
         // Give the tool task a moment to start, then abort
         try? await Task.sleep(for: .milliseconds(100))
-        abortState.set(true)
+        notifier.request()
 
         do {
             _ = try await task.value
@@ -119,10 +122,11 @@ struct ToolRegistryAbortTests {
     @Test func toolThatThrowsReturnsErrorJSON() async throws {
         let tool = ThrowingTool(errorMessage: "something went wrong")
         let registry = ToolRegistry(tools: [tool])
+        let notifier = AbortNotifier()
 
         let json = try await registry.run(
             name: "thrower", arguments: "{}",
-            workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+            workingDirectory: ScribeFilePath("/tmp"), abortObserver: notifier)
 
         // Should be a JSON error response
         #expect(json.contains("\"ok\":false") || json.contains("\"ok\" : false"))
@@ -134,10 +138,11 @@ struct ToolRegistryAbortTests {
     @Test func toolSuccessReturnsJSON() async throws {
         let tool = EchoTool(value: "hello")
         let registry = ToolRegistry(tools: [tool])
+        let notifier = AbortNotifier()
 
         let json = try await registry.run(
             name: "echo", arguments: "{}",
-            workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+            workingDirectory: ScribeFilePath("/tmp"), abortObserver: notifier)
 
         // JSON-encoded string should contain "hello"
         #expect(json.contains("hello"))
@@ -149,10 +154,11 @@ struct ToolRegistryAbortTests {
         let toolA = EchoTool(value: "AAA")
         let toolB = EchoTool(value: "BBB")
         let registry = ToolRegistry(tools: [toolA, toolB])
+        let notifier = AbortNotifier()
 
         let jsonA = try await registry.run(
             name: "echo", arguments: "{}",
-            workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+            workingDirectory: ScribeFilePath("/tmp"), abortObserver: notifier)
         #expect(jsonA.contains("AAA") || jsonA.contains("BBB"))
     }
 }

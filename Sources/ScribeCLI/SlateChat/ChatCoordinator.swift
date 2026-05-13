@@ -6,30 +6,33 @@ import Synchronization
 
 // MARK: - ChatCoordinator
 
-/// Actor that owns the agent-turn loop: reads user input lines from an AsyncStream,
+/// Coordinates the agent-turn loop: reads user input lines from an AsyncStream,
 /// processes them through an `AgentProtocol` implementation, and emits `HostEvent`s
 /// to a callback.
 ///
 /// Extracted from `SlateChatHost` to make the turn-loop testable without a TUI.
-actor ChatCoordinator {
+final class ChatCoordinator: Sendable {
 
-  private let makeAgent: AgentFactory
-  private let systemPrompt: String
+  private let configuration: ScribeConfig
   private let resumeSnapshot: [Components.Schemas.ChatMessage]
-  private let interruptFlag: ModelTurnInterruptFlag
   private let log: Logger
-  private let enqueue: (HostEvent) -> Void
+  private let enqueue: @Sendable (HostEvent) -> Void
   private let persistURL: URL
   private let sessionId: UUID
   private let sessionCreatedAt: Date
   private let lines: AsyncStream<String>
-  private let configuration: ScribeConfig
+  private let makeAgent: AgentFactory
+
+  private let initialMessages: [Components.Schemas.ChatMessage]
+
+  /// Materialised at the top of `run()`.  Before that `interrupt()` is a
+  /// safe no-op.
+  private let agentBox = Mutex<(any AgentProtocol)?>(nil)
 
   init(
     configuration: ScribeConfig,
     systemPrompt: String,
     resumeSnapshot: [Components.Schemas.ChatMessage],
-    interruptFlag: ModelTurnInterruptFlag,
     log: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
     persistURL: URL,
@@ -37,11 +40,18 @@ actor ChatCoordinator {
     sessionCreatedAt: Date,
     lines: AsyncStream<String>,
     makeAgent: @escaping AgentFactory
-  ) {
+  ) throws {
+    if !resumeSnapshot.isEmpty {
+      guard resumeSnapshot.first?.role == .system else {
+        throw ScribeError.sessionCorrupted(
+          reason: "Resumed conversation must begin with a system message.")
+      }
+      self.initialMessages = resumeSnapshot
+    } else {
+      self.initialMessages = [.init(role: .system, content: systemPrompt)]
+    }
     self.configuration = configuration
-    self.systemPrompt = systemPrompt
     self.resumeSnapshot = resumeSnapshot
-    self.interruptFlag = interruptFlag
     self.log = log
     self.enqueue = enqueue
     self.persistURL = persistURL
@@ -49,6 +59,10 @@ actor ChatCoordinator {
     self.sessionCreatedAt = sessionCreatedAt
     self.lines = lines
     self.makeAgent = makeAgent
+  }
+
+  func interrupt() {
+    agentBox.withLock { $0?.abort() }
   }
 
   func run() async {
@@ -76,20 +90,9 @@ actor ChatCoordinator {
     }
 
     do {
-      let initialMessages: [Components.Schemas.ChatMessage]
-      if !resumeSnapshot.isEmpty {
-        guard resumeSnapshot.first?.role == .system else {
-          throw ScribeError.sessionCorrupted(
-            reason: "Resumed conversation must begin with a system message.")
-        }
-        initialMessages = resumeSnapshot
-      } else {
-        initialMessages = [.init(role: .system, content: systemPrompt)]
-      }
-
       let agent = try await makeAgent(initialMessages)
+      agentBox.withLock { $0 = agent }
 
-      // Write metadata on first persist (new sessions only).
       if resumeSnapshot.isEmpty {
         let cwd = FileManager.default.currentDirectoryPath
         let meta = ChatSessionMetadata(
@@ -126,25 +129,14 @@ actor ChatCoordinator {
           continue
         }
 
-        // Record user submission into transcript.
         enqueue(.transcript(.userSubmitted(trimmed)))
         log.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
 
-        interruptFlag.clear()
-        interruptFlag.logState(log, tag: "cleared-for-new-turn")
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
-        let options = AgentRunOptions(
-          shouldAbortTurn: { [interruptFlag, log] in
-            let v = interruptFlag.peek()
-            if v { log.trace("chat.interrupt-flag.polled", metadata: ["value": "true"]) }
-            return v
-          }
-        )
-
         do {
-          let ts = await agent.prompt(trimmed, options: options, log: log)
+          let ts = await agent.prompt(trimmed, options: AgentRunOptions(), log: log)
           for await event in ts.events {
             if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))
@@ -171,7 +163,6 @@ actor ChatCoordinator {
         await persistNew(from: agent, since: persistedCount)
         persistedCount = await agent.messages.count
 
-        // Turn complete — tell host to finalize.
         let committed = await agent.messages
         enqueue(.transcript(.turnComplete(referenceMessages: committed)))
       }
@@ -188,22 +179,5 @@ actor ChatCoordinator {
         ])
     }
     enqueue(.coordinatorFinished)
-  }
-}
-
-// MARK: - ModelTurnInterruptFlag (extracted from host)
-
-/// Cooperative abort for Ctrl+C during an assistant/tool round without
-/// cancelling the long-lived coordinator task.
-final class ModelTurnInterruptFlag: Sendable {
-  private let lock = Mutex(false)
-
-  func clear() { lock.withLock { $0 = false } }
-  func request() { lock.withLock { $0 = true } }
-  func peek() -> Bool { lock.withLock { $0 } }
-
-  func logState(_ logger: Logger, tag: String) {
-    let val = peek()
-    logger.trace("chat.interrupt-flag.\(tag)", metadata: ["value": "\(val)"])
   }
 }

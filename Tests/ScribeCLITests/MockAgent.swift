@@ -66,4 +66,8 @@ actor MockAgent: AgentProtocol {
     _messages.append(.init(role: .user, content: input))
     return makeTurnStream()
   }
+
+  nonisolated func abort() {
+    // No-op: mock doesn't run long operations.
+  }
 }

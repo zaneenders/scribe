@@ -8,7 +8,7 @@ import Testing
 
 // MARK: - ChatCoordinator tests
 
-/// Tests for the `ChatCoordinator` actor — verifies initialization, turn-loop
+/// Tests for the `ChatCoordinator` — verifies initialization, turn-loop
 /// event emission, interrupt handling, stop conditions, and lifecycle using
 /// `MockAgent` instead of a live LLM.
 @Suite
@@ -18,16 +18,14 @@ struct ChatCoordinatorTests {
 
   // MARK: - Initialization
 
-  @Test func coordinatorInitialization() async {
+  @Test func coordinatorInitialization() async throws {
     let (lines, _) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
     let events: Mutex<[HostEvent]> = Mutex([])
 
-    let coordinator = ChatCoordinator(
+    let coordinator = try ChatCoordinator(
       configuration: .testValue,
       systemPrompt: "test prompt",
       resumeSnapshot: [],
-      interruptFlag: interruptFlag,
       log: log,
       enqueue: { event in events.withLock { $0.append(event) } },
       persistURL: URL(fileURLWithPath: "/tmp/test-coordinator-init"),
@@ -39,19 +37,77 @@ struct ChatCoordinatorTests {
     _ = coordinator
   }
 
+  /// `interrupt()` is a safe no-op before `run()` has materialised the agent.
+  @Test func interruptBeforeRunIsNoOp() async throws {
+    let (lines, _) = AsyncStream<String>.makeStream()
+    let events: Mutex<[HostEvent]> = Mutex([])
+    let coordinator = try ChatCoordinator(
+      configuration: .testValue,
+      systemPrompt: "test prompt",
+      resumeSnapshot: [],
+      log: log,
+      enqueue: { event in events.withLock { $0.append(event) } },
+      persistURL: URL(fileURLWithPath: "/tmp/test"),
+      sessionId: UUID(),
+      sessionCreatedAt: Date(),
+      lines: lines,
+      makeAgent: { _ in MockAgent.makeDefault() }
+    )
+    // Should not crash, throw, or block.
+    coordinator.interrupt()
+    #expect(events.withLock { $0.isEmpty })
+  }
+
+  /// A resume snapshot that doesn't lead with a system message is malformed;
+  /// `init` should reject it rather than letting the bad state reach the
+  /// agent loop.
+  @Test func coordinatorRejectsCorruptResumeSnapshot() async {
+    let (lines, _) = AsyncStream<String>.makeStream()
+    let events: Mutex<[HostEvent]> = Mutex([])
+    let badSnapshot: [Components.Schemas.ChatMessage] = [
+      .init(role: .user, content: "no system message in front")
+    ]
+    do {
+      _ = try ChatCoordinator(
+        configuration: .testValue,
+        systemPrompt: "test prompt",
+        resumeSnapshot: badSnapshot,
+        log: log,
+        enqueue: { event in events.withLock { $0.append(event) } },
+        persistURL: URL(fileURLWithPath: "/tmp/test"),
+        sessionId: UUID(),
+        sessionCreatedAt: Date(),
+        lines: lines,
+        makeAgent: { _ in MockAgent.makeDefault() }
+      )
+      Issue.record("Expected ScribeError.sessionCorrupted")
+    } catch let error as ScribeError {
+      if case .sessionCorrupted = error {
+        // expected
+      } else {
+        Issue.record("Wrong ScribeError variant: \(error)")
+      }
+    } catch {
+      Issue.record("Wrong error type: \(error)")
+    }
+  }
+
+  // (`AbortNotifier` itself is tested directly in
+  // `ScribeCoreTests/AbortNotifierTests` — fresh state, set, clear,
+  // late subscribers, and multi-subscriber broadcast all live there.
+  // Coordinator-level tests focus on the `interrupt()` API surface.)
+
   // MARK: - Single turn completion
 
-  @Test func singleTurnEmitsCorrectEvents() async {
+  @Test func singleTurnEmitsCorrectEvents() async throws {
     let (lines, cont) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
     let events: Mutex<[HostEvent]> = Mutex([])
     let persistURL = URL(fileURLWithPath: "/tmp/test-single-turn-\(UUID().uuidString)")
 
-    let coordinator = ChatCoordinator(
+    let coordinator = try ChatCoordinator(
       configuration: .testValue,
       systemPrompt: "test",
       resumeSnapshot: [],
-      interruptFlag: interruptFlag,
       log: log,
       enqueue: { event in events.withLock { $0.append(event) } },
       persistURL: persistURL,
@@ -87,16 +143,14 @@ struct ChatCoordinatorTests {
 
   // MARK: - Exit command stops coordinator
 
-  @Test func exitCommandStopsCoordinator() async {
+  @Test func exitCommandStopsCoordinator() async throws {
     let (lines, cont) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
     let events: Mutex<[HostEvent]> = Mutex([])
 
-    let coordinator = ChatCoordinator(
+    let coordinator = try ChatCoordinator(
       configuration: .testValue,
       systemPrompt: "test",
       resumeSnapshot: [],
-      interruptFlag: interruptFlag,
       log: log,
       enqueue: { event in events.withLock { $0.append(event) } },
       persistURL: URL(fileURLWithPath: "/tmp/test-exit-\(UUID().uuidString)"),
@@ -120,16 +174,14 @@ struct ChatCoordinatorTests {
 
   // MARK: - Empty lines are skipped
 
-  @Test func emptyLinesAreSkipped() async {
+  @Test func emptyLinesAreSkipped() async throws {
     let (lines, cont) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
     let events: Mutex<[HostEvent]> = Mutex([])
 
-    let coordinator = ChatCoordinator(
+    let coordinator = try ChatCoordinator(
       configuration: .testValue,
       systemPrompt: "test",
       resumeSnapshot: [],
-      interruptFlag: interruptFlag,
       log: log,
       enqueue: { event in events.withLock { $0.append(event) } },
       persistURL: URL(fileURLWithPath: "/tmp/test-empty-\(UUID().uuidString)"),
@@ -153,16 +205,14 @@ struct ChatCoordinatorTests {
 
   // MARK: - Multiple turns
 
-  @Test func multipleTurnsAccumulateTranscript() async {
+  @Test func multipleTurnsAccumulateTranscript() async throws {
     let (lines, cont) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
     let events: Mutex<[HostEvent]> = Mutex([])
 
-    let coordinator = ChatCoordinator(
+    let coordinator = try ChatCoordinator(
       configuration: .testValue,
       systemPrompt: "test",
       resumeSnapshot: [],
-      interruptFlag: interruptFlag,
       log: log,
       enqueue: { event in events.withLock { $0.append(event) } },
       persistURL: URL(fileURLWithPath: "/tmp/test-multi-\(UUID().uuidString)"),
@@ -183,77 +233,10 @@ struct ChatCoordinatorTests {
     #expect(userSubmits.count == 2)
   }
 
-  // MARK: - Interrupt flag propagates to turn options
-
-  @Test func interruptFlagIsClearedBeforeEachTurn() async {
-    let (lines, cont) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
-    let events: Mutex<[HostEvent]> = Mutex([])
-
-    // Pre-set the flag — it should be cleared before the turn.
-    interruptFlag.request()
-    #expect(interruptFlag.peek())
-
-    let coordinator = ChatCoordinator(
-      configuration: .testValue,
-      systemPrompt: "test",
-      resumeSnapshot: [],
-      interruptFlag: interruptFlag,
-      log: log,
-      enqueue: { event in events.withLock { $0.append(event) } },
-      persistURL: URL(fileURLWithPath: "/tmp/test-interrupt-clear-\(UUID().uuidString)"),
-      sessionId: UUID(),
-      sessionCreatedAt: Date(),
-      lines: lines,
-      makeAgent: { _ in MockAgent.makeDefault() }
-    )
-
-    let task = Task { await coordinator.run() }
-    cont.yield("hello")
-    cont.finish()
-    _ = await task.value
-
-    // After the turn, the flag should have been cleared by the coordinator.
-    #expect(!interruptFlag.peek(), "Interrupt flag should be cleared after turn dispatch")
-  }
-
-  // MARK: - ModelTurnInterruptFlag (standalone)
-
-  @Test func interruptFlagInitiallyNotSet() {
-    let flag = ModelTurnInterruptFlag()
-    #expect(!flag.peek())
-  }
-
-  @Test func interruptFlagSetAndPeek() {
-    let flag = ModelTurnInterruptFlag()
-    flag.request()
-    #expect(flag.peek())
-  }
-
-  @Test func interruptFlagClear() {
-    let flag = ModelTurnInterruptFlag()
-    flag.request()
-    flag.clear()
-    #expect(!flag.peek())
-  }
-
-  @Test func interruptFlagConcurrentAccess() async {
-    let flag = ModelTurnInterruptFlag()
-    await withTaskGroup(of: Void.self) { group in
-      for _ in 0..<100 {
-        group.addTask { flag.request() }
-        group.addTask { _ = flag.peek() }
-        group.addTask { flag.clear() }
-      }
-    }
-    _ = flag.peek()
-  }
-
   // MARK: - Resume snapshot
 
-  @Test func resumeSnapshotWithSystemMessage() async {
+  @Test func resumeSnapshotWithSystemMessage() async throws {
     let (lines, _) = AsyncStream<String>.makeStream()
-    let interruptFlag = ModelTurnInterruptFlag()
     let events: Mutex<[HostEvent]> = Mutex([])
 
     let resume: [Components.Schemas.ChatMessage] = [
@@ -261,11 +244,10 @@ struct ChatCoordinatorTests {
       .init(role: .user, content: "previous message"),
     ]
 
-    let coordinator = ChatCoordinator(
+    let coordinator = try ChatCoordinator(
       configuration: .testValue,
       systemPrompt: "default prompt",
       resumeSnapshot: resume,
-      interruptFlag: interruptFlag,
       log: log,
       enqueue: { event in events.withLock { $0.append(event) } },
       persistURL: URL(fileURLWithPath: "/tmp/test-resume-\(UUID().uuidString)"),
@@ -319,16 +301,15 @@ struct ChatCoordinatorMultiTurnTests {
 
     private let log = Logger(label: "test.chat-coordinator.multi-turn")
 
-    @Test func twoTurnsEmitCorrectEventSequence() async {
+    @Test func twoTurnsEmitCorrectEventSequence() async throws {
         let (lines, cont) = AsyncStream<String>.makeStream()
         let events: Mutex<[HostEvent]> = Mutex([])
         let persistURL = URL(fileURLWithPath: "/tmp/test-multi-turn-\(UUID().uuidString)")
 
-        let coordinator = ChatCoordinator(
+        let coordinator = try ChatCoordinator(
             configuration: .testValue,
             systemPrompt: "test",
             resumeSnapshot: [],
-            interruptFlag: ModelTurnInterruptFlag(),
             log: log,
             enqueue: { event in events.withLock { $0.append(event) } },
             persistURL: persistURL,
@@ -358,16 +339,15 @@ struct ChatCoordinatorMultiTurnTests {
         #expect(userSubmits.count == 2)
     }
 
-    @Test func turnCompleteEventBetweenTurns() async {
+    @Test func turnCompleteEventBetweenTurns() async throws {
         let (lines, cont) = AsyncStream<String>.makeStream()
         let events: Mutex<[HostEvent]> = Mutex([])
         let persistURL = URL(fileURLWithPath: "/tmp/test-turn-complete-\(UUID().uuidString)")
 
-        let coordinator = ChatCoordinator(
+        let coordinator = try ChatCoordinator(
             configuration: .testValue,
             systemPrompt: "test",
             resumeSnapshot: [],
-            interruptFlag: ModelTurnInterruptFlag(),
             log: log,
             enqueue: { event in events.withLock { $0.append(event) } },
             persistURL: persistURL,
@@ -393,16 +373,15 @@ struct ChatCoordinatorMultiTurnTests {
         #expect(turnCompletes.count >= 1, "Expected at least 1 turnComplete event, got \(turnCompletes.count)")
     }
 
-    @Test func emptyInputIsSkipped() async {
+    @Test func emptyInputIsSkipped() async throws {
         let (lines, cont) = AsyncStream<String>.makeStream()
         let events: Mutex<[HostEvent]> = Mutex([])
         let persistURL = URL(fileURLWithPath: "/tmp/test-empty-input-\(UUID().uuidString)")
 
-        let coordinator = ChatCoordinator(
+        let coordinator = try ChatCoordinator(
             configuration: .testValue,
             systemPrompt: "test",
             resumeSnapshot: [],
-            interruptFlag: ModelTurnInterruptFlag(),
             log: log,
             enqueue: { event in events.withLock { $0.append(event) } },
             persistURL: persistURL,
@@ -439,7 +418,7 @@ struct ChatCoordinatorResumeTests {
 
     private let log = Logger(label: "test.chat-coordinator.resume")
 
-    @Test func resumeWithExistingMessagesDoesNotEmitReplayEvents() async {
+    @Test func resumeWithExistingMessagesDoesNotEmitReplayEvents() async throws {
         let resumeMessages: [Components.Schemas.ChatMessage] = [
             .init(role: .system, content: "sys"),
             .init(role: .user, content: "previous question"),
@@ -450,11 +429,10 @@ struct ChatCoordinatorResumeTests {
         let events: Mutex<[HostEvent]> = Mutex([])
         let persistURL = URL(fileURLWithPath: "/tmp/test-resume-\(UUID().uuidString)")
 
-        let coordinator = ChatCoordinator(
+        let coordinator = try ChatCoordinator(
             configuration: .testValue,
             systemPrompt: "test",
             resumeSnapshot: resumeMessages,
-            interruptFlag: ModelTurnInterruptFlag(),
             log: log,
             enqueue: { event in events.withLock { $0.append(event) } },
             persistURL: persistURL,
@@ -479,16 +457,15 @@ struct ChatCoordinatorResumeTests {
         #expect(userSubmits.count >= 1)
     }
 
-    @Test func resumeWithEmptySnapshotBehavesLikeNewSession() async {
+    @Test func resumeWithEmptySnapshotBehavesLikeNewSession() async throws {
         let (lines, cont) = AsyncStream<String>.makeStream()
         let events: Mutex<[HostEvent]> = Mutex([])
         let persistURL = URL(fileURLWithPath: "/tmp/test-resume-empty-\(UUID().uuidString)")
 
-        let coordinator = ChatCoordinator(
+        let coordinator = try ChatCoordinator(
             configuration: .testValue,
             systemPrompt: "test",
             resumeSnapshot: [],  // empty = new session
-            interruptFlag: ModelTurnInterruptFlag(),
             log: log,
             enqueue: { event in events.withLock { $0.append(event) } },
             persistURL: persistURL,
