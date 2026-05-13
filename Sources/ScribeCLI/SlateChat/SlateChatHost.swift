@@ -52,10 +52,8 @@ extension HostEvent: Equatable {
       return true
     case (.modelTurnRunning(let a), .modelTurnRunning(let b)):
       return a == b
-    case (.transcript, .transcript):
-      // TranscriptEvent is not Equatable; treat all transcript
-      // events as equal for host-level matching.
-      return true
+    case (.transcript(let a), .transcript(let b)):
+      return a == b
     default:
       return false
     }

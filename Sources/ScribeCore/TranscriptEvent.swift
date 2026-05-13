@@ -7,7 +7,7 @@ public enum AssistantStreamSection: Sendable, Equatable {
 }
 
 /// Events emitted by the agent harness and coordinator so a host can render transcript updates.
-public enum TranscriptEvent: Sendable {
+public enum TranscriptEvent: Sendable, Equatable {
   case enterAssistantSection(AssistantStreamSection, previous: AssistantStreamSection?)
   case appendAssistantText(AssistantStreamSection, text: String)
   case finalizeAssistantStream
