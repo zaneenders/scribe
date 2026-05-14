@@ -543,18 +543,3 @@ struct ScribeAgentTests {
     #expect(toolMessage?.content == recorder.canned)
   }
 }
-
-/// Tiny mutex used by the local `RecordingExecutor` test fixture. Mirrors
-/// the helper in `ChatCoordinatorTests` so we don't have to cross-import.
-private final class Mutex<T>: @unchecked Sendable {
-  private var value: T
-  private let lock = NSLock()
-
-  init(_ value: T) { self.value = value }
-
-  func withLock<R>(_ body: (inout T) -> R) -> R {
-    lock.lock()
-    defer { lock.unlock() }
-    return body(&value)
-  }
-}

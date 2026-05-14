@@ -75,12 +75,17 @@ public struct ScribeAgent: Sendable {
   ///   - model: Model id the loop sends as the `model` field.
   ///   - systemPrompt: Optional system prompt; injected into
   ///     `initialMessages` when missing.
-  ///   - tools: Built-in tools whose schemas are advertised to the model.
-  ///     When `toolExecutor` is `nil`, these are also the tools the agent
+  ///   - tools: Tool definitions whose schemas are advertised to the model.
+  ///     The schema list is derived from `tools` regardless of whether a
+  ///     custom executor is supplied — so callers can declare a richer
+  ///     surface (e.g. tools that the executor forwards over the wire) by
+  ///     handing the agent matching `ScribeTool` descriptors.
+  ///     When `toolExecutor` is `nil`, these tools are also what the agent
   ///     runs in-process via a default ``ToolRegistry``.
   ///   - toolExecutor: Custom execution backend (HITL gate, sandbox
-  ///     forwarder, etc.). When `nil`, a ``ToolRegistry`` is built from
-  ///     `tools` and used as the executor.
+  ///     forwarder, etc.). When `nil`, a ``ToolRegistry`` built from
+  ///     `tools` is used as the executor; when non-`nil`, no registry is
+  ///     constructed.
   ///   - initialMessages: Pre-loaded conversation history (e.g. resumed
   ///     session). May omit a leading system message — see `systemPrompt`.
   ///   - workingDirectory: Absolute working directory used for tool path
@@ -96,9 +101,11 @@ public struct ScribeAgent: Sendable {
   ) {
     self.client = client
     self.workingDirectory = workingDirectory
-    let registry = ToolRegistry(tools: tools)
-    self.toolExecutor = toolExecutor ?? registry
-    self.chatTools = registry.chatTools
+    // Schemas the model is told about — always derived directly from
+    // `tools`, even when a custom executor is supplied. The registry is
+    // only built when we actually need it as the default executor.
+    self.chatTools = tools.map { type(of: $0).toChatTool() }
+    self.toolExecutor = toolExecutor ?? ToolRegistry(tools: tools)
     self.storage = Storage(
       model: model,
       messages: Self.applySystemPrompt(
