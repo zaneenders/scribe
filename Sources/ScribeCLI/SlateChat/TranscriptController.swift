@@ -281,7 +281,7 @@ struct TranscriptController {
   }
 
   private static func applyUsage(
-    _ usage: Components.Schemas.CompletionUsage,
+    _ usage: ScribeUsage,
     tokensPerSecond tps: Double?,
     state: inout TranscriptState,
     contextWindow: Int?
@@ -307,8 +307,8 @@ struct TranscriptController {
       sessionPrompt: state.usageSessionPrompt,
       sessionCompletion: state.usageSessionCompletion,
       sessionTotal: state.usageSessionTotal,
-      reasoningTokens: usage.completionTokensDetails?.reasoningTokens,
-      cachedPromptTokens: usage.promptTokensDetails?.cachedTokens,
+      reasoningTokens: usage.reasoningTokens,
+      cachedPromptTokens: usage.cachedPromptTokens,
       outputTokensPerSecond: tps,
       contextWindow: contextWindow,
       contextWindowUsedPercent: pct

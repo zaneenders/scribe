@@ -50,7 +50,7 @@ final class ChatCoordinator: Sendable {
     self.agent = try ScribeAgent(
       configuration: configuration,
       systemPrompt: systemPrompt,
-      initialMessages: self.initialMessages.toChatMessages()
+      initialMessages: self.initialMessages
     )
     self.configuration = configuration
     self.resumeSnapshot = resumeSnapshot

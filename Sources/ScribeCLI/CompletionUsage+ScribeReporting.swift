@@ -1,6 +1,5 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 
 /// Shared presentation helpers for token counts in the CLI.
 public enum ScribeUsageFormatting {
@@ -18,7 +17,7 @@ public enum ScribeUsageFormatting {
   }
 }
 
-extension Components.Schemas.CompletionUsage {
+extension ScribeUsage {
   /// Best-effort counts for one provider response when presenting usage in the CLI.
   ///
   /// Some servers omit `total_tokens`; if so, uses `prompt_tokens + completion_tokens` when those are present.

@@ -106,7 +106,7 @@ private func makeAgent(
     model: model,
     systemPrompt: "You are a test agent.",
     tools: tools,
-    initialMessages: [] as [Components.Schemas.ChatMessage],
+    initialMessages: [],
     workingDirectory: ScribeFilePath("/tmp")
   )
 }
@@ -125,7 +125,7 @@ private func makeAgent(
     model: model,
     systemPrompt: "You are a test agent.",
     tools: tools,
-    initialMessages: [] as [Components.Schemas.ChatMessage],
+    initialMessages: [],
     workingDirectory: ScribeFilePath("/tmp")
   )
 }
@@ -434,8 +434,8 @@ struct ScribeAgentTests {
       systemPrompt: "ignored, already present",
       tools: [],
       initialMessages: [
-        Components.Schemas.ChatMessage(role: .system, content: "pre-baked"),
-        Components.Schemas.ChatMessage(role: .user, content: "first"),
+        ScribeMessage(role: .system, content: "pre-baked"),
+        ScribeMessage(role: .user, content: "first"),
       ],
       workingDirectory: ScribeFilePath("/tmp")
     )
@@ -524,7 +524,7 @@ struct ScribeAgentTests {
       systemPrompt: "system",
       tools: [UnreachableTool()],
       toolExecutor: recorder,
-      initialMessages: [] as [Components.Schemas.ChatMessage],
+      initialMessages: [],
       workingDirectory: ScribeFilePath("/tmp")
     )
     let ts = await agent.prompt("call the tool", log: testLogger)

@@ -191,7 +191,8 @@ internal enum SlateChatRenderer {
       if needsExtraCursorRow { lines.append("") }
       let capped = min(maxInputRows, max(1, lines.count))
       inputRowCount = capped
-      visualLines = lines.count > capped
+      visualLines =
+        lines.count > capped
         ? Array(lines.suffix(capped))
         : lines + Array(repeating: "", count: max(0, capped &- lines.count))
     }
@@ -208,7 +209,8 @@ internal enum SlateChatRenderer {
     // Fill input/tray background
     let inputBgRowCount = trayRowCount &+ inputRowCount
     if inputBgRowCount > 0 {
-      fillSemanticRect(&grid, col: 0, row: firstTrayRow,
+      fillSemanticRect(
+        &grid, col: 0, row: firstTrayRow,
         width: cols, height: inputBgRowCount, with: inputFill)
     }
 
@@ -222,10 +224,14 @@ internal enum SlateChatRenderer {
 
     if headerRows >= 1 {
       if let banner {
-        buildSemanticBannerKV(&grid, row: 0, cols: cols, maxWidth: bannerMaxWithUsage,
+        buildSemanticBannerKV(
+          &grid, row: 0, cols: cols, maxWidth: bannerMaxWithUsage,
           label: "LLM: ",
-          valueSpans: [StyledSpan(fg: theme.bannerValue, bg: theme.background,
-            bold: false, text: banner.baseURL)],
+          valueSpans: [
+            StyledSpan(
+              fg: theme.bannerValue, bg: theme.background,
+              bold: false, text: banner.baseURL)
+          ],
           theme: theme)
       }
       if let u = usage {
@@ -236,10 +242,14 @@ internal enum SlateChatRenderer {
     if headerRows >= 2, let banner {
       let shortId = String(banner.sessionId.prefix(8))
       let modelWithVersion = "\(banner.model)  v:\(banner.scribeVersion)  sid:\(shortId)"
-      buildSemanticBannerKV(&grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage,
+      buildSemanticBannerKV(
+        &grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage,
         label: "Model: ",
-        valueSpans: [StyledSpan(fg: theme.bannerValue, bg: theme.background,
-          bold: false, text: modelWithVersion)],
+        valueSpans: [
+          StyledSpan(
+            fg: theme.bannerValue, bg: theme.background,
+            bold: false, text: modelWithVersion)
+        ],
         theme: theme)
     }
 
@@ -252,7 +262,8 @@ internal enum SlateChatRenderer {
         cwdSpans.append(
           StyledSpan(fg: theme.bannerLabel, bg: bg, bold: false, text: "@\(branch)"))
       }
-      buildSemanticBannerKV(&grid, row: 2, cols: cols, maxWidth: bannerMaxWithUsage,
+      buildSemanticBannerKV(
+        &grid, row: 2, cols: cols, maxWidth: bannerMaxWithUsage,
         label: "CWD: ", valueSpans: cwdSpans, theme: theme)
     }
 
@@ -276,12 +287,14 @@ internal enum SlateChatRenderer {
 
     // Queued tray
     if trayRowCount > 0 {
-      buildSemanticQueuedTrayRows(&grid, startRow: firstTrayRow, cols: cols,
+      buildSemanticQueuedTrayRows(
+        &grid, startRow: firstTrayRow, cols: cols,
         textWidth: trayTextWidth, visualLines: trayVisualLines, theme: theme)
     }
 
     // Input rows
-    buildSemanticInputRows(&grid, startRow: firstInputRow, cols: cols,
+    buildSemanticInputRows(
+      &grid, startRow: firstInputRow, cols: cols,
       textWidth: textWidth, visualLines: visualLines, rowCount: inputRowCount,
       inputMode: inputMode,
       llmWaitAnimationFrame: llmWaitAnimationFrame, waitingForLLM: waitingForLLM, theme: theme)
@@ -355,7 +368,8 @@ internal enum SlateChatRenderer {
           budget -= span.text.count
         } else {
           trimmed.append(
-            StyledSpan(fg: span.fg, bg: span.bg, bold: span.bold,
+            StyledSpan(
+              fg: span.fg, bg: span.bg, bold: span.bold,
               text: String(span.text.prefix(max(0, budget &- 1))) + "…"))
           budget = 0
         }
@@ -382,7 +396,8 @@ internal enum SlateChatRenderer {
       guard rowOffset < maxRows else { break }
       let w = spans.reduce(0) { $0 + $1.text.count }
       let startCol = max(0, cols &- w)
-      writeSemanticSpans(&grid, col: startCol, row: rowOffset,
+      writeSemanticSpans(
+        &grid, col: startCol, row: rowOffset,
         maxWidth: cols &- startCol, spans: spans)
     }
   }
@@ -425,7 +440,8 @@ internal enum SlateChatRenderer {
         }
         if lineIdx < visualLines.count, textWidth > 0 {
           spans.append(
-            StyledSpan(fg: theme.inputText, bg: bg, bold: false,
+            StyledSpan(
+              fg: theme.inputText, bg: bg, bold: false,
               text: String(visualLines[lineIdx].prefix(textWidth))))
         }
         if onLastInputRow {
@@ -435,7 +451,8 @@ internal enum SlateChatRenderer {
         spans.append(StyledSpan(fg: theme.inputGutter, bg: bg, bold: false, text: gutter))
         if lineIdx < visualLines.count, textWidth > 0 {
           spans.append(
-            StyledSpan(fg: theme.inputText, bg: bg, bold: false,
+            StyledSpan(
+              fg: theme.inputText, bg: bg, bold: false,
               text: String(visualLines[lineIdx].prefix(textWidth))))
         }
         if onLastInputRow {
@@ -469,7 +486,8 @@ internal enum SlateChatRenderer {
       }
       if textWidth > 0 {
         spans.append(
-          StyledSpan(fg: theme.queuedText, bg: bg, bold: false,
+          StyledSpan(
+            fg: theme.queuedText, bg: bg, bold: false,
             text: String(visualLines[lineIdx].prefix(textWidth))))
       }
       writeSemanticSpans(&grid, col: 0, row: row, maxWidth: cols, spans: spans)
@@ -507,8 +525,9 @@ internal enum SlateChatRenderer {
       row0.append(semanticHudSpan(theme.usageMuted, sep, bg: bg))
       row0.append(semanticHudSpan(theme.usageLabel, "ctx ", bg: bg))
       let pctColor: TerminalRGB =
-        pct >= 90 ? theme.usageCtxPctDanger
-          : (pct >= 75 ? theme.usageCtxPctWarn : theme.usageCtxPctNormal)
+        pct >= 90
+        ? theme.usageCtxPctDanger
+        : (pct >= 75 ? theme.usageCtxPctWarn : theme.usageCtxPctNormal)
       row0.append(semanticHudSpan(pctColor, "\(pct)%", bg: bg))
     }
 

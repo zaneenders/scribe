@@ -1,6 +1,5 @@
 import Foundation
 import Logging
-import ScribeLLM
 import Synchronization
 
 /// Lightweight client-side token accumulator and context-window monitor.
@@ -25,7 +24,7 @@ public final class TokenTracker: Sendable {
   }
 
   /// Adds a usage snapshot to the running tallies.
-  public func accumulate(usage: Components.Schemas.CompletionUsage) {
+  public func accumulate(usage: ScribeUsage) {
     state.withLock { state in
       if let total = usage.totalTokens, total > 0 {
         state.sessionTotalTokens += total

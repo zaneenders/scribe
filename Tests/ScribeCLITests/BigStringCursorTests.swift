@@ -1,7 +1,7 @@
 import Testing
+import _RopeModule
 
 @testable import ScribeCLI
-import _RopeModule
 
 /// Tests for `BigString` cursor-relative operations (insert, backspace, cursor
 /// navigation) — the building blocks used by `SlateChatHost` for edit-mode

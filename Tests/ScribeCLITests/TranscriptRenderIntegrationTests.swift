@@ -69,7 +69,6 @@ struct TranscriptRenderIntegrationTests {
     transcriptLines.append(
       TLine(spans: [StyledSpan(fg: theme.userBody, bg: theme.background, bold: false, text: "  hello")]))
 
-
     let flat2 = TranscriptLayout.FlattenCache.flatten(
       cache: &flattenCache,
       completed: transcriptLines,

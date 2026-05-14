@@ -317,7 +317,7 @@ private func runSingleRound(
       completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
       tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
       """)
-    emit(.usage(u, tokensPerSecond: tps))
+    emit(.usage(ScribeUsage(u), tokensPerSecond: tps))
   }
 
   if toolInvocations.isEmpty {

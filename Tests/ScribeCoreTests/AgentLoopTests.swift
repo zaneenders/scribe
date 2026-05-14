@@ -485,7 +485,7 @@ struct AgentLoopTests {
     )
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
-    let usageEvents = captured.compactMap { (e: TranscriptEvent) -> (Components.Schemas.CompletionUsage, Double?)? in
+    let usageEvents = captured.compactMap { (e: TranscriptEvent) -> (ScribeUsage, Double?)? in
       if case .usage(let u, let tps) = e { return (u, tps) }
       return nil
     }

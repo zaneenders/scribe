@@ -71,7 +71,7 @@ struct ProcessTreeWalkerTests {
   /// 0/1/2 from a corrupt /proc listing is a sign to drop it, not propagate.
   @Test func skipsKernelPids() {
     let reader = StubReader(tree: [
-      100: [1, 2, 3, 4],
+      100: [1, 2, 3, 4]
     ])
     let result = collectProcessTree(rootPid: 100, reader: reader)
     #expect(result == [100, 3, 4])

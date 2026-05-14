@@ -96,7 +96,7 @@ public struct ScribeAgent: Sendable {
     systemPrompt: String = "",
     tools: [any ScribeTool] = [],
     toolExecutor: (any ToolExecutor)? = nil,
-    initialMessages: [Components.Schemas.ChatMessage] = [],
+    initialMessages: [ScribeMessage] = [],
     workingDirectory: ScribeFilePath
   ) {
     self.client = client
@@ -110,33 +110,7 @@ public struct ScribeAgent: Sendable {
       model: model,
       messages: Self.applySystemPrompt(
         systemPrompt: systemPrompt,
-        initialMessages: initialMessages)
-    )
-  }
-
-  // MARK: - ScribeMessage initializer (transport-agnostic)
-
-  /// Same shape as the wire-typed initializer above, but takes the
-  /// transport-agnostic ``ScribeMessage`` for `initialMessages`. Prefer
-  /// this overload from embedders that want to keep
-  /// `Components.Schemas.ChatMessage` out of their type surface.
-  public init(
-    client: Client,
-    model: String,
-    systemPrompt: String = "",
-    tools: [any ScribeTool] = [],
-    toolExecutor: (any ToolExecutor)? = nil,
-    initialMessages: [ScribeMessage],
-    workingDirectory: ScribeFilePath
-  ) {
-    self.init(
-      client: client,
-      model: model,
-      systemPrompt: systemPrompt,
-      tools: tools,
-      toolExecutor: toolExecutor,
-      initialMessages: initialMessages.toChatMessages(),
-      workingDirectory: workingDirectory
+        initialMessages: initialMessages.toChatMessages())
     )
   }
 
@@ -148,7 +122,7 @@ public struct ScribeAgent: Sendable {
   public init(
     configuration: ScribeConfig,
     systemPrompt: String,
-    initialMessages: [Components.Schemas.ChatMessage] = []
+    initialMessages: [ScribeMessage] = []
   ) throws {
     guard let serverURL = URL(string: configuration.serverURL) else {
       throw ScribeError.configuration(
@@ -175,17 +149,9 @@ public struct ScribeAgent: Sendable {
   }
 
   /// The full conversation history as ``ScribeMessage`` values — the
-  /// public, transport-agnostic message type. Equivalent to ``rawMessages``
-  /// but suitable for embedders that want to avoid the generated
-  /// OpenAI-compatible type.
+  /// public, transport-agnostic message type.
   public var messages: [ScribeMessage] {
     get async { await storage.messages.toScribeMessages() }
-  }
-
-  /// Wire-typed conversation history. Internal-leaning accessor preserved
-  /// for the in-tree CLI; new embedders should prefer ``messages``.
-  public var rawMessages: [Components.Schemas.ChatMessage] {
-    get async { await storage.messages }
   }
 
   public func messages(since start: Int) async -> [ScribeMessage] {
@@ -207,27 +173,18 @@ public struct ScribeAgent: Sendable {
     options: AgentRunOptions = AgentRunOptions(),
     log: Logger
   ) async -> TurnStream {
-    let userMessage = Components.Schemas.ChatMessage(
-      role: .user, content: input)
-    return await prompt([userMessage], options: options, log: log)
+    await prompt([ScribeMessage(role: .user, content: input)], options: options, log: log)
   }
 
-  /// Send a batch of ``ScribeMessage`` values as the next turn. Convenience
-  /// overload for embedders that don't want to construct OpenAI-shaped
-  /// values; the messages are bridged to the wire shape internally.
+  /// Send a batch of ``ScribeMessage`` values as the next turn. Messages
+  /// are bridged to the wire shape once on the way into ``runAgentLoop`` —
+  /// the OpenAPI type never crosses the public API surface.
   public func prompt(
     _ promptMessages: [ScribeMessage],
     options: AgentRunOptions = AgentRunOptions(),
     log: Logger
   ) async -> TurnStream {
-    await prompt(promptMessages.toChatMessages(), options: options, log: log)
-  }
-
-  public func prompt(
-    _ promptMessages: [Components.Schemas.ChatMessage],
-    options: AgentRunOptions = AgentRunOptions(),
-    log: Logger
-  ) async -> TurnStream {
+    let wireMessages = promptMessages.toChatMessages()
     let (stream, continuation) = AsyncStream<TranscriptEvent>.makeStream()
 
     let snapshot = await storage.snapshot()
@@ -236,7 +193,7 @@ public struct ScribeAgent: Sendable {
 
     let task = Task {
       [
-        storage, toolExecutor, chatTools, client, promptMessages, options, log,
+        storage, toolExecutor, chatTools, client, wireMessages, options, log,
         abortNotifier
       ] in
       defer {
@@ -258,7 +215,7 @@ public struct ScribeAgent: Sendable {
 
       do {
         let result = try await runAgentLoop(
-          promptMessages: promptMessages,
+          promptMessages: wireMessages,
           context: ctx,
           config: config,
           emit: { continuation.yield($0) },
@@ -271,20 +228,17 @@ public struct ScribeAgent: Sendable {
           let finalMessages = await storage.messages
           return TurnResult(
             messages: finalMessages.toScribeMessages(),
-            rawMessages: finalMessages,
             outcome: .completed)
         case .interrupted:
           continuation.yield(.turnInterrupted)
           let current = await storage.messages
           return TurnResult(
             messages: current.toScribeMessages(),
-            rawMessages: current,
             outcome: .interrupted)
         case .toolRoundLimit(let rounds):
           let current = await storage.messages
           return TurnResult(
             messages: current.toScribeMessages(),
-            rawMessages: current,
             outcome: .toolRoundLimit(rounds: rounds))
         }
       } catch is AgentTurnInterruptedError {
@@ -292,7 +246,6 @@ public struct ScribeAgent: Sendable {
         let current = await storage.messages
         return TurnResult(
           messages: current.toScribeMessages(),
-          rawMessages: current,
           outcome: .interrupted)
       }
     }

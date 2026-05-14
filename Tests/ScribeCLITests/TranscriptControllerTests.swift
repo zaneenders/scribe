@@ -1,6 +1,5 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 import Testing
 
 @testable import ScribeCLI
@@ -82,7 +81,8 @@ struct TranscriptControllerTests {
   @Test func toolInvocation() {
     var state = TranscriptState()
     let effects = TranscriptController.apply(
-      .toolInvocation(name: "shell", arguments: #"{"command":"ls"}"#, output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#),
+      .toolInvocation(
+        name: "shell", arguments: #"{"command":"ls"}"#, output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
@@ -175,13 +175,7 @@ struct TranscriptControllerTests {
 
   @Test func usageUpdatesHUD() {
     var state = TranscriptState()
-    let usage = Components.Schemas.CompletionUsage(
-      promptTokens: 100,
-      completionTokens: 50,
-      totalTokens: 150,
-      promptTokensDetails: nil,
-      completionTokensDetails: nil
-    )
+    let usage = ScribeUsage(promptTokens: 100, completionTokens: 50, totalTokens: 150)
     let effects = TranscriptController.apply(
       .usage(usage, tokensPerSecond: 10.5),
       to: &state, theme: theme, renderer: renderer,
@@ -196,16 +190,12 @@ struct TranscriptControllerTests {
 
   @Test func usageAccumulatesTurnTotals() {
     var state = TranscriptState()
-    let u1 = Components.Schemas.CompletionUsage(
-      promptTokens: 10, completionTokens: 5, totalTokens: 15,
-      promptTokensDetails: nil, completionTokensDetails: nil)
+    let u1 = ScribeUsage(promptTokens: 10, completionTokens: 5, totalTokens: 15)
     _ = TranscriptController.apply(
       .usage(u1, tokensPerSecond: nil),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
-    let u2 = Components.Schemas.CompletionUsage(
-      promptTokens: 20, completionTokens: 10, totalTokens: 30,
-      promptTokensDetails: nil, completionTokensDetails: nil)
+    let u2 = ScribeUsage(promptTokens: 20, completionTokens: 10, totalTokens: 30)
     _ = TranscriptController.apply(
       .usage(u2, tokensPerSecond: nil),
       to: &state, theme: theme, renderer: renderer,
@@ -217,9 +207,7 @@ struct TranscriptControllerTests {
 
   @Test func usageContextWindowPct() {
     var state = TranscriptState()
-    let usage = Components.Schemas.CompletionUsage(
-      promptTokens: 2000, completionTokens: 100, totalTokens: 2100,
-      promptTokensDetails: nil, completionTokensDetails: nil)
+    let usage = ScribeUsage(promptTokens: 2000, completionTokens: 100, totalTokens: 2100)
     _ = TranscriptController.apply(
       .usage(usage, tokensPerSecond: nil),
       to: &state, theme: theme, renderer: renderer,
