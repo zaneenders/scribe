@@ -1,10 +1,13 @@
 import Foundation
+import Synchronization
+
+@testable import ScribeCore
 
 struct ShellPayload: Decodable {
   let ok: Bool
   let exitCode: Int?
-  let stdout: String?
-  let stderr: String?
+  let stdoutFile: String?
+  let stderrFile: String?
   let pid: Int?
 }
 
@@ -107,4 +110,38 @@ func withTemporaryDirectory<T>(
 final class AbortState: @unchecked Sendable {
   var value = false
   func set(_ newValue: Bool) { value = newValue }
+}
+
+/// Test-only `AbortObserver` that returns `false` for the first
+/// `triggerAt` calls to `isAborted()` and `true` from then on. Used by
+/// `AgentLoopTests` to verify abort-checks fire at specific positions in
+/// the loop without needing a real interrupt source.
+///
+/// Conforms to the `AbortObserver` protocol directly rather than
+/// subclassing `AbortNotifier` — the production type is `final class …
+/// Sendable` with no `@unchecked` escape hatch. The protocol is the test
+/// seam, and that's exactly what test fakes are for.
+///
+/// `signals()` returns an immediately-finished stream. The loop's
+/// `for await _ in observer.signals()` exits right away, so any abort
+/// dispatch in `ToolRegistry`'s watch task falls through to the
+/// synchronous `isAborted()` check at the next checkpoint — which is
+/// what tests of "abort fires at checkpoint N" actually want to observe.
+final class CountingAbortObserver: AbortObserver, @unchecked Sendable {
+  let counter = Atomic<Int>(0)
+  private let triggerAt: Int
+
+  init(triggerAt: Int) {
+    self.triggerAt = triggerAt
+  }
+
+  func isAborted() -> Bool {
+    let c = counter.load(ordering: .sequentiallyConsistent)
+    counter.store(c + 1, ordering: .sequentiallyConsistent)
+    return c >= triggerAt
+  }
+
+  func signals() -> AsyncStream<Void> {
+    AsyncStream { continuation in continuation.finish() }
+  }
 }

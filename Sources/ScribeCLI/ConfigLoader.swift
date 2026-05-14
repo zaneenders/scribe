@@ -94,7 +94,12 @@ final class FileSink: Sendable {
 
   func write(_ data: Data) {
     try? handle.write(contentsOf: data)
-    try? handle.synchronize()
+    // fsync is intentionally NOT called per write. With `logging.level = trace`,
+    // a single shell drain emits hundreds of trace lines per second, and an
+    // fsync per line was a major hot path (each one is a kernel round-trip and
+    // shows up as ~100% CPU during noisy shells). Durability is bounded by the
+    // deinit fsync below; for crash-grade durability use a write-through file
+    // system or rotate to an os_log-backed handler.
   }
 
   deinit {
@@ -216,18 +221,23 @@ public struct LoadedConfig: Sendable {
       _ = try? fileHandle.seekToEnd()
       let sink = FileSink(handle: fileHandle)
       let fileWriter = LockedDataWriter { data in sink.write(data) }
-      return Logger(label: "scribe.session") { _ in
+      let sessionLogger = Logger(label: "scribe.session") { _ in
         ScribeLineLogHandler(minimumLevel: level, dataWriter: fileWriter)
       }
+      // Route all ScribeCore loggers (ToolRegistry, Shell, etc.) to this file.
+      ScribeCore.scribeSessionLogger = sessionLogger
+      return sessionLogger
     }
     // Last-resort fallback: emit to stderr if we can't open the per-session file.
-    return Logger(label: "scribe.session") { _ in
+    let fallback = Logger(label: "scribe.session") { _ in
       ScribeLineLogHandler(
         minimumLevel: level,
         dataWriter: LockedDataWriter { data in
           try? FileHandle.standardError.write(contentsOf: data)
         })
     }
+    ScribeCore.scribeSessionLogger = fallback
+    return fallback
   }
 }
 

@@ -1,24 +1,27 @@
 import Foundation
 import Logging
 import Subprocess
-import _RopeModule
 
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#elseif canImport(Musl)
-import Musl
-#endif
+// TODO: Address logging mess.
+package nonisolated(unsafe) var scribeSessionLogger: Logger?
 
+/// Thin orchestrator for "run a shell command, capture its output, kill
+/// the whole tree on cancellation."
+///
+/// Delegates the meaty bits to focused collaborators:
+/// - `OutputCapture` — temp files, drain task, post-cancel deadline.
+/// - `ProcessKiller` — platform-specific tree kill (`/proc` walk on Linux,
+///   pgroup signal on macOS, `terminate` on Windows).
+///
+/// Public API (`Shell.run(command:cwd:workingDirectory:)`) is unchanged
+/// from before the split.
 enum Shell {
   struct Result: Sendable {
     let exitCode: TerminationStatus
-    let stdout: String
-    let stderr: String
+    let stdoutFile: ScribeFilePath
+    let stderrFile: ScribeFilePath
     let pid: pid_t
 
-    /// `JSONSerialization` only accepts Foundation types; ``TerminationStatus`` is not one of them.
     var exitCodeForJSON: Int {
       switch exitCode {
       case .exited(let code):
@@ -35,19 +38,41 @@ enum Shell {
     let description: String
   }
 
-  private static let logger = Logger(label: "scribe.tool.shell")
+  private static let defaultLogger = Logger(label: "scribe.tool.shell")
+  private static var logger: Logger { scribeSessionLogger ?? defaultLogger }
 
   /// Run a shell command, supporting cooperative cancellation.
   ///
-  /// When the calling `Task` is cancelled, a `SIGKILL` is sent to the entire
-  /// process group so long-running commands (builds, servers, etc.) and all
-  /// of their child processes are terminated.
-  static func run(command: String, cwd: String?, workingDirectory: ScribeFilePath) async throws -> Result {
+  /// When the calling `Task` is cancelled, the configured `ProcessKiller`
+  /// terminates the process tree so long-running commands (builds,
+  /// servers, etc.) and all of their child processes go away.
+  ///
+  /// Stdout and stderr are streamed to temp files (one per stream) so the
+  /// LLM can read them with the `read_file` tool when it needs the
+  /// contents.
+  ///
+  /// `killer` is injectable for tests — pass `.platformDefault` (the
+  /// default) in production, a stub in tests that want to inspect what
+  /// would have been killed without invoking real `kill(2)` syscalls.
+  static func run(
+    command: String,
+    cwd: String?,
+    workingDirectory: ScribeFilePath,
+    killer: any ProcessKiller = DefaultProcessKiller()
+  ) async throws -> Result {
     let id = UUID()
+    let t0 = ContinuousClock.now
     let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       throw ShellError(description: "command is empty")
     }
+
+    logger.trace(
+      "shell-run-entry",
+      metadata: [
+        "shell_id": "\(id)", "command": "\(trimmed.logSafe())",
+        "cancelled_at_entry": "\(Task.isCancelled)",
+      ])
 
     let shellCwd: ScribeFilePath?
     if let cwd {
@@ -57,160 +82,187 @@ enum Shell {
       shellCwd = nil
     }
 
-    logger.trace(
-      "starting", metadata: ["shell_id": "\(id)", "command": "\(command)", "cwd": "\(shellCwd ?? "nil")"])
+    let capture = try OutputCapture.create(
+      id: id, in: FileManager.default.temporaryDirectory)
 
-    // Use the body-based Subprocess API to get an Execution handle so we can
-    // send SIGKILL to the process group on cancellation.  Output is collected
-    // manually from the AsyncBufferSequence streams.
+    logger.trace(
+      "shell-tempfiles-ready",
+      metadata: [
+        "shell_id": "\(id)",
+        "stdout_file": "\(capture.stdoutURL.path)",
+        "stderr_file": "\(capture.stderrURL.path)",
+      ])
+
     var platformOptions = PlatformOptions()
     platformOptions.processGroupID = 0
-    let outcome = try await Subprocess.run(
-      .path(ScribeFilePath("/bin/sh")),
-      arguments: ["-c", trimmed],
-      environment: .inherit,
-      workingDirectory: shellCwd,
-      platformOptions: platformOptions
-    ) { execution, _, outputSequence, errorSequence in
-      let pid = execution.processIdentifier.value
-      logger.trace("spawned", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-      logger.trace("registering-cancellation-handler", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-      return try await withTaskCancellationHandler {
-        logger.trace("draining-streams-start", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-        // Collect stdout and stderr concurrently.
-        async let out = collectString(from: outputSequence, label: "\(id)/stdout", pid: pid)
-        async let err = collectString(from: errorSequence, label: "\(id)/stderr", pid: pid)
-        let result = try await (pid, out, err)
+
+    let t1 = ContinuousClock.now
+    logger.trace(
+      "shell-entering-subprocess-run",
+      metadata: [
+        "shell_id": "\(id)", "elapsed_us": "\(t0.duration(to: t1).microseconds)",
+        "cancelled": "\(Task.isCancelled)",
+      ])
+
+    let outcome: ExecutionOutcome<(pid_t, Int, Int)>
+    do {
+      outcome = try await Subprocess.run(
+        .path(ScribeFilePath("/bin/sh")),
+        arguments: ["-c", trimmed],
+        environment: .inherit,
+        workingDirectory: shellCwd,
+        platformOptions: platformOptions
+      ) { execution, _, outputSequence, errorSequence in
+        let pid = execution.processIdentifier.value
+        let tBody = ContinuousClock.now
         logger.trace(
-          "draining-streams-end",
+          "shell-body-entered",
           metadata: [
-            "shell_id": "\(id)", "pid": "\(pid)", "out_chars": "\(result.1.count)", "err_chars": "\(result.2.count)",
+            "shell_id": "\(id)", "pid": "\(pid)",
+            "elapsed_since_entry_us": "\(t0.duration(to: tBody).microseconds)",
+            "cancelled": "\(Task.isCancelled)",
           ])
-        return result
-      } onCancel: {
-        logger.trace("onCancel-fired", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-        do {
-          #if os(Windows)
-          logger.trace("sending-Windows-terminate", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-          try execution.terminate(withExitCode: 0)
-          logger.trace("Windows-terminate-succeeded", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-          #elseif os(Linux)
-          // swiftc creates its own process groups on Linux, so a simple
-          // kill(-pgid) misses compiler children.  Walk /proc to recursively
-          // kill every descendant regardless of process group.
-          logger.trace("killing-process-tree-start", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-          let killed = Self.killProcessTree(pid: pid, id: id.uuidString)
-          logger.trace("process-tree-killed", metadata: ["shell_id": "\(id)", "pid": "\(pid)", "count": "\(killed)"])
-          #else
-          // macOS / other Unix: process-group kill is sufficient.
-          logger.trace("sending-SIGKILL-to-process-group", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-          try execution.send(signal: .kill, toProcessGroup: true)
-          logger.trace("SIGKILL-succeeded", metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
-          #endif
-        } catch {
+
+        return try await withTaskCancellationHandler {
           logger.trace(
-            "process-kill-failed",
-            metadata: ["shell_id": "\(id)", "pid": "\(pid)", "err": "\(String(describing: error))"])
+            "shell-drain-start",
+            metadata: [
+              "shell_id": "\(id)", "pid": "\(pid)",
+              "cancelled": "\(Task.isCancelled)",
+              "handler_registered": "true",
+            ])
+          let tDrain = ContinuousClock.now
+
+          let drainTask = capture.startDrain(
+            stdout: outputSequence,
+            stderr: errorSequence,
+            pid: pid,
+            logger: logger)
+
+          let bytes: DrainBytes
+          do {
+            bytes = try await drainTask.value
+            logger.trace(
+              "shell-drain-complete",
+              metadata: [
+                "shell_id": "\(id)", "pid": "\(pid)",
+                "out_bytes": "\(bytes.out)", "err_bytes": "\(bytes.err)",
+                "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                "cancelled": "\(Task.isCancelled)",
+              ])
+          } catch is CancellationError {
+            // Parent cancelled mid-drain. Race the (still-running) detached
+            // drain against a hard deadline so a setsid grandchild that
+            // keeps the pipe open can't hang us indefinitely. See
+            // OutputCapture.awaitDrainWithDeadline for the cancellation
+            // gymnastics.
+            if let drained = await OutputCapture.awaitDrainWithDeadline(
+              drainTask: drainTask, deadlineMs: 2_000,
+              shellID: id, logger: logger)
+            {
+              bytes = drained
+              logger.trace(
+                "shell-drain-completed-after-cancel",
+                metadata: [
+                  "shell_id": "\(id)", "pid": "\(pid)",
+                  "out_bytes": "\(bytes.out)", "err_bytes": "\(bytes.err)",
+                  "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                ])
+            } else {
+              capture.closeHandles()
+              bytes = capture.diskSizes()
+              logger.trace(
+                "shell-drain-deadline-reached",
+                metadata: [
+                  "shell_id": "\(id)", "pid": "\(pid)",
+                  "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+                  "out_bytes_on_disk": "\(bytes.out)",
+                  "err_bytes_on_disk": "\(bytes.err)",
+                ])
+            }
+          } catch {
+            drainTask.cancel()
+            logger.trace(
+              "shell-drain-error",
+              metadata: [
+                "shell_id": "\(id)", "pid": "\(pid)",
+                "error": "\(String(describing: error))",
+                "drain_elapsed_us": "\(tDrain.duration(to: .now).microseconds)",
+              ])
+            throw error
+          }
+
+          capture.closeHandles()
+          logger.trace(
+            "shell-drain-handles-closed",
+            metadata: ["shell_id": "\(id)", "pid": "\(pid)"])
+          return (pid, bytes.out, bytes.err)
+        } onCancel: {
+          let tCancel = ContinuousClock.now
+          logger.trace(
+            "shell-onCancel-fired",
+            metadata: [
+              "shell_id": "\(id)", "pid": "\(pid)",
+              "elapsed_since_entry_us": "\(t0.duration(to: tCancel).microseconds)",
+            ])
+
+          // Kill the process tree first so the async sequences hit EOF.
+          // writeStream will drain any remaining buffered output and
+          // return naturally — do NOT close handles here or we lose
+          // partial output that hasn't been delivered yet. The body's
+          // `catch is CancellationError` path closes handles once drain
+          // returns and reads partial sizes from disk.
+          let killed = killer.killTree(
+            rootPid: pid,
+            execution: execution,
+            logger: logger,
+            shellID: id)
+          logger.trace(
+            "shell-onCancel-complete",
+            metadata: [
+              "shell_id": "\(id)", "pid": "\(pid)",
+              "killed_count": "\(killed)",
+              "onCancel_elapsed_us": "\(tCancel.duration(to: .now).microseconds)",
+            ])
         }
       }
+    } catch {
+      logger.trace(
+        "shell-subprocess-run-threw",
+        metadata: [
+          "shell_id": "\(id)", "error": "\(String(describing: error))",
+          "total_elapsed_us": "\(t0.duration(to: .now).microseconds)",
+        ])
+      throw error
     }
 
+    let tEnd = ContinuousClock.now
+    let totalUs = t0.duration(to: tEnd).microseconds
+    let onDisk = capture.diskSizes()
     logger.trace(
-      "run-returning",
+      "shell-run-returning",
       metadata: [
         "shell_id": "\(id)",
         "pid": "\(outcome.value.0)",
         "termination": "\(String(describing: outcome.terminationStatus))",
-        "out_chars": "\(outcome.value.1.count)",
-        "err_chars": "\(outcome.value.2.count)",
+        "out_bytes": "\(outcome.value.1)",
+        "err_bytes": "\(outcome.value.2)",
+        "out_file_bytes": "\(onDisk.out)",
+        "err_file_bytes": "\(onDisk.err)",
+        "total_elapsed_us": "\(totalUs)",
       ])
     return Result(
       exitCode: outcome.terminationStatus,
-      stdout: String(outcome.value.1),
-      stderr: String(outcome.value.2),
+      stdoutFile: capture.stdoutFile,
+      stderrFile: capture.stderrFile,
       pid: outcome.value.0
     )
   }
+}
 
-  // MARK: - Process tree kill (Linux)
-
-  #if os(Linux)
-  /// Recursively kills `pid` and all its descendants by walking `/proc`.
-  /// Returns the total number of processes signalled (including the root).
-  private static func killProcessTree(pid: pid_t, id: String) -> Int {
-    var pids = [pid]
-    // Collect all descendants recursively via /proc/[pid]/task/[tid]/children.
-    var i = 0
-    while i < pids.count {
-      let current = pids[i]
-      if let children = readChildPids(of: current) {
-        for child in children where child > 2 {  // skip PID 1 (init) and PID 2 (kthreadd)
-          if !pids.contains(child) {
-            pids.append(child)
-          }
-        }
-      }
-      i += 1
-    }
-    // Kill from leaves to root (reverse order).
-    var killed = 0
-    for victim in pids.reversed() {
-      if kill(victim, SIGKILL) == 0 {
-        killed += 1
-        logger.trace("process-tree-kill", metadata: ["shell_id": "\(id)", "pid": "\(victim)", "status": "ok"])
-      } else {
-        let e = errno
-        // ESRCH: already exited, EPERM: not ours (shouldn't happen).
-        if e != ESRCH {
-          logger.trace(
-            "process-tree-kill",
-            metadata: ["shell_id": "\(id)", "pid": "\(victim)", "status": "failed", "errno": "\(e)"])
-        }
-      }
-    }
-    return killed
-  }
-
-  /// Reads the set of direct child PIDs from `/proc/[pid]/task/[pid]/children`.
-  private static func readChildPids(of pid: pid_t) -> [pid_t]? {
-    let path = "/proc/\(pid)/task/\(pid)/children"
-    guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
-      return nil
-    }
-    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return [] }
-    return trimmed.split(separator: " ").compactMap { pid_t($0) }
-  }
-  #endif
-
-  private static func collectString(
-    from sequence: AsyncBufferSequence,
-    label: String,
-    pid: pid_t
-  ) async throws -> BigString {
-    var result = BigString()
-    var chunkCount = 0
-    var totalBytes = 0
-    for try await buffer in sequence {
-      chunkCount += 1
-      totalBytes += buffer.count
-      if chunkCount == 1 {
-        logger.trace("first-chunk", metadata: ["stream": "\(label)", "pid": "\(pid)", "bytes": "\(buffer.count)"])
-      }
-      result.append(
-        contentsOf: buffer.withUnsafeBytes { raw in
-          String(decoding: raw, as: UTF8.self)
-        })
-    }
-    logger.trace(
-      "collect-done",
-      metadata: [
-        "stream": "\(label)",
-        "pid": "\(pid)",
-        "chunks": "\(chunkCount)",
-        "total_bytes": "\(totalBytes)",
-        "result_chars": "\(result.count)",
-      ])
-    return result
+extension Duration {
+  var microseconds: Int64 {
+    let (seconds, attoseconds) = self.components
+    return seconds * 1_000_000 + attoseconds / 1_000_000_000_000
   }
 }

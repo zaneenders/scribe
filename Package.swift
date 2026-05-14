@@ -83,7 +83,6 @@ let package = Package(
         "ScribeLLM",
         "ScribeCLI",
         .product(name: "SlateCore", package: "slate"),
-        .product(name: "Markdown", package: "swift-markdown"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

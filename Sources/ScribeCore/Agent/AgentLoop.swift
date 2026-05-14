@@ -42,7 +42,7 @@ func runAgentLoop(
   config: AgentLoopConfig,
   emit: @escaping @Sendable (TranscriptEvent) -> Void,
   log: Logger,
-  shouldAbortTurn: @escaping @Sendable () -> Bool
+  abortObserver: some AbortObserver
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
@@ -58,7 +58,7 @@ func runAgentLoop(
 
   while true {
     round += 1
-    if shouldAbortTurn() {
+    if abortObserver.isAborted() {
       log.debug("agent.abort", metadata: ["where": "before-http", "round": "\(round)"])
       return (newMessages, .interrupted)
     }
@@ -73,7 +73,7 @@ func runAgentLoop(
         log: log,
         clock: clock,
         round: round,
-        shouldAbortTurn: shouldAbortTurn
+        abortObserver: abortObserver
       )
     } catch is AgentTurnInterruptedError {
       log.notice(
@@ -88,7 +88,7 @@ func runAgentLoop(
     let roundMessages = Array(currentContext.messages[messagesCountBeforeRound...])
     newMessages.append(contentsOf: roundMessages)
 
-    if shouldAbortTurn() {
+    if abortObserver.isAborted() {
       log.debug("agent.abort", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
       // Remove uncommitted round messages
       currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
@@ -117,7 +117,7 @@ func runAgentLoop(
       emit(.toolRoundHeader(round: round, toolNames: invocations.map(\.name)))
 
       for inv in invocations {
-        if shouldAbortTurn() {
+        if abortObserver.isAborted() {
           log.notice(
             "agent.abort",
             metadata: [
@@ -132,7 +132,8 @@ func runAgentLoop(
         do {
           jsonOutput = try await config.registry.run(
             name: inv.name, arguments: inv.arguments,
-            workingDirectory: config.workingDirectory, abortVia: shouldAbortTurn)
+            workingDirectory: config.workingDirectory,
+            abortObserver: abortObserver)
         } catch is AgentTurnInterruptedError {
           currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
           newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
@@ -178,7 +179,7 @@ private func runSingleRound(
   log: Logger,
   clock: ContinuousClock,
   round: Int,
-  shouldAbortTurn: @escaping @Sendable () -> Bool
+  abortObserver: some AbortObserver
 ) async throws -> RoundOutcome {
 
   // ── Build request ────────────────────────────────────
@@ -250,7 +251,7 @@ private func runSingleRound(
   var processor = StreamProcessor(
     onEvent: emit,
     logger: log,
-    shouldAbortTurn: shouldAbortTurn,
+    abortObserver: abortObserver,
     streamWallStart: clock.now
   )
   try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)

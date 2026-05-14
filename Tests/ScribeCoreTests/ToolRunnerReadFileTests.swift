@@ -1,6 +1,7 @@
 import Foundation
-import ScribeCore
 import Testing
+
+@testable import ScribeCore
 
 @Suite
 struct ToolRunnerReadFileTests {
@@ -15,7 +16,7 @@ struct ToolRunnerReadFileTests {
 
       let args = try jsonArguments(["path": fileURL.path])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.content == body)
@@ -41,7 +42,7 @@ struct ToolRunnerReadFileTests {
         "limit": 3,
       ])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.content == "line4\nline5\nline6")
@@ -61,7 +62,7 @@ struct ToolRunnerReadFileTests {
 
       let args = try jsonArguments(["path": fileURL.path, "offset": 99])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.content == "")
@@ -79,7 +80,7 @@ struct ToolRunnerReadFileTests {
 
       let args = try jsonArguments(["path": fileURL.path, "limit": 0])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+        name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.totalLines == 50)
@@ -95,7 +96,7 @@ struct ToolRunnerReadFileTests {
       .appendingPathComponent("scribe-no-such-file-\(UUID().uuidString).txt")
     let args = try jsonArguments(["path": bogus.path])
     let json = try! await registry.run(
-      name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      name: "read_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)
@@ -104,7 +105,7 @@ struct ToolRunnerReadFileTests {
   @Test func missingPathFieldFails() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let json = try! await registry.run(
-      name: "read_file", arguments: "{}", workingDirectory: ScribeFilePath("/tmp"), abortVia: { false })
+      name: "read_file", arguments: "{}", workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("missing or empty field path") == true)
