@@ -28,7 +28,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 1,
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
-      showSpinner: false,
+      waitingForLLM: false,
       theme: theme)
 
     // "EDIT: " = 6 chars
@@ -59,7 +59,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 1,
       inputMode: .read,
       llmWaitAnimationFrame: 0,
-      showSpinner: false,
+      waitingForLLM: false,
       theme: theme)
 
     // "READ: " = 6 chars in scribePrefix color
@@ -92,7 +92,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 1,
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
-      showSpinner: false,
+      waitingForLLM: false,
       theme: theme)
 
     // After "EDIT: " (6), "hello" (5) = col 11 should be the cursor
@@ -118,7 +118,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 2,
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
-      showSpinner: false,
+      waitingForLLM: false,
       theme: theme)
 
     // Row 0 (not last): no cursor — the cursor "▏" only appears on the last row
@@ -148,7 +148,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 2,
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
-      showSpinner: false,
+      waitingForLLM: false,
       theme: theme)
 
     // Row 0: "EDIT: " + "line1"
@@ -180,7 +180,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 1,
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
-      showSpinner: true,
+      waitingForLLM: true,
       theme: theme)
 
     // Always shows mode label: "EDIT: " or "READ: " (edit → userPrefix orange)
@@ -210,7 +210,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 1,
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
-      showSpinner: false,
+      waitingForLLM: false,
       theme: theme)
 
     // Grid should be unchanged
@@ -235,7 +235,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       rowCount: 1,
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
-      showSpinner: false,
+      waitingForLLM: false,
       theme: theme)
 
     // Grid should be unchanged
