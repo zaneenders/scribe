@@ -101,6 +101,8 @@ internal final class SlateChatHost {
   private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
+  /// Current input mode: `.edit` for typing, `.read` for navigation/ladder.
+  private var editMode: EditMode = .edit
 
   private var transcriptState = TranscriptState()
   private var flattenCache = TranscriptLayout.FlattenCache()
@@ -109,7 +111,7 @@ internal final class SlateChatHost {
   private var inPaste: Bool = false
   private var modelBusy: Bool = false
   private var coordinatorFinished: Bool = false
-  private var queuedTrayText: String? = nil
+  private var queuedTrayTexts: [String] = []
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
 
@@ -281,7 +283,10 @@ internal final class SlateChatHost {
 
             case .enter:
               if self.inPaste {
-                self.inputBuffer.append("\n")
+                if self.editMode == .edit { self.inputBuffer.append("\n") }
+              } else if self.editMode == .read {
+                self.log.debug("event=chat.mode.to-edit source=enter")
+                self.editMode = .edit
               } else {
                 let text = self.inputBuffer
                 self.inputBuffer = ""
@@ -291,13 +296,24 @@ internal final class SlateChatHost {
               }
 
             case .ctrlC:
-              let (effect, recallText) = self.submitCoordinator.handleCtrlC()
-              if let recall = recallText {
-                self.inputBuffer = recall
-                self.queuedTrayText = nil
-                self.renderWake?.requestRender()
+              if self.editMode == .edit {
+                self.log.debug("event=chat.mode.to-read source=ctrl-c")
+                self.editMode = .read
+              } else {
+                let (effect, recallText) = self.submitCoordinator.handleCtrlC()
+                if let recall = recallText {
+                  self.inputBuffer = recall
+                  self.editMode = .edit
+                  self.renderWake?.requestRender()
+                }
+                shouldStop = self.applySubmitEffect(effect, gate: gate)
               }
-              shouldStop = self.applySubmitEffect(effect, gate: gate)
+
+            case .escape:
+              if self.editMode == .edit {
+                self.log.debug("event=chat.mode.to-read source=escape")
+                self.editMode = .read
+              }
 
             case .ctrlD:
               self.log.debug("chat.user.ctrl-d", metadata: ["action": "exit"])
@@ -316,25 +332,26 @@ internal final class SlateChatHost {
             case .end:
               self.viewport.queueGoToBottom()
 
-            case .escape:
-              break
-
             case .shiftEnter:
-              self.inputBuffer.append("\n")
+              if self.editMode == .edit { self.inputBuffer.append("\n") }
               self.log.debug(
-                "chat.user.input.newline",
+                "chat.user.input.shift-enter",
                 metadata: [
-                  "source": "paste-or-shift-enter",
+                  "source": "shift-enter",
                   "buffer_chars": "\(self.inputBuffer.count)",
-                  "has_queue": "\(self.submitCoordinator.queuedText != nil)",
+                  "has_queue": "\(!self.submitCoordinator.queuedTexts.isEmpty)",
                 ])
 
             case .character(let ch):
-              self.inputBuffer.append(ch)
+              if self.editMode == .edit { self.inputBuffer.append(ch) }
+
             case .backspace:
-              if !self.inputBuffer.isEmpty { self.inputBuffer.removeLast() }
+              if !self.inPaste, self.editMode == .edit, !self.inputBuffer.isEmpty {
+                self.inputBuffer.removeLast()
+              }
+
             case .tab:
-              self.inputBuffer.append("\t")
+              if self.editMode == .edit { self.inputBuffer.append("    ") }
             }
           }
 
@@ -346,13 +363,18 @@ internal final class SlateChatHost {
 
         let nowBusy = self.modelBusy
         self.submitCoordinator.setModelBusy(nowBusy)
-        let flushEffect = self.submitCoordinator.handleModelTurnEnd()
-        if case .sendToGate(let text) = flushEffect {
-          self.log.debug(
-            "chat.queue.auto-flush",
-            metadata: ["trigger": "busy-to-idle", "chars": "\(text.count)"])
-          self.queuedTrayText = nil
-          Task { await gate.complete(text) }
+        // TODO: allow a plugin/hook to decide drain-all vs drain-one here.
+        let drained = self.submitCoordinator.handleModelTurnEnd()
+        if !drained.isEmpty {
+          for text in drained {
+            self.log.debug(
+              "chat.queue.auto-flush",
+              metadata: ["trigger": "busy-to-idle", "chars": "\(text.count)"])
+          }
+          self.queuedTrayTexts = self.submitCoordinator.queuedTexts
+          for text in drained {
+            Task { await gate.complete(text) }
+          }
         }
 
         self.drainIncomingEvents()
@@ -371,7 +393,7 @@ internal final class SlateChatHost {
             usageHUD: self.transcriptState.usageHUD,
             inputBuffer: self.inputBuffer,
             modelBusy: self.modelBusy,
-            queuedTrayText: self.queuedTrayText,
+            queuedTrayText: self.queuedTrayTexts.first,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             viewport: self.viewport,
             cols: scrCols,
@@ -391,9 +413,10 @@ internal final class SlateChatHost {
             banner: self.banner,
             usage: self.transcriptState.usageHUD,
             inputLine: self.inputBuffer,
+            inputMode: self.editMode,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
-            queuedTrayText: self.queuedTrayText,
+            queuedTrayText: self.queuedTrayTexts.first,
             theme: .default)
           // Paint semantic spans into the terminal grid
           for (row, spanRow) in spanGrid.enumerated() {
@@ -419,7 +442,7 @@ internal final class SlateChatHost {
                 "cols": "\(scrCols)",
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
-                "queue_chars": "\(self.submitCoordinator.queuedText?.count ?? 0)",
+                "queue_chars": "\(self.submitCoordinator.queuedTexts.first?.count ?? 0)",
                 "buffer_chars": "\(self.inputBuffer.count)",
               ])
           }
@@ -514,9 +537,9 @@ internal final class SlateChatHost {
     _ effect: SubmitEffect,
     gate: UserLineGate
   ) -> Bool {
-    var state = HostSubmitState(queuedTrayText: queuedTrayText)
+    var state = HostSubmitState(queuedTrayTexts: queuedTrayTexts)
     let fx = HostSubmitState.apply(effect, to: &state)
-    queuedTrayText = state.queuedTrayText
+    queuedTrayTexts = state.queuedTrayTexts
 
     if let tag = fx.interruptLogTag {
       coordinator?.interrupt()

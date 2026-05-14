@@ -70,7 +70,7 @@ enum SlateChat {
   /// | `chat.session.resume.model-mismatch` | `archived_model current_model` | Resuming a session saved with a different model than the current config. |
   /// | `chat.fullscreen.attach` | `session_file` | `SlateChat.runFullscreen` accepted the TTY and is starting the host. |
   /// | `chat.fullscreen.fail` | `reason=slate-not-interactive` | Slate refused the terminal. |
-  /// | `chat.user.input.newline` | `source buffer_chars has_queue` | Soft newline inserted (Shift+Enter / Alt+Enter / Ctrl+J etc.). `source` distinguishes the encoding: `raw-lf`, `esc-prefix-cr-or-lf`, `csi-u-modified-enter mod=N`, `csi-tilde-modified-enter mod=N`, `csi-tilde-xterm-modified-enter mod=N`. |
+  /// | `chat.user.input.shift-enter` | `source buffer_chars has_queue` | Soft newline inserted (Shift+Enter / Alt+Enter / Ctrl+J etc.). |
   /// | `chat.user.input.paste-begin` / `paste-end` | `buffer_chars` | Bracketed-paste boundaries — handy when correlating large multi-line submits with subsequent submit/queue events. |
   /// | `chat.user.submit kind=immediate` | `chars newlines model_busy=false` | Enter sent the buffer straight to the agent (idle path — first message, between turns, etc.). |
   /// | `chat.user.submit kind=queue` | `chars newlines replacing model_busy=true` | Enter parked the buffer in the queued tray while the agent is busy. `replacing=true` means a previously queued message was overwritten. |

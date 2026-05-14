@@ -56,7 +56,8 @@ internal enum SlateChatRenderer {
     "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷",
   ]
 
-  private nonisolated static let inputGutterColumns = 5
+  /// Gutter wide enough for mode labels: "EDIT: " / "READ: " (6 chars).
+  private nonisolated static let inputGutterColumns = 6
   /// Width of `queued: ` prefix; continuation rows under the queued tray indent to align under text.
   private nonisolated static let queuedTrayGutterColumns = 8
   /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
@@ -64,7 +65,7 @@ internal enum SlateChatRenderer {
 
   /// Wrapped tray rows for an optional queued submission, capped by ``queuedTrayMaxRows``.
   /// Returns an empty array when ``queuedTrayText`` is nil/empty.
-  private nonisolated static func queuedTrayVisualLines(
+  nonisolated static func queuedTrayVisualLines(
     queuedTrayText: String?,
     textWidth: Int
   ) -> [String] {
@@ -150,6 +151,7 @@ internal enum SlateChatRenderer {
     banner: BannerSnapshot?,
     usage: UsageHUDSnapshot?,
     inputLine: String,
+    inputMode: EditMode = .edit,
     llmWaitAnimationFrame: Int,
     waitingForLLM: Bool,
     queuedTrayText: String?,
@@ -281,7 +283,8 @@ internal enum SlateChatRenderer {
     // Input rows
     buildSemanticInputRows(&grid, startRow: firstInputRow, cols: cols,
       textWidth: textWidth, visualLines: visualLines, rowCount: inputRowCount,
-      llmWaitAnimationFrame: llmWaitAnimationFrame, showSpinner: showSpinner, theme: theme)
+      inputMode: inputMode,
+      llmWaitAnimationFrame: llmWaitAnimationFrame, waitingForLLM: waitingForLLM, theme: theme)
 
     return grid
   }
@@ -384,15 +387,20 @@ internal enum SlateChatRenderer {
     }
   }
 
-  private nonisolated static func buildSemanticInputRows(
+  nonisolated static func buildSemanticInputRows(
     _ grid: inout [[StyledSpan]],
     startRow: Int, cols: Int, textWidth: Int,
     visualLines: [String], rowCount: Int,
-    llmWaitAnimationFrame: Int, showSpinner: Bool,
+    inputMode: EditMode = .edit,
+    llmWaitAnimationFrame: Int, waitingForLLM: Bool,
     theme: CLITheme
   ) {
     let bg = theme.inputAreaBg
     let gutter = String(repeating: " ", count: min(inputGutterColumns, cols))
+    // Mode label: "EDIT: " in userPrefix (orange), "READ: " in scribePrefix (white)
+    let modeLabel = inputMode == .edit ? "EDIT: " : "READ: "
+    let modeColor = inputMode == .edit ? theme.userPrefix : theme.scribePrefix
+    let showSpinner = waitingForLLM && visualLines.isEmpty
     var lineIdx = 0
     while lineIdx < rowCount {
       let row = startRow &+ lineIdx
@@ -401,13 +409,20 @@ internal enum SlateChatRenderer {
 
       var spans: [StyledSpan] = []
       if showSpinner, onLastInputRow {
-        spans.append(StyledSpan(fg: theme.scribePrefix, bg: bg, bold: false, text: "scribe: "))
+        spans.append(StyledSpan(fg: modeColor, bg: bg, bold: false, text: modeLabel))
         let frames = llmWaitSpinner
         let ch = frames[llmWaitAnimationFrame % frames.count]
         spans.append(StyledSpan(fg: theme.spinnerGlyph, bg: bg, bold: false, text: String(ch)))
         spans.append(StyledSpan(fg: theme.inputCursor, bg: bg, bold: false, text: "▏"))
       } else if lineIdx == 0 {
-        spans.append(StyledSpan(fg: theme.userPrefix, bg: bg, bold: false, text: "you: "))
+        if waitingForLLM {
+          let frames = llmWaitSpinner
+          let ch = frames[llmWaitAnimationFrame % frames.count]
+          spans.append(StyledSpan(fg: theme.spinnerGlyph, bg: bg, bold: false, text: String(ch)))
+          spans.append(StyledSpan(fg: modeColor, bg: bg, bold: false, text: modeLabel))
+        } else {
+          spans.append(StyledSpan(fg: modeColor, bg: bg, bold: false, text: modeLabel))
+        }
         if lineIdx < visualLines.count, textWidth > 0 {
           spans.append(
             StyledSpan(fg: theme.inputText, bg: bg, bold: false,
@@ -432,7 +447,7 @@ internal enum SlateChatRenderer {
     }
   }
 
-  private nonisolated static func buildSemanticQueuedTrayRows(
+  nonisolated static func buildSemanticQueuedTrayRows(
     _ grid: inout [[StyledSpan]],
     startRow: Int, cols: Int, textWidth: Int,
     visualLines: [String],
