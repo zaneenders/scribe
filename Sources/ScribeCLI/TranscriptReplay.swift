@@ -1,14 +1,13 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 import SlateCore
 
 // MARK: - Rendering messages to transcript lines
 
-/// Render a list of `ChatMessage`s into styled transcript lines.
+/// Render a list of `ScribeMessage`s into styled transcript lines.
 /// Pure function — no side effects, no state.
 public func renderMessagesToTranscript(
-  _ messages: [Components.Schemas.ChatMessage],
+  _ messages: [ScribeMessage],
   theme: CLITheme,
   renderer: MarkdownRenderer
 ) -> [TLine] {
@@ -25,7 +24,7 @@ public func renderMessagesToTranscript(
     case .system:
       i += 1
     case .user:
-      let t = (msg.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      let t = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
       if !t.isEmpty {
         let logicalLines =
           t.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -49,9 +48,9 @@ public func renderMessagesToTranscript(
       }
       i += 1
     case .assistant:
-      let text = msg.content ?? ""
+      let text = msg.content
       let calls = msg.toolCalls ?? []
-      let reasoning = msg.reasoningContent ?? ""
+      let reasoning = msg.reasoning ?? ""
 
       // Add blank line separator between user and assistant sections.
       if let last = lines.last, !last.spans.isEmpty {
@@ -111,7 +110,7 @@ public func renderMessagesToTranscript(
 
       if !calls.isEmpty {
         toolRoundCounter += 1
-        let names = calls.map { $0.function?.name ?? "(tool)" }
+        let names = calls.map { $0.name }
         lines.append(
           TLine(spans: [
             StyledSpan(
@@ -126,15 +125,15 @@ public func renderMessagesToTranscript(
         var toolBodies: [String: String] = [:]
         while k < messages.count, messages[k].role == .tool {
           if let tid = messages[k].toolCallId {
-            toolBodies[tid] = messages[k].content ?? ""
+            toolBodies[tid] = messages[k].content
           }
           k += 1
         }
 
         for tc in calls {
-          let id = tc.id ?? ""
-          let name = tc.function?.name ?? "tool"
-          let args = tc.function?.arguments ?? "{}"
+          let id = tc.id
+          let name = tc.name
+          let args = tc.arguments
           let jsonOut = toolBodies[id] ?? ""
           let argSummary = ToolInvocationFormatting.argumentSummary(
             name: name, argumentsJSON: args)

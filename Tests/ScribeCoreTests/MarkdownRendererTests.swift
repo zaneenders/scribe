@@ -1,4 +1,4 @@
-import ScribeLLM
+import ScribeCore
 import SlateCore
 import Testing
 
@@ -88,9 +88,9 @@ struct MarkdownRendererTests {
   }
 
   @Test func debugSinkColors() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "test"),
-      .init(role: .assistant, content: "### 4. O(n²) re-parsing\n1. hello world\n"),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "test"),
+      ScribeMessage(role: .assistant, content: "### 4. O(n²) re-parsing\n1. hello world\n"),
     ]
     let completed = renderMessagesToTranscript(
       messages, theme: .default, renderer: SwiftMarkdownRenderer())

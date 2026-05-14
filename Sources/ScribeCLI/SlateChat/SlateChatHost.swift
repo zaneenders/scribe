@@ -1,7 +1,6 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
 import SlateCore
 import Synchronization
 
@@ -93,7 +92,7 @@ internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
   private let systemPrompt: String
-  private let resumeMessages: [Components.Schemas.ChatMessage]
+  private let resumeMessages: [ScribeMessage]
   private let sessionPersistenceURL: URL
   private let sessionId: UUID
   private let sessionCreatedAt: Date
@@ -145,7 +144,7 @@ internal final class SlateChatHost {
   init(
     configuration: ScribeConfig,
     systemPrompt: String,
-    resumeMessages: [Components.Schemas.ChatMessage],
+    resumeMessages: [ScribeMessage],
     sessionPersistenceURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,
@@ -473,11 +472,8 @@ internal final class SlateChatHost {
         )
         // Drift detection for turnComplete
         if case .turnComplete(let referenceMessages) = te {
-          // `renderMessagesToTranscript` still consumes the wire-typed
-          // message representation. Bridge at the boundary — the public
-          // event surface stays transport-agnostic (ScribeMessage).
           let batchLines = renderMessagesToTranscript(
-            referenceMessages.toChatMessages(), theme: theme, renderer: markdownRenderer)
+            referenceMessages, theme: theme, renderer: markdownRenderer)
           if transcriptState.lines != batchLines {
             let sc = transcriptState.lines.count
             let bc = batchLines.count

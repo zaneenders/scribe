@@ -1,6 +1,5 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 
 // MARK: - ChatDriver
 
@@ -64,13 +63,6 @@ struct ChatDriver {
   /// Render the complete transcript from a list of agent messages (batch path).
   /// Useful for comparison against the streaming path in golden tests.
   func batchRender(_ messages: [ScribeMessage]) -> [TLine] {
-    renderMessagesToTranscript(messages.toChatMessages(), theme: theme, renderer: renderer)
-  }
-
-  /// Wire-typed batch render — preserved for in-tree CLI code that still
-  /// threads `Components.Schemas.ChatMessage` through its persistence
-  /// layer. New code should prefer the ``ScribeMessage`` overload above.
-  func batchRender(_ messages: [Components.Schemas.ChatMessage]) -> [TLine] {
     renderMessagesToTranscript(messages, theme: theme, renderer: renderer)
   }
 }

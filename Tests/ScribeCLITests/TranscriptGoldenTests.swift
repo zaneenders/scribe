@@ -1,6 +1,5 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 import Testing
 
 @testable import ScribeCLI
@@ -18,9 +17,9 @@ struct TranscriptGoldenTests {
   // MARK: - Simple message golden
 
   @Test func simpleUserAssistantGolden() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "hello"),
-      .init(role: .assistant, content: "Hi there!"),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "hello"),
+      ScribeMessage(role: .assistant, content: "Hi there!"),
     ]
 
     // Batch path
@@ -46,11 +45,11 @@ struct TranscriptGoldenTests {
   // MARK: - Multi-turn golden
 
   @Test func multiTurnGolden() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "first"),
-      .init(role: .assistant, content: "response one"),
-      .init(role: .user, content: "second"),
-      .init(role: .assistant, content: "response two"),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "first"),
+      ScribeMessage(role: .assistant, content: "response one"),
+      ScribeMessage(role: .user, content: "second"),
+      ScribeMessage(role: .assistant, content: "response two"),
     ]
 
     let batchLines = renderMessagesToTranscript(messages, theme: theme, renderer: renderer)
@@ -69,17 +68,17 @@ struct TranscriptGoldenTests {
   // MARK: - Tool call golden
 
   @Test func toolCallGolden() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "list files"),
-      .init(
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "list files"),
+      ScribeMessage(
         role: .assistant,
-        content: nil,
+        content: "",
         toolCalls: [
-          .init(id: "t1", function: .init(name: "shell", arguments: #"{"command":"ls"}"#))
+          ScribeToolCall(id: "t1", name: "shell", arguments: #"{"command":"ls"}"#)
         ]
       ),
-      .init(role: .tool, content: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#, toolCallId: "t1"),
-      .init(role: .assistant, content: "Done!"),
+      ScribeMessage(role: .tool, content: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#, toolCallId: "t1"),
+      ScribeMessage(role: .assistant, content: "Done!"),
     ]
 
     let batchLines = renderMessagesToTranscript(messages, theme: theme, renderer: renderer)
@@ -93,9 +92,9 @@ struct TranscriptGoldenTests {
   // MARK: - Reasoning golden
 
   @Test func reasoningGolden() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "complex"),
-      .init(role: .assistant, content: "Answer is 42", reasoningContent: "Let me think..."),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "complex"),
+      ScribeMessage(role: .assistant, content: "Answer is 42", reasoning: "Let me think..."),
     ]
 
     let batchLines = renderMessagesToTranscript(messages, theme: theme, renderer: renderer)

@@ -1,6 +1,5 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 import Testing
 
 @testable import ScribeCLI
@@ -15,10 +14,10 @@ struct TranscriptReplayTests {
   // MARK: - Single-turn session with text only
 
   @Test func singleTurnTextOnly() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .system, content: "You are a test agent."),
-      .init(role: .user, content: "hello"),
-      .init(role: .assistant, content: "Hi there!", toolCalls: nil, reasoningContent: nil),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .system, content: "You are a test agent."),
+      ScribeMessage(role: .user, content: "hello"),
+      ScribeMessage(role: .assistant, content: "Hi there!"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -36,9 +35,9 @@ struct TranscriptReplayTests {
   // MARK: - Multi-line user submission
 
   @Test func multiLineUserSubmission() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "line1\nline2\nline3"),
-      .init(role: .assistant, content: "ok"),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "line1\nline2\nline3"),
+      ScribeMessage(role: .assistant, content: "ok"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -53,11 +52,11 @@ struct TranscriptReplayTests {
   // MARK: - Reasoning + answer
 
   @Test func reasoningAndAnswer() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "think"),
-      .init(
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "think"),
+      ScribeMessage(
         role: .assistant, content: "answer text",
-        toolCalls: nil, reasoningContent: "reasoning text"),
+        reasoning: "reasoning text"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -71,16 +70,14 @@ struct TranscriptReplayTests {
   // MARK: - Tool calls
 
   @Test func toolCallsWithOutput() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "run tool"),
-      .init(
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "run tool"),
+      ScribeMessage(
         role: .assistant, content: "",
         toolCalls: [
-          .init(
-            id: "call_1", _type: "function",
-            function: .init(name: "shell", arguments: "{\"command\":\"ls\"}"))
-        ], reasoningContent: nil),
-      .init(role: .tool, content: "file1\nfile2", name: nil, toolCalls: nil, toolCallId: "call_1"),
+          ScribeToolCall(id: "call_1", name: "shell", arguments: #"{"command":"ls"}"#)
+        ]),
+      ScribeMessage(role: .tool, content: "file1\nfile2", toolCallId: "call_1"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -93,9 +90,9 @@ struct TranscriptReplayTests {
   // MARK: - Empty assistant turn
 
   @Test func emptyAssistantTurn() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "test"),
-      .init(role: .assistant, content: "", toolCalls: nil, reasoningContent: nil),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "test"),
+      ScribeMessage(role: .assistant, content: ""),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -109,11 +106,11 @@ struct TranscriptReplayTests {
   // MARK: - Multiple turns
 
   @Test func multipleTurns() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "first"),
-      .init(role: .assistant, content: "response 1"),
-      .init(role: .user, content: "second"),
-      .init(role: .assistant, content: "response 2"),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "first"),
+      ScribeMessage(role: .assistant, content: "response 1"),
+      ScribeMessage(role: .user, content: "second"),
+      ScribeMessage(role: .assistant, content: "response 2"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -128,20 +125,16 @@ struct TranscriptReplayTests {
   // MARK: - Tool calls with multiple tools in one round
 
   @Test func multipleToolsInOneRound() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "use tools"),
-      .init(
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "use tools"),
+      ScribeMessage(
         role: .assistant, content: "",
         toolCalls: [
-          .init(
-            id: "c1", _type: "function",
-            function: .init(name: "read_file", arguments: "{\"path\":\"a.swift\"}")),
-          .init(
-            id: "c2", _type: "function",
-            function: .init(name: "shell", arguments: "{\"command\":\"ls\"}")),
-        ], reasoningContent: nil),
-      .init(role: .tool, content: "content a", toolCallId: "c1"),
-      .init(role: .tool, content: "content b", toolCallId: "c2"),
+          ScribeToolCall(id: "c1", name: "read_file", arguments: #"{"path":"a.swift"}"#),
+          ScribeToolCall(id: "c2", name: "shell", arguments: #"{"command":"ls"}"#),
+        ]),
+      ScribeMessage(role: .tool, content: "content a", toolCallId: "c1"),
+      ScribeMessage(role: .tool, content: "content b", toolCallId: "c2"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -154,11 +147,11 @@ struct TranscriptReplayTests {
   // MARK: - Skips system messages after the first
 
   @Test func skipsSystemMessages() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .system, content: "system 1"),
-      .init(role: .system, content: "system 2"),
-      .init(role: .user, content: "hi"),
-      .init(role: .assistant, content: "hey"),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .system, content: "system 1"),
+      ScribeMessage(role: .system, content: "system 2"),
+      ScribeMessage(role: .user, content: "hi"),
+      ScribeMessage(role: .assistant, content: "hey"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())
@@ -172,9 +165,9 @@ struct TranscriptReplayTests {
   // MARK: - Empty user content is skipped
 
   @Test func emptyUserContentSkipped() {
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: ""),
-      .init(role: .assistant, content: "response"),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: ""),
+      ScribeMessage(role: .assistant, content: "response"),
     ]
 
     let lines = renderMessagesToTranscript(messages, theme: .default, renderer: SwiftMarkdownRenderer())

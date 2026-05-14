@@ -1,7 +1,6 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
 
 // MARK: - ChatSessionMetadata
 
@@ -115,7 +114,7 @@ enum ChatSessionStore {
   // MARK: - Messages (JSONL)
 
   /// Read all messages from `messages.jsonl`.
-  static func loadMessages(from directory: URL) throws -> [Components.Schemas.ChatMessage] {
+  static func loadMessages(from directory: URL) throws -> [ScribeMessage] {
     let messagesURL = directory.appendingPathComponent("messages.jsonl", isDirectory: false)
     guard FileManager.default.fileExists(atPath: messagesURL.path) else {
       return []
@@ -123,13 +122,13 @@ enum ChatSessionStore {
     let data = try Data(contentsOf: messagesURL)
     let lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
     return lines.compactMap { line in
-      try? dec.decode(Components.Schemas.ChatMessage.self, from: Data(line))
+      try? dec.decode(ScribeMessage.self, from: Data(line))
     }
   }
 
   /// Append messages to `messages.jsonl` (creates the file if needed).
   static func appendMessages(
-    _ messages: [Components.Schemas.ChatMessage],
+    _ messages: [ScribeMessage],
     to directory: URL
   ) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

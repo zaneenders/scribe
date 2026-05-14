@@ -1,7 +1,6 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
 import Synchronization
 import Testing
 
@@ -71,8 +70,8 @@ struct ChatCoordinatorTests {
   @Test func coordinatorRejectsCorruptResumeSnapshot() async {
     let (lines, _) = AsyncStream<String>.makeStream()
     let events: Mutex<[HostEvent]> = Mutex([])
-    let badSnapshot: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "no system message in front")
+    let badSnapshot: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "no system message in front")
     ]
     do {
       _ = try ChatCoordinator(

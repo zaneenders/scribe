@@ -1,6 +1,6 @@
 import Foundation
 import Logging
-import ScribeLLM
+import ScribeCore
 import Testing
 
 @testable import ScribeCLI
@@ -10,9 +10,9 @@ struct ChatSessionPersistenceTests {
   @Test func roundTripsThroughSaveAndLoad() throws {
     let id = UUID()
     let stamp = Date(timeIntervalSince1970: 1_700_000_000)
-    let messages: [Components.Schemas.ChatMessage] = [
-      .init(role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil),
-      .init(role: .user, content: "hello", name: nil, toolCalls: nil, toolCallId: nil),
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .system, content: "sys"),
+      ScribeMessage(role: .user, content: "hello"),
     ]
     let meta = ChatSessionMetadata(
       id: id,
@@ -48,8 +48,8 @@ struct ChatSessionPersistenceTests {
 
     let id = UUID()
     let stem = Date(timeIntervalSince1970: 1_702_000_000)
-    let sys = Components.Schemas.ChatMessage(
-      role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil)
+    let sys = ScribeMessage(
+      role: .system, content: "sys")
     let meta = ChatSessionMetadata(
       id: id, createdAt: stem, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
     let dir = try ChatSessionStore.sessionDirectoryURL(
@@ -103,8 +103,8 @@ struct ChatSessionPersistenceTests {
 
     let id = UUID()
     let stem = Date(timeIntervalSince1970: 1_703_000_000)
-    let sys = Components.Schemas.ChatMessage(
-      role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil)
+    let sys = ScribeMessage(
+      role: .system, content: "sys")
     let meta = ChatSessionMetadata(
       id: id, createdAt: stem, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
     let dir = try ChatSessionStore.sessionDirectoryURL(
@@ -112,8 +112,8 @@ struct ChatSessionPersistenceTests {
     try ChatSessionStore.saveMetadata(meta, to: dir)
     try ChatSessionStore.appendMessages([sys], to: dir)
 
-    let user = Components.Schemas.ChatMessage(
-      role: .user, content: "hello", name: nil, toolCalls: nil, toolCallId: nil)
+    let user = ScribeMessage(
+      role: .user, content: "hello")
     try ChatSessionStore.appendMessages([user], to: dir)
 
     let loadedMessages = try ChatSessionStore.loadMessages(from: dir)
@@ -128,8 +128,8 @@ struct ChatSessionPersistenceTests {
 
     let id = UUID()
     let stem = Date(timeIntervalSince1970: 1_704_000_000)
-    let sys = Components.Schemas.ChatMessage(
-      role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil)
+    let sys = ScribeMessage(
+      role: .system, content: "sys")
     let meta = ChatSessionMetadata(
       id: id, createdAt: stem, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
     let dir = try ChatSessionStore.sessionDirectoryURL(
@@ -171,10 +171,10 @@ struct ChatSessionPersistenceTests {
       scribeVersion: "test"
     )
 
-    let sys = Components.Schemas.ChatMessage(
-      role: .system, content: "sys", name: nil, toolCalls: nil, toolCallId: nil)
-    let user = Components.Schemas.ChatMessage(
-      role: .user, content: "hello", name: nil, toolCalls: nil, toolCallId: nil)
+    let sys = ScribeMessage(
+      role: .system, content: "sys")
+    let user = ScribeMessage(
+      role: .user, content: "hello")
 
     try ChatSessionStore.saveMetadata(meta, to: dir)
     try ChatSessionStore.appendMessages([sys, user], to: dir)
@@ -189,10 +189,10 @@ struct ChatSessionPersistenceTests {
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: dir) }
 
-    let sys = Components.Schemas.ChatMessage(role: .system, content: "sys")
-    let user1 = Components.Schemas.ChatMessage(role: .user, content: "q1")
-    let asst1 = Components.Schemas.ChatMessage(role: .assistant, content: "a1")
-    let user2 = Components.Schemas.ChatMessage(role: .user, content: "q2")
+    let sys = ScribeMessage(role: .system, content: "sys")
+    let user1 = ScribeMessage(role: .user, content: "q1")
+    let asst1 = ScribeMessage(role: .assistant, content: "a1")
+    let user2 = ScribeMessage(role: .user, content: "q2")
 
     // Simulate: persist initial, then append only new
     try ChatSessionStore.appendMessages([sys, user1, asst1], to: dir)
