@@ -8,12 +8,16 @@ import Synchronization
 /// accident, and so test fakes can supply their own observer without
 /// subclassing.
 ///
+/// Public so embedders can implement custom ``ToolExecutor``s that
+/// participate in the same cooperative-cancellation protocol the agent
+/// loop and built-in tools use.
+///
 /// Two methods cover both polling and event-driven consumption:
 /// - `isAborted()` — synchronous snapshot, called at loop checkpoints.
 /// - `signals()` — `AsyncStream<Void>` that yields once on each abort
 ///   request, used by the tool registry's watch task for zero-latency
 ///   wake-up. Late subscribers see the in-flight abort flag immediately.
-internal protocol AbortObserver: Sendable {
+public protocol AbortObserver: Sendable {
   func isAborted() -> Bool
   func signals() -> AsyncStream<Void>
 }

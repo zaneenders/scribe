@@ -27,14 +27,25 @@ public struct TurnStream: Sendable {
 /// The final state after a model turn completes.
 public struct TurnResult: Sendable {
   /// The full conversation history after the turn, including any assistant
-  /// and tool messages appended during execution.
-  public let messages: [Components.Schemas.ChatMessage]
+  /// and tool messages appended during execution. Public, transport-agnostic
+  /// shape — prefer this for new code.
+  public let messages: [ScribeMessage]
+
+  /// The same history in the wire-typed OpenAI-compatible representation.
+  /// Kept for the in-tree CLI which still threads
+  /// `Components.Schemas.ChatMessage` through its persistence layer.
+  public let rawMessages: [Components.Schemas.ChatMessage]
 
   /// How the turn ended.
   public let outcome: TurnOutcome
 
-  public init(messages: [Components.Schemas.ChatMessage], outcome: TurnOutcome) {
+  public init(
+    messages: [ScribeMessage],
+    rawMessages: [Components.Schemas.ChatMessage],
+    outcome: TurnOutcome
+  ) {
     self.messages = messages
+    self.rawMessages = rawMessages
     self.outcome = outcome
   }
 }

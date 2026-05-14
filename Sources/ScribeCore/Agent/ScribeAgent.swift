@@ -5,24 +5,20 @@ import ScribeLLM
 public struct ScribeAgent: Sendable {
 
   private actor Storage {
-    var systemPrompt: String
     var model: String
     var messages: [Components.Schemas.ChatMessage]
     var isStreaming = false
 
     init(
-      systemPrompt: String,
       model: String,
       messages: [Components.Schemas.ChatMessage]
     ) {
-      self.systemPrompt = systemPrompt
       self.model = model
       self.messages = messages
     }
 
     func snapshot() -> AgentStateSnapshot {
       AgentStateSnapshot(
-        systemPrompt: systemPrompt,
         model: model,
         messages: messages,
         isStreaming: isStreaming
@@ -50,12 +46,98 @@ public struct ScribeAgent: Sendable {
   }
 
   private let storage: Storage
-  public let registry: ToolRegistry
-  public var chatTools: [Components.Schemas.ChatTool] { registry.chatTools }
+  /// Schemas advertised to the LLM. Lives alongside the tool executor — even
+  /// when an embedder injects a custom ``ToolExecutor``, the loop still needs
+  /// to tell the model what tools exist.
+  internal let chatTools: [Components.Schemas.ChatTool]
+  private let toolExecutor: any ToolExecutor
   private let client: Client
   private let workingDirectory: ScribeFilePath
   private let abortNotifier = AbortNotifier()
 
+  // MARK: - Designated initializer (transport-injected)
+
+  /// Construct an agent against a caller-supplied ``ScribeLLM/Client``.
+  ///
+  /// Embedded callers (server, sub-agent, anything that wants its own
+  /// transport / auth middleware / retry policy / metric tagging) use this
+  /// initializer to inject a pre-built `Client` and an optional custom
+  /// ``ToolExecutor`` — no `ScribeConfig`, no `Foundation.URL` parsing.
+  ///
+  /// If `systemPrompt` is non-empty and `initialMessages` does not begin
+  /// with a `.system` message, one is inserted at the head so the model
+  /// always sees the instructions even when callers prefer to pass just
+  /// user/assistant history.
+  ///
+  /// - Parameters:
+  ///   - client: HTTP client speaking the OpenAI-compatible chat
+  ///     completions surface (see ``ScribeLLM/OpenAICompatibleClient``).
+  ///   - model: Model id the loop sends as the `model` field.
+  ///   - systemPrompt: Optional system prompt; injected into
+  ///     `initialMessages` when missing.
+  ///   - tools: Built-in tools whose schemas are advertised to the model.
+  ///     When `toolExecutor` is `nil`, these are also the tools the agent
+  ///     runs in-process via a default ``ToolRegistry``.
+  ///   - toolExecutor: Custom execution backend (HITL gate, sandbox
+  ///     forwarder, etc.). When `nil`, a ``ToolRegistry`` is built from
+  ///     `tools` and used as the executor.
+  ///   - initialMessages: Pre-loaded conversation history (e.g. resumed
+  ///     session). May omit a leading system message — see `systemPrompt`.
+  ///   - workingDirectory: Absolute working directory used for tool path
+  ///     resolution.
+  public init(
+    client: Client,
+    model: String,
+    systemPrompt: String = "",
+    tools: [any ScribeTool] = [],
+    toolExecutor: (any ToolExecutor)? = nil,
+    initialMessages: [Components.Schemas.ChatMessage] = [],
+    workingDirectory: ScribeFilePath
+  ) {
+    self.client = client
+    self.workingDirectory = workingDirectory
+    let registry = ToolRegistry(tools: tools)
+    self.toolExecutor = toolExecutor ?? registry
+    self.chatTools = registry.chatTools
+    self.storage = Storage(
+      model: model,
+      messages: Self.applySystemPrompt(
+        systemPrompt: systemPrompt,
+        initialMessages: initialMessages)
+    )
+  }
+
+  // MARK: - ScribeMessage initializer (transport-agnostic)
+
+  /// Same shape as the wire-typed initializer above, but takes the
+  /// transport-agnostic ``ScribeMessage`` for `initialMessages`. Prefer
+  /// this overload from embedders that want to keep
+  /// `Components.Schemas.ChatMessage` out of their type surface.
+  public init(
+    client: Client,
+    model: String,
+    systemPrompt: String = "",
+    tools: [any ScribeTool] = [],
+    toolExecutor: (any ToolExecutor)? = nil,
+    initialMessages: [ScribeMessage],
+    workingDirectory: ScribeFilePath
+  ) {
+    self.init(
+      client: client,
+      model: model,
+      systemPrompt: systemPrompt,
+      tools: tools,
+      toolExecutor: toolExecutor,
+      initialMessages: initialMessages.toChatMessages(),
+      workingDirectory: workingDirectory
+    )
+  }
+
+  // MARK: - ScribeConfig convenience initializer
+
+  /// Build an agent from a ``ScribeConfig``. Internally constructs an
+  /// OpenAI-compatible client from `configuration.serverURL`. Prefer the
+  /// `init(client:...)` overloads for embedded use.
   public init(
     configuration: ScribeConfig,
     systemPrompt: String,
@@ -66,54 +148,52 @@ public struct ScribeAgent: Sendable {
         key: "serverURL",
         reason: "Invalid serverURL in ScribeConfig: \(configuration.serverURL)")
     }
-    self.client = OpenAICompatibleClient.make(
+    let client = OpenAICompatibleClient.make(
       serverURL: serverURL, apiKey: configuration.apiKey)
-    self.workingDirectory = ScribeFilePath(configuration.workingDirectory)
-    self.registry = ToolRegistry(tools: configuration.tools)
-    self.storage = Storage(
-      systemPrompt: systemPrompt,
+    self.init(
+      client: client,
       model: configuration.agentModel,
-      messages: initialMessages
+      systemPrompt: systemPrompt,
+      tools: configuration.tools,
+      toolExecutor: nil,
+      initialMessages: initialMessages,
+      workingDirectory: ScribeFilePath(configuration.workingDirectory)
     )
   }
 
-  package init(
-    client: Client,
-    model: String,
-    systemPrompt: String,
-    tools: [any ScribeTool] = [],
-    initialMessages: [Components.Schemas.ChatMessage] = [],
-    workingDirectory: ScribeFilePath
-  ) {
-    self.client = client
-    self.workingDirectory = workingDirectory
-    self.registry = ToolRegistry(tools: tools)
-    self.storage = Storage(
-      systemPrompt: systemPrompt,
-      model: model,
-      messages: initialMessages
-    )
-  }
+  // MARK: - State accessors
 
   var state: AgentStateSnapshot {
     get async { await storage.snapshot() }
   }
 
-  public var messages: [Components.Schemas.ChatMessage] {
+  /// The full conversation history as ``ScribeMessage`` values — the
+  /// public, transport-agnostic message type. Equivalent to ``rawMessages``
+  /// but suitable for embedders that want to avoid the generated
+  /// OpenAI-compatible type.
+  public var messages: [ScribeMessage] {
+    get async { await storage.messages.toScribeMessages() }
+  }
+
+  /// Wire-typed conversation history. Internal-leaning accessor preserved
+  /// for the in-tree CLI; new embedders should prefer ``messages``.
+  public var rawMessages: [Components.Schemas.ChatMessage] {
     get async { await storage.messages }
   }
 
-  public func messages(since start: Int) async -> [Components.Schemas.ChatMessage] {
-    await storage.messages(since: start)
+  public func messages(since start: Int) async -> [ScribeMessage] {
+    await storage.messages(since: start).toScribeMessages()
   }
 
-  public func messages(in range: Range<Int>) async -> [Components.Schemas.ChatMessage] {
-    await storage.messages(in: range)
+  public func messages(in range: Range<Int>) async -> [ScribeMessage] {
+    await storage.messages(in: range).toScribeMessages()
   }
 
   public var isStreaming: Bool {
     get async { await storage.isStreaming }
   }
+
+  // MARK: - prompt
 
   public func prompt(
     _ input: String,
@@ -123,6 +203,17 @@ public struct ScribeAgent: Sendable {
     let userMessage = Components.Schemas.ChatMessage(
       role: .user, content: input)
     return await prompt([userMessage], options: options, log: log)
+  }
+
+  /// Send a batch of ``ScribeMessage`` values as the next turn. Convenience
+  /// overload for embedders that don't want to construct OpenAI-shaped
+  /// values; the messages are bridged to the wire shape internally.
+  public func prompt(
+    _ promptMessages: [ScribeMessage],
+    options: AgentRunOptions = AgentRunOptions(),
+    log: Logger
+  ) async -> TurnStream {
+    await prompt(promptMessages.toChatMessages(), options: options, log: log)
   }
 
   public func prompt(
@@ -138,7 +229,7 @@ public struct ScribeAgent: Sendable {
 
     let task = Task {
       [
-        storage, registry, client, promptMessages, options, log,
+        storage, toolExecutor, chatTools, client, promptMessages, options, log,
         abortNotifier
       ] in
       defer {
@@ -146,15 +237,13 @@ public struct ScribeAgent: Sendable {
         Task { await storage.setStreaming(false) }
       }
 
-      let ctx = AgentContext(
-        systemPrompt: snapshot.systemPrompt,
-        messages: snapshot.messages
-      )
+      let ctx = AgentContext(messages: snapshot.messages)
 
       let config = AgentLoopConfig(
         model: snapshot.model,
         client: client,
-        registry: registry,
+        toolExecutor: toolExecutor,
+        chatTools: chatTools,
         temperature: options.temperature,
         maxToolRounds: options.maxToolRounds,
         workingDirectory: workingDirectory
@@ -173,17 +262,31 @@ public struct ScribeAgent: Sendable {
         case .completed:
           await storage.appendMessages(result.messages)
           let finalMessages = await storage.messages
-          return TurnResult(messages: finalMessages, outcome: .completed)
+          return TurnResult(
+            messages: finalMessages.toScribeMessages(),
+            rawMessages: finalMessages,
+            outcome: .completed)
         case .interrupted:
           continuation.yield(.turnInterrupted)
-          return TurnResult(messages: await storage.messages, outcome: .interrupted)
+          let current = await storage.messages
+          return TurnResult(
+            messages: current.toScribeMessages(),
+            rawMessages: current,
+            outcome: .interrupted)
         case .toolRoundLimit(let rounds):
-          return TurnResult(messages: await storage.messages, outcome: .toolRoundLimit(rounds: rounds))
+          let current = await storage.messages
+          return TurnResult(
+            messages: current.toScribeMessages(),
+            rawMessages: current,
+            outcome: .toolRoundLimit(rounds: rounds))
         }
       } catch is AgentTurnInterruptedError {
         continuation.yield(.turnInterrupted)
         let current = await storage.messages
-        return TurnResult(messages: current, outcome: .interrupted)
+        return TurnResult(
+          messages: current.toScribeMessages(),
+          rawMessages: current,
+          outcome: .interrupted)
       }
     }
 
@@ -192,5 +295,22 @@ public struct ScribeAgent: Sendable {
 
   public func abort() {
     abortNotifier.request()
+  }
+
+  // MARK: - Helpers
+
+  /// Inject a system message at the head of `initialMessages` when one is
+  /// not already present and a non-empty `systemPrompt` is supplied. Keeps
+  /// older callers (which baked the system message into `initialMessages`)
+  /// working unchanged.
+  private static func applySystemPrompt(
+    systemPrompt: String,
+    initialMessages: [Components.Schemas.ChatMessage]
+  ) -> [Components.Schemas.ChatMessage] {
+    guard !systemPrompt.isEmpty else { return initialMessages }
+    if initialMessages.first?.role == .system { return initialMessages }
+    var result = initialMessages
+    result.insert(.init(role: .system, content: systemPrompt), at: 0)
+    return result
   }
 }

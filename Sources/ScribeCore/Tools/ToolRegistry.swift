@@ -2,7 +2,7 @@ import Foundation
 import Logging
 import ScribeLLM
 
-public struct ToolRegistry: Sendable {
+public struct ToolRegistry: Sendable, ToolExecutor {
   private let tools: [String: any ScribeTool]
 
   /// The ChatTool schemas sent to the LLM, derived from the same tools.
@@ -19,6 +19,21 @@ public struct ToolRegistry: Sendable {
     }
     self.tools = map
     self.chatTools = tools.map { type(of: $0).toChatTool() }
+  }
+
+  /// ``ToolExecutor`` conformance: route a resolved invocation through the
+  /// registry's abort-aware `run(name:arguments:...)` helper.
+  public func execute(
+    _ invocation: ToolInvocation,
+    workingDirectory: ScribeFilePath,
+    abort: any AbortObserver
+  ) async throws -> String {
+    try await run(
+      name: invocation.name,
+      arguments: invocation.arguments,
+      workingDirectory: workingDirectory,
+      abortObserver: abort
+    )
   }
 
   /// Execute a tool by name with cooperative abort support.
@@ -209,7 +224,11 @@ public struct ToolRegistry: Sendable {
   private static let jsonSerializationFallback =
     "{\"ok\":false,\"error\":\"tool result could not be encoded as JSON\"}"
 
-  static func jsonError(_ text: String) -> String {
+  /// Convenience builder for the `{"ok": false, "error": "..."}` JSON
+  /// shape that the agent loop and built-in tools use to surface tool
+  /// failures to the assistant. Exposed so custom ``ToolExecutor``s can
+  /// produce matching error payloads.
+  public static func jsonError(_ text: String) -> String {
     let payload: [String: Any] = ["ok": false, "error": text]
     do {
       let data = try JSONSerialization.data(withJSONObject: payload, options: [])

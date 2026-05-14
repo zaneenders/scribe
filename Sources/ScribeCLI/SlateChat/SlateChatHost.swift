@@ -450,8 +450,11 @@ internal final class SlateChatHost {
         )
         // Drift detection for turnComplete
         if case .turnComplete(let referenceMessages) = te {
+          // `renderMessagesToTranscript` still consumes the wire-typed
+          // message representation. Bridge at the boundary — the public
+          // event surface stays transport-agnostic (ScribeMessage).
           let batchLines = renderMessagesToTranscript(
-            referenceMessages, theme: theme, renderer: markdownRenderer)
+            referenceMessages.toChatMessages(), theme: theme, renderer: markdownRenderer)
           if transcriptState.lines != batchLines {
             let sc = transcriptState.lines.count
             let bc = batchLines.count

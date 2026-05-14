@@ -26,5 +26,5 @@ public enum TranscriptEvent: Sendable {
   /// consistency comparison (streaming render vs batch render).
   /// The host should NOT rebuild from these messages — the streaming path
   /// is authoritative.  Differences are logged as warnings for later test-casing.
-  case turnComplete(referenceMessages: [Components.Schemas.ChatMessage])
+  case turnComplete(referenceMessages: [ScribeMessage])
 }

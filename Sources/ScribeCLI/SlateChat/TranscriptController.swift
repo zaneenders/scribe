@@ -65,7 +65,8 @@ struct TranscriptController {
       return applyEnterAssistantSection(section, previous: previous, state: &state, theme: theme)
 
     case .appendAssistantText(let section, let text):
-      return applyAppendAssistantText(section, text: text, state: &state, theme: theme, renderer: renderer, followingLive: followingLive)
+      return applyAppendAssistantText(
+        section, text: text, state: &state, theme: theme, renderer: renderer, followingLive: followingLive)
 
     case .finalizeAssistantStream:
       return applyFinalizeAssistantStream(state: &state, theme: theme, renderer: renderer)
@@ -95,21 +96,25 @@ struct TranscriptController {
     case .skippedUnreadableStreamLine:
       state.lines.append(
         TLine(spans: [
-          StyledSpan(fg: theme.skippedStreamLine, bg: theme.background, bold: false, text: "(skipped one stream line: not valid completion JSON)"),
+          StyledSpan(
+            fg: theme.skippedStreamLine, bg: theme.background, bold: false,
+            text: "(skipped one stream line: not valid completion JSON)")
         ]))
       return Effects(needsRender: true)
 
     case .harnessError(let error):
       state.lines.append(
         TLine(spans: [
-          StyledSpan(fg: theme.errorFG, bg: theme.background, bold: false, text: "error: \(error.errorDescription ?? String(describing: error))"),
+          StyledSpan(
+            fg: theme.errorFG, bg: theme.background, bold: false,
+            text: "error: \(error.errorDescription ?? String(describing: error))")
         ]))
       return Effects(needsRender: true)
 
     case .turnInterrupted:
       state.lines.append(
         TLine(spans: [
-          StyledSpan(fg: theme.interruptedFG, bg: theme.background, bold: false, text: "(interrupted)"),
+          StyledSpan(fg: theme.interruptedFG, bg: theme.background, bold: false, text: "(interrupted)")
         ]))
       state.streamingOpenLine = nil
       state.streamingOpenLineRaw = ""
@@ -147,18 +152,20 @@ struct TranscriptController {
       }
     }
     let header = TLine(spans: [
-      StyledSpan(fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:"),
+      StyledSpan(fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:")
     ])
     state.lines.append(header)
     switch section {
     case .reasoning:
-      state.lines.append(TLine(spans: [
-        StyledSpan(fg: theme.sectionLabel, bg: theme.background, bold: false, text: "  · reasoning"),
-      ]))
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(fg: theme.sectionLabel, bg: theme.background, bold: false, text: "  · reasoning")
+        ]))
     case .answer:
-      state.lines.append(TLine(spans: [
-        StyledSpan(fg: theme.sectionLabel, bg: theme.background, bold: false, text: "  · answer"),
-      ]))
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(fg: theme.sectionLabel, bg: theme.background, bold: false, text: "  · answer")
+        ]))
     }
     state.streamingOpenLine = TLine(spans: [])
     state.streamingOpenLineRaw = ""
@@ -263,10 +270,10 @@ struct TranscriptController {
     theme: CLITheme
   ) -> Effects {
     let lineA = TLine(spans: [
-      StyledSpan(fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:"),
+      StyledSpan(fg: theme.scribePrefix, bg: theme.background, bold: false, text: "scribe:")
     ])
     let lineB = TLine(spans: [
-      StyledSpan(fg: theme.emptyTurn, bg: theme.background, bold: false, text: "(empty turn)"),
+      StyledSpan(fg: theme.emptyTurn, bg: theme.background, bold: false, text: "(empty turn)")
     ])
     state.lines.append(lineA)
     state.lines.append(lineB)
@@ -319,16 +326,17 @@ struct TranscriptController {
     let argSummary = ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: arguments)
     let outputLines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: output)
     var spans: [StyledSpan] = [
-      StyledSpan(fg: theme.toolInvocation, bg: theme.background, bold: false, text: "▶ \(name)"),
+      StyledSpan(fg: theme.toolInvocation, bg: theme.background, bold: false, text: "▶ \(name)")
     ]
     if let argSummary {
       spans.append(StyledSpan(fg: theme.toolArgSummary, bg: theme.background, bold: false, text: " \(argSummary)"))
     }
     state.lines.append(TLine(spans: spans))
     for ol in outputLines {
-      state.lines.append(TLine(spans: [
-        StyledSpan(fg: theme.toolOutput, bg: theme.background, bold: false, text: "  \(ol)"),
-      ]))
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(fg: theme.toolOutput, bg: theme.background, bold: false, text: "  \(ol)")
+        ]))
     }
     return Effects(needsRender: true)
   }
@@ -340,23 +348,25 @@ struct TranscriptController {
   ) -> Effects {
     guard !text.isEmpty else { return Effects(needsRender: false) }
     let logicalLines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    state.lines.append(TLine(spans: [
-      StyledSpan(fg: theme.userPrefix, bg: theme.background, bold: false, text: "you:"),
-    ]))
+    state.lines.append(
+      TLine(spans: [
+        StyledSpan(fg: theme.userPrefix, bg: theme.background, bold: false, text: "you:")
+      ]))
     for row in logicalLines {
       if row.isEmpty {
         state.lines.append(TLine(spans: []))
         continue
       }
-      state.lines.append(TLine(spans: [
-        StyledSpan(fg: theme.userBody, bg: theme.background, bold: false, text: "  \(row)"),
-      ]))
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(fg: theme.userBody, bg: theme.background, bold: false, text: "  \(row)")
+        ]))
     }
     return Effects(needsRender: true)
   }
 
   private static func applyTurnComplete(
-    _ referenceMessages: [Components.Schemas.ChatMessage],
+    _ referenceMessages: [ScribeMessage],
     state: inout TranscriptState,
     theme: CLITheme,
     renderer: MarkdownRenderer

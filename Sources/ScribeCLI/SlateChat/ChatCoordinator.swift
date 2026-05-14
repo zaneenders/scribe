@@ -3,6 +3,16 @@ import Logging
 import ScribeCore
 import ScribeLLM
 
+/// Reference embedder that drives a ``ScribeAgent`` from a `lines` stream
+/// of user submissions.
+///
+/// `ChatCoordinator` is intentionally narrow: it owns nothing UI-shaped
+/// (Slate, `@MainActor`, terminal handling all live in ``SlateChatHost``)
+/// and reaches for the ``ScribeAgent`` only through its public surface —
+/// `prompt(...)`, `abort()`, and the ``TurnResult`` it returns. Copy this
+/// file to ship Scribe inside a server or another tool; the only
+/// outside-the-agent dependencies are ``ChatSessionStore`` (persistence)
+/// and the `enqueue` callback (where transcript events are routed).
 final class ChatCoordinator: Sendable {
 
   private let configuration: ScribeConfig
@@ -58,17 +68,23 @@ final class ChatCoordinator: Sendable {
   }
 
   func run() async {
-    func persistNew(from agent: ScribeAgent, since count: Int) async {
-      let newMessages = await agent.messages(since: count)
-      guard !newMessages.isEmpty else { return }
+    /// Append messages produced by the most recent turn to the JSONL store.
+    /// Uses the messages returned by ``TurnResult`` rather than reaching back
+    /// into the agent's internal buffer — keeping the coordinator on the
+    /// public surface.
+    func persistNew(
+      allMessages: [Components.Schemas.ChatMessage],
+      persistedCount: Int
+    ) {
+      guard persistedCount < allMessages.count else { return }
+      let newMessages = Array(allMessages[persistedCount...])
       do {
         try ChatSessionStore.appendMessages(newMessages, to: persistURL)
-        let total = await agent.messages.count
         log.trace(
           "chat.persist.append",
           metadata: [
             "new": "\(newMessages.count)",
-            "total": "\(total)",
+            "total": "\(allMessages.count)",
             "path": "\(persistURL.path)",
           ])
       } catch {
@@ -124,6 +140,11 @@ final class ChatCoordinator: Sendable {
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
+        // Track the messages the agent committed during this turn so we can
+        // persist + emit `turnComplete` without reaching back into the
+        // agent's storage actor. Falls back to the agent's snapshot if the
+        // turn never produced a TurnResult (e.g. HTTP error before stream).
+        var committed: [Components.Schemas.ChatMessage]? = nil
         do {
           let ts = await agent.prompt(trimmed, log: log)
           for await event in ts.events {
@@ -131,6 +152,7 @@ final class ChatCoordinator: Sendable {
             enqueue(.transcript(event))
           }
           let result = try await ts.result.value
+          committed = result.rawMessages
           switch result.outcome {
           case .completed:
             log.info("event=agent.turn.end status=completed")
@@ -149,15 +171,25 @@ final class ChatCoordinator: Sendable {
           )
           enqueue(.transcript(.harnessError(se)))
         }
-        await persistNew(from: agent, since: persistedCount)
-        persistedCount = await agent.messages.count
 
-        let committed = await agent.messages
-        enqueue(.transcript(.turnComplete(referenceMessages: committed)))
+        let allMessages: [Components.Schemas.ChatMessage]
+        if let committed {
+          allMessages = committed
+        } else {
+          allMessages = await agent.rawMessages
+        }
+        persistNew(allMessages: allMessages, persistedCount: persistedCount)
+        persistedCount = allMessages.count
+
+        enqueue(
+          .transcript(
+            .turnComplete(
+              referenceMessages: allMessages.toScribeMessages())))
       }
-      await persistNew(from: agent, since: persistedCount)
-      let finalMsgCount = await agent.messages.count
-      log.debug("event=chat.coordinator.end transcript_messages=\(finalMsgCount)")
+      // Final flush in case the loop exited with un-persisted messages.
+      let trailing = await agent.rawMessages
+      persistNew(allMessages: trailing, persistedCount: persistedCount)
+      log.debug("event=chat.coordinator.end transcript_messages=\(trailing.count)")
     } catch {
       let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
       enqueue(.transcript(.harnessError(scribeError)))
