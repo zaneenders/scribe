@@ -7,10 +7,12 @@ enum SubmitEffect: Equatable, Sendable {
   case sendToGate(String)
   /// Interrupt the model AND send text to the gate (empty Enter with queued message).
   case interruptAndSend(String)
-  /// Park text in the queued tray (model is busy).
-  case setQueued(String)
-  /// Remove any queued tray text.
-  case clearQueued
+  /// Park text in the queued tray (model is busy).  Associated value is the
+  /// updated array so the host can update its rendering state.
+  case setQueued([String])
+  /// Remove first queued item (Ctrl+C recall).  Associated value is the
+  /// remaining array after the pop.
+  case clearQueued([String])
   /// Request an interrupt of the in-flight model turn.
   case interruptModel
   /// Stop the chat loop (Ctrl+C on idle, Ctrl+D, EOF).
@@ -26,8 +28,8 @@ enum SubmitEffect: Equatable, Sendable {
 struct SubmitCoordinator {
   /// Whether model turn is busy (set by host before calling into coordinator).
   private var modelBusy: Bool = false
-  /// Text parked in the queued tray while the model is busy, if any.
-  private(set) var queuedText: String? = nil
+  /// Queued submissions (FIFO) parked while the model is busy.
+  private(set) var queuedTexts: [String] = []
 
   // MARK: - Inputs from host
 
@@ -44,11 +46,11 @@ struct SubmitCoordinator {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
     if trimmed.isEmpty {
-      // Empty buffer + queued tray → interrupt-and-send.
-      guard let queued = queuedText else {
+      // Empty buffer + queued tray → interrupt-and-send oldest.
+      guard !queuedTexts.isEmpty else {
         return .none  // Empty buffer, nothing queued → no-op.
       }
-      queuedText = nil
+      let queued = queuedTexts.removeFirst()
       if modelBusy {
         return .interruptAndSend(queued)
       }
@@ -56,8 +58,8 @@ struct SubmitCoordinator {
     }
 
     if modelBusy {
-      queuedText = text
-      return .setQueued(text)
+      queuedTexts.append(text)
+      return .setQueued(queuedTexts)
     }
 
     return .sendToGate(text)
@@ -66,13 +68,13 @@ struct SubmitCoordinator {
   // MARK: - Ctrl+C ladder
 
   /// Three-step ladder, evaluated in order:
-  /// 1. Queued message present → recall it to input buffer.
+  /// 1. Queued message present → recall oldest to input buffer.
   /// 2. Model is busy → request interrupt.
   /// 3. Model is idle, nothing queued → exit chat.
   mutating func handleCtrlC() -> (effect: SubmitEffect, recallText: String?) {
-    if let queued = queuedText {
-      queuedText = nil
-      return (.clearQueued, queued)
+    if !queuedTexts.isEmpty {
+      let queued = queuedTexts.removeFirst()
+      return (.clearQueued(queuedTexts), queued)
     }
     if modelBusy {
       return (.interruptModel, nil)
@@ -84,12 +86,20 @@ struct SubmitCoordinator {
 
   /// Called by the host when the model transitions from busy → idle.
   ///
-  /// If a message was queued while the model was busy, it is auto-flushed
-  /// to the coordinator now.  Only fires when model is currently idle.
-  mutating func handleModelTurnEnd() -> SubmitEffect {
-    guard !modelBusy, let queued = queuedText else { return .none }
-    queuedText = nil
-    return .sendToGate(queued)
+  /// If messages were queued while the model was busy, they are all
+  /// auto-flushed to the coordinator now.  Returns an array of texts
+  /// to send (oldest first), or an empty array when nothing is queued.
+  ///
+  /// TODO: make drain strategy pluggable (all-at-once vs one-per-turn).
+  /// A hook/plugin could choose to drain only the oldest message here and
+  /// leave the rest for subsequent turns, which would let the user
+  /// interrupt or recall individual queued messages between auto-flushes
+  /// instead of having them all pushed out in one burst.
+  mutating func handleModelTurnEnd() -> [String] {
+    guard !modelBusy, !queuedTexts.isEmpty else { return [] }
+    let drained = queuedTexts
+    queuedTexts = []
+    return drained
   }
 }
 
@@ -98,7 +108,7 @@ struct SubmitCoordinator {
 /// Host-side mutable state affected by `SubmitEffect` application.
 /// Pure value type — testable without any TUI infrastructure.
 struct HostSubmitState: Equatable {
-  var queuedTrayText: String? = nil
+  var queuedTrayTexts: [String] = []
 
   /// Side effects the host must perform after applying the state transition.
   struct SideEffects: Equatable {
@@ -119,21 +129,19 @@ struct HostSubmitState: Equatable {
     var fx = SideEffects()
     switch effect {
     case .sendToGate(let text):
-      state.queuedTrayText = nil
       fx.gateText = text
       fx.needsDelayedRenderWake = true
 
     case .interruptAndSend(let text):
-      state.queuedTrayText = nil
       fx.gateText = text
       fx.interruptLogTag = "interrupt-and-send"
       fx.needsDelayedRenderWake = true
 
-    case .setQueued(let text):
-      state.queuedTrayText = text
+    case .setQueued(let texts):
+      state.queuedTrayTexts = texts
 
-    case .clearQueued:
-      state.queuedTrayText = nil
+    case .clearQueued(let texts):
+      state.queuedTrayTexts = texts
 
     case .interruptModel:
       fx.interruptLogTag = "requested-by-ctrl-c"
