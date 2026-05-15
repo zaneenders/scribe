@@ -127,7 +127,6 @@ func runAgentLoop(
           "round": "\(round)", "tool_count": "\(invocations.count)",
           "tools": "\(invocations.map(\.name).joined(separator: ","))",
         ])
-      emit(.toolRoundHeader(round: round, toolNames: invocations.map(\.name)))
 
       for inv in invocations {
         if abortObserver.isAborted() {
@@ -175,7 +174,6 @@ func runAgentLoop(
             "elapsed_ms": "\(elapsedMs)",
           ])
         emit(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
-        emit(.blankLine)
         let toolMsg = Components.Schemas.ChatMessage(
           role: .tool, content: jsonOutput, name: nil, toolCalls: nil, toolCallId: inv.id)
         currentContext.messages.append(toolMsg)
@@ -329,7 +327,6 @@ private func runSingleRound(
       answer_chars=\(assistantText.count) \
       reasoning_chars=\(assistantReasoning?.count ?? 0)
       """)
-    emit(.blankLine)
     return .completed
   }
 

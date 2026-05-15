@@ -74,33 +74,11 @@ struct TranscriptController {
     case .emptyAssistantTurn:
       return applyEmptyAssistantTurn(state: &state, theme: theme)
 
-    case .usage(let usage, let tps):
-      return applyUsage(usage, tokensPerSecond: tps, state: &state, contextWindow: contextWindow)
-
-    case .blankLine:
-      state.lines.append(TLine(spans: []))
-      return Effects(needsRender: true)
-
-    case .toolRoundHeader(let round, let toolNames):
-      let names = toolNames.joined(separator: ", ")
-      let line = TLine(spans: [
-        StyledSpan(fg: theme.toolRoundHeader, bg: theme.background, bold: true, text: "tool round \(round) "),
-        StyledSpan(fg: theme.toolNames, bg: theme.background, bold: false, text: names),
-      ])
-      state.lines.append(line)
-      return Effects(needsRender: true)
-
     case .toolInvocation(let name, let arguments, let output):
       return applyToolInvocation(name: name, arguments: arguments, output: output, state: &state, theme: theme)
 
-    case .skippedUnreadableStreamLine:
-      state.lines.append(
-        TLine(spans: [
-          StyledSpan(
-            fg: theme.skippedStreamLine, bg: theme.background, bold: false,
-            text: "(skipped one stream line: not valid completion JSON)")
-        ]))
-      return Effects(needsRender: true)
+    case .usage(let usage, let tps):
+      return applyUsage(usage, tokensPerSecond: tps, state: &state, contextWindow: contextWindow)
 
     case .harnessError(let error):
       state.lines.append(
@@ -120,12 +98,6 @@ struct TranscriptController {
       state.streamingOpenLineRaw = ""
       state.streamingSectionStartLineIndex = nil
       return Effects(needsRender: true)
-
-    case .userSubmitted(let text):
-      return applyUserSubmitted(text, state: &state, theme: theme)
-
-    case .turnComplete(let referenceMessages):
-      return applyTurnComplete(referenceMessages, state: &state, theme: theme, renderer: renderer)
     }
   }
 
@@ -262,6 +234,7 @@ struct TranscriptController {
     }
     state.streamingOpenLineRaw = ""
     state.streamingSectionStartLineIndex = nil
+    state.lines.append(TLine(spans: []))
     return Effects(needsRender: true)
   }
 
@@ -338,10 +311,11 @@ struct TranscriptController {
           StyledSpan(fg: theme.toolOutput, bg: theme.background, bold: false, text: "  \(ol)")
         ]))
     }
+    state.lines.append(TLine(spans: []))
     return Effects(needsRender: true)
   }
 
-  private static func applyUserSubmitted(
+  static func applyUserSubmitted(
     _ text: String,
     state: inout TranscriptState,
     theme: CLITheme
@@ -362,26 +336,6 @@ struct TranscriptController {
           StyledSpan(fg: theme.userBody, bg: theme.background, bold: false, text: "  \(row)")
         ]))
     }
-    return Effects(needsRender: true)
-  }
-
-  private static func applyTurnComplete(
-    _ referenceMessages: [ScribeMessage],
-    state: inout TranscriptState,
-    theme: CLITheme,
-    renderer: MarkdownRenderer
-  ) -> Effects {
-    // Finalize any dangling streaming state (defensive).
-    if let open = state.streamingOpenLine {
-      state.lines.append(open)
-    }
-    state.streamingOpenLine = nil
-    state.streamingOpenLineRaw = ""
-    state.streamingSectionStartLineIndex = nil
-
-    // Drift detection (streaming vs batch render) is performed by the host
-    // after this event returns, since it needs Logger access.
-
     return Effects(needsRender: true)
   }
 

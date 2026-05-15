@@ -60,6 +60,13 @@ struct ChatDriver {
     }
   }
 
+  /// Record a user submission in the transcript (equivalent to the
+  /// host emitting `HostEvent.userSubmitted`).
+  @discardableResult
+  mutating func handleUserSubmitted(_ text: String) -> TranscriptController.Effects {
+    TranscriptController.applyUserSubmitted(text, state: &state, theme: theme)
+  }
+
   /// Render the complete transcript from a list of agent messages (batch path).
   /// Useful for comparison against the streaming path in golden tests.
   func batchRender(_ messages: [ScribeMessage]) -> [TLine] {

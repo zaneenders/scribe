@@ -14,13 +14,11 @@ struct TranscriptControllerTests {
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
-  // MARK: - .userSubmitted
+  // MARK: - applyUserSubmitted (direct call — no longer a TranscriptEvent)
 
   @Test func userSubmittedProducesYouPrefix() {
     var state = TranscriptState()
-    let effects = TranscriptController.apply(
-      .userSubmitted("hello"), to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
+    let effects = TranscriptController.applyUserSubmitted("hello", state: &state, theme: theme)
     #expect(effects.needsRender)
     #expect(state.lines.count == 2)
     #expect(state.lines[0].spans[0].text == "you:")
@@ -29,18 +27,14 @@ struct TranscriptControllerTests {
 
   @Test func userSubmittedEmptyNoOp() {
     var state = TranscriptState()
-    let effects = TranscriptController.apply(
-      .userSubmitted(""), to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
+    let effects = TranscriptController.applyUserSubmitted("", state: &state, theme: theme)
     #expect(!effects.needsRender)
     #expect(state.lines.isEmpty)
   }
 
   @Test func userSubmittedMultiLine() {
     var state = TranscriptState()
-    let effects = TranscriptController.apply(
-      .userSubmitted("hello\nworld"), to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
+    let effects = TranscriptController.applyUserSubmitted("hello\nworld", state: &state, theme: theme)
     #expect(effects.needsRender)
     #expect(state.lines.count == 3)  // "you:" + "  hello" + "  world"
     #expect(state.lines[0].spans[0].text == "you:")
@@ -48,45 +42,20 @@ struct TranscriptControllerTests {
     #expect(state.lines[2].spans[0].text.contains("world"))
   }
 
-  // MARK: - .blankLine
+  // MARK: - .toolInvocation (blank line now appended internally)
 
-  @Test func blankLine() {
-    var state = TranscriptState()
-    let effects = TranscriptController.apply(
-      .blankLine, to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
-    #expect(effects.needsRender)
-    #expect(state.lines.count == 1)
-    #expect(state.lines[0].spans.isEmpty)
-  }
-
-  // MARK: - .toolRoundHeader
-
-  @Test func toolRoundHeader() {
-    var state = TranscriptState()
-    let effects = TranscriptController.apply(
-      .toolRoundHeader(round: 1, toolNames: ["shell", "read_file"]),
-      to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
-    #expect(effects.needsRender)
-    #expect(state.lines.count == 1)
-    let text = state.lines[0].spans.map(\.text).joined()
-    #expect(text.contains("tool round 1"))
-    #expect(text.contains("shell"))
-    #expect(text.contains("read_file"))
-  }
-
-  // MARK: - .toolInvocation
-
-  @Test func toolInvocation() {
+  @Test func toolInvocationAppendsTrailingBlankLine() {
     var state = TranscriptState()
     let effects = TranscriptController.apply(
       .toolInvocation(
-        name: "shell", arguments: #"{"command":"ls"}"#, output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#),
+        name: "shell", arguments: #"{"command":"ls"}"#,
+        output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
-    #expect(state.lines.count >= 1)
+    #expect(state.lines.count >= 2)
+    // Last line should be the blank separator appended by the controller.
+    #expect(state.lines.last?.spans.isEmpty == true)
     let firstLine = state.lines[0].spans.map(\.text).joined()
     #expect(firstLine.contains("shell"))
   }
@@ -139,9 +108,7 @@ struct TranscriptControllerTests {
 
   @Test func enterAssistantSectionAnswer() {
     var state = TranscriptState()
-    _ = TranscriptController.apply(
-      .userSubmitted("test"), to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
+    _ = TranscriptController.applyUserSubmitted("test", state: &state, theme: theme)
 
     let effects = TranscriptController.apply(
       .enterAssistantSection(.answer, previous: nil),
@@ -158,9 +125,7 @@ struct TranscriptControllerTests {
 
   @Test func enterAssistantSectionReasoning() {
     var state = TranscriptState()
-    _ = TranscriptController.apply(
-      .userSubmitted("test"), to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
+    _ = TranscriptController.applyUserSubmitted("test", state: &state, theme: theme)
 
     let effects = TranscriptController.apply(
       .enterAssistantSection(.reasoning, previous: nil),
@@ -169,6 +134,23 @@ struct TranscriptControllerTests {
     #expect(effects.needsRender)
     let labelLine = state.lines.last?.spans[0].text
     #expect(labelLine == "  · reasoning")
+  }
+
+  // MARK: - .finalizeAssistantStream (blank line now appended internally)
+
+  @Test func finalizeAssistantStreamAppendsTrailingBlankLine() {
+    var state = TranscriptState()
+    _ = TranscriptController.apply(
+      .enterAssistantSection(.answer, previous: nil),
+      to: &state, theme: theme, renderer: renderer, followingLive: true, contextWindow: nil)
+    _ = TranscriptController.apply(
+      .appendAssistantText(.answer, text: "hello"),
+      to: &state, theme: theme, renderer: renderer, followingLive: true, contextWindow: nil)
+    _ = TranscriptController.apply(
+      .finalizeAssistantStream,
+      to: &state, theme: theme, renderer: renderer, followingLive: true, contextWindow: nil)
+    // Last line should be the blank separator.
+    #expect(state.lines.last?.spans.isEmpty == true)
   }
 
   // MARK: - .usage
@@ -215,64 +197,20 @@ struct TranscriptControllerTests {
     #expect(state.usageHUD?.contextWindowUsedPercent == 50)
   }
 
-  // MARK: - .turnComplete
-
-  @Test func turnCompleteFinalizesStreamingState() {
-    var state = TranscriptState()
-    state.streamingOpenLine = TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "remaining")])
-    state.streamingOpenLineRaw = "remaining"
-    state.streamingSectionStartLineIndex = 0
-
-    _ = TranscriptController.apply(
-      .turnComplete(referenceMessages: []),
-      to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
-    #expect(state.streamingOpenLine == nil)
-    #expect(state.streamingOpenLineRaw.isEmpty)
-    #expect(state.streamingSectionStartLineIndex == nil)
-  }
-
-  // MARK: - .skippedUnreadableStreamLine
-
-  @Test func skippedUnreadableStreamLine() {
-    var state = TranscriptState()
-    let effects = TranscriptController.apply(
-      .skippedUnreadableStreamLine, to: &state, theme: theme, renderer: renderer,
-      followingLive: true, contextWindow: nil)
-    #expect(effects.needsRender)
-    #expect(state.lines.count == 1)
-    #expect(state.lines[0].spans.map(\.text).joined().contains("skipped"))
-  }
-
   // MARK: - Streaming rendering respects followingLive
 
   @Test func appendAssistantTextSkipsRenderWhenScrolledUp() {
     var state = TranscriptState()
-    // Set up a streaming section
     _ = TranscriptController.apply(
       .enterAssistantSection(.answer, previous: nil),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
 
-    // Now append text while NOT following live (user scrolled up)
     let effects = TranscriptController.apply(
       .appendAssistantText(.answer, text: "some text"),
       to: &state, theme: theme, renderer: renderer,
       followingLive: false, contextWindow: nil)
     #expect(!effects.needsRender)
     #expect(state.streamingOpenLineRaw == "some text")
-  }
-
-  // MARK: - Idempotency
-
-  @Test func multipleBlankLines() {
-    var state = TranscriptState()
-    for _ in 0..<5 {
-      _ = TranscriptController.apply(
-        .blankLine, to: &state, theme: theme, renderer: renderer,
-        followingLive: true, contextWindow: nil)
-    }
-    #expect(state.lines.count == 5)
-    #expect(state.lines.allSatisfy { $0.spans.isEmpty })
   }
 }

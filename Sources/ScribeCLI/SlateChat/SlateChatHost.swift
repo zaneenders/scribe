@@ -40,6 +40,7 @@ private actor UserLineGate {
 
 enum HostEvent: Sendable {
   case transcript(TranscriptEvent)
+  case userSubmitted(String)
   case modelTurnRunning(Bool)
   case coordinatorFinished
 }
@@ -470,33 +471,12 @@ internal final class SlateChatHost {
           followingLive: viewport.followingLive,
           contextWindow: contextWindow
         )
-        // Drift detection for turnComplete
-        if case .turnComplete(let referenceMessages) = te {
-          let batchLines = renderMessagesToTranscript(
-            referenceMessages, theme: theme, renderer: markdownRenderer)
-          if transcriptState.lines != batchLines {
-            let sc = transcriptState.lines.count
-            let bc = batchLines.count
-            let driftMeta: Logger.Metadata = [
-              "streaming_count": .string("\(sc)"),
-              "batch_count": .string("\(bc)"),
-            ]
-            log.warning("transcript.streaming-drift", metadata: driftMeta)
-            let maxCount = max(sc, bc)
-            for idx in 0..<maxCount {
-              let sLine = idx < sc ? transcriptState.lines[idx] : nil
-              let bLine = idx < bc ? batchLines[idx] : nil
-              if sLine != bLine {
-                let detailMeta: Logger.Metadata = [
-                  "index": .string("\(idx)"),
-                  "streaming": .string(sLine.map { spansToDebugString($0) } ?? "(missing)"),
-                  "batch": .string(bLine.map { spansToDebugString($0) } ?? "(missing)"),
-                ]
-                log.warning("transcript.streaming-drift.detail", metadata: detailMeta)
-              }
-            }
-          }
+        if effects.needsRender {
+          renderWake?.requestRender()
         }
+      case .userSubmitted(let text):
+        let effects = TranscriptController.applyUserSubmitted(
+          text, state: &transcriptState, theme: theme)
         if effects.needsRender {
           renderWake?.requestRender()
         }

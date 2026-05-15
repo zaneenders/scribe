@@ -133,7 +133,7 @@ final class ChatCoordinator: Sendable {
           continue
         }
 
-        enqueue(.transcript(.userSubmitted(trimmed)))
+        enqueue(.userSubmitted(trimmed))
         log.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
 
         enqueue(.modelTurnRunning(true))
@@ -179,11 +179,6 @@ final class ChatCoordinator: Sendable {
         }
         persistNew(allMessages: allMessages, persistedCount: persistedCount)
         persistedCount = allMessages.count
-
-        enqueue(
-          .transcript(
-            .turnComplete(
-              referenceMessages: allMessages)))
       }
       // Final flush in case the loop exited with un-persisted messages.
       let trailing = await agent.messages
