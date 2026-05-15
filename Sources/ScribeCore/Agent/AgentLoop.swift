@@ -23,10 +23,12 @@ struct AgentLoopConfig: Sendable {
   /// in-process; embedders can swap in an approval / sandbox / forwarding
   /// executor without subclassing.
   let toolExecutor: any ToolExecutor
-  /// Tool schemas advertised to the model. The registry derives these from
-  /// the same `[any ScribeTool]` it executes, but the loop only ever reads
-  /// the schema list — so a custom executor can declare a different schema
-  /// surface than its execution surface.
+  /// Tool schemas advertised to the model.  Derived from the same
+  /// `[any ScribeTool]` that backs the default ``ToolRegistry`` so
+  /// schema and execution surface stay in sync.  When a custom
+  /// ``ToolExecutor`` is supplied, schemas are derived from the `tools`
+  /// parameter of ``ScribeAgent`` and the caller is responsible for
+  /// consistency (mismatches are surfaced as recoverable JSON errors).
   let chatTools: [Components.Schemas.ChatTool]
   let temperature: Double
   let maxToolRounds: Int

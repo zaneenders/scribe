@@ -101,11 +101,21 @@ public struct ScribeAgent: Sendable {
   ) {
     self.client = client
     self.workingDirectory = workingDirectory
-    // Schemas the model is told about — always derived directly from
-    // `tools`, even when a custom executor is supplied. The registry is
-    // only built when we actually need it as the default executor.
-    self.chatTools = tools.map { type(of: $0).toChatTool() }
-    self.toolExecutor = toolExecutor ?? ToolRegistry(tools: tools)
+    // Schemas the model is told about.  When using the default
+    // ToolRegistry, both `chatTools` and the execution surface come from
+    // the same `tools` array — they cannot diverge.  When a custom
+    // ToolExecutor is supplied, schemas are derived from `tools`; the
+    // caller is responsible for passing tools whose schemas match what
+    // the executor can handle (mismatches surface as JSON error strings
+    // that the assistant can self-correct).
+    if let customExecutor = toolExecutor {
+      self.toolExecutor = customExecutor
+      self.chatTools = tools.map { type(of: $0).toChatTool() }
+    } else {
+      let registry = ToolRegistry(tools: tools)
+      self.toolExecutor = registry
+      self.chatTools = registry.chatTools
+    }
     self.storage = Storage(
       model: model,
       messages: Self.applySystemPrompt(
