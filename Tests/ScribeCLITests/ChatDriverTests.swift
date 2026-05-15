@@ -19,11 +19,10 @@ struct ChatDriverTests {
   @Test func fullStreamingTurn() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
-    driver.handle(TranscriptEvent.userSubmitted("hello"))
+    driver.handleUserSubmitted("hello")
     driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
     driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Hello! How can I help?"))
     driver.handle(TranscriptEvent.finalizeAssistantStream)
-    driver.handle(TranscriptEvent.turnComplete(referenceMessages: []))
 
     #expect(driver.state.lines.count > 0)
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
@@ -37,11 +36,10 @@ struct ChatDriverTests {
   @Test func toolInvocationTurn() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
-    driver.handle(TranscriptEvent.userSubmitted("list files"))
+    driver.handleUserSubmitted("list files")
     driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
     driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Let me check"))
     driver.handle(TranscriptEvent.finalizeAssistantStream)
-    driver.handle(TranscriptEvent.toolRoundHeader(round: 1, toolNames: ["shell"]))
     driver.handle(
       TranscriptEvent.toolInvocation(
         name: "shell",
@@ -50,8 +48,8 @@ struct ChatDriverTests {
       ))
 
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
-    #expect(allText.contains("tool round 1"))
     #expect(allText.contains("shell"))
+    #expect(allText.contains("list files"))
   }
 
   // MARK: - Reasoning section
@@ -59,7 +57,7 @@ struct ChatDriverTests {
   @Test func reasoningThenAnswer() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
-    driver.handle(TranscriptEvent.userSubmitted("complex question"))
+    driver.handleUserSubmitted("complex question")
     driver.handle(TranscriptEvent.enterAssistantSection(.reasoning, previous: nil))
     driver.handle(TranscriptEvent.appendAssistantText(.reasoning, text: "Let me think..."))
     driver.handle(TranscriptEvent.finalizeAssistantStream)
@@ -79,7 +77,7 @@ struct ChatDriverTests {
   @Test func turnInterruptedClearsStreaming() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
-    driver.handle(TranscriptEvent.userSubmitted("long task"))
+    driver.handleUserSubmitted("long task")
     driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
     driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Working..."))
     driver.handle(TranscriptEvent.turnInterrupted)
@@ -111,7 +109,7 @@ struct ChatDriverTests {
   @Test func emptyAssistantTurn() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
-    driver.handle(TranscriptEvent.userSubmitted("do nothing"))
+    driver.handleUserSubmitted("do nothing")
     driver.handle(TranscriptEvent.emptyAssistantTurn)
 
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()

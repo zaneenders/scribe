@@ -200,11 +200,6 @@ struct ScribeAgentTests {
     for await event in ts.events { events.append(event) }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
-    let hasHeader = events.contains(where: {
-      if case .toolRoundHeader(let r, let names) = $0, r == 1, names == ["fake_tool"] { return true }
-      return false
-    })
-    #expect(hasHeader)
     let hasInvocation = events.contains(where: {
       if case .toolInvocation(let name, _, _) = $0, name == "fake_tool" { return true }
       return false

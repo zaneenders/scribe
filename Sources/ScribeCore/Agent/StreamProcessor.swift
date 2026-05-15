@@ -92,7 +92,6 @@ struct StreamProcessor<AO: AbortObserver> {
           raw_prefix="\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))"
           """
         )
-        onEvent(.skippedUnreadableStreamLine)
         continue
       }
       decodedChunkCount += 1

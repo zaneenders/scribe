@@ -27,7 +27,7 @@ struct TranscriptGoldenTests {
 
     // Streaming path
     var driver = ChatDriver(renderer: renderer, theme: theme)
-    driver.handle(TranscriptEvent.userSubmitted("hello"))
+    driver.handleUserSubmitted("hello")
     driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
     driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Hi there!"))
     driver.handle(TranscriptEvent.finalizeAssistantStream)
