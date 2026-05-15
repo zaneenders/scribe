@@ -13,12 +13,21 @@ public enum TurnOutcome: Sendable, Equatable {
 }
 
 /// A resolved tool call produced by the assistant in a single round.
-struct ToolInvocation: Sendable, Equatable {
-  let id: String
-  let name: String
-  let arguments: String
+///
+/// Surfaced publicly so embedders providing their own ``ToolExecutor`` can
+/// receive the resolved invocation (`id`, `name`, JSON-encoded `arguments`)
+/// without depending on the OpenAI wire schema.
+public struct ToolInvocation: Sendable, Equatable, Hashable {
+  /// Provider-generated identifier (echoed back as `tool_call_id` on the
+  /// resulting tool message).
+  public let id: String
+  /// Tool name as the assistant requested it (must match a registered tool).
+  public let name: String
+  /// JSON-encoded argument blob from the model. Schema validation is the
+  /// executor's responsibility.
+  public let arguments: String
 
-  init(id: String, name: String, arguments: String) {
+  public init(id: String, name: String, arguments: String) {
     self.id = id
     self.name = name
     self.arguments = arguments

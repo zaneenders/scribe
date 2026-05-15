@@ -285,11 +285,12 @@ struct InputVisualLinesTests {
     // "this is a longer line that wraps" (35 chars)
     // → "this is a longer lin" (20) + "e that wraps" (15)
     let lines = TranscriptLayout.inputVisualLines(from: "short\nthis is a longer line that wraps", textWidth: 20)
-    #expect(lines == [
-      "short",
-      "this is a longer lin",
-      "e that wraps",
-    ])
+    #expect(
+      lines == [
+        "short",
+        "this is a longer lin",
+        "e that wraps",
+      ])
   }
 
   // MARK: - Whitespace handling

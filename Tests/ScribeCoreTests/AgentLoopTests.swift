@@ -119,10 +119,12 @@ private func makeConfig(
 ) -> AgentLoopConfig {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+  let registry = ToolRegistry(tools: tools)
   return AgentLoopConfig(
     model: model,
     client: client,
-    registry: ToolRegistry(tools: tools),
+    toolExecutor: registry,
+    chatTools: registry.chatTools,
     temperature: temperature,
     maxToolRounds: maxToolRounds, workingDirectory: ScribeFilePath("/tmp")
   )
@@ -131,7 +133,7 @@ private func makeConfig(
 /// Run the agent loop with a single string prompt.
 private func runLoop(
   prompt: String,
-  context: AgentContext = AgentContext(systemPrompt: "You are a test agent.", messages: []),
+  context: AgentContext = AgentContext(messages: []),
   config: AgentLoopConfig,
   abortNotifier: AbortNotifier = AbortNotifier()
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
@@ -148,7 +150,7 @@ private func runLoop(
 
 private func runLoop(
   prompt: String,
-  context: AgentContext = AgentContext(systemPrompt: "You are a test agent.", messages: []),
+  context: AgentContext = AgentContext(messages: []),
   config: AgentLoopConfig,
   countingAbortObserver: CountingAbortObserver = CountingAbortObserver(triggerAt: 1)
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
@@ -246,10 +248,12 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [FakeTool()])
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
-      registry: ToolRegistry(tools: [FakeTool()]),
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
       temperature: 0,
       maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
@@ -367,10 +371,12 @@ struct AgentLoopTests {
       let transport = FakeClientTransport(
         statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
       let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+      let registry = ToolRegistry(tools: [FakeTool()])
       let config = AgentLoopConfig(
         model: "test-model",
         client: client,
-        registry: ToolRegistry(tools: [FakeTool()]),
+        toolExecutor: registry,
+        chatTools: registry.chatTools,
         temperature: 0,
         maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
       )
@@ -471,7 +477,7 @@ struct AgentLoopTests {
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: "test")
     let (_, termination) = try await runAgentLoop(
       promptMessages: [userMsg],
-      context: AgentContext(systemPrompt: "test", messages: []),
+      context: AgentContext(messages: []),
       config: makeConfig(chunks: chunks),
       emit: { event in events.withLock { $0.append(event) } },
       log: testLogger,
@@ -479,7 +485,7 @@ struct AgentLoopTests {
     )
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
-    let usageEvents = captured.compactMap { (e: TranscriptEvent) -> (Components.Schemas.CompletionUsage, Double?)? in
+    let usageEvents = captured.compactMap { (e: TranscriptEvent) -> (ScribeUsage, Double?)? in
       if case .usage(let u, let tps) = e { return (u, tps) }
       return nil
     }
@@ -518,8 +524,7 @@ struct AgentLoopTests {
       .init(role: .user, content: "previous question"),
       .init(role: .assistant, content: "previous answer"),
     ]
-    let context = AgentContext(
-      systemPrompt: "System prompt", messages: initialMessages)
+    let context = AgentContext(messages: initialMessages)
     let (messages, termination) = try await runAgentLoop(
       promptMessages: [],
       context: context,
@@ -551,10 +556,12 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [FakeTool()])
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
-      registry: ToolRegistry(tools: [FakeTool()]),
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
       temperature: 0,
       maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )
@@ -589,10 +596,12 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [chunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [InterruptedTool()])
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
-      registry: ToolRegistry(tools: [InterruptedTool()]),
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
       temperature: 0,
       maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
     )

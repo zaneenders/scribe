@@ -1,6 +1,5 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 import Testing
 
 @testable import ScribeCLI
@@ -43,11 +42,12 @@ struct ChatDriverTests {
     driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Let me check"))
     driver.handle(TranscriptEvent.finalizeAssistantStream)
     driver.handle(TranscriptEvent.toolRoundHeader(round: 1, toolNames: ["shell"]))
-    driver.handle(TranscriptEvent.toolInvocation(
-      name: "shell",
-      arguments: #"{"command":"ls"}"#,
-      output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#
-    ))
+    driver.handle(
+      TranscriptEvent.toolInvocation(
+        name: "shell",
+        arguments: #"{"command":"ls"}"#,
+        output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#
+      ))
 
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
     #expect(allText.contains("tool round 1"))
@@ -95,12 +95,8 @@ struct ChatDriverTests {
   @Test func usageAccumulatesAcrossMultipleRounds() {
     var driver = ChatDriver(renderer: renderer, theme: theme, contextWindow: 8000)
 
-    let u1 = Components.Schemas.CompletionUsage(
-      promptTokens: 100, completionTokens: 50, totalTokens: 150,
-      promptTokensDetails: nil, completionTokensDetails: nil)
-    let u2 = Components.Schemas.CompletionUsage(
-      promptTokens: 200, completionTokens: 75, totalTokens: 275,
-      promptTokensDetails: nil, completionTokensDetails: nil)
+    let u1 = ScribeUsage(promptTokens: 100, completionTokens: 50, totalTokens: 150)
+    let u2 = ScribeUsage(promptTokens: 200, completionTokens: 75, totalTokens: 275)
 
     driver.handle(TranscriptEvent.usage(u1, tokensPerSecond: nil))
     driver.handle(TranscriptEvent.usage(u2, tokensPerSecond: nil))

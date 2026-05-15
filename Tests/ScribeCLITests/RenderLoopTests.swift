@@ -125,7 +125,7 @@ struct RenderLoopTests {
 
   @Test func flattenCacheReusesOnSameGeneration() {
     let lines = [
-      TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "test")]),
+      TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "test")])
     ]
     let cache = TranscriptLayout.FlattenCache()
 
@@ -152,7 +152,7 @@ struct RenderLoopTests {
 
   @Test func generationChangeInvalidatesFlattenCache() {
     let lines = [
-      TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "old")]),
+      TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "old")])
     ]
     var cache = TranscriptLayout.FlattenCache()
     cache.completedLogicalLines = 5

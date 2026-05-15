@@ -1,7 +1,6 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
 import SlateCore
 
 #if canImport(Darwin)
@@ -94,7 +93,7 @@ enum SlateChat {
   static func runFullscreen(
     configuration: ScribeConfig,
     systemPrompt: String,
-    resumeMessages: [Components.Schemas.ChatMessage] = [],
+    resumeMessages: [ScribeMessage] = [],
     sessionPersistenceURL: URL,
     sessionId: UUID,
     log: Logger

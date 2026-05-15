@@ -6,8 +6,11 @@ import ScribeLLM
 // MARK: - AgentContext / AgentLoopConfig
 
 /// Immutable snapshot of agent state taken before a run starts.
+///
+/// The system prompt is no longer carried separately — callers are expected
+/// to bake it into the head of `messages` (the agent's public constructors
+/// do this automatically for embedders that don't pre-include one).
 struct AgentContext: Sendable {
-  let systemPrompt: String
   var messages: [Components.Schemas.ChatMessage]
 }
 
@@ -16,7 +19,17 @@ struct AgentContext: Sendable {
 struct AgentLoopConfig: Sendable {
   let model: String
   let client: Client
-  let registry: ToolRegistry
+  /// Pluggable execution backend. The default ``ToolRegistry`` runs tools
+  /// in-process; embedders can swap in an approval / sandbox / forwarding
+  /// executor without subclassing.
+  let toolExecutor: any ToolExecutor
+  /// Tool schemas advertised to the model.  Derived from the same
+  /// `[any ScribeTool]` that backs the default ``ToolRegistry`` so
+  /// schema and execution surface stay in sync.  When a custom
+  /// ``ToolExecutor`` is supplied, schemas are derived from the `tools`
+  /// parameter of ``ScribeAgent`` and the caller is responsible for
+  /// consistency (mismatches are surfaced as recoverable JSON errors).
+  let chatTools: [Components.Schemas.ChatTool]
   let temperature: Double
   let maxToolRounds: Int
   let workingDirectory: ScribeFilePath
@@ -130,10 +143,10 @@ func runAgentLoop(
         let toolStarted = clock.now
         let jsonOutput: String
         do {
-          jsonOutput = try await config.registry.run(
-            name: inv.name, arguments: inv.arguments,
+          jsonOutput = try await config.toolExecutor.execute(
+            inv,
             workingDirectory: config.workingDirectory,
-            abortObserver: abortObserver)
+            abort: abortObserver)
         } catch is AgentTurnInterruptedError {
           currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
           newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
@@ -141,6 +154,17 @@ func runAgentLoop(
         } catch let ScribeError.toolUnknown(name) {
           log.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
           jsonOutput = ToolRegistry.jsonError("unknown tool \(name)")
+        } catch {
+          // Defensive: a custom ToolExecutor may throw arbitrary errors.
+          // Surface them to the model as a JSON-encoded tool failure so the
+          // assistant can self-correct, rather than aborting the turn.
+          log.warning(
+            "agent.tool.executor.error",
+            metadata: [
+              "tool": "\(inv.name)", "round": "\(round)",
+              "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+            ])
+          jsonOutput = ToolRegistry.jsonError(String(describing: error))
         }
         let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
         log.debug(
@@ -189,7 +213,7 @@ private func runSingleRound(
     stream: true,
     temperature: Float(config.temperature),
     maxTokens: nil,
-    tools: config.registry.chatTools,
+    tools: config.chatTools,
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
     reasoning: Components.Schemas.ChatCompletionReasoning(enabled: true)
@@ -295,7 +319,7 @@ private func runSingleRound(
       completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
       tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
       """)
-    emit(.usage(u, tokensPerSecond: tps))
+    emit(.usage(ScribeUsage(u), tokensPerSecond: tps))
   }
 
   if toolInvocations.isEmpty {

@@ -1,7 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
+import Synchronization
 import Testing
 
 @testable import ScribeCLI
@@ -70,8 +70,8 @@ struct ChatCoordinatorTests {
   @Test func coordinatorRejectsCorruptResumeSnapshot() async {
     let (lines, _) = AsyncStream<String>.makeStream()
     let events: Mutex<[HostEvent]> = Mutex([])
-    let badSnapshot: [Components.Schemas.ChatMessage] = [
-      .init(role: .user, content: "no system message in front")
+    let badSnapshot: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "no system message in front")
     ]
     do {
       _ = try ChatCoordinator(
@@ -114,20 +114,4 @@ extension ScribeConfig {
     apiKey: "test-token",
     workingDirectory: "/tmp"
   )
-}
-
-/// Simple mutex wrapper for test event collection.
-final class Mutex<T>: @unchecked Sendable {
-  private var value: T
-  private let lock = NSLock()
-
-  init(_ value: T) {
-    self.value = value
-  }
-
-  func withLock<R>(_ body: (inout T) -> R) -> R {
-    lock.lock()
-    defer { lock.unlock() }
-    return body(&value)
-  }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import ScribeLLM
 
 public enum AssistantStreamSection: Sendable, Equatable {
   case reasoning
@@ -12,7 +11,7 @@ public enum TranscriptEvent: Sendable {
   case appendAssistantText(AssistantStreamSection, text: String)
   case finalizeAssistantStream
   case emptyAssistantTurn
-  case usage(Components.Schemas.CompletionUsage, tokensPerSecond: Double?)
+  case usage(ScribeUsage, tokensPerSecond: Double?)
   case blankLine
   case toolRoundHeader(round: Int, toolNames: [String])
   case toolInvocation(name: String, arguments: String, output: String)
@@ -26,5 +25,5 @@ public enum TranscriptEvent: Sendable {
   /// consistency comparison (streaming render vs batch render).
   /// The host should NOT rebuild from these messages — the streaming path
   /// is authoritative.  Differences are logged as warnings for later test-casing.
-  case turnComplete(referenceMessages: [Components.Schemas.ChatMessage])
+  case turnComplete(referenceMessages: [ScribeMessage])
 }

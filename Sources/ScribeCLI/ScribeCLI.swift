@@ -2,7 +2,6 @@ import ArgumentParser
 import Foundation
 import ProfileRecorderServer
 import ScribeCore
-import ScribeLLM
 
 @main struct ScribeCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -102,7 +101,7 @@ import ScribeLLM
 
     let sessionPersistenceURL: URL
     let resumeMetadata: ChatSessionMetadata?
-    let resumeMessages: [Components.Schemas.ChatMessage]
+    let resumeMessages: [ScribeMessage]
     let sessionId: UUID
     if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
       sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(

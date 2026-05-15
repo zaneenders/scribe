@@ -28,12 +28,15 @@ public struct TurnStream: Sendable {
 public struct TurnResult: Sendable {
   /// The full conversation history after the turn, including any assistant
   /// and tool messages appended during execution.
-  public let messages: [Components.Schemas.ChatMessage]
+  public let messages: [ScribeMessage]
 
   /// How the turn ended.
   public let outcome: TurnOutcome
 
-  public init(messages: [Components.Schemas.ChatMessage], outcome: TurnOutcome) {
+  public init(
+    messages: [ScribeMessage],
+    outcome: TurnOutcome
+  ) {
     self.messages = messages
     self.outcome = outcome
   }

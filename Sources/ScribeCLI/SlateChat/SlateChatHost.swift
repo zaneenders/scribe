@@ -1,7 +1,6 @@
 import Foundation
 import Logging
 import ScribeCore
-import ScribeLLM
 import SlateCore
 import Synchronization
 
@@ -93,7 +92,7 @@ internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
   private let systemPrompt: String
-  private let resumeMessages: [Components.Schemas.ChatMessage]
+  private let resumeMessages: [ScribeMessage]
   private let sessionPersistenceURL: URL
   private let sessionId: UUID
   private let sessionCreatedAt: Date
@@ -145,7 +144,7 @@ internal final class SlateChatHost {
   init(
     configuration: ScribeConfig,
     systemPrompt: String,
-    resumeMessages: [Components.Schemas.ChatMessage],
+    resumeMessages: [ScribeMessage],
     sessionPersistenceURL: URL,
     sessionId: UUID,
     sessionCreatedAt: Date,

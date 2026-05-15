@@ -34,8 +34,10 @@ public protocol ScribeTool: Sendable {
 // MARK: - ScribeTool → ChatTool conversion
 
 extension ScribeTool {
-  /// Converts this tool's schema into the `ChatTool` form the LLM API expects.
-  public static func toChatTool() -> Components.Schemas.ChatTool {
+  /// Converts this tool's schema into the `ChatTool` form the LLM API
+  /// expects. `package` so the wire shape stays inside ScribeCore — only
+  /// `ScribeAgent` and `ToolRegistry` need to build the request payload.
+  package static func toChatTool() -> Components.Schemas.ChatTool {
     var props: [String: (any Sendable)?] = [:]
     var required: [String] = []
     for p in parameters {

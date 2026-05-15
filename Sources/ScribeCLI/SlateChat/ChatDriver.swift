@@ -1,13 +1,24 @@
 import Foundation
 import ScribeCore
-import ScribeLLM
 
 // MARK: - ChatDriver
 
 /// Headless orchestrator that wires `TranscriptController` + `MarkdownRenderer`
 /// together without Slate, `@MainActor`, or a terminal.
 ///
-/// This enables integration and golden tests to run without a TUI.
+/// Reference "embedder for the headless side": copy this file into your own
+/// server / CI tool to drive the public ``ScribeCore`` agent surface (via
+/// ``ChatCoordinator``) without pulling the Slate-based TUI. The two
+/// touchpoints to customise are:
+///
+/// - ``MarkdownRenderer`` — swap in a plain-text / HTML renderer for
+///   non-terminal hosts.
+/// - the `TranscriptEvent` sink — any sequence of events emitted by
+///   ``ScribeAgent.prompt(_:options:log:)`` (or relayed by
+///   ``ChatCoordinator``) feeds straight in via ``handle(_:followingLive:)``.
+///
+/// The driver holds no references to Slate, no `@MainActor`, no terminal
+/// I/O — it is unit-testable as a pure state machine.
 struct ChatDriver {
   var state: TranscriptState
   let renderer: MarkdownRenderer
@@ -49,9 +60,9 @@ struct ChatDriver {
     }
   }
 
-  /// Render the complete transcript from a list of chat messages (batch path).
+  /// Render the complete transcript from a list of agent messages (batch path).
   /// Useful for comparison against the streaming path in golden tests.
-  func batchRender(_ messages: [Components.Schemas.ChatMessage]) -> [TLine] {
+  func batchRender(_ messages: [ScribeMessage]) -> [TLine] {
     renderMessagesToTranscript(messages, theme: theme, renderer: renderer)
   }
 }
