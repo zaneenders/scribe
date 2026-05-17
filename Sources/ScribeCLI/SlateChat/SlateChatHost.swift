@@ -518,7 +518,7 @@ internal final class SlateChatHost {
   ) -> Bool {
     var state = HostSubmitState(queuedTrayTexts: queuedTrayTexts)
     let fx = HostSubmitState.apply(effect, to: &state)
-    queuedTrayTexts = state.queuedTrayTexts
+    queuedTrayTexts = submitCoordinator.queuedTexts
 
     if let tag = fx.interruptLogTag {
       coordinator?.interrupt()
