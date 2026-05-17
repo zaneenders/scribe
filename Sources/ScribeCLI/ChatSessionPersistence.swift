@@ -2,9 +2,6 @@ import Foundation
 import Logging
 import ScribeCore
 
-// MARK: - ChatSessionMetadata
-
-/// Session metadata stored as `metadata.json` alongside `messages.jsonl`.
 struct ChatSessionMetadata: Codable, Sendable {
   var schemaVersion: Int
   var id: UUID
@@ -33,8 +30,6 @@ struct ChatSessionMetadata: Codable, Sendable {
   }
 }
 
-// MARK: - ChatSessionStore
-
 enum ChatSessionStore {
 
   private static let enc: JSONEncoder = {
@@ -50,17 +45,16 @@ enum ChatSessionStore {
     return d
   }()
 
-  // MARK: - Directory helpers
-
-  /// Resolved session root (creates directories).
   static func sessionsDirectoryURL(sessionsDirectoryPath: String) throws -> URL {
     let url = URL(fileURLWithPath: sessionsDirectoryPath, isDirectory: true).standardizedFileURL
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
   }
 
-  /// All session directories under the configured sessions directory (newest first by modification time).
-  static func listSessionFiles(sessionsDirectoryPath: String) throws -> [URL] {
+  static func listSessionFiles(
+    sessionsDirectoryPath: String,
+    cwdFilter: String? = nil
+  ) throws -> [URL] {
     let root = try sessionsDirectoryURL(sessionsDirectoryPath: sessionsDirectoryPath)
     guard FileManager.default.fileExists(atPath: root.path) else {
       return []
@@ -70,13 +64,18 @@ enum ChatSessionStore {
       includingPropertiesForKeys: [.contentModificationDateKey],
       options: [.skipsHiddenFiles]
     )
-    let sessionDirs = contents.filter { url in
+    var sessionDirs = contents.filter { url in
       var isDir: ObjCBool = false
       guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
         return false
       }
       let meta = url.appendingPathComponent("metadata.json", isDirectory: false)
       return FileManager.default.fileExists(atPath: meta.path)
+    }
+    if let cwd = cwdFilter {
+      sessionDirs = sessionDirs.filter { url in
+        (try? ChatSessionStore.loadMetadata(from: url).cwd) == cwd
+      }
     }
     return sessionDirs.sorted { a, b in
       let da =
@@ -94,9 +93,6 @@ enum ChatSessionStore {
       .appendingPathComponent(sessionId.uuidString, isDirectory: true)
   }
 
-  // MARK: - Metadata
-
-  /// Write `metadata.json` into a session directory.
   static func saveMetadata(_ metadata: ChatSessionMetadata, to directory: URL) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let metaURL = directory.appendingPathComponent("metadata.json", isDirectory: false)
@@ -104,16 +100,12 @@ enum ChatSessionStore {
     try metaData.write(to: metaURL, options: [.atomic])
   }
 
-  /// Read `metadata.json` from a session directory.
   static func loadMetadata(from directory: URL) throws -> ChatSessionMetadata {
     let metaURL = directory.appendingPathComponent("metadata.json", isDirectory: false)
     let metaData = try Data(contentsOf: metaURL)
     return try dec.decode(ChatSessionMetadata.self, from: metaData)
   }
 
-  // MARK: - Messages (JSONL)
-
-  /// Read all messages from `messages.jsonl`.
   static func loadMessages(from directory: URL) throws -> [ScribeMessage] {
     let messagesURL = directory.appendingPathComponent("messages.jsonl", isDirectory: false)
     guard FileManager.default.fileExists(atPath: messagesURL.path) else {
@@ -126,7 +118,6 @@ enum ChatSessionStore {
     }
   }
 
-  /// Append messages to `messages.jsonl` (creates the file if needed).
   static func appendMessages(
     _ messages: [ScribeMessage],
     to directory: URL
@@ -148,25 +139,31 @@ enum ChatSessionStore {
       try handle.write(contentsOf: data)
     }
 
-    // Touch the directory so listSessionFiles reflects recent activity.
     try? FileManager.default.setAttributes(
       [.modificationDate: Date()],
       ofItemAtPath: directory.path
     )
   }
 
-  // MARK: - Resolution
-
-  /// Resolves `path`, `UUID` / prefix, or the token `latest` (most recently modified directory).
-  static func resolveResumeURL(specifier: String, sessionsDirectoryPath: String) throws -> URL {
+  static func resolveResumeURL(
+    specifier: String,
+    sessionsDirectoryPath: String,
+    preferCWD: String? = nil
+  ) throws -> URL {
     let trimmed = specifier.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       throw ScribeError.invalidInput(message: "Empty --resume value.")
     }
 
     if trimmed.lowercased() == "latest" {
-      let files = try listSessionFiles(sessionsDirectoryPath: sessionsDirectoryPath)
-      guard let first = files.first else {
+      let files = try listSessionFiles(
+        sessionsDirectoryPath: sessionsDirectoryPath, cwdFilter: preferCWD)
+      if let first = files.first {
+        return first
+      }
+      // Fall back to overall latest (any cwd)
+      let allFiles = try listSessionFiles(sessionsDirectoryPath: sessionsDirectoryPath)
+      guard let first = allFiles.first else {
         throw ScribeError.resumeNotFound(specifier: "latest")
       }
       return first
