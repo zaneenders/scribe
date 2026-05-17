@@ -11,11 +11,23 @@ import ScribeCore
     version: "\(GitVersion.hash)"
   )
 
-  @Flag(name: .long, help: "List saved chat sessions (newest first) and exit.")
+  @Flag(
+    name: .long,
+    help:
+      "List saved chat sessions (newest first) and exit. Filter to current working directory unless --all is passed.")
   var listSessions = false
 
-  @Flag(name: .long, help: "Print Scribe’s resolved paths, version, and configuration and exit.")
+  @Flag(name: .long, help: "Include sessions from all directories when listing (only meaningful with --list-sessions).")
+  var all = false
+
+  @Flag(name: .long, help: "Print Scribe's resolved paths, version, and configuration and exit.")
   var info = false
+
+  @Flag(
+    name: [.customShort("r")],
+    help: "Resume the latest session (preferring current working directory)."
+  )
+  var resumeLatest = false
 
   @Option(
     name: .long,
@@ -37,13 +49,21 @@ import ScribeCore
       return
     }
 
+    let cwd = FileManager.default.currentDirectoryPath
+
     if listSessions {
       let root = try ChatSessionStore.sessionsDirectoryURL(
         sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
+      let cwdFilter: String? = all ? nil : cwd
       let files = try ChatSessionStore.listSessionFiles(
-        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
+        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath,
+        cwdFilter: cwdFilter)
       guard !files.isEmpty else {
-        print("No saved sessions under \(root.path)")
+        if all {
+          print("No saved sessions under \(root.path)")
+        } else {
+          print("No saved sessions under \(root.path) for \(cwd) (use --all to list all sessions)")
+        }
         return
       }
       let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -54,15 +74,13 @@ import ScribeCore
           (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
           ?? meta.createdAt
         let when = relativeTime(from: updatedAt)
-        let cwd = meta.cwd.replacingOccurrences(of: home, with: "~")
+        let displayCwd = meta.cwd.replacingOccurrences(of: home, with: "~")
 
         print(
-          formatSessionLine(shortId: shortId, when: when, cwd: cwd, version: meta.scribeVersion ?? "unknown"))
+          formatSessionLine(shortId: shortId, when: when, cwd: displayCwd, version: meta.scribeVersion ?? "unknown"))
       }
       return
     }
-
-    let cwd = FileManager.default.currentDirectoryPath
 
     let tools: [any ScribeTool] = [
       ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
@@ -73,18 +91,18 @@ import ScribeCore
     let systemPrompt = """
       You are Scribe, a coding agent CLI with shell and file tools.
 
-      Prefer doing over asking use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don’t ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never “should I look at X?” instead of opening X.
+      Prefer doing over asking use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don't ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never "should I look at X?" instead of opening X.
 
       Git: use `shell` for normal inspection (`git status`, `git diff`, `git log`, branches). Avoid destructive git operations (force push, hard reset, branch deletion) unless the user explicitly requests them.
 
       Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
 
       Tool names must match exactly: \(toolNames).
-      Parallel tool calls are fine when they do not depend on each other’s outputs.
+      Parallel tool calls are fine when they do not depend on each other's outputs.
 
       \(toolHints)
 
-      Scribe’s configuration, logs, and sessions live under `~/.scribe/` by default.  If asked to modify or rebuild Scribe itself, clone the source into `~/.scribe/scribe/` from https://github.com/zaneenders/scribe.
+      Scribe's configuration, logs, and sessions live under `~/.scribe/` by default.  If asked to modify or rebuild Scribe itself, clone the source into `~/.scribe/scribe/` from https://github.com/zaneenders/scribe.
 
       Current working directory (relative paths resolve here): \(cwd)
       """
@@ -103,9 +121,21 @@ import ScribeCore
     let resumeMetadata: ChatSessionMetadata?
     let resumeMessages: [ScribeMessage]
     let sessionId: UUID
-    if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
+
+    if resumeLatest {
+      let spec = "latest"
       sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
-        specifier: spec, sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
+        specifier: spec,
+        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath,
+        preferCWD: cwd)
+      resumeMetadata = try ChatSessionStore.loadMetadata(from: sessionPersistenceURL)
+      resumeMessages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
+      sessionId = resumeMetadata!.id
+    } else if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
+      sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
+        specifier: spec,
+        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath,
+        preferCWD: cwd)
       resumeMetadata = try ChatSessionStore.loadMetadata(from: sessionPersistenceURL)
       resumeMessages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
       sessionId = resumeMetadata!.id
@@ -198,7 +228,7 @@ extension ScribeCLI {
     let specifier = sessionId.uuidString
     let binaryName =
       CommandLine.arguments.first.map { NSString(string: $0).lastPathComponent } ?? "scribe"
-    let hint = "\(binaryName) --resume \(specifier)"
+    let hint = "\(binaryName) -r  # or \(binaryName) --resume \(specifier)"
     guard let text = ("Resume with: \(hint)\n").data(using: .utf8) else { return }
     try? FileHandle.standardError.write(contentsOf: text)
   }
