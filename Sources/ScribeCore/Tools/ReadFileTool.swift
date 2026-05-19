@@ -15,6 +15,7 @@ struct ReadFileToolResult: Encodable, Sendable {
 struct ReadFileImageResult: Encodable, AttachableToolResult, Sendable {
   let ok = true
   let path: String
+  let isImage = true
   let mimeType: String
   let base64: String
   let bytes: Int
