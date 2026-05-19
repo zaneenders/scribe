@@ -108,8 +108,7 @@ private func makeAgent(
     systemPrompt: "You are a test agent.",
     tools: tools,
     initialMessages: [],
-    workingDirectory: FilePath("/tmp"),
-    reasoningEnabled: nil
+workingDirectory: FilePath("/tmp"),    reasoningEnabled: nil
   )
 }
 
@@ -128,8 +127,7 @@ private func makeAgent(
     systemPrompt: "You are a test agent.",
     tools: tools,
     initialMessages: [],
-    workingDirectory: FilePath("/tmp"),
-    reasoningEnabled: nil
+workingDirectory: FilePath("/tmp"),    reasoningEnabled: nil
   )
 }
 
@@ -435,9 +433,8 @@ struct ScribeAgentTests {
         ScribeMessage(role: .system, content: "pre-baked"),
         ScribeMessage(role: .user, content: "first"),
       ],
-      workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil
-    )
+workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil    )
     let messages = await agent.messages
     #expect(messages.count == 2)
     #expect(messages[0].role == .system)
@@ -494,9 +491,9 @@ struct ScribeAgentTests {
       _ invocation: ToolInvocation,
       workingDirectory: FilePath,
       abort: any AbortObserver
-    ) async throws -> String {
+    ) async throws -> ToolResult {
       invocations.withLock { $0.append(invocation) }
-      return canned
+      return ToolResult(text: canned)
     }
   }
 
@@ -524,12 +521,12 @@ struct ScribeAgentTests {
       tools: [UnreachableTool()],
       toolExecutor: recorder,
       initialMessages: [],
-      workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil
+workingDirectory: FilePath("/tmp"),      reasoningEnabled: nil
     )
     let ts = await agent.prompt("call the tool", log: testLogger)
     Task { for await _ in ts.events {} }
-    let result = try await ts.result.value
+    let task = ts.result
+    let result = try await task.value
     #expect(result.outcome == .completed)
     let recorded = recorder.invocations.withLock { $0 }
     #expect(recorded.count == 1)
@@ -540,6 +537,11 @@ struct ScribeAgentTests {
     // confirming the assistant saw the executor's response (not the
     // unreachable built-in).
     let toolMessage = result.messages.first { $0.role == .tool }
-    #expect(toolMessage?.content == recorder.canned)
+    #expect(stringContent(toolMessage) == recorder.canned)
   }
+}
+
+private func stringContent(_ msg: ScribeMessage?) -> String? {
+  guard let msg else { return nil }
+  return msg.content.isEmpty ? nil : msg.content
 }

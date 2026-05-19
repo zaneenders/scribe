@@ -97,7 +97,7 @@ struct AbortNotifierTests {
 
     let start = ContinuousClock.now
     do {
-      _ = try await withThrowingTaskGroup(of: String.self) { group in
+      _ = try await withThrowingTaskGroup(of: ToolResult.self) { group in
         group.addTask {
           try await registry.run(
             name: "sleepy",

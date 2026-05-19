@@ -28,5 +28,5 @@ public protocol ToolExecutor: Sendable {
     _ invocation: ToolInvocation,
     workingDirectory: FilePath,
     abort: any AbortObserver
-  ) async throws -> String
+  ) async throws -> ToolResult
 }

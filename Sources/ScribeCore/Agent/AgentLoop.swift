@@ -142,9 +142,9 @@ func runAgentLoop(
           return (newMessages, .interrupted)
         }
         let toolStarted = clock.now
-        let jsonOutput: String
+        let result: ToolResult
         do {
-          jsonOutput = try await config.toolExecutor.execute(
+          result = try await config.toolExecutor.execute(
             inv,
             workingDirectory: config.workingDirectory,
             abort: abortObserver)
@@ -154,7 +154,7 @@ func runAgentLoop(
           return (newMessages, .interrupted)
         } catch let ScribeError.toolUnknown(name) {
           log.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
-          jsonOutput = ToolRegistry.jsonError("unknown tool \(name)")
+          result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
         } catch {
           // Defensive: a custom ToolExecutor may throw arbitrary errors.
           // Surface them to the model as a JSON-encoded tool failure so the
@@ -165,21 +165,49 @@ func runAgentLoop(
               "tool": "\(inv.name)", "round": "\(round)",
               "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
             ])
-          jsonOutput = ToolRegistry.jsonError(String(describing: error))
+          result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
         }
         let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
         log.debug(
           "agent.tool.invoke",
           metadata: [
             "round": "\(round)", "tool": "\(inv.name)",
-            "args_chars": "\(inv.arguments.count)", "output_chars": "\(jsonOutput.count)",
+            "args_chars": "\(inv.arguments.count)", "output_chars": "\(result.text.count)",
+            "attachments": "\(result.attachments.count)",
             "elapsed_ms": "\(elapsedMs)",
           ])
-        emit(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
+        emit(.toolInvocation(name: inv.name, arguments: inv.arguments, output: result.text))
+        for warning in result.warnings {
+          emit(.warning(warning))
+        }
         let toolMsg = Components.Schemas.ChatMessage(
-          role: .tool, content: jsonOutput, name: nil, toolCalls: nil, toolCallId: inv.id)
+          role: .tool, content: .case1(result.text), name: nil, toolCalls: nil, toolCallId: inv.id)
         currentContext.messages.append(toolMsg)
         newMessages.append(toolMsg)
+
+        // If the tool returned attachments (images, PDFs, etc.), inject a
+        // follow-up user message so the model can view them on the next
+        // turn.  OpenAI-compatible APIs only accept string content in
+        // tool results, so media must flow through synthetic user messages.
+        for attachment in result.attachments {
+          let b64chars = attachment.base64.count
+          log.info(
+            "agent.tool.attachment.inject",
+            metadata: [
+              "round": "\(round)",
+              "tool": "\(inv.name)",
+              "mime_type": "\(attachment.mimeType)",
+              "base64_chars": "\(b64chars)",
+              "source_path": "\(attachment.sourcePath ?? "nil")",
+            ])
+          let parts: [ScribeContentPart] = [
+            .text((attachment.sourcePath ?? attachment.filename).map { "\($0):" } ?? "Attached media:"),
+            .image(url: attachment.dataUri, detail: nil),
+          ]
+          let imageMsg = ScribeMessage(role: .user, contentParts: parts).toChatMessage()
+          currentContext.messages.append(imageMsg)
+          newMessages.append(imageMsg)
+        }
       }
     }
   }
@@ -289,7 +317,7 @@ private func runSingleRound(
 
   let assistantMessage = Components.Schemas.ChatMessage(
     role: .assistant,
-    content: assistantText,
+    content: .case1(assistantText),
     name: nil,
     toolCalls: toolInvocations.isEmpty
       ? nil

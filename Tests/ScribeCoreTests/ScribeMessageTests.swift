@@ -48,6 +48,44 @@ struct ScribeMessageTests {
     #expect(decoded == msg)
   }
 
+  @Test func roundTripsMessageWithContentParts() throws {
+    let msg = ScribeMessage(
+      role: .user,
+      content: "",
+      contentParts: [
+        .text("What do you see?"),
+        .image(url: "data:image/png;base64,abc123", detail: nil),
+      ]
+    )
+    let data = try JSONEncoder().encode(msg)
+    let json = String(data: data, encoding: .utf8) ?? ""
+    #expect(json.contains("\"type\":\"text\""))
+    #expect(json.contains("\"type\":\"image_url\""))
+    #expect(json.contains("\"image_url\""))
+    let decoded = try JSONDecoder().decode(ScribeMessage.self, from: data)
+    #expect(decoded == msg)
+    #expect(decoded.contentParts.count == 2)
+    if case .text(let t) = decoded.contentParts[0] {
+      #expect(t == "What do you see?")
+    } else {
+      Issue.record("Expected text part")
+    }
+    if case .image(let url, let detail) = decoded.contentParts[1] {
+      #expect(url == "data:image/png;base64,abc123")
+      #expect(detail == nil)
+    } else {
+      Issue.record("Expected image part")
+    }
+  }
+
+  @Test func decodesLegacyStringContent() throws {
+    let json = #"{"role":"user","content":"hello"}"#
+    let decoded = try JSONDecoder().decode(ScribeMessage.self, from: Data(json.utf8))
+    #expect(decoded.role == .user)
+    #expect(decoded.content == "hello")
+    #expect(decoded.contentParts == [.text("hello")])
+  }
+
   // MARK: - Decoding legacy / wire format
 
   /// Sessions saved before ``ScribeMessage`` existed encoded

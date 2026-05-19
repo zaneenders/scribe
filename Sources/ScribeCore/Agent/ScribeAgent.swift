@@ -289,7 +289,7 @@ public struct ScribeAgent: Sendable {
     guard !systemPrompt.isEmpty else { return initialMessages }
     if initialMessages.first?.role == .system { return initialMessages }
     var result = initialMessages
-    result.insert(.init(role: .system, content: systemPrompt), at: 0)
+    result.insert(.init(role: .system, content: .case1(systemPrompt)), at: 0)
     return result
   }
 }

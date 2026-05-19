@@ -139,13 +139,15 @@ final class ChatCoordinator: Sendable {
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
+        let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
+
         // Track the messages the agent committed during this turn so we can
         // persist + emit `turnComplete` without reaching back into the
         // agent's storage actor. Falls back to the agent's snapshot if the
         // turn never produced a TurnResult (e.g. HTTP error before stream).
         var committed: [ScribeMessage]? = nil
         do {
-          let ts = await agent.prompt(trimmed, log: log)
+          let ts = await agent.prompt(promptMessages, log: log)
           for await event in ts.events {
             if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))

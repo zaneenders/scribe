@@ -139,7 +139,7 @@ private func runLoop(
   config: AgentLoopConfig,
   abortNotifier: AbortNotifier = AbortNotifier()
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
-  let userMsg = Components.Schemas.ChatMessage(role: .user, content: prompt)
+  let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
   return try await runAgentLoop(
     promptMessages: [userMsg],
     context: context,
@@ -156,7 +156,7 @@ private func runLoop(
   config: AgentLoopConfig,
   countingAbortObserver: CountingAbortObserver = CountingAbortObserver(triggerAt: 1)
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
-  let userMsg = Components.Schemas.ChatMessage(role: .user, content: prompt)
+  let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
   return try await runAgentLoop(
     promptMessages: [userMsg],
     context: context,
@@ -165,6 +165,14 @@ private func runLoop(
     log: testLogger,
     abortObserver: countingAbortObserver
   )
+}
+
+private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
+  guard let content = msg.content else { return nil }
+  switch content {
+  case .case1(let text): return text
+  case .case2: return nil
+  }
 }
 
 // MARK: - LoopTermination pattern helpers
@@ -197,9 +205,9 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 2)  // user + assistant
     #expect(messages[0].role == .user)
-    #expect(messages[0].content == "hello")
+    #expect(stringContent(messages[0]) == "hello")
     #expect(messages[1].role == .assistant)
-    #expect(messages[1].content == "reply")
+    #expect(stringContent(messages[1]) == "reply")
   }
 
   @Test func completesWithEmptyAssistantText() async throws {
@@ -213,7 +221,7 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(messages[1].role == .assistant)
-    #expect(messages[1].content == "")
+    #expect(stringContent(messages[1]) == "")
   }
 
   // MARK: - Tool round limit
@@ -270,7 +278,7 @@ struct AgentLoopTests {
     #expect(messages[2].role == .tool)
     #expect(messages[2].toolCallId == "c1")
     #expect(messages[3].role == .assistant)
-    #expect(messages[3].content == "done")
+    #expect(stringContent(messages[3]) == "done")
   }
 
   // MARK: - Abort: before-http
@@ -394,7 +402,7 @@ struct AgentLoopTests {
       #expect(toolMessages.count >= 1)
       if let toolMsg = toolMessages.first {
         #expect(toolMsg.toolCallId == "c1")
-        #expect(toolMsg.content?.contains("unknown tool") == true)
+        #expect(stringContent(toolMsg)?.contains("unknown tool") == true)
       }
     }
   }
@@ -478,7 +486,7 @@ struct AgentLoopTests {
       doneChunk(),
     ]
     let events = Mutex<[TranscriptEvent]>([])
-    let userMsg = Components.Schemas.ChatMessage(role: .user, content: "test")
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("test"))
     let (_, termination) = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
@@ -512,7 +520,7 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(messages[1].role == .assistant)
-    #expect(messages[1].content == "answer")
+    #expect(stringContent(messages[1]) == "answer")
     #expect(messages[1].reasoningContent == "Let me think...")
   }
 
@@ -524,9 +532,9 @@ struct AgentLoopTests {
       doneChunk(),
     ]
     let initialMessages: [Components.Schemas.ChatMessage] = [
-      .init(role: .system, content: "System prompt"),
-      .init(role: .user, content: "previous question"),
-      .init(role: .assistant, content: "previous answer"),
+      .init(role: .system, content: .case1("System prompt")),
+      .init(role: .user, content: .case1("previous question")),
+      .init(role: .assistant, content: .case1("previous answer")),
     ]
     let context = AgentContext(messages: initialMessages)
     let (messages, termination) = try await runAgentLoop(
@@ -541,7 +549,7 @@ struct AgentLoopTests {
     // Only the new assistant message is returned
     #expect(messages.count == 1)
     #expect(messages[0].role == .assistant)
-    #expect(messages[0].content == "reply")
+    #expect(stringContent(messages[0]) == "reply")
   }
 
   // MARK: - Multiple tool calls in one round
@@ -582,7 +590,7 @@ struct AgentLoopTests {
     #expect(messages[3].role == .tool)
     #expect(messages[3].toolCallId == "c2")
     #expect(messages[4].role == .assistant)
-    #expect(messages[4].content == "all done")
+    #expect(stringContent(messages[4]) == "all done")
   }
 
   // MARK: - Tool that throws (error is caught and converted to jsonError)
@@ -619,7 +627,7 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 4)
     #expect(messages[2].role == .tool)
-    #expect(messages[2].content?.contains("ok") == true)
+    #expect(stringContent(messages[2])?.contains("ok") == true)
   }
 
   // MARK: - AgentTurnInterruptedError mid-stream
