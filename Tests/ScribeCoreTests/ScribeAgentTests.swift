@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import HTTPTypes
 import Logging
@@ -58,7 +59,7 @@ private struct FakeTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: ScribeCore.ScribeFilePath) async throws -> Encodable { Result() }
+  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable { Result() }
 }
 
 /// Sleeps until cancelled — used by `promptAbortReturnsInterrupted` to keep
@@ -71,7 +72,7 @@ private struct SleepyAgentTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: ScribeCore.ScribeFilePath) async throws -> Encodable {
+  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
     try await Task.sleep(for: .seconds(60))
     return Result()
   }
@@ -107,7 +108,8 @@ private func makeAgent(
     systemPrompt: "You are a test agent.",
     tools: tools,
     initialMessages: [],
-    workingDirectory: ScribeFilePath("/tmp")
+    workingDirectory: FilePath("/tmp"),
+    reasoningEnabled: nil
   )
 }
 
@@ -126,7 +128,8 @@ private func makeAgent(
     systemPrompt: "You are a test agent.",
     tools: tools,
     initialMessages: [],
-    workingDirectory: ScribeFilePath("/tmp")
+    workingDirectory: FilePath("/tmp"),
+    reasoningEnabled: nil
   )
 }
 
@@ -432,7 +435,8 @@ struct ScribeAgentTests {
         ScribeMessage(role: .system, content: "pre-baked"),
         ScribeMessage(role: .user, content: "first"),
       ],
-      workingDirectory: ScribeFilePath("/tmp")
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
     )
     let messages = await agent.messages
     #expect(messages.count == 2)
@@ -469,7 +473,7 @@ struct ScribeAgentTests {
     static var parameters: [ScribeToolParameter] { [] }
     static var promptHint: String? { nil }
     struct Result: Encodable { let ok = false }
-    func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable {
+    func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
       Issue.record("Built-in tool ran despite a custom ToolExecutor being installed.")
       return Result()
     }
@@ -488,7 +492,7 @@ struct ScribeAgentTests {
 
     func execute(
       _ invocation: ToolInvocation,
-      workingDirectory: ScribeFilePath,
+      workingDirectory: FilePath,
       abort: any AbortObserver
     ) async throws -> String {
       invocations.withLock { $0.append(invocation) }
@@ -520,7 +524,8 @@ struct ScribeAgentTests {
       tools: [UnreachableTool()],
       toolExecutor: recorder,
       initialMessages: [],
-      workingDirectory: ScribeFilePath("/tmp")
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
     )
     let ts = await agent.prompt("call the tool", log: testLogger)
     Task { for await _ in ts.events {} }

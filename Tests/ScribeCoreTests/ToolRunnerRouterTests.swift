@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Testing
 
@@ -9,7 +10,7 @@ struct ToolRunnerRouterTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     do {
       _ = try await registry.run(
-        name: "not_a_registered_tool", arguments: "{}", workingDirectory: ScribeFilePath("/tmp"),
+        name: "not_a_registered_tool", arguments: "{}", workingDirectory: FilePath("/tmp"),
         abortObserver: AbortNotifier())
       #expect(Bool(false), "expected ScribeError.toolUnknown")
     } catch let error as ScribeError {
