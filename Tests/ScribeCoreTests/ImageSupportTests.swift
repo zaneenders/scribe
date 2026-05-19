@@ -6,18 +6,82 @@ import Testing
 @Suite
 struct ImageSupportTests {
 
-  @Test func detectsImageExtensions() {
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.png") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.jpg") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.jpeg") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.gif") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.webp") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.bmp") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.tiff") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/photo.heic") == true)
-    #expect(ImageSupport.isImageFile(path: "/tmp/document.txt") == false)
-    #expect(ImageSupport.isImageFile(path: "/tmp/code.swift") == false)
+  // MARK: - Magic-byte detection (raw data)
+
+  @Test func detectsPNGByMagicBytes() {
+    let data = Data([0x89, 0x50, 0x4E, 0x47])
+    #expect(ImageSupport.detectImageType(data: data) == "image/png")
   }
+
+  @Test func detectsJPEGByMagicBytes() {
+    let data = Data([0xFF, 0xD8, 0xFF, 0xE0])
+    #expect(ImageSupport.detectImageType(data: data) == "image/jpeg")
+  }
+
+  @Test func detectsGIFByMagicBytes() {
+    let data = Data([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
+    #expect(ImageSupport.detectImageType(data: data) == "image/gif")
+  }
+
+  @Test func detectsBMPByMagicBytes() {
+    let data = Data([0x42, 0x4D, 0x00, 0x00])
+    #expect(ImageSupport.detectImageType(data: data) == "image/bmp")
+  }
+
+  @Test func detectsTIFFLittleEndianByMagicBytes() {
+    let data = Data([0x49, 0x49, 0x2A, 0x00])
+    #expect(ImageSupport.detectImageType(data: data) == "image/tiff")
+  }
+
+  @Test func detectsTIFFBigEndianByMagicBytes() {
+    let data = Data([0x4D, 0x4D, 0x00, 0x2A])
+    #expect(ImageSupport.detectImageType(data: data) == "image/tiff")
+  }
+
+  @Test func detectsWebPByMagicBytes() {
+    // RIFF....WEBP
+    var data = Data([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00])
+    data.append(contentsOf: [0x57, 0x45, 0x42, 0x50])
+    #expect(ImageSupport.detectImageType(data: data) == "image/webp")
+  }
+
+  @Test func detectsHEICByMagicBytes() {
+    // ftyp box: size(4) + "ftyp"(4) + "heic"(4)
+    var data = Data([0x00, 0x00, 0x00, 0x14]) // 20 bytes
+    data.append(contentsOf: [0x66, 0x74, 0x79, 0x70]) // "ftyp"
+    data.append(contentsOf: [0x68, 0x65, 0x69, 0x63]) // "heic"
+    data.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // padding
+    #expect(ImageSupport.detectImageType(data: data) == "image/heic")
+  }
+
+  @Test func rejectsNonImageData() {
+    let data = Data([0x00, 0x00, 0x00, 0x00])
+    #expect(ImageSupport.detectImageType(data: data) == nil)
+  }
+
+  @Test func rejectsTooShortData() {
+    let data = Data([0x89, 0x50])
+    #expect(ImageSupport.detectImageType(data: data) == nil)
+  }
+
+  // MARK: - File-based detection
+
+  @Test func detectsImageFileByMagicBytes() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let pngPath = dir.appendingPathComponent("not-really-a-txt.txt").path
+    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: pngPath))
+    #expect(ImageSupport.isImageFile(path: pngPath) == true)
+
+    let txtPath = dir.appendingPathComponent("actually-text.png").path
+    try Data("hello world".utf8).write(to: URL(fileURLWithPath: txtPath))
+    #expect(ImageSupport.isImageFile(path: txtPath) == false)
+  }
+
+  // MARK: - MIME type (extension fallback for non-existent files)
 
   @Test func mimeTypeMapping() {
     #expect(ImageSupport.mimeType(for: "test.png") == "image/png")
@@ -31,6 +95,20 @@ struct ImageSupportTests {
     #expect(ImageSupport.mimeType(for: "test.heic") == "image/heic")
     #expect(ImageSupport.mimeType(for: "test.unknown") == "application/octet-stream")
   }
+
+  @Test func mimeTypePrefersMagicBytesOverExtension() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // A PNG file with a .jpg extension — magic bytes should win
+    let path = dir.appendingPathComponent("tricky.jpg").path
+    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: path))
+    #expect(ImageSupport.mimeType(for: path) == "image/png")
+  }
+
+  // MARK: - Path extraction
 
   @Test func extractsAbsoluteImagePath() throws {
     let dir = FileManager.default.temporaryDirectory
@@ -70,8 +148,17 @@ struct ImageSupportTests {
     #expect(paths.isEmpty)
   }
 
-  @Test func ignoresNonImagePaths() {
-    let text = "Look at /tmp/document.txt"
+  @Test func ignoresNonImagePaths() throws {
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // A text file with a .png extension — magic bytes should reject it
+    let fakeImagePath = dir.appendingPathComponent("fake.png").path
+    try Data("not an image".utf8).write(to: URL(fileURLWithPath: fakeImagePath))
+
+    let text = "Look at \(fakeImagePath)"
     let paths = ImageSupport.extractImagePaths(from: text, workingDirectory: "/tmp")
     #expect(paths.isEmpty)
   }

@@ -29,8 +29,8 @@ public struct ReadFileTool: ScribeTool {
       + "fetched in sections without bloating the conversation history. The result includes "
       + "`bytes`, `total_lines`, `start_line`, `end_line`, and `truncated` so you can decide "
       + "whether to request another page (`offset = previous end_line + 1`). "
-      + "Image files (png, jpg, jpeg, gif, webp, bmp, tiff, heic) are automatically detected "
-      + "and returned as base64-encoded data so the model can view them."
+      + "Image files are automatically detected by their contents (magic bytes) and returned "
+      + "as base64-encoded data so the model can view them."
   }
   public static var parameters: [ScribeToolParameter] {
     [
@@ -77,9 +77,8 @@ public struct ReadFileTool: ScribeTool {
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
     let s = fp.fileSystemPath
 
-    // Detect image files by extension and return base64-encoded data.
-    let ext = (s as NSString).pathExtension.lowercased()
-    if ImageSupport.imageExtensions.contains(ext) {
+    // Detect image files by magic bytes and return base64-encoded data.
+    if ImageSupport.isImageFile(path: s) {
       let result = try await Self.readImage(path: s)
       Self.logger.debug(
         "agent.tool.read_file.image",
@@ -196,7 +195,7 @@ public struct ReadFileTool: ScribeTool {
       try Data(contentsOf: URL(fileURLWithPath: path))
     }.value
     let base64 = data.base64EncodedString()
-    let mimeType = ImageSupport.mimeType(for: path)
+    let mimeType = ImageSupport.detectImageType(path: path) ?? "application/octet-stream"
     return ReadFileImageResult(
       path: path,
       mimeType: mimeType,
