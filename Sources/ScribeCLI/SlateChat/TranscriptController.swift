@@ -98,6 +98,13 @@ struct TranscriptController {
       state.streamingOpenLineRaw = ""
       state.streamingSectionStartLineIndex = nil
       return Effects(needsRender: true)
+
+    case .warning(let message):
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(fg: theme.warningFG, bg: theme.background, bold: false, text: "warning: \(message)")
+        ]))
+      return Effects(needsRender: true)
     }
   }
 

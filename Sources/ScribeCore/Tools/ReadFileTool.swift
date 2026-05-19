@@ -83,6 +83,18 @@ public struct ReadFileTool: ScribeTool {
 
     // Detect image files by magic bytes and return base64-encoded data.
     if ImageSupport.isImageFile(path: s) {
+      let maxImageBytes = 5 * 1024 * 1024
+      if let attrs = try? FileManager.default.attributesOfItem(atPath: s),
+        let fileSize = attrs[.size] as? Int,
+        fileSize > maxImageBytes
+      {
+        Self.logger.warning(
+          "agent.tool.read_file.image.too-large",
+          metadata: ["path": "\(s)", "bytes": "\(fileSize)", "limit_bytes": "\(maxImageBytes)"])
+        throw ScribeError.generic(
+          "Image file is too large to attach (\(fileSize / (1024 * 1024)) MB, limit 5 MB). "
+            + "Ask the user to provide a smaller or cropped version.")
+      }
       let result = try await Self.readImage(path: s)
       Self.logger.debug(
         "agent.tool.read_file.image",

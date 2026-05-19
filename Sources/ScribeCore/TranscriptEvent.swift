@@ -15,4 +15,5 @@ public enum TranscriptEvent: Sendable {
   case usage(ScribeUsage, tokensPerSecond: Double?)
   case harnessError(ScribeError)
   case turnInterrupted
+  case warning(String)
 }

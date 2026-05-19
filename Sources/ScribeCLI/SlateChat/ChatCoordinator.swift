@@ -154,7 +154,24 @@ final class ChatCoordinator: Sendable {
           }
           var attachedCount = 0
           var totalBytes = 0
+          let maxImageBytes = 5 * 1024 * 1024  // 5 MB
           for path in imagePaths {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let fileSize = attrs[.size] as? Int,
+              fileSize > maxImageBytes
+            {
+              log.warning(
+                "chat.image.too-large",
+                metadata: [
+                  "path": "\(path)",
+                  "bytes": "\(fileSize)",
+                  "limit_bytes": "\(maxImageBytes)",
+                ])
+              let name = URL(fileURLWithPath: path).lastPathComponent
+              let sizeMB = fileSize / (1024 * 1024)
+              enqueue(.transcript(.warning("\(name) skipped: \(sizeMB) MB exceeds 5 MB limit")))
+              continue
+            }
             do {
               let (mimeType, base64, bytes) = try ImageSupport.base64ImageData(from: path)
               let url = "data:\(mimeType);base64,\(base64)"
