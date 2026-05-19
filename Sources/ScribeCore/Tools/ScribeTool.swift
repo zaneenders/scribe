@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Logging
 import OpenAPIRuntime
@@ -90,7 +91,7 @@ public protocol ScribeTool: Sendable {
   ///   - arguments: JSON-encoded arguments string from the LLM.
   ///   - workingDirectory: The absolute working directory for path resolution.
   /// - Returns: An `Encodable` value that the registry will serialize as JSON.
-  func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable
+  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable
 }
 
 // MARK: - ScribeTool → ChatTool conversion

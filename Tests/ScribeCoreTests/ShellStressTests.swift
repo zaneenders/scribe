@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Synchronization
 import Testing
@@ -62,7 +63,7 @@ struct ShellStressTests {
           command:
             "i=0; while [ $i -lt 1000 ]; do echo line$i; i=$((i+1)); sleep 0.001; done",
           cwd: nil,
-          workingDirectory: ScribeFilePath("/tmp"))
+          workingDirectory: FilePath("/tmp"))
       }
       try await Task.sleep(for: .milliseconds(50))
       task.cancel()

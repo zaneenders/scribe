@@ -6,19 +6,6 @@ import ScribeLLM
 import Synchronization
 import SystemPackage
 
-// MARK: - ScribeFilePath extension
-
-extension ScribeFilePath {
-  /// Bridge to `SystemPackage.FilePath` for Swift Configuration file providers.
-  var configurationFilePath: SystemPackage.FilePath {
-    #if canImport(System)
-    SystemPackage.FilePath(string)
-    #else
-    self
-    #endif
-  }
-}
-
 // MARK: - Config key bindings
 
 /// Dotted keys in `scribe-config.json` for `ConfigReader` (matches nested JSON paths).
@@ -255,13 +242,13 @@ public enum ConfigLoader {
     if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
       let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
       if !t.isEmpty {
-        return try await loadConfig(at: ScribeFilePath(t), paths: paths)
+        return try await loadConfig(at: FilePath(t), paths: paths)
       }
     }
 
     // 2. Check {dataHome}/scribe-config.json.
     if FileManager.default.fileExists(atPath: paths.defaultConfigPath) {
-      return try await loadConfig(at: ScribeFilePath(paths.defaultConfigPath), paths: paths)
+      return try await loadConfig(at: FilePath(paths.defaultConfigPath), paths: paths)
     }
 
     // 3. Check cwd/scribe-config.json.
@@ -269,7 +256,7 @@ public enum ConfigLoader {
     let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
       .appendingPathComponent(configFileName).path
     if FileManager.default.fileExists(atPath: cwdCandidate) {
-      return try await loadConfig(at: ScribeFilePath(cwdCandidate), paths: paths)
+      return try await loadConfig(at: FilePath(cwdCandidate), paths: paths)
     }
 
     // 4. Not found — write a default config to {dataHome}/, then load it.
@@ -280,17 +267,17 @@ public enum ConfigLoader {
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
-    return try await loadConfig(at: ScribeFilePath(defaultCandidate), paths: paths)
+    return try await loadConfig(at: FilePath(defaultCandidate), paths: paths)
   }
 
   private static func loadConfig(
-    at path: ScribeFilePath,
+    at path: FilePath,
     paths: ScribePaths
   ) async throws -> LoadedConfig {
     let fileProvider: FileProvider<JSONSnapshot>
     do {
       fileProvider = try await FileProvider<JSONSnapshot>(
-        filePath: path.configurationFilePath)
+        filePath: path)
     } catch {
       throw ScribeError.configuration(
         key: nil,
@@ -303,7 +290,7 @@ public enum ConfigLoader {
 
   private static func parse(
     reader: ConfigReader,
-    configPath: ScribeFilePath,
+    configPath: FilePath,
     paths: ScribePaths
   ) async throws -> LoadedConfig {
     let baseURL = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.apiBaseURL)
@@ -373,7 +360,7 @@ public enum ConfigLoader {
     let logDirectoryPath = paths.logDirectoryPath
     let chatSessionsDirectoryPath = paths.sessionsDirectoryPath
 
-    let resolvedPathString = configPath.fileSystemPath
+    let resolvedPathString = configPath.string
 
     let scribeConfig = ScribeConfig(
       agentModel: model,

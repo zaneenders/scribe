@@ -1,7 +1,8 @@
 import Foundation
-import ScribeCLI
 import ScribeCore
 import Testing
+
+@testable import ScribeCLI
 
 struct CompletionUsageReportingTests {
   @Test func groupingIntAddsThousandsSeparators() async throws {

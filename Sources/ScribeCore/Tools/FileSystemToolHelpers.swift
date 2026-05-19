@@ -1,4 +1,5 @@
 import Foundation
+import SystemPackage
 
 enum FileSystemToolHelpers {
   static func requireParentDirectoryForWrite(filesystemPath: String, userPath: String) throws {
@@ -11,9 +12,9 @@ enum FileSystemToolHelpers {
     }
   }
 
-  static func readFileWhole(path: String, workingDirectory: ScribeFilePath) throws -> String {
+  static func readFileWhole(path: String, workingDirectory: FilePath) throws -> String {
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
-    let s = fp.fileSystemPath
+    let s = fp.string
     return try String(contentsOfFile: s, encoding: .utf8)
   }
 }

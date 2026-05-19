@@ -113,6 +113,5 @@ extension ScribeConfig {
     serverURL: "https://test.example.com",
     apiKey: "test-token",
     workingDirectory: "/tmp",
-    reasoningEnabled: nil
-  )
+reasoningEnabled: nil  )
 }

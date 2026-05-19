@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Logging
 import OpenAPIRuntime
@@ -32,7 +33,7 @@ struct AgentLoopConfig: Sendable {
   let chatTools: [Components.Schemas.ChatTool]
   let temperature: Double
   let maxToolRounds: Int
-  let workingDirectory: ScribeFilePath
+  let workingDirectory: FilePath
   let reasoningEnabled: Bool?
 }
 

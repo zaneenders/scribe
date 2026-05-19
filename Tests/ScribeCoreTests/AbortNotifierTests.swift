@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Testing
 
@@ -101,7 +102,7 @@ struct AbortNotifierTests {
           try await registry.run(
             name: "sleepy",
             arguments: "{}",
-            workingDirectory: ScribeFilePath("/tmp"),
+            workingDirectory: FilePath("/tmp"),
             abortObserver: notifier)
         }
         group.addTask {
@@ -137,7 +138,7 @@ private struct SleepyTool: ScribeTool {
 
   struct Output: Encodable { let ok: Bool }
 
-  func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable {
+  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
     try await Task.sleep(for: .seconds(60))
     return Output(ok: true)
   }

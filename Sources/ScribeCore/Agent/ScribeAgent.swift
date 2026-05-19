@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Logging
 import ScribeLLM
@@ -56,7 +57,7 @@ public struct ScribeAgent: Sendable {
   internal let chatTools: [Components.Schemas.ChatTool]
   private let toolExecutor: any ToolExecutor
   private let client: Client
-  private let workingDirectory: ScribeFilePath
+  private let workingDirectory: FilePath
   private let abortNotifier = AbortNotifier()
 
   // MARK: - Designated initializer (transport-injected)
@@ -101,7 +102,7 @@ public struct ScribeAgent: Sendable {
     tools: [any ScribeTool] = [],
     toolExecutor: (any ToolExecutor)? = nil,
     initialMessages: [ScribeMessage] = [],
-    workingDirectory: ScribeFilePath,
+    workingDirectory: FilePath,
     reasoningEnabled: Bool?
   ) {
     self.client = client
@@ -154,7 +155,7 @@ public struct ScribeAgent: Sendable {
       tools: configuration.tools,
       toolExecutor: nil,
       initialMessages: initialMessages,
-      workingDirectory: ScribeFilePath(configuration.workingDirectory),
+      workingDirectory: FilePath(configuration.workingDirectory),
       reasoningEnabled: configuration.reasoningEnabled
     )
   }

@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Testing
 
@@ -17,7 +18,7 @@ struct ToolRunnerReadImageTests {
       let result = try! await registry.run(
         name: "read_file",
         arguments: args,
-        workingDirectory: ScribeFilePath("/tmp"),
+        workingDirectory: FilePath("/tmp"),
         abortObserver: AbortNotifier()
       )
 
@@ -53,7 +54,7 @@ struct ToolRunnerReadImageTests {
       let result = try! await registry.run(
         name: "read_file",
         arguments: args,
-        workingDirectory: ScribeFilePath("/tmp"),
+        workingDirectory: FilePath("/tmp"),
         abortObserver: AbortNotifier()
       )
       // Text files have no attachments.

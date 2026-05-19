@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Logging
 
@@ -72,20 +73,20 @@ public struct ReadFileTool: ScribeTool {
 
   private static let logger = Logger(label: "scribe.tool.read_file")
 
-  public func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let offset = ToolArgumentParsing.optionalInt(obj["offset"])
     let limit = ToolArgumentParsing.optionalInt(obj["limit"])
 
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
-    let s = fp.fileSystemPath
+    let s = fp.string
 
     // Detect image files by magic bytes and return base64-encoded data.
     if ImageSupport.isImageFile(path: s) {
       let maxImageBytes = 5 * 1024 * 1024
       if let attrs = try? FileManager.default.attributesOfItem(atPath: s),
-        let fileSize = attrs[.size] as? Int,
+        let fileSize = attrs[FileAttributeKey.size] as? Int,
         fileSize > maxImageBytes
       {
         Self.logger.warning(
@@ -157,10 +158,10 @@ public struct ReadFileTool: ScribeTool {
     path: String,
     offset: Int?,
     limit: Int?,
-    workingDirectory: ScribeFilePath
+    workingDirectory: FilePath
   ) throws -> ReadFileResult {
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
-    let s = fp.fileSystemPath
+    let s = fp.string
     let text = try String(contentsOfFile: s, encoding: .utf8)
     let totalBytes = text.utf8.count
 

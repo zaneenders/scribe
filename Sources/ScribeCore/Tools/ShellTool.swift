@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Logging
 
@@ -47,7 +48,7 @@ public struct ShellTool: ScribeTool {
 
   private static let logger = Logger(label: "scribe.tool.shell")
 
-  public func run(arguments: String, workingDirectory: ScribeFilePath) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let command = try ToolArgumentParsing.string(obj["command"], field: "command")
     var cwd: String? = ToolArgumentParsing.optionalString(obj["cwd"])

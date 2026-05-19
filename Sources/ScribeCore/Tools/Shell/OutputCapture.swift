@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Subprocess
+import SystemPackage
 
 #if canImport(Darwin)
 import Darwin
@@ -32,8 +33,8 @@ import Musl
 struct OutputCapture: Sendable {
 
   let id: UUID
-  let stdoutFile: ScribeFilePath
-  let stderrFile: ScribeFilePath
+  let stdoutFile: FilePath
+  let stderrFile: FilePath
 
   /// Underlying URLs kept around so we can stat them for fallback byte
   /// counts when the drain misses its deadline.
@@ -62,8 +63,8 @@ struct OutputCapture: Sendable {
 
     return OutputCapture(
       id: id,
-      stdoutFile: ScribeFilePath(stdoutURL.path),
-      stderrFile: ScribeFilePath(stderrURL.path),
+      stdoutFile: FilePath(stdoutURL.path),
+      stderrFile: FilePath(stderrURL.path),
       stdoutURL: stdoutURL,
       stderrURL: stderrURL,
       stdoutHandle: stdoutHandle,

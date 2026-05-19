@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 
 // MARK: - ToolExecutor
@@ -25,7 +26,7 @@ import Foundation
 public protocol ToolExecutor: Sendable {
   func execute(
     _ invocation: ToolInvocation,
-    workingDirectory: ScribeFilePath,
+    workingDirectory: FilePath,
     abort: any AbortObserver
   ) async throws -> ToolResult
 }
