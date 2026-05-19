@@ -10,7 +10,7 @@ struct ToolRunnerRouterTests {
     do {
       _ = try await registry.run(
         name: "not_a_registered_tool", arguments: "{}", workingDirectory: ScribeFilePath("/tmp"),
-        abortObserver: AbortNotifier())
+        abortObserver: AbortNotifier()).text
       #expect(Bool(false), "expected ScribeError.toolUnknown")
     } catch let error as ScribeError {
       guard case .toolUnknown(let name) = error else {

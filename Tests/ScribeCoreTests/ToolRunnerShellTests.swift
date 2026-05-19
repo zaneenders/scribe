@@ -12,7 +12,7 @@ struct ToolRunnerShellTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/echo scribetest"])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 0)
@@ -34,7 +34,7 @@ struct ToolRunnerShellTests {
 
       let args = try jsonArguments(["command": "/bin/cat only_here.txt", "cwd": dir.path])
       let json = try! await registry.run(
-        name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+        name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
       let out = try decodeShell(json)
       #expect(out.ok == true)
       #expect(out.exitCode == 0)
@@ -49,7 +49,7 @@ struct ToolRunnerShellTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "/bin/sh -c 'exit 7'"])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 7)
@@ -59,7 +59,7 @@ struct ToolRunnerShellTests {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
     let args = try jsonArguments(["command": "   "])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("command is empty") == true)
@@ -70,7 +70,7 @@ struct ToolRunnerShellTests {
     // Passing cwd as empty string exercises the if-let-empty-to-nil conversion.
     let args = try jsonArguments(["command": "/bin/echo ok", "cwd": ""])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
     let out = try decodeShell(json)
     #expect(out.ok == true)
     let stdout = try readFileIfExists(out.stdoutFile)
@@ -84,7 +84,7 @@ struct ToolRunnerShellTests {
       .appendingPathComponent("scribe-no-such-cwd-\(UUID().uuidString)", isDirectory: true)
     let args = try jsonArguments(["command": "/bin/true", "cwd": bogusDir.path])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+      name: "shell", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)
@@ -111,7 +111,7 @@ struct ToolRunnerShellTests {
             arguments: args,
             workingDirectory: ScribeFilePath("/tmp"),
             abortObserver: notifier
-          )
+          ).text
         }
         group.addTask {
           // Let the process start up, then trigger the abort.
@@ -165,7 +165,7 @@ struct ToolRunnerShellTests {
             arguments: args,
             workingDirectory: ScribeFilePath("/tmp"),
             abortObserver: notifier
-          )
+          ).text
         }
         group.addTask {
           try await Task.sleep(for: .milliseconds(500))

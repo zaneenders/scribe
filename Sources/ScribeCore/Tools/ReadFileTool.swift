@@ -12,13 +12,16 @@ struct ReadFileToolResult: Encodable, Sendable {
   let truncated: Bool
 }
 
-struct ReadFileImageResult: Encodable, Sendable {
+struct ReadFileImageResult: Encodable, AttachableToolResult, Sendable {
   let ok = true
   let path: String
-  let isImage = true
   let mimeType: String
   let base64: String
   let bytes: Int
+
+  var toolAttachments: [ToolAttachment] {
+    [ToolAttachment(mimeType: mimeType, base64: base64, sourcePath: path)]
+  }
 }
 
 public struct ReadFileTool: ScribeTool {

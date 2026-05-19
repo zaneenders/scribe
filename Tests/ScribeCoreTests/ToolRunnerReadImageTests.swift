@@ -14,14 +14,23 @@ struct ToolRunnerReadImageTests {
       try data.write(to: imageURL)
 
       let args = try jsonArguments(["path": imageURL.path])
-      let json = try! await registry.run(
+      let result = try! await registry.run(
         name: "read_file",
         arguments: args,
         workingDirectory: ScribeFilePath("/tmp"),
         abortObserver: AbortNotifier()
       )
 
-      guard let jsonData = json.data(using: .utf8) else {
+      // Attachments carry the image data.
+      #expect(result.attachments.count == 1)
+      let attachment = result.attachments[0]
+      #expect(attachment.mimeType == "image/png")
+      #expect(!attachment.base64.isEmpty)
+      #expect(Data(base64Encoded: attachment.base64) == data)
+      #expect(attachment.sourcePath == imageURL.path)
+
+      // The text payload still has the JSON metadata.
+      guard let jsonData = result.text.data(using: .utf8) else {
         Issue.record("JSON is not valid UTF-8")
         return
       }
@@ -30,8 +39,6 @@ struct ToolRunnerReadImageTests {
       #expect(payload.isImage == true)
       #expect(payload.mimeType == "image/png")
       #expect(payload.bytes == data.count)
-      #expect(!(payload.base64?.isEmpty ?? true))
-      #expect(Data(base64Encoded: payload.base64 ?? "") == data)
     }
   }
 
@@ -43,13 +50,15 @@ struct ToolRunnerReadImageTests {
       try body.write(to: fileURL, atomically: true, encoding: .utf8)
 
       let args = try jsonArguments(["path": fileURL.path])
-      let json = try! await registry.run(
+      let result = try! await registry.run(
         name: "read_file",
         arguments: args,
         workingDirectory: ScribeFilePath("/tmp"),
         abortObserver: AbortNotifier()
       )
-      let payload = try decodeRead(json)
+      // Text files have no attachments.
+      #expect(result.attachments.isEmpty)
+      let payload = try decodeRead(result.text)
       #expect(payload.ok == true)
       #expect(payload.content == body)
       #expect(payload.bytes == body.utf8.count)

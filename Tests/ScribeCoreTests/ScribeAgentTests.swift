@@ -493,9 +493,9 @@ struct ScribeAgentTests {
       _ invocation: ToolInvocation,
       workingDirectory: ScribeFilePath,
       abort: any AbortObserver
-    ) async throws -> String {
+    ) async throws -> ToolResult {
       invocations.withLock { $0.append(invocation) }
-      return canned
+      return ToolResult(text: canned)
     }
   }
 

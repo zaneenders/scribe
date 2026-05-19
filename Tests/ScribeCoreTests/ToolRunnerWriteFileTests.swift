@@ -12,7 +12,7 @@ struct ToolRunnerWriteFileTests {
       let body = "written_once\nγ\n"
       let args = try jsonArguments(["path": fileURL.path, "content": body])
       let json = try! await registry.run(
-        name: "write_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+        name: "write_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
       let payload = try decodeWrite(json)
       #expect(payload.ok == true)
       #expect(payload.written == true)
@@ -23,7 +23,7 @@ struct ToolRunnerWriteFileTests {
       let reread = try decodeRead(
         try! await registry.run(
           name: "read_file", arguments: try jsonArguments(["path": fileURL.path]),
-          workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()))
+          workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text)
       #expect(reread.ok == true)
       #expect(reread.content == body)
     }
@@ -36,7 +36,7 @@ struct ToolRunnerWriteFileTests {
       try "old".write(to: fileURL, atomically: true, encoding: .utf8)
       let args = try jsonArguments(["path": fileURL.path, "content": "new"])
       let json = try! await registry.run(
-        name: "write_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+        name: "write_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
       let payload = try decodeWrite(json)
       #expect(payload.ok == true)
       let onDisk = try String(contentsOf: fileURL, encoding: .utf8)
@@ -51,7 +51,7 @@ struct ToolRunnerWriteFileTests {
       .appendingPathComponent("scribe-deep-\(UUID().uuidString)/nope/out.txt")
     let args = try jsonArguments(["path": deep.path, "content": "x"])
     let json = try! await registry.run(
-      name: "write_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+      name: "write_file", arguments: args, workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("parent directory does not exist") == true)
@@ -63,7 +63,7 @@ struct ToolRunnerWriteFileTests {
       let fileURL = dir.appendingPathComponent("only_path.txt")
       let json = try! await registry.run(
         name: "write_file", arguments: try jsonArguments(["path": fileURL.path]),
-        workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier())
+        workingDirectory: ScribeFilePath("/tmp"), abortObserver: AbortNotifier()).text
       let fail = try decodeFail(json)
       #expect(fail.ok == false)
       #expect(fail.error?.contains("missing or empty field content") == true)

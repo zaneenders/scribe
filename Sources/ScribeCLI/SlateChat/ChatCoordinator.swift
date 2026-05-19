@@ -152,11 +152,15 @@ final class ChatCoordinator: Sendable {
           if !trimmed.isEmpty {
             parts.append(.text(trimmed))
           }
+          var attachedCount = 0
+          var totalBytes = 0
           for path in imagePaths {
             do {
-              let (mimeType, base64, _) = try ImageSupport.base64ImageData(from: path)
+              let (mimeType, base64, bytes) = try ImageSupport.base64ImageData(from: path)
               let url = "data:\(mimeType);base64,\(base64)"
               parts.append(.image(url: url, detail: nil))
+              attachedCount += 1
+              totalBytes += bytes
             } catch {
               log.warning(
                 "chat.image.read-failed",
@@ -165,6 +169,15 @@ final class ChatCoordinator: Sendable {
                   "err": "\(String(describing: error))",
                 ])
             }
+          }
+          if attachedCount > 0 {
+            log.info(
+              "chat.image.attached",
+              metadata: [
+                "count": "\(attachedCount)",
+                "total_bytes": "\(totalBytes)",
+                "paths": "\(imagePaths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))",
+              ])
           }
           promptMessages = [ScribeMessage(role: .user, content: "", contentParts: parts)]
         }
