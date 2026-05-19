@@ -1,7 +1,6 @@
 import Foundation
 
-/// Shared helpers for detecting image files, reading them as base64 data URIs,
-/// and extracting image path references from user-typed text.
+/// Shared helpers for detecting image files and reading them as base64 data.
 public enum ImageSupport {
 
   // MARK: - Magic-byte image detection
@@ -85,87 +84,4 @@ public enum ImageSupport {
     return (mimeType, base64, data.count)
   }
 
-  // MARK: - Path extraction
-
-  /// Extracts image file paths from a text string.
-  ///
-  /// Looks for substrings that end with a known image extension and appear to
-  /// be file paths (absolute, tilde-relative, or contain a `/`). Each candidate
-  /// is resolved against `workingDirectory` and only included if it points to an
-  /// existing file that passes magic-byte image detection.
-  public static func extractImagePaths(from text: String, workingDirectory: String)
-    -> [String]
-  {
-    var results: [String] = []
-    let lowercased = text.lowercased()
-    let extensions = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif", "heic", "heif"]
-
-    for ext in extensions {
-      var searchStart = lowercased.startIndex
-      while let range = lowercased[searchStart...].range(of: "." + ext) {
-        let extEnd = range.upperBound
-
-        // Walk backwards to find the earliest plausible start of the path.
-        var earliestStart = range.lowerBound
-        while earliestStart > text.startIndex {
-          let prev = text.index(before: earliestStart)
-          let char = text[prev]
-          if char.isWhitespace || ["\"", "'", "(", "[", "{", ":", ";", ","].contains(char) {
-            earliestStart = text.index(after: prev)
-            break
-          }
-          earliestStart = prev
-        }
-
-        // Try progressively shorter paths by moving the start forward.
-        var currentStart = earliestStart
-        while currentStart <= range.lowerBound {
-          let candidate = String(text[currentStart..<extEnd])
-          if let resolved = resolveImagePath(candidate, workingDirectory: workingDirectory),
-            !results.contains(resolved),
-            isImageFile(path: resolved)
-          {
-            results.append(resolved)
-            break
-          }
-          if currentStart >= range.lowerBound { break }
-          currentStart = text.index(after: currentStart)
-        }
-
-        searchStart = extEnd
-      }
-    }
-
-    return results
-  }
-
-  private static func resolveImagePath(_ candidate: String, workingDirectory: String) -> String?
-  {
-    let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return nil }
-
-    // Only consider paths that look like file paths.
-    guard
-      trimmed.hasPrefix("/") || trimmed.hasPrefix("~") || trimmed.hasPrefix(".")
-        || trimmed.contains("/")
-    else { return nil }
-
-    let resolved: String
-    if trimmed.hasPrefix("/") {
-      resolved = trimmed
-    } else if trimmed.hasPrefix("~") {
-      resolved = NSString(string: trimmed).expandingTildeInPath
-    } else {
-      resolved = (workingDirectory as NSString).appendingPathComponent(trimmed)
-    }
-
-    let standardized = URL(fileURLWithPath: resolved).standardizedFileURL.path
-    var isDir: ObjCBool = false
-    guard
-      FileManager.default.fileExists(atPath: standardized, isDirectory: &isDir),
-      !isDir.boolValue
-    else { return nil }
-
-    return standardized
-  }
 }

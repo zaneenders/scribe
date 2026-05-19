@@ -139,65 +139,7 @@ final class ChatCoordinator: Sendable {
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
-        // Build prompt messages, attaching any image files referenced in the input.
-        let promptMessages: [ScribeMessage]
-        let imagePaths = ImageSupport.extractImagePaths(
-          from: trimmed,
-          workingDirectory: FileManager.default.currentDirectoryPath
-        )
-        if imagePaths.isEmpty {
-          promptMessages = [ScribeMessage(role: .user, content: trimmed)]
-        } else {
-          var parts: [ScribeContentPart] = []
-          if !trimmed.isEmpty {
-            parts.append(.text(trimmed))
-          }
-          var attachedCount = 0
-          var totalBytes = 0
-          let maxImageBytes = 5 * 1024 * 1024  // 5 MB
-          for path in imagePaths {
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let fileSize = attrs[.size] as? Int,
-              fileSize > maxImageBytes
-            {
-              log.warning(
-                "chat.image.too-large",
-                metadata: [
-                  "path": "\(path)",
-                  "bytes": "\(fileSize)",
-                  "limit_bytes": "\(maxImageBytes)",
-                ])
-              let name = URL(fileURLWithPath: path).lastPathComponent
-              let sizeMB = fileSize / (1024 * 1024)
-              enqueue(.transcript(.warning("\(name) skipped: \(sizeMB) MB exceeds 5 MB limit")))
-              continue
-            }
-            do {
-              let (mimeType, base64, bytes) = try ImageSupport.base64ImageData(from: path)
-              let url = "data:\(mimeType);base64,\(base64)"
-              parts.append(.image(url: url, detail: nil))
-              attachedCount += 1
-              totalBytes += bytes
-            } catch {
-              log.warning(
-                "chat.image.read-failed",
-                metadata: [
-                  "path": "\(path)",
-                  "err": "\(String(describing: error))",
-                ])
-            }
-          }
-          if attachedCount > 0 {
-            log.info(
-              "chat.image.attached",
-              metadata: [
-                "count": "\(attachedCount)",
-                "total_bytes": "\(totalBytes)",
-                "paths": "\(imagePaths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))",
-              ])
-          }
-          promptMessages = [ScribeMessage(role: .user, content: "", contentParts: parts)]
-        }
+        let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
 
         // Track the messages the agent committed during this turn so we can
         // persist + emit `turnComplete` without reaching back into the

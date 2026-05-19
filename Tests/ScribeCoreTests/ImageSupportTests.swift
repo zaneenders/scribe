@@ -95,61 +95,6 @@ struct ImageSupportTests {
     #expect(ImageSupport.detectImageType(path: path) == "image/png")
   }
 
-  // MARK: - Path extraction
-
-  @Test func extractsAbsoluteImagePath() throws {
-    let dir = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
-
-    let imagePath = dir.appendingPathComponent("test.png").path
-    let data = Data([0x89, 0x50, 0x4E, 0x47])  // PNG magic bytes
-    try data.write(to: URL(fileURLWithPath: imagePath))
-
-    let text = "Look at this image: \(imagePath)"
-    let paths = ImageSupport.extractImagePaths(from: text, workingDirectory: "/tmp")
-    #expect(paths.count == 1)
-    #expect(paths.first == imagePath)
-  }
-
-  @Test func extractsRelativeImagePath() throws {
-    let dir = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
-
-    let imagePath = dir.appendingPathComponent("test.png").path
-    let data = Data([0x89, 0x50, 0x4E, 0x47])
-    try data.write(to: URL(fileURLWithPath: imagePath))
-
-    let text = "Look at ./test.png"
-    let paths = ImageSupport.extractImagePaths(from: text, workingDirectory: dir.path)
-    #expect(paths.count == 1)
-    #expect(paths.first == imagePath)
-  }
-
-  @Test func ignoresNonExistentPaths() {
-    let text = "Look at /tmp/nonexistent.png"
-    let paths = ImageSupport.extractImagePaths(from: text, workingDirectory: "/tmp")
-    #expect(paths.isEmpty)
-  }
-
-  @Test func ignoresNonImagePaths() throws {
-    let dir = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
-
-    // A text file with a .png extension — magic bytes should reject it
-    let fakeImagePath = dir.appendingPathComponent("fake.png").path
-    try Data("not an image".utf8).write(to: URL(fileURLWithPath: fakeImagePath))
-
-    let text = "Look at \(fakeImagePath)"
-    let paths = ImageSupport.extractImagePaths(from: text, workingDirectory: "/tmp")
-    #expect(paths.isEmpty)
-  }
-
   @Test func base64EncodesImage() throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
