@@ -30,6 +30,7 @@ public enum ScribeConfigBinding {
   public static let agentModel: ConfigKey = "agent.model"
   public static let contextWindow: ConfigKey = "agent.contextWindow"
   public static let contextWindowThreshold: ConfigKey = "agent.contextWindowThreshold"
+  public static let reasoningEnabled: ConfigKey = "agent.reasoning"
   public static let loggingLevel: ConfigKey = "logging.level"
 }
 
@@ -163,6 +164,7 @@ private struct ConfigTemplate: Codable {
     var model: String
     var contextWindow: Int
     var contextWindowThreshold: Double
+    var reasoning: Bool?
   }
   struct LoggingSection: Codable {
     var level: String
@@ -366,6 +368,8 @@ public enum ConfigLoader {
       )
     }
 
+    let reasoningEnabled = try await reader.fetchBool(forKey: ScribeConfigBinding.reasoningEnabled)
+
     let logDirectoryPath = paths.logDirectoryPath
     let chatSessionsDirectoryPath = paths.sessionsDirectoryPath
 
@@ -377,7 +381,8 @@ public enum ConfigLoader {
       contextWindowThreshold: contextWindowThreshold,
       serverURL: baseURL,
       apiKey: resolvedAPIKey,
-      workingDirectory: "."
+      workingDirectory: ".",
+      reasoningEnabled: reasoningEnabled
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,
@@ -402,7 +407,8 @@ public enum ConfigLoader {
       agent: ConfigTemplate.AgentSection(
         model: "gemma4:e2b",
         contextWindow: 128000,
-        contextWindowThreshold: 0.8
+        contextWindowThreshold: 0.8,
+        reasoning: false
       ),
       logging: ConfigTemplate.LoggingSection(
         level: "trace"

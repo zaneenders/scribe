@@ -114,7 +114,8 @@ import ScribeCore
       serverURL: loaded.scribeConfig.serverURL,
       apiKey: loaded.scribeConfig.apiKey,
       tools: tools,
-      workingDirectory: cwd
+      workingDirectory: cwd,
+      reasoningEnabled: loaded.scribeConfig.reasoningEnabled
     )
 
     let sessionPersistenceURL: URL
@@ -158,6 +159,7 @@ import ScribeCore
         "model": "\(scribeConfig.agentModel)",
         "base_url": "\(scribeConfig.serverURL)",
         "api_key": "\(scribeConfig.apiKey == nil ? "none" : "set")",
+        "reasoning": "\(String(describing: scribeConfig.reasoningEnabled))",
         "log_level": "\(loaded.logLevel.rawValue)",
         "cwd": "\(cwd)",
         "session_file": "\(sessionPersistenceURL.path)",
