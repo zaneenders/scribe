@@ -84,14 +84,14 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   }
 
   public var role: Role
-  /// Plain-text content. Defaults to an empty string for assistant messages
-  /// that exist purely to carry `toolCalls`. Empty content is encoded as
-  /// `""` rather than omitted, matching OpenAI's behaviour for tool-calling
-  /// assistant messages.
-  public var content: String
-  /// Rich content parts (text + images). When non-nil and non-empty, this
-  /// takes precedence over `content` for encoding and wire transport.
-  public var contentParts: [ScribeContentPart]?
+  /// Content parts. Text-only messages have a single `.text(_)` part.
+  /// Multimodal messages mix `.text` and `.image` parts.
+  /// Empty means no content (e.g. tool-calling assistant messages).
+  public var contentParts: [ScribeContentPart]
+  /// Convenience accessor: concatenated text from all `.text(_)` parts.
+  public var content: String {
+    contentParts.compactMap { if case .text(let t) = $0 { t } else { nil } }.joined()
+  }
   public var name: String?
   public var toolCalls: [ScribeToolCall]?
   public var toolCallId: String?
@@ -110,8 +110,13 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
     reasoning: String? = nil
   ) {
     self.role = role
-    self.content = content
-    self.contentParts = contentParts
+    if let parts = contentParts {
+      self.contentParts = parts
+    } else if !content.isEmpty {
+      self.contentParts = [.text(content)]
+    } else {
+      self.contentParts = []
+    }
     self.name = name
     self.toolCalls = toolCalls
     self.toolCallId = toolCallId
@@ -137,10 +142,10 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
     // Try content as array of parts first, then fall back to string.
     if let parts = try? c.decode([ScribeContentPart].self, forKey: .content) {
       self.contentParts = parts
-      self.content = ""
+    } else if let text = try c.decodeIfPresent(String.self, forKey: .content), !text.isEmpty {
+      self.contentParts = [.text(text)]
     } else {
-      self.content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
-      self.contentParts = nil
+      self.contentParts = []
     }
 
     if let wires = try c.decodeIfPresent([ScribeToolCall.Wire].self, forKey: .toolCalls) {
@@ -153,10 +158,12 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   public func encode(to encoder: any Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(role, forKey: .role)
-    if let parts = contentParts, !parts.isEmpty {
-      try c.encode(parts, forKey: .content)
+    if contentParts.count == 1, case .text(let t) = contentParts[0] {
+      try c.encode(t, forKey: .content)
+    } else if contentParts.isEmpty {
+      try c.encode("", forKey: .content)
     } else {
-      try c.encode(content, forKey: .content)
+      try c.encode(contentParts, forKey: .content)
     }
     try c.encodeIfPresent(name, forKey: .name)
     try c.encodeIfPresent(toolCallId, forKey: .toolCallId)
@@ -252,30 +259,23 @@ extension ScribeMessage {
       return ScribeToolCall(id: id, name: name, arguments: fn.arguments ?? "")
     }
 
-    let content: String
-    let contentParts: [ScribeContentPart]?
+    let contentParts: [ScribeContentPart]
     switch chatMessage.content {
     case .case1(let text):
-      content = text
-      contentParts = nil
+      contentParts = text.isEmpty ? [] : [.text(text)]
     case .case2(let parts):
-      content = ""
       contentParts = parts.map { part in
         switch part {
-        case .text(let p):
-          return .text(p.text)
-        case .imageUrl(let p):
-          return .image(url: p.imageUrl.url, detail: p.imageUrl.detail?.rawValue)
+        case .text(let p): return .text(p.text)
+        case .imageUrl(let p): return .image(url: p.imageUrl.url, detail: p.imageUrl.detail?.rawValue)
         }
       }
     case .none:
-      content = ""
-      contentParts = nil
+      contentParts = []
     }
 
     self.init(
       role: role,
-      content: content,
       contentParts: contentParts,
       name: chatMessage.name,
       toolCalls: calls?.isEmpty == true ? nil : calls,
@@ -295,8 +295,12 @@ extension ScribeMessage {
     }()
 
     let contentPayload: Components.Schemas.ChatMessage.ContentPayload?
-    if let parts = contentParts, !parts.isEmpty {
-      let chatParts = parts.map { part -> Components.Schemas.ChatContentPart in
+    if contentParts.isEmpty {
+      contentPayload = nil
+    } else if contentParts.count == 1, case .text(let t) = contentParts[0] {
+      contentPayload = t.isEmpty ? nil : .case1(t)
+    } else {
+      let chatParts = contentParts.map { part -> Components.Schemas.ChatContentPart in
         switch part {
         case .text(let text):
           return .text(.init(_type: .text, text: text))
@@ -316,8 +320,6 @@ extension ScribeMessage {
         }
       }
       contentPayload = .case2(chatParts)
-    } else {
-      contentPayload = content.isEmpty ? nil : .case1(content)
     }
 
     let calls = toolCalls?.map { tc in

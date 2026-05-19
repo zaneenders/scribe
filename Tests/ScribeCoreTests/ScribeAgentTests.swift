@@ -543,9 +543,5 @@ workingDirectory: FilePath("/tmp"),      reasoningEnabled: nil
 
 private func stringContent(_ msg: ScribeMessage?) -> String? {
   guard let msg else { return nil }
-  if let parts = msg.contentParts, !parts.isEmpty {
-    if case .text(let text) = parts.first { return text }
-    return nil
-  }
-  return msg.content
+  return msg.content.isEmpty ? nil : msg.content
 }

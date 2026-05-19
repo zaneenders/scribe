@@ -177,6 +177,9 @@ func runAgentLoop(
             "elapsed_ms": "\(elapsedMs)",
           ])
         emit(.toolInvocation(name: inv.name, arguments: inv.arguments, output: result.text))
+        for warning in result.warnings {
+          emit(.warning(warning))
+        }
         let toolMsg = Components.Schemas.ChatMessage(
           role: .tool, content: .case1(result.text), name: nil, toolCalls: nil, toolCallId: inv.id)
         currentContext.messages.append(toolMsg)

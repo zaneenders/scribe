@@ -26,6 +26,14 @@ struct ReadFileImageResult: Encodable, AttachableToolResult, Sendable {
   }
 }
 
+struct ReadFileImageTooLargeResult: Encodable, WarnableToolResult, Sendable {
+  let ok = false
+  let path: String
+  let error: String
+
+  var toolWarnings: [String] { [error] }
+}
+
 public struct ReadFileTool: ScribeTool {
   public static var name: String { "read_file" }
   public static var description: String {
@@ -89,12 +97,12 @@ public struct ReadFileTool: ScribeTool {
         let fileSize = attrs[FileAttributeKey.size] as? Int,
         fileSize > maxImageBytes
       {
+        let name = URL(fileURLWithPath: s).lastPathComponent
+        let msg = "\(name) is too large to attach (\(fileSize / (1024 * 1024)) MB, limit 5 MB)"
         Self.logger.warning(
           "agent.tool.read_file.image.too-large",
           metadata: ["path": "\(s)", "bytes": "\(fileSize)", "limit_bytes": "\(maxImageBytes)"])
-        throw ScribeError.generic(
-          "Image file is too large to attach (\(fileSize / (1024 * 1024)) MB, limit 5 MB). "
-            + "Ask the user to provide a smaller or cropped version.")
+        return ReadFileImageTooLargeResult(path: s, error: msg)
       }
       let result = try await Self.readImage(path: s)
       Self.logger.debug(
@@ -206,18 +214,10 @@ public struct ReadFileTool: ScribeTool {
     )
   }
 
-  /// Reads an image file and returns it as a base64-encoded payload.
   private static func readImage(path: String) async throws -> ReadFileImageResult {
-    let data = try await Task {
-      try Data(contentsOf: URL(fileURLWithPath: path))
+    let (mimeType, base64, bytes) = try await Task {
+      try ImageSupport.base64ImageData(from: path)
     }.value
-    let base64 = data.base64EncodedString()
-    let mimeType = ImageSupport.detectImageType(path: path) ?? "application/octet-stream"
-    return ReadFileImageResult(
-      path: path,
-      mimeType: mimeType,
-      base64: base64,
-      bytes: data.count
-    )
+    return ReadFileImageResult(path: path, mimeType: mimeType, base64: base64, bytes: bytes)
   }
 }

@@ -123,6 +123,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               } else {
                 attachments = []
               }
+              let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
               Self.logger.debug(
                 "agent.tool.completed",
                 metadata: [
@@ -130,9 +131,10 @@ public struct ToolRegistry: Sendable, ToolExecutor {
                   "elapsed_ms": "\(elapsedMs)",
                   "output_chars": "\(encoded.count)",
                   "attachments": "\(attachments.count)",
+                  "warnings": "\(warnings.count)",
                   "args": "\(arguments.logSafe())",
                 ])
-              return ToolResult(text: encoded, attachments: attachments)
+              return ToolResult(text: encoded, attachments: attachments, warnings: warnings)
             } catch {
               Self.logger.warning(
                 "agent.tool.encode_failed",

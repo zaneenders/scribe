@@ -64,13 +64,13 @@ struct ScribeMessageTests {
     #expect(json.contains("\"image_url\""))
     let decoded = try JSONDecoder().decode(ScribeMessage.self, from: data)
     #expect(decoded == msg)
-    #expect(decoded.contentParts?.count == 2)
-    if case .text(let t) = decoded.contentParts?[0] {
+    #expect(decoded.contentParts.count == 2)
+    if case .text(let t) = decoded.contentParts[0] {
       #expect(t == "What do you see?")
     } else {
       Issue.record("Expected text part")
     }
-    if case .image(let url, let detail) = decoded.contentParts?[1] {
+    if case .image(let url, let detail) = decoded.contentParts[1] {
       #expect(url == "data:image/png;base64,abc123")
       #expect(detail == nil)
     } else {
@@ -83,7 +83,7 @@ struct ScribeMessageTests {
     let decoded = try JSONDecoder().decode(ScribeMessage.self, from: Data(json.utf8))
     #expect(decoded.role == .user)
     #expect(decoded.content == "hello")
-    #expect(decoded.contentParts == nil)
+    #expect(decoded.contentParts == [.text("hello")])
   }
 
   // MARK: - Decoding legacy / wire format
