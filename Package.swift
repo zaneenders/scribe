@@ -80,8 +80,6 @@ let package = Package(
       dependencies: [
         "ScribeCore",
         "ScribeLLM",
-        "ScribeCLI",
-        .product(name: "SlateCore", package: "slate"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
