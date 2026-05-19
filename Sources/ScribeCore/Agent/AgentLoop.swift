@@ -117,7 +117,9 @@ func runAgentLoop(
 
     case .toolCalls(let invocations):
       if round >= config.maxToolRounds {
-        log.notice("event=agent.turn.tool-round-limit max=\(config.maxToolRounds)")
+        log.notice(
+          "agent.turn.tool-round-limit",
+          metadata: ["max": "\(config.maxToolRounds)"])
         currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
         newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
         return (newMessages, .toolRoundLimit(rounds: config.maxToolRounds))
@@ -147,6 +149,7 @@ func runAgentLoop(
           jsonOutput = try await config.toolExecutor.execute(
             inv,
             workingDirectory: config.workingDirectory,
+            log: log,
             abort: abortObserver)
         } catch is AgentTurnInterruptedError {
           currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
@@ -223,22 +226,22 @@ private func runSingleRound(
   // ── Send HTTP request ────────────────────────────────
   let httpStart = clock.now
   log.info(
-    """
-    event=agent.http.request \
-    messages=\(requestBody.messages.count) \
-    reasoningEnabled=\(String(describing: config.reasoningEnabled))
-    """)
+    "agent.http.request",
+    metadata: [
+      "messages": "\(requestBody.messages.count)",
+      "reasoning_enabled": "\(String(describing: config.reasoningEnabled))",
+    ])
   let response = try await config.client.createChatCompletion(body: .json(requestBody))
 
   let httpBody: HTTPBody
   switch response {
   case .ok(let ok):
     log.debug(
-      """
-      event=agent.http.response \
-      status=200 \
-      elapsed=\(clock.now - httpStart)
-      """)
+      "agent.http.response",
+      metadata: [
+        "status": "200",
+        "elapsed": "\(clock.now - httpStart)",
+      ])
     httpBody = try ok.body.textEventStream
   case .undocumented(statusCode: let code, let payload):
     var detail = ""
@@ -264,11 +267,11 @@ private func runSingleRound(
     let level: Logger.Level = code >= 500 ? .error : .warning
     log.log(
       level: level,
-      """
-      event=agent.http.response \
-      status=\(code) \
-      body_snippet="\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))"
-      """)
+      "agent.http.response",
+      metadata: [
+        "status": "\(code)",
+        "body_snippet": "\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))",
+      ])
     throw ScribeError.apiHTTPError(statusCode: code, detail: detail, hint: hint.isEmpty ? nil : hint)
   }
 
@@ -313,24 +316,24 @@ private func runSingleRound(
       return Double(c) / max(0.001, genSec)
     }()
     log.debug(
-      """
-      event=agent.stream.end \
-      chunks=\(processor.decodedChunkCount) \
-      skipped=\(processor.skippedChunkCount) \
-      prompt_tokens=\(u.promptTokens.map(String.init(describing:)) ?? "nil") \
-      completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
-      tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
-      """)
+      "agent.stream.end",
+      metadata: [
+        "chunks": "\(processor.decodedChunkCount)",
+        "skipped": "\(processor.skippedChunkCount)",
+        "prompt_tokens": "\(u.promptTokens.map(String.init(describing:)) ?? "nil")",
+        "completion_tokens": "\(u.completionTokens.map(String.init(describing:)) ?? "nil")",
+        "tps": "\(tps.map { String(format: "%.1f", $0) } ?? "nil")",
+      ])
     emit(.usage(ScribeUsage(u), tokensPerSecond: tps))
   }
 
   if toolInvocations.isEmpty {
     log.info(
-      """
-      event=agent.assistant.final \
-      answer_chars=\(assistantText.count) \
-      reasoning_chars=\(assistantReasoning?.count ?? 0)
-      """)
+      "agent.assistant.final",
+      metadata: [
+        "answer_chars": "\(assistantText.count)",
+        "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
+      ])
     return .completed
   }
 

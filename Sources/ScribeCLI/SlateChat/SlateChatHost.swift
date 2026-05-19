@@ -285,7 +285,9 @@ internal final class SlateChatHost {
               if self.inPaste {
                 if self.editMode == .edit { self.inputBuffer.append("\n") }
               } else if self.editMode == .read {
-                self.log.debug("event=chat.mode.to-edit source=enter")
+                self.log.debug(
+                  "chat.mode.to-edit",
+                  metadata: ["source": "enter"])
                 self.editMode = .edit
               } else {
                 let text = self.inputBuffer
@@ -297,7 +299,9 @@ internal final class SlateChatHost {
 
             case .ctrlC:
               if self.editMode == .edit {
-                self.log.debug("event=chat.mode.to-read source=ctrl-c")
+                self.log.debug(
+                  "chat.mode.to-read",
+                  metadata: ["source": "ctrl-c"])
                 self.editMode = .read
               } else {
                 let (effect, recallText) = self.submitCoordinator.handleCtrlC()
@@ -311,7 +315,9 @@ internal final class SlateChatHost {
 
             case .escape:
               if self.editMode == .edit {
-                self.log.debug("event=chat.mode.to-read source=escape")
+                self.log.debug(
+                  "chat.mode.to-read",
+                  metadata: ["source": "escape"])
                 self.editMode = .read
               }
 

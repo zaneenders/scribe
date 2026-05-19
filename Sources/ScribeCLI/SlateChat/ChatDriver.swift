@@ -14,7 +14,7 @@ import ScribeCore
 /// - ``MarkdownRenderer`` — swap in a plain-text / HTML renderer for
 ///   non-terminal hosts.
 /// - the `TranscriptEvent` sink — any sequence of events emitted by
-///   ``ScribeAgent.prompt(_:options:log:)`` (or relayed by
+///   ``ScribeAgent.prompt(_:options:)`` (or relayed by
 ///   ``ChatCoordinator``) feeds straight in via ``handle(_:followingLive:)``.
 ///
 /// The driver holds no references to Slate, no `@MainActor`, no terminal

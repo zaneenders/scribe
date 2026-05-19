@@ -50,7 +50,8 @@ final class ChatCoordinator: Sendable {
     self.agent = try ScribeAgent(
       configuration: configuration,
       systemPrompt: systemPrompt,
-      initialMessages: self.initialMessages
+      initialMessages: self.initialMessages,
+      log: log
     )
     self.configuration = configuration
     self.resumeSnapshot = resumeSnapshot
@@ -115,7 +116,11 @@ final class ChatCoordinator: Sendable {
 
       let msgCount = initialMessages.count
       log.debug(
-        "event=chat.coordinator.start messages=\(msgCount) resumed=\(!resumeSnapshot.isEmpty)")
+        "chat.coordinator.start",
+        metadata: [
+          "messages": "\(msgCount)",
+          "resumed": "\(!resumeSnapshot.isEmpty)",
+        ])
 
       let tracker = TokenTracker(
         contextWindow: configuration.contextWindow,
@@ -125,16 +130,18 @@ final class ChatCoordinator: Sendable {
       for await line in lines {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == "exit" {
-          log.notice("event=chat.user.exit-command")
+          log.notice("chat.user.exit-command")
           break
         }
         if trimmed.isEmpty {
-          log.trace("event=chat.user.empty-skip")
+          log.trace("chat.user.empty-skip")
           continue
         }
 
         enqueue(.userSubmitted(trimmed))
-        log.debug("event=agent.turn.dispatch chars=\(trimmed.count)")
+        log.debug(
+          "agent.turn.dispatch",
+          metadata: ["chars": "\(trimmed.count)"])
 
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
@@ -145,7 +152,7 @@ final class ChatCoordinator: Sendable {
         // turn never produced a TurnResult (e.g. HTTP error before stream).
         var committed: [ScribeMessage]? = nil
         do {
-          let ts = await agent.prompt(trimmed, log: log)
+          let ts = await agent.prompt(trimmed)
           for await event in ts.events {
             if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))
@@ -154,20 +161,25 @@ final class ChatCoordinator: Sendable {
           committed = result.messages
           switch result.outcome {
           case .completed:
-            log.info("event=agent.turn.end status=completed")
+            log.info("agent.turn.end", metadata: ["status": "completed"])
             tracker.logStatus(logger: log)
           case .interrupted:
-            log.notice("event=agent.turn.end status=interrupted")
+            log.notice("agent.turn.end", metadata: ["status": "interrupted"])
             enqueue(.transcript(.turnInterrupted))
           case .toolRoundLimit(let max):
-            log.notice("event=agent.turn.end status=tool-round-limit limit=\(max)")
+            log.notice(
+              "agent.turn.end",
+              metadata: ["status": "tool-round-limit", "limit": "\(max)"])
             enqueue(.transcript(.turnInterrupted))
           }
         } catch {
           let se = (error as? ScribeError) ?? .generic(String(describing: error))
           log.error(
-            "event=agent.turn.end status=error err=\"\(se.errorDescription ?? String(describing: se))\""
-          )
+            "agent.turn.end",
+            metadata: [
+              "status": "error",
+              "err": "\(se.errorDescription ?? String(describing: se))",
+            ])
           enqueue(.transcript(.harnessError(se)))
         }
 
@@ -183,7 +195,9 @@ final class ChatCoordinator: Sendable {
       // Final flush in case the loop exited with un-persisted messages.
       let trailing = await agent.messages
       persistNew(allMessages: trailing, persistedCount: persistedCount)
-      log.debug("event=chat.coordinator.end transcript_messages=\(trailing.count)")
+      log.debug(
+        "chat.coordinator.end",
+        metadata: ["transcript_messages": "\(trailing.count)"])
     } catch {
       let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
       enqueue(.transcript(.harnessError(scribeError)))

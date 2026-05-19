@@ -125,6 +125,7 @@ struct SessionListFormattingTests {
       stripANSI(
         ScribeCLI().formatSessionLine(
           shortId: $0.id, when: $0.when, cwd: $0.cwd,
+          logFile: "~/.scribe/sessions/8ffc6215/scribe.log",
           version: "test"
         )
       )
@@ -163,6 +164,7 @@ struct SessionListFormattingTests {
   @Test func formatSessionLineContainsShortId() {
     let line = ScribeCLI().formatSessionLine(
       shortId: "DEADBEEF", when: "1h ago", cwd: "~/proj",
+      logFile: "~/.scribe/sessions/deadbeef/scribe.log",
       version: "test")
     let stripped = stripANSI(line)
     #expect(stripped.contains("DEADBEEF"))
@@ -176,6 +178,7 @@ struct SessionListFormattingTests {
     for when in cases {
       let line = ScribeCLI().formatSessionLine(
         shortId: "BBBBBBBB", when: when, cwd: "~",
+        logFile: "~/.scribe/sessions/deadbeef/scribe.log",
         version: "test")
       let stripped = stripANSI(line)
 
@@ -200,6 +203,7 @@ struct SessionListFormattingTests {
     for when in cases {
       let line = ScribeCLI().formatSessionLine(
         shortId: "CCCCCCCC", when: when, cwd: "~",
+        logFile: "~/.scribe/sessions/deadbeef/scribe.log",
         version: "test")
       let stripped = stripANSI(line)
 

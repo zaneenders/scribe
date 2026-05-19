@@ -60,7 +60,10 @@ private struct FakeTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable { Result() }
+  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+    _ = log
+    return Result()
+  }
 }
 
 /// A tool that throws `AgentTurnInterruptedError` directly from `run`.
@@ -70,7 +73,8 @@ private struct InterruptedTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
+  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+    _ = log
     throw AgentTurnInterruptedError()
   }
 }
@@ -120,7 +124,7 @@ private func makeConfig(
 ) -> AgentLoopConfig {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  let registry = ToolRegistry(tools: tools)
+  let registry = ToolRegistry(tools: tools, log: testLogger)
   return AgentLoopConfig(
     model: model,
     client: client,
@@ -250,7 +254,7 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [FakeTool()])
+    let registry = ToolRegistry(tools: [FakeTool()], log: toolRunnerTestLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
@@ -374,7 +378,7 @@ struct AgentLoopTests {
       let transport = FakeClientTransport(
         statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
       let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-      let registry = ToolRegistry(tools: [FakeTool()])
+      let registry = ToolRegistry(tools: [FakeTool()], log: toolRunnerTestLogger)
       let config = AgentLoopConfig(
         model: "test-model",
         client: client,
@@ -560,7 +564,7 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [FakeTool()])
+    let registry = ToolRegistry(tools: [FakeTool()], log: toolRunnerTestLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
@@ -601,7 +605,7 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [chunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [InterruptedTool()])
+    let registry = ToolRegistry(tools: [InterruptedTool()], log: toolRunnerTestLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,

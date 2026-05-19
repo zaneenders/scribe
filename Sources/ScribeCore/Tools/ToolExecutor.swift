@@ -1,5 +1,6 @@
 import SystemPackage
 import Foundation
+import Logging
 
 // MARK: - ToolExecutor
 
@@ -27,6 +28,7 @@ public protocol ToolExecutor: Sendable {
   func execute(
     _ invocation: ToolInvocation,
     workingDirectory: FilePath,
+    log: Logger,
     abort: any AbortObserver
   ) async throws -> String
 }

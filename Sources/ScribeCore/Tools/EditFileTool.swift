@@ -29,9 +29,7 @@ public struct EditFileTool: ScribeTool {
 
   public init() {}
 
-  private static let logger = Logger(label: "scribe.tool.edit_file")
-
-  public func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let oldS = try ToolArgumentParsing.string(obj["old_string"], field: "old_string")
@@ -55,7 +53,7 @@ public struct EditFileTool: ScribeTool {
     let s = fp.string
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try text.write(toFile: s, atomically: true, encoding: .utf8)
-    Self.logger.debug(
+    log.debug(
       "agent.tool.edit_file",
       metadata: [
         "path": "\(s.replacingOccurrences(of: "\"", with: "\\\""))",

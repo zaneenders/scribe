@@ -3,7 +3,6 @@ import Foundation
 import Logging
 import ScribeCore
 import ScribeLLM
-import Synchronization
 import SystemPackage
 
 // MARK: - Config key bindings
@@ -19,124 +18,6 @@ public enum ScribeConfigBinding {
   public static let contextWindowThreshold: ConfigKey = "agent.contextWindowThreshold"
   public static let reasoningEnabled: ConfigKey = "agent.reasoning"
   public static let loggingLevel: ConfigKey = "logging.level"
-}
-
-// MARK: - Log level
-
-/// Severity-ordered levels for `logging.level` in `scribe-config.json`.
-///
-/// A configured minimum level emits that level and all *more severe* levels (e.g. `info`
-/// also allows `notice`, `warning`, and `error`).
-public enum ScribeLogLevel: String, Sendable, CaseIterable {
-  case trace
-  case debug
-  case info
-  case notice
-  case warning
-  case error
-
-  public var priority: Int {
-    switch self {
-    case .trace: 0
-    case .debug: 1
-    case .info: 2
-    case .notice: 3
-    case .warning: 4
-    case .error: 5
-    }
-  }
-
-  /// Corresponding `Logger.Level` for swift-log (same raw strings).
-  public var swiftLogLevel: Logger.Level {
-    Logger.Level(rawValue: rawValue) ?? .info
-  }
-
-  init?(parsingConfig raw: String) {
-    let s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !s.isEmpty else { return nil }
-    self.init(rawValue: s)
-  }
-}
-
-// MARK: - Logging infrastructure
-
-final class LockedDataWriter: Sendable {
-  private let mutex = Mutex(())
-  private let emit: @Sendable (Data) -> Void
-
-  init(_ emit: @escaping @Sendable (Data) -> Void) {
-    self.emit = emit
-  }
-
-  func write(_ data: Data) {
-    mutex.withLock { _ in emit(data) }
-  }
-}
-
-final class FileSink: Sendable {
-  private let handle: FileHandle
-
-  init(handle: FileHandle) {
-    self.handle = handle
-  }
-
-  func write(_ data: Data) {
-    try? handle.write(contentsOf: data)
-    // fsync is intentionally NOT called per write. With `logging.level = trace`,
-    // a single shell drain emits hundreds of trace lines per second, and an
-    // fsync per line was a major hot path (each one is a kernel round-trip and
-    // shows up as ~100% CPU during noisy shells). Durability is bounded by the
-    // deinit fsync below; for crash-grade durability use a write-through file
-    // system or rotate to an os_log-backed handler.
-  }
-
-  deinit {
-    try? handle.synchronize()
-    try? handle.close()
-  }
-}
-
-/// Lock-protected `ISO8601DateFormatter` so a single shared instance can be reused from many
-/// tasks under strict concurrency.
-private let scribeLogTimestampFormatter: Mutex<ISO8601DateFormatter> = {
-  let formatter = ISO8601DateFormatter()
-  formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-  return Mutex(formatter)
-}()
-
-/// One log line per call, formatted as
-/// `<iso8601-ms> [<level>] <message>` so each line is timestamped and easy to grep.
-struct ScribeLineLogHandler: LogHandler {
-  var logLevel: Logger.Level = .info
-  var metadata: Logger.Metadata = [:]
-
-  private let dataWriter: LockedDataWriter
-
-  init(minimumLevel: Logger.Level, dataWriter: LockedDataWriter) {
-    self.logLevel = minimumLevel
-    self.dataWriter = dataWriter
-  }
-
-  func log(event: LogEvent) {
-    var text = "\(event.message)"
-    if let error = event.error {
-      text += " err=\"\(error)\""
-    }
-    if let metadata = event.metadata, !metadata.isEmpty {
-      let pairs = metadata.map { key, value in
-        "\(key)=\(value)"
-      }.sorted().joined(separator: " ")
-      text += " \(pairs)"
-    }
-    let timestamp = scribeLogTimestampFormatter.withLock { $0.string(from: Date()) }
-    let line = "\(timestamp) [\(event.level.rawValue)] \(text)\n"
-    dataWriter.write(Data(line.utf8))
-  }
-
-  subscript(metadataKey metadataKey: String) -> Logger.Metadata.Value? {
-    get { metadata[metadataKey] }
-    set { metadata[metadataKey] = newValue }
-  }
 }
 
 // MARK: - Codable mirror for writing a default config file
@@ -167,7 +48,7 @@ private struct ConfigTemplate: Codable {
   }
 }
 
-// MARK: - ConfigLoader
+// MARK: - LoadedConfig
 
 /// Loaded configuration bundle returned by `ConfigLoader.load()`.
 public struct LoadedConfig: Sendable {
@@ -175,7 +56,6 @@ public struct LoadedConfig: Sendable {
   public var apiBaseURL: String
   public var apiKey: String?
   public var logLevel: ScribeLogLevel
-  public var logDirectoryPath: String
   public var chatSessionsDirectoryPath: String
   public var resolvedConfigurationPath: String
   public var paths: ScribePaths
@@ -191,42 +71,13 @@ public struct LoadedConfig: Sendable {
     return OpenAICompatibleClient.make(serverURL: serverURL, apiKey: apiKey)
   }
 
-  /// Returns a logger appending all events for one Scribe invocation to
-  /// `logDirectoryPath`/`scribe-{sessionId}.log`. Pass the chat session id when one exists
-  /// (so the log file shares a UUID stem with the matching `{uuid}.json` transcript archive),
-  /// or a freshly-minted UUID for ephemeral / non-chat invocations.
+  /// Per-chat logger writing to `sessions/{sessionId}/scribe.log` under the data home.
   public func makeSessionLogger(sessionId: UUID) -> Logger {
-    let level = logLevel.swiftLogLevel
-    let dir = URL(fileURLWithPath: logDirectoryPath, isDirectory: true).standardizedFileURL
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-
-    let fileURL = dir.appendingPathComponent(
-      "scribe-\(sessionId.uuidString).log", isDirectory: false)
-
-    if !FileManager.default.fileExists(atPath: fileURL.path) {
-      _ = FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-    }
-    if let fileHandle = try? FileHandle(forUpdating: fileURL) {
-      _ = try? fileHandle.seekToEnd()
-      let sink = FileSink(handle: fileHandle)
-      let fileWriter = LockedDataWriter { data in sink.write(data) }
-      let sessionLogger = Logger(label: "scribe.session") { _ in
-        ScribeLineLogHandler(minimumLevel: level, dataWriter: fileWriter)
-      }
-      // Route all ScribeCore loggers (ToolRegistry, Shell, etc.) to this file.
-      ScribeCore.scribeSessionLogger = sessionLogger
-      return sessionLogger
-    }
-    // Last-resort fallback: emit to stderr if we can't open the per-session file.
-    let fallback = Logger(label: "scribe.session") { _ in
-      ScribeLineLogHandler(
-        minimumLevel: level,
-        dataWriter: LockedDataWriter { data in
-          try? FileHandle.standardError.write(contentsOf: data)
-        })
-    }
-    ScribeCore.scribeSessionLogger = fallback
-    return fallback
+    SessionLoggerFactory.makeSessionLogger(
+      sessionId: sessionId,
+      minimumLevel: logLevel.swiftLogLevel,
+      logFilePath: paths.logFilePath(sessionId: sessionId)
+    )
   }
 }
 
@@ -357,7 +208,6 @@ public enum ConfigLoader {
 
     let reasoningEnabled = try await reader.fetchBool(forKey: ScribeConfigBinding.reasoningEnabled)
 
-    let logDirectoryPath = paths.logDirectoryPath
     let chatSessionsDirectoryPath = paths.sessionsDirectoryPath
 
     let resolvedPathString = configPath.string
@@ -376,7 +226,6 @@ public enum ConfigLoader {
       apiBaseURL: baseURL,
       apiKey: resolvedAPIKey,
       logLevel: logLevel,
-      logDirectoryPath: logDirectoryPath,
       chatSessionsDirectoryPath: chatSessionsDirectoryPath,
       resolvedConfigurationPath: resolvedPathString,
       paths: paths
@@ -398,7 +247,7 @@ public enum ConfigLoader {
         reasoning: false
       ),
       logging: ConfigTemplate.LoggingSection(
-        level: "trace"
+        level: "info"
       )
     )
     let encoder = JSONEncoder()

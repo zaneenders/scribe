@@ -107,3 +107,10 @@ Release builds omit frame pointers by default, which breaks stack walking.
 The `ScribeCLI` target already includes `-Xcc -fno-omit-frame-pointer` so
 release-mode profiling works out of the box.
 
+## Logging
+
+- **CLI file logs:** `~/.scribe/sessions/{sessionId}/scribe.log` (see `Sources/ScribeCLI/Logging/`).
+- **Format:** `2026-05-18T12:00:00.123Z [info] chat.session.start session_id=… mode=new …`
+- **Convention:** message = `domain.action` (e.g. `agent.tool.start`); dimensions in swift-log `metadata`.
+- **Embedders:** pass a host `Logger` into ``ScribeAgent`` at init; the same instance flows through the agent loop and built-in tools.
+

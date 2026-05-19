@@ -3,18 +3,14 @@ import Foundation
 // MARK: - ScribePaths
 
 /// Centralized path resolution for Scribe.  The data home defaults to `~/.scribe/`
-/// and can be overridden with the `SCRIBE_HOME` environment variable.  All
-/// subdirectories (`logs/`, `sessions/`) and the default config file are derived
-/// from it.
+/// and can be overridden with the `SCRIBE_HOME` environment variable.  Config,
+/// sessions, and per-session logs all live under that directory.
 public struct ScribePaths: Sendable {
   /// Root data directory.  Defaults to `~/.scribe/`; override with `SCRIBE_HOME`.
   public let dataHome: String
 
   /// Absolute path to the default config file: `{dataHome}/scribe-config.json`.
   public let defaultConfigPath: String
-
-  /// Absolute path for per‑session log files: `{dataHome}/logs/`.
-  public let logDirectoryPath: String
 
   /// Absolute path for session storage: `{dataHome}/sessions/`.
   public let sessionsDirectoryPath: String
@@ -27,9 +23,6 @@ public struct ScribePaths: Sendable {
     self.defaultConfigPath =
       homeURL
       .appendingPathComponent("scribe-config.json", isDirectory: false).path
-    self.logDirectoryPath =
-      homeURL
-      .appendingPathComponent("logs", isDirectory: true).path
     self.sessionsDirectoryPath =
       homeURL
       .appendingPathComponent("sessions", isDirectory: true).path
@@ -40,6 +33,20 @@ public struct ScribePaths: Sendable {
   /// Resolve all Scribe paths from the current environment.
   public static func resolve() -> ScribePaths {
     ScribePaths(dataHome: resolveDataHome())
+  }
+
+  /// `{sessionsDirectoryPath}/{sessionId}/`
+  public func sessionDirectory(sessionId: UUID) -> String {
+    URL(fileURLWithPath: sessionsDirectoryPath, isDirectory: true)
+      .appendingPathComponent(sessionId.uuidString, isDirectory: true)
+      .path
+  }
+
+  /// `{sessionsDirectoryPath}/{sessionId}/scribe.log`
+  public func logFilePath(sessionId: UUID) -> String {
+    URL(fileURLWithPath: sessionDirectory(sessionId: sessionId), isDirectory: true)
+      .appendingPathComponent("scribe.log", isDirectory: false)
+      .path
   }
 
   // MARK: - Private helpers

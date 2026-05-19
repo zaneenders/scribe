@@ -7,10 +7,11 @@ import Testing
 @Suite
 struct ToolRunnerRouterTests {
   @Test func unknownToolThrowsTypedError() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], log: toolRunnerTestLogger)
     do {
       _ = try await registry.run(
         name: "not_a_registered_tool", arguments: "{}", workingDirectory: FilePath("/tmp"),
+        log: toolRunnerTestLogger,
         abortObserver: AbortNotifier())
       #expect(Bool(false), "expected ScribeError.toolUnknown")
     } catch let error as ScribeError {

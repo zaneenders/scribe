@@ -1,5 +1,4 @@
 import Foundation
-import Logging
 import ScribeCore
 
 struct ChatSessionMetadata: Codable, Sendable {
@@ -122,24 +121,16 @@ enum ChatSessionStore {
     _ messages: [ScribeMessage],
     to directory: URL
   ) throws {
+    guard !messages.isEmpty else { return }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let messagesURL = directory.appendingPathComponent("messages.jsonl", isDirectory: false)
-
-    if !FileManager.default.fileExists(atPath: messagesURL.path) {
-      _ = FileManager.default.createFile(atPath: messagesURL.path, contents: nil)
-    }
-
-    let handle = try FileHandle(forWritingTo: messagesURL)
-    defer { try? handle.close() }
-    try handle.seekToEnd()
-
+    let writer = try AppendOnlyFileWriter(fileURL: messagesURL)
     for message in messages {
       var data = try enc.encode(message)
       data.append(UInt8(ascii: "\n"))
-      try handle.write(contentsOf: data)
+      try writer.append(data)
     }
-
-    try? FileManager.default.setAttributes(
+    try FileManager.default.setAttributes(
       [.modificationDate: Date()],
       ofItemAtPath: directory.path
     )

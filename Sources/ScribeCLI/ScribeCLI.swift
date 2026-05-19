@@ -76,8 +76,15 @@ import ScribeCore
         let when = relativeTime(from: updatedAt)
         let displayCwd = meta.cwd.replacingOccurrences(of: home, with: "~")
 
+        let logFile = loaded.paths.logFilePath(sessionId: meta.id)
+        let displayLog = logFile.replacingOccurrences(of: home, with: "~")
         print(
-          formatSessionLine(shortId: shortId, when: when, cwd: displayCwd, version: meta.scribeVersion ?? "unknown"))
+          formatSessionLine(
+            shortId: shortId,
+            when: when,
+            cwd: displayCwd,
+            logFile: displayLog,
+            version: meta.scribeVersion ?? "unknown"))
       }
       return
     }
@@ -148,13 +155,12 @@ import ScribeCore
       resumeMessages = []
     }
 
-    let log = loaded.makeSessionLogger(sessionId: sessionId)
+    var log = loaded.makeSessionLogger(sessionId: sessionId)
     let mode = resumeMetadata == nil ? "new" : "resume"
+    log[metadataKey: "mode"] = "\(mode)"
     log.notice(
       "chat.session.start",
       metadata: [
-        "session_id": "\(sessionId.uuidString)",
-        "mode": "\(mode)",
         "scribe_version": "\(GitVersion.hash)",
         "model": "\(scribeConfig.agentModel)",
         "base_url": "\(scribeConfig.serverURL)",
@@ -211,8 +217,9 @@ import ScribeCore
     print("Scribe version:  \(GitVersion.hash)")
     print("Data home:       \(abbreviate(p.dataHome))")
     print("Config:          \(abbreviate(loaded.resolvedConfigurationPath))")
-    print("Logs:            \(abbreviate(p.logDirectoryPath))")
-    print("Sessions:        \(abbreviate(p.sessionsDirectoryPath))")
+    print(
+      "Sessions:        \(abbreviate(p.sessionsDirectoryPath))  ({sessionId}/metadata.json, messages.jsonl, scribe.log)"
+    )
     if let env = scribeHomeEnv {
       print("SCRIBE_HOME:     \(env)")
     } else {
@@ -259,10 +266,11 @@ extension ScribeCLI {
     shortId: String,
     when: String,
     cwd: String,
+    logFile: String,
     version: String
   ) -> String {
     let timeCol = when.padding(toLength: 9, withPad: " ", startingAt: 0)
     return
-      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m(\(version))\u{001B}[0m"
+      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m\(logFile)\u{001B}[0m  \u{001B}[2m(\(version))\u{001B}[0m"
   }
 }

@@ -59,7 +59,10 @@ private struct FakeTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable { Result() }
+  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+    _ = log
+    return Result()
+  }
 }
 
 /// Sleeps until cancelled — used by `promptAbortReturnsInterrupted` to keep
@@ -72,7 +75,8 @@ private struct SleepyAgentTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
+  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+    _ = log
     try await Task.sleep(for: .seconds(60))
     return Result()
   }
@@ -109,7 +113,8 @@ private func makeAgent(
     tools: tools,
     initialMessages: [],
     workingDirectory: FilePath("/tmp"),
-    reasoningEnabled: nil
+    reasoningEnabled: nil,
+    log: testLogger
   )
 }
 
@@ -129,7 +134,8 @@ private func makeAgent(
     tools: tools,
     initialMessages: [],
     workingDirectory: FilePath("/tmp"),
-    reasoningEnabled: nil
+    reasoningEnabled: nil,
+    log: testLogger
   )
 }
 
@@ -146,7 +152,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.prompt("hello", log: testLogger)
+    let ts = await agent.prompt("hello")
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
@@ -161,7 +167,7 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks, tools: [FakeTool()])
     let options = AgentRunOptions(maxToolRounds: 1)
-    let ts = await agent.prompt("test", options: options, log: testLogger)
+    let ts = await agent.prompt("test", options: options)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .toolRoundLimit(rounds: 1))
@@ -176,7 +182,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     var texts: [String] = []
     for await event in ts.events {
       if case .appendAssistantText(_, let text) = event { texts.append(text) }
@@ -198,7 +204,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     var events: [TranscriptEvent] = []
     for await event in ts.events { events.append(event) }
     let result = try await ts.result.value
@@ -217,7 +223,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     var events: [TranscriptEvent] = []
     for await event in ts.events { events.append(event) }
     _ = try await ts.result.value
@@ -236,7 +242,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.prompt("hello", log: testLogger)
+    let ts = await agent.prompt("hello")
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     // The agent auto-injects the system message at construction time when
@@ -261,7 +267,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
@@ -280,7 +286,7 @@ struct ScribeAgentTests {
 
   @Test func promptPropagatesHTTPError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     Task { for await _ in ts.events {} }
     do {
       _ = try await ts.result.value
@@ -298,7 +304,7 @@ struct ScribeAgentTests {
 
   @Test func promptStreamFinishesOnError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     var eventCount = 0
     for await _ in ts.events { eventCount += 1 }
     let didThrow: Bool
@@ -326,7 +332,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: toolCallChunks, tools: [SleepyAgentTool()])
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     let drain = Task { for await _ in ts.events {} }
     // Give the loop a beat to enter the tool watch task before aborting.
     try await Task.sleep(for: .milliseconds(50))
@@ -345,7 +351,7 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks)
     agent.abort()  // fired with no in-flight turn
-    let ts = await agent.prompt("test", log: testLogger)
+    let ts = await agent.prompt("test")
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
@@ -359,10 +365,10 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.prompt("one", log: testLogger)
+    let ts = await agent.prompt("one")
     Task { for await _ in ts.events {} }
     _ = try await ts.result.value
-    let ts2 = await agent.prompt("two", log: testLogger)
+    let ts2 = await agent.prompt("two")
     Task { for await _ in ts2.events {} }
     _ = try await ts2.result.value
 
@@ -379,7 +385,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.prompt("hello", log: testLogger)
+    let ts = await agent.prompt("hello")
     Task { for await _ in ts.events {} }
     _ = try await ts.result.value
 
@@ -436,7 +442,8 @@ struct ScribeAgentTests {
         ScribeMessage(role: .user, content: "first"),
       ],
       workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil
+      reasoningEnabled: nil,
+      log: testLogger
     )
     let messages = await agent.messages
     #expect(messages.count == 2)
@@ -454,7 +461,7 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks)
     let userMsg = ScribeMessage(role: .user, content: "hello")
-    let ts = await agent.prompt([userMsg], log: testLogger)
+    let ts = await agent.prompt([userMsg])
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
@@ -473,7 +480,8 @@ struct ScribeAgentTests {
     static var parameters: [ScribeToolParameter] { [] }
     static var promptHint: String? { nil }
     struct Result: Encodable { let ok = false }
-    func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
+    func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+      _ = log
       Issue.record("Built-in tool ran despite a custom ToolExecutor being installed.")
       return Result()
     }
@@ -493,8 +501,10 @@ struct ScribeAgentTests {
     func execute(
       _ invocation: ToolInvocation,
       workingDirectory: FilePath,
+      log: Logger,
       abort: any AbortObserver
     ) async throws -> String {
+      _ = log
       invocations.withLock { $0.append(invocation) }
       return canned
     }
@@ -525,9 +535,10 @@ struct ScribeAgentTests {
       toolExecutor: recorder,
       initialMessages: [],
       workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil
+      reasoningEnabled: nil,
+      log: testLogger
     )
-    let ts = await agent.prompt("call the tool", log: testLogger)
+    let ts = await agent.prompt("call the tool")
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)

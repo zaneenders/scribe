@@ -56,16 +56,14 @@ public struct ReadFileTool: ScribeTool {
   /// subsequent model turn re-uploads the full transcript).
   static let defaultLineLimit = 2000
 
-  private static let logger = Logger(label: "scribe.tool.read_file")
-
-  public func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let offset = ToolArgumentParsing.optionalInt(obj["offset"])
     let limit = ToolArgumentParsing.optionalInt(obj["limit"])
     let result = try Self.readFile(path: path, offset: offset, limit: limit, workingDirectory: workingDirectory)
     let returnedLines = max(0, result.endLine - result.startLine + 1)
-    Self.logger.debug(
+    log.debug(
       "agent.tool.read_file",
       metadata: [
         "ok": "true",
