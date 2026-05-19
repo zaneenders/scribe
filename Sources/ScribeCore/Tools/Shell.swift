@@ -108,10 +108,10 @@ enum Shell {
     let outcome: ExecutionOutcome<(pid_t, Int, Int)>
     do {
       outcome = try await Subprocess.run(
-        .path(FilePath("/bin/sh")),
+        .path(SubprocessFilePathBridge.executable(FilePath("/bin/sh"))),
         arguments: ["-c", trimmed],
         environment: .inherit,
-        workingDirectory: shellCwd,
+        workingDirectory: SubprocessFilePathBridge.workingDirectory(shellCwd),
         platformOptions: platformOptions
       ) { execution, _, outputSequence, errorSequence in
         let pid = execution.processIdentifier.value

@@ -108,7 +108,8 @@ private func makeAgent(
     systemPrompt: "You are a test agent.",
     tools: tools,
     initialMessages: [],
-    workingDirectory: FilePath("/tmp")
+    workingDirectory: FilePath("/tmp"),
+    reasoningEnabled: nil
   )
 }
 
@@ -127,7 +128,8 @@ private func makeAgent(
     systemPrompt: "You are a test agent.",
     tools: tools,
     initialMessages: [],
-    workingDirectory: FilePath("/tmp")
+    workingDirectory: FilePath("/tmp"),
+    reasoningEnabled: nil
   )
 }
 
@@ -433,7 +435,8 @@ struct ScribeAgentTests {
         ScribeMessage(role: .system, content: "pre-baked"),
         ScribeMessage(role: .user, content: "first"),
       ],
-      workingDirectory: FilePath("/tmp")
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
     )
     let messages = await agent.messages
     #expect(messages.count == 2)
@@ -521,7 +524,8 @@ struct ScribeAgentTests {
       tools: [UnreachableTool()],
       toolExecutor: recorder,
       initialMessages: [],
-      workingDirectory: FilePath("/tmp")
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
     )
     let ts = await agent.prompt("call the tool", log: testLogger)
     Task { for await _ in ts.events {} }
