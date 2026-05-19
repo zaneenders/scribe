@@ -1,3 +1,4 @@
+import SystemPackage
 import Foundation
 import Logging
 import ScribeLLM
@@ -5,7 +6,7 @@ import ScribeLLM
 public struct ToolRegistry: Sendable, ToolExecutor {
   private let tools: [String: any ScribeTool]
 
-  /// The ChatTool schemas sent to the LLM, derived from the same tools.
+  // The ChatTool schemas sent to the LLM, derived from the same tools.
   let chatTools: [Components.Schemas.ChatTool]
 
   private static let defaultLogger = Logger(label: "scribe.tool.registry")
@@ -25,7 +26,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
   /// registry's abort-aware `run(name:arguments:...)` helper.
   public func execute(
     _ invocation: ToolInvocation,
-    workingDirectory: ScribeFilePath,
+    workingDirectory: FilePath,
     abort: any AbortObserver
   ) async throws -> String {
     try await run(
@@ -56,7 +57,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
   internal func run(
     name: String,
     arguments: String,
-    workingDirectory: ScribeFilePath,
+    workingDirectory: FilePath,
     abortObserver: some AbortObserver
   ) async throws -> String {
     guard let tool = tools[name] else {

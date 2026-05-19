@@ -112,6 +112,7 @@ extension ScribeConfig {
     contextWindowThreshold: 0.75,
     serverURL: "https://test.example.com",
     apiKey: "test-token",
-    workingDirectory: "/tmp"
+    workingDirectory: "/tmp",
+    reasoningEnabled: false
   )
 }

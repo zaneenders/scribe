@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Subprocess
+import SystemPackage
 
 // TODO: Address logging mess.
 package nonisolated(unsafe) var scribeSessionLogger: Logger?
@@ -18,8 +19,8 @@ package nonisolated(unsafe) var scribeSessionLogger: Logger?
 enum Shell {
   struct Result: Sendable {
     let exitCode: TerminationStatus
-    let stdoutFile: ScribeFilePath
-    let stderrFile: ScribeFilePath
+    let stdoutFile: FilePath
+    let stderrFile: FilePath
     let pid: pid_t
 
     var exitCodeForJSON: Int {
@@ -57,7 +58,7 @@ enum Shell {
   static func run(
     command: String,
     cwd: String?,
-    workingDirectory: ScribeFilePath,
+    workingDirectory: FilePath,
     killer: any ProcessKiller = DefaultProcessKiller()
   ) async throws -> Result {
     let id = UUID()
@@ -74,10 +75,10 @@ enum Shell {
         "cancelled_at_entry": "\(Task.isCancelled)",
       ])
 
-    let shellCwd: ScribeFilePath?
+    let shellCwd: FilePath?
     if let cwd {
       let fp = try PathResolution.resolve(existingDirectory: cwd, cwd: workingDirectory)
-      shellCwd = ScribeFilePath(fp.fileSystemPath)
+      shellCwd = FilePath(fp.string)
     } else {
       shellCwd = nil
     }
@@ -107,7 +108,7 @@ enum Shell {
     let outcome: ExecutionOutcome<(pid_t, Int, Int)>
     do {
       outcome = try await Subprocess.run(
-        .path(ScribeFilePath("/bin/sh")),
+        .path(FilePath("/bin/sh")),
         arguments: ["-c", trimmed],
         environment: .inherit,
         workingDirectory: shellCwd,
