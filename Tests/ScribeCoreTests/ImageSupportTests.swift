@@ -81,22 +81,9 @@ struct ImageSupportTests {
     #expect(ImageSupport.isImageFile(path: txtPath) == false)
   }
 
-  // MARK: - MIME type (extension fallback for non-existent files)
+  // MARK: - MIME type (magic bytes, not extension)
 
-  @Test func mimeTypeMapping() {
-    #expect(ImageSupport.mimeType(for: "test.png") == "image/png")
-    #expect(ImageSupport.mimeType(for: "test.jpg") == "image/jpeg")
-    #expect(ImageSupport.mimeType(for: "test.jpeg") == "image/jpeg")
-    #expect(ImageSupport.mimeType(for: "test.gif") == "image/gif")
-    #expect(ImageSupport.mimeType(for: "test.webp") == "image/webp")
-    #expect(ImageSupport.mimeType(for: "test.bmp") == "image/bmp")
-    #expect(ImageSupport.mimeType(for: "test.tiff") == "image/tiff")
-    #expect(ImageSupport.mimeType(for: "test.tif") == "image/tiff")
-    #expect(ImageSupport.mimeType(for: "test.heic") == "image/heic")
-    #expect(ImageSupport.mimeType(for: "test.unknown") == "application/octet-stream")
-  }
-
-  @Test func mimeTypePrefersMagicBytesOverExtension() throws {
+  @Test func detectImageTypeUsesMagicBytesNotExtension() throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -105,7 +92,7 @@ struct ImageSupportTests {
     // A PNG file with a .jpg extension — magic bytes should win
     let path = dir.appendingPathComponent("tricky.jpg").path
     try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: path))
-    #expect(ImageSupport.mimeType(for: path) == "image/png")
+    #expect(ImageSupport.detectImageType(path: path) == "image/png")
   }
 
   // MARK: - Path extraction
@@ -179,4 +166,5 @@ struct ImageSupportTests {
     #expect(!base64.isEmpty)
     #expect(Data(base64Encoded: base64) == data)
   }
+
 }

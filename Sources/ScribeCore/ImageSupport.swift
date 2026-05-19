@@ -76,28 +76,12 @@ public enum ImageSupport {
     detectImageType(path: path) != nil
   }
 
-  public static func mimeType(for path: String) -> String {
-    if let detected = detectImageType(path: path) { return detected }
-    // Fallback to extension for files we haven't read yet (e.g. in extractImagePaths)
-    let ext = (path as NSString).pathExtension.lowercased()
-    switch ext {
-    case "png": return "image/png"
-    case "jpg", "jpeg": return "image/jpeg"
-    case "gif": return "image/gif"
-    case "webp": return "image/webp"
-    case "bmp": return "image/bmp"
-    case "tiff", "tif": return "image/tiff"
-    case "heic", "heif": return "image/heic"
-    default: return "application/octet-stream"
-    }
-  }
-
   public static func base64ImageData(from path: String) throws -> (
     mimeType: String, base64: String, bytes: Int
   ) {
     let data = try Data(contentsOf: URL(fileURLWithPath: path))
     let base64 = data.base64EncodedString()
-    let mimeType = self.mimeType(for: path)
+    let mimeType = detectImageType(data: data) ?? "application/octet-stream"
     return (mimeType, base64, data.count)
   }
 
