@@ -8,20 +8,24 @@ public struct ScribeAgent: Sendable {
     var model: String
     var messages: [Components.Schemas.ChatMessage]
     var isStreaming = false
+    var reasoningEnabled: Bool?
 
     init(
       model: String,
-      messages: [Components.Schemas.ChatMessage]
+      messages: [Components.Schemas.ChatMessage],
+      reasoningEnabled: Bool?
     ) {
       self.model = model
       self.messages = messages
+      self.reasoningEnabled = reasoningEnabled
     }
 
     func snapshot() -> AgentStateSnapshot {
       AgentStateSnapshot(
         model: model,
         messages: messages,
-        isStreaming: isStreaming
+        isStreaming: isStreaming,
+        reasoningEnabled: reasoningEnabled
       )
     }
 
@@ -97,7 +101,8 @@ public struct ScribeAgent: Sendable {
     tools: [any ScribeTool] = [],
     toolExecutor: (any ToolExecutor)? = nil,
     initialMessages: [ScribeMessage] = [],
-    workingDirectory: ScribeFilePath
+    workingDirectory: ScribeFilePath,
+    reasoningEnabled: Bool?
   ) {
     self.client = client
     self.workingDirectory = workingDirectory
@@ -120,7 +125,8 @@ public struct ScribeAgent: Sendable {
       model: model,
       messages: Self.applySystemPrompt(
         systemPrompt: systemPrompt,
-        initialMessages: initialMessages.toChatMessages())
+        initialMessages: initialMessages.toChatMessages()),
+      reasoningEnabled: reasoningEnabled
     )
   }
 
@@ -148,7 +154,8 @@ public struct ScribeAgent: Sendable {
       tools: configuration.tools,
       toolExecutor: nil,
       initialMessages: initialMessages,
-      workingDirectory: ScribeFilePath(configuration.workingDirectory)
+      workingDirectory: ScribeFilePath(configuration.workingDirectory),
+      reasoningEnabled: configuration.reasoningEnabled
     )
   }
 
@@ -220,7 +227,8 @@ public struct ScribeAgent: Sendable {
         chatTools: chatTools,
         temperature: options.temperature,
         maxToolRounds: options.maxToolRounds,
-        workingDirectory: workingDirectory
+        workingDirectory: workingDirectory,
+        reasoningEnabled: snapshot.reasoningEnabled
       )
 
       do {

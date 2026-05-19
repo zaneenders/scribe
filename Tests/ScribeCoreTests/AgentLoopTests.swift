@@ -126,7 +126,8 @@ private func makeConfig(
     toolExecutor: registry,
     chatTools: registry.chatTools,
     temperature: temperature,
-    maxToolRounds: maxToolRounds, workingDirectory: ScribeFilePath("/tmp")
+    maxToolRounds: maxToolRounds, workingDirectory: ScribeFilePath("/tmp"),
+    reasoningEnabled: true
   )
 }
 
@@ -255,7 +256,8 @@ struct AgentLoopTests {
       toolExecutor: registry,
       chatTools: registry.chatTools,
       temperature: 0,
-      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
+      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp"),
+      reasoningEnabled: true
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -378,7 +380,8 @@ struct AgentLoopTests {
         toolExecutor: registry,
         chatTools: registry.chatTools,
         temperature: 0,
-        maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
+        maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp"),
+        reasoningEnabled: true
       )
       let (messages, termination) = try await runLoop(
         prompt: "test",
@@ -563,7 +566,8 @@ struct AgentLoopTests {
       toolExecutor: registry,
       chatTools: registry.chatTools,
       temperature: 0,
-      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
+      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp"),
+      reasoningEnabled: true
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -603,7 +607,8 @@ struct AgentLoopTests {
       toolExecutor: registry,
       chatTools: registry.chatTools,
       temperature: 0,
-      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp")
+      maxToolRounds: .max, workingDirectory: ScribeFilePath("/tmp"),
+      reasoningEnabled: true
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())

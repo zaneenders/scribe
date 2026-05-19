@@ -16,6 +16,7 @@ public struct ScribeConfig: Sendable {
   public var tools: [any ScribeTool]
   /// Absolute working directory for tool path resolution.
   public var workingDirectory: String
+  public var reasoningEnabled: Bool?  // May need to set this to null for some providers
   public init(
     agentModel: String,
     contextWindow: Int,
@@ -23,7 +24,8 @@ public struct ScribeConfig: Sendable {
     serverURL: String,
     apiKey: String? = nil,
     tools: [any ScribeTool] = [],
-    workingDirectory: String
+    workingDirectory: String,
+    reasoningEnabled: Bool?
   ) {
     self.agentModel = agentModel
     self.contextWindow = contextWindow
@@ -32,5 +34,6 @@ public struct ScribeConfig: Sendable {
     self.apiKey = apiKey
     self.tools = tools
     self.workingDirectory = workingDirectory
+    self.reasoningEnabled = reasoningEnabled
   }
 }

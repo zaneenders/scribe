@@ -33,6 +33,7 @@ struct AgentLoopConfig: Sendable {
   let temperature: Double
   let maxToolRounds: Int
   let workingDirectory: ScribeFilePath
+  let reasoningEnabled: Bool?
 }
 
 /// Why the agent loop stopped.
@@ -214,7 +215,8 @@ private func runSingleRound(
     tools: config.chatTools,
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
-    reasoning: Components.Schemas.ChatCompletionReasoning(enabled: true)
+    reasoning: config.reasoningEnabled == nil
+      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled)
   )
 
   // ── Send HTTP request ────────────────────────────────
@@ -222,7 +224,8 @@ private func runSingleRound(
   log.info(
     """
     event=agent.http.request \
-    messages=\(requestBody.messages.count)
+    messages=\(requestBody.messages.count) \
+    reasoningEnabled=\(String(describing: config.reasoningEnabled))
     """)
   let response = try await config.client.createChatCompletion(body: .json(requestBody))
 
