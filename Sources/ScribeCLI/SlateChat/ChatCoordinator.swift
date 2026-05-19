@@ -139,13 +139,43 @@ final class ChatCoordinator: Sendable {
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
+        // Build prompt messages, attaching any image files referenced in the input.
+        let promptMessages: [ScribeMessage]
+        let imagePaths = ImageSupport.extractImagePaths(
+          from: trimmed,
+          workingDirectory: FileManager.default.currentDirectoryPath
+        )
+        if imagePaths.isEmpty {
+          promptMessages = [ScribeMessage(role: .user, content: trimmed)]
+        } else {
+          var parts: [ScribeContentPart] = []
+          if !trimmed.isEmpty {
+            parts.append(.text(trimmed))
+          }
+          for path in imagePaths {
+            do {
+              let (mimeType, base64, _) = try ImageSupport.base64ImageData(from: path)
+              let url = "data:\(mimeType);base64,\(base64)"
+              parts.append(.image(url: url, detail: nil))
+            } catch {
+              log.warning(
+                "chat.image.read-failed",
+                metadata: [
+                  "path": "\(path)",
+                  "err": "\(String(describing: error))",
+                ])
+            }
+          }
+          promptMessages = [ScribeMessage(role: .user, content: "", contentParts: parts)]
+        }
+
         // Track the messages the agent committed during this turn so we can
         // persist + emit `turnComplete` without reaching back into the
         // agent's storage actor. Falls back to the agent's snapshot if the
         // turn never produced a TurnResult (e.g. HTTP error before stream).
         var committed: [ScribeMessage]? = nil
         do {
-          let ts = await agent.prompt(trimmed, log: log)
+          let ts = await agent.prompt(promptMessages, log: log)
           for await event in ts.events {
             if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))

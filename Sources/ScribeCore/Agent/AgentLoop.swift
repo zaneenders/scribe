@@ -176,12 +176,57 @@ func runAgentLoop(
           ])
         emit(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
         let toolMsg = Components.Schemas.ChatMessage(
-          role: .tool, content: jsonOutput, name: nil, toolCalls: nil, toolCallId: inv.id)
+          role: .tool, content: .case1(jsonOutput), name: nil, toolCalls: nil, toolCallId: inv.id)
         currentContext.messages.append(toolMsg)
         newMessages.append(toolMsg)
+
+        // If read_file returned an image, inject a follow-up user message
+        // with the image so the model can see it on the next turn.
+        if inv.name == "read_file",
+          let imageData = extractImageFromToolResult(jsonOutput)
+        {
+          let imageUrl = "data:\(imageData.mimeType);base64,\(imageData.base64)"
+          let imageScribeMsg = ScribeMessage(
+            role: .user,
+            contentParts: [
+              .text("Image from \(imageData.path):"),
+              .image(url: imageUrl, detail: nil),
+            ]
+          )
+          let imageMsg = imageScribeMsg.toChatMessage()
+          currentContext.messages.append(imageMsg)
+          newMessages.append(imageMsg)
+        }
       }
     }
   }
+}
+
+// MARK: - Image tool result extraction
+
+private struct ImageToolResult {
+  let path: String
+  let mimeType: String
+  let base64: String
+}
+
+private struct ReadFileImageWireResult: Decodable {
+  let ok: Bool?
+  let isImage: Bool?
+  let path: String?
+  let mimeType: String?
+  let base64: String?
+}
+
+private func extractImageFromToolResult(_ json: String) -> ImageToolResult? {
+  guard let data = json.data(using: .utf8),
+    let result = try? JSONDecoder().decode(ReadFileImageWireResult.self, from: data),
+    result.isImage == true,
+    let path = result.path,
+    let mimeType = result.mimeType,
+    let base64 = result.base64
+  else { return nil }
+  return ImageToolResult(path: path, mimeType: mimeType, base64: base64)
 }
 
 // MARK: - Round outcome
@@ -288,7 +333,7 @@ private func runSingleRound(
 
   let assistantMessage = Components.Schemas.ChatMessage(
     role: .assistant,
-    content: assistantText,
+    content: .case1(assistantText),
     name: nil,
     toolCalls: toolInvocations.isEmpty
       ? nil

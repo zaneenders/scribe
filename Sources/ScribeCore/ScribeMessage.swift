@@ -1,6 +1,62 @@
 import Foundation
 import ScribeLLM
 
+// MARK: - ScribeContentPart
+
+/// A single part of a message's content — either plain text or an image.
+///
+/// Maps to OpenAI's `ChatContentPart` on the wire (text / image_url).
+public enum ScribeContentPart: Sendable, Codable, Hashable {
+  case text(String)
+  case image(url: String, detail: String?)
+
+  enum CodingKeys: String, CodingKey {
+    case type
+    case text
+    case imageUrl = "image_url"
+  }
+
+  struct ImageUrlPayload: Codable, Hashable, Sendable {
+    var url: String
+    var detail: String?
+    enum CodingKeys: String, CodingKey {
+      case url
+      case detail
+    }
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let type = try container.decode(String.self, forKey: .type)
+    switch type {
+    case "text":
+      let text = try container.decode(String.self, forKey: .text)
+      self = .text(text)
+    case "image_url":
+      let payload = try container.decode(ImageUrlPayload.self, forKey: .imageUrl)
+      self = .image(url: payload.url, detail: payload.detail)
+    default:
+      throw DecodingError.dataCorruptedError(
+        forKey: .type,
+        in: container,
+        debugDescription: "Unknown content part type: \(type)")
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .text(let text):
+      try container.encode("text", forKey: .type)
+      try container.encode(text, forKey: .text)
+    case .image(let url, let detail):
+      try container.encode("image_url", forKey: .type)
+      let payload = ImageUrlPayload(url: url, detail: detail)
+      try container.encode(payload, forKey: .imageUrl)
+    }
+  }
+}
+
 // MARK: - ScribeMessage
 
 /// Transport-agnostic chat message used by Scribe's public agent API.
@@ -33,6 +89,9 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   /// `""` rather than omitted, matching OpenAI's behaviour for tool-calling
   /// assistant messages.
   public var content: String
+  /// Rich content parts (text + images). When non-nil and non-empty, this
+  /// takes precedence over `content` for encoding and wire transport.
+  public var contentParts: [ScribeContentPart]?
   public var name: String?
   public var toolCalls: [ScribeToolCall]?
   public var toolCallId: String?
@@ -44,6 +103,7 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   public init(
     role: Role,
     content: String = "",
+    contentParts: [ScribeContentPart]? = nil,
     name: String? = nil,
     toolCalls: [ScribeToolCall]? = nil,
     toolCallId: String? = nil,
@@ -51,6 +111,7 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   ) {
     self.role = role
     self.content = content
+    self.contentParts = contentParts
     self.name = name
     self.toolCalls = toolCalls
     self.toolCallId = toolCallId
@@ -69,10 +130,19 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   public init(from decoder: any Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     self.role = try c.decode(Role.self, forKey: .role)
-    self.content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
     self.name = try c.decodeIfPresent(String.self, forKey: .name)
     self.toolCallId = try c.decodeIfPresent(String.self, forKey: .toolCallId)
     self.reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning)
+
+    // Try content as array of parts first, then fall back to string.
+    if let parts = try? c.decode([ScribeContentPart].self, forKey: .content) {
+      self.contentParts = parts
+      self.content = ""
+    } else {
+      self.content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+      self.contentParts = nil
+    }
+
     if let wires = try c.decodeIfPresent([ScribeToolCall.Wire].self, forKey: .toolCalls) {
       self.toolCalls = wires.compactMap(ScribeToolCall.init(wire:))
     } else {
@@ -83,7 +153,11 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   public func encode(to encoder: any Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(role, forKey: .role)
-    try c.encode(content, forKey: .content)
+    if let parts = contentParts, !parts.isEmpty {
+      try c.encode(parts, forKey: .content)
+    } else {
+      try c.encode(content, forKey: .content)
+    }
     try c.encodeIfPresent(name, forKey: .name)
     try c.encodeIfPresent(toolCallId, forKey: .toolCallId)
     try c.encodeIfPresent(reasoning, forKey: .reasoning)
@@ -177,9 +251,32 @@ extension ScribeMessage {
       guard let id = c.id, let fn = c.function, let name = fn.name else { return nil }
       return ScribeToolCall(id: id, name: name, arguments: fn.arguments ?? "")
     }
+
+    let content: String
+    let contentParts: [ScribeContentPart]?
+    switch chatMessage.content {
+    case .case1(let text):
+      content = text
+      contentParts = nil
+    case .case2(let parts):
+      content = ""
+      contentParts = parts.map { part in
+        switch part {
+        case .text(let p):
+          return .text(p.text)
+        case .imageUrl(let p):
+          return .image(url: p.imageUrl.url, detail: p.imageUrl.detail?.rawValue)
+        }
+      }
+    case .none:
+      content = ""
+      contentParts = nil
+    }
+
     self.init(
       role: role,
-      content: chatMessage.content ?? "",
+      content: content,
+      contentParts: contentParts,
       name: chatMessage.name,
       toolCalls: calls?.isEmpty == true ? nil : calls,
       toolCallId: chatMessage.toolCallId,
@@ -196,6 +293,33 @@ extension ScribeMessage {
       case .tool: return .tool
       }
     }()
+
+    let contentPayload: Components.Schemas.ChatMessage.ContentPayload?
+    if let parts = contentParts, !parts.isEmpty {
+      let chatParts = parts.map { part -> Components.Schemas.ChatContentPart in
+        switch part {
+        case .text(let text):
+          return .text(.init(_type: .text, text: text))
+        case .image(let url, let detail):
+          let detailPayload: Components.Schemas.ChatImageContentPart.ImageUrlPayload.DetailPayload? = {
+            guard let d = detail else { return nil }
+            switch d {
+            case "low": return .low
+            case "high": return .high
+            default: return .auto
+            }
+          }()
+          return .imageUrl(.init(
+            _type: .imageUrl,
+            imageUrl: .init(url: url, detail: detailPayload)
+          ))
+        }
+      }
+      contentPayload = .case2(chatParts)
+    } else {
+      contentPayload = content.isEmpty ? nil : .case1(content)
+    }
+
     let calls = toolCalls?.map { tc in
       Components.Schemas.AssistantToolCall(
         id: tc.id,
@@ -205,7 +329,7 @@ extension ScribeMessage {
     }
     return Components.Schemas.ChatMessage(
       role: role,
-      content: content,
+      content: contentPayload,
       name: name,
       toolCalls: calls,
       toolCallId: toolCallId,

@@ -12,6 +12,15 @@ struct ReadFileToolResult: Encodable, Sendable {
   let truncated: Bool
 }
 
+struct ReadFileImageResult: Encodable, Sendable {
+  let ok = true
+  let path: String
+  let isImage = true
+  let mimeType: String
+  let base64: String
+  let bytes: Int
+}
+
 public struct ReadFileTool: ScribeTool {
   public static var name: String { "read_file" }
   public static var description: String {
@@ -19,7 +28,9 @@ public struct ReadFileTool: ScribeTool {
       + "Supports line-based pagination via `offset` and `limit` so very large files can be "
       + "fetched in sections without bloating the conversation history. The result includes "
       + "`bytes`, `total_lines`, `start_line`, `end_line`, and `truncated` so you can decide "
-      + "whether to request another page (`offset = previous end_line + 1`)."
+      + "whether to request another page (`offset = previous end_line + 1`). "
+      + "Image files (png, jpg, jpeg, gif, webp, bmp, tiff, heic) are automatically detected "
+      + "and returned as base64-encoded data so the model can view them."
   }
   public static var parameters: [ScribeToolParameter] {
     [
@@ -62,6 +73,25 @@ public struct ReadFileTool: ScribeTool {
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let offset = ToolArgumentParsing.optionalInt(obj["offset"])
     let limit = ToolArgumentParsing.optionalInt(obj["limit"])
+
+    let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
+    let s = fp.fileSystemPath
+
+    // Detect image files by extension and return base64-encoded data.
+    let ext = (s as NSString).pathExtension.lowercased()
+    if ImageSupport.imageExtensions.contains(ext) {
+      let result = try await Self.readImage(path: s)
+      Self.logger.debug(
+        "agent.tool.read_file.image",
+        metadata: [
+          "ok": "true",
+          "path": "\(result.path.replacingOccurrences(of: "\"", with: "\\\""))",
+          "mime_type": "\(result.mimeType)",
+          "bytes": "\(result.bytes)",
+        ])
+      return result
+    }
+
     let result = try Self.readFile(path: path, offset: offset, limit: limit, workingDirectory: workingDirectory)
     let returnedLines = max(0, result.endLine - result.startLine + 1)
     Self.logger.debug(
@@ -157,6 +187,21 @@ public struct ReadFileTool: ScribeTool {
       startLine: startIndex + 1,
       endLine: endIndex,
       truncated: endIndex < totalLines
+    )
+  }
+
+  /// Reads an image file and returns it as a base64-encoded payload.
+  private static func readImage(path: String) async throws -> ReadFileImageResult {
+    let data = try await Task {
+      try Data(contentsOf: URL(fileURLWithPath: path))
+    }.value
+    let base64 = data.base64EncodedString()
+    let mimeType = ImageSupport.mimeType(for: path)
+    return ReadFileImageResult(
+      path: path,
+      mimeType: mimeType,
+      base64: base64,
+      bytes: data.count
     )
   }
 }
