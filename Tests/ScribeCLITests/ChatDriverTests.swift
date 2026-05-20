@@ -20,9 +20,9 @@ struct ChatDriverTests {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
     driver.handleUserSubmitted("hello")
-    driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
-    driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Hello! How can I help?"))
-    driver.handle(TranscriptEvent.finalizeAssistantStream)
+    driver.handle(AgentEvent.output(.sectionStarted(.answer, previous: nil)))
+    driver.handle(AgentEvent.output(.text(.answer, "Hello! How can I help?")))
+    driver.handle(AgentEvent.output(.finalized))
 
     #expect(driver.state.lines.count > 0)
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
@@ -37,15 +37,15 @@ struct ChatDriverTests {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
     driver.handleUserSubmitted("list files")
-    driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
-    driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Let me check"))
-    driver.handle(TranscriptEvent.finalizeAssistantStream)
+    driver.handle(AgentEvent.output(.sectionStarted(.answer, previous: nil)))
+    driver.handle(AgentEvent.output(.text(.answer, "Let me check")))
+    driver.handle(AgentEvent.output(.finalized))
     driver.handle(
-      TranscriptEvent.toolInvocation(
+      AgentEvent.tool(.invocation(
         name: "shell",
         arguments: #"{"command":"ls"}"#,
         output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#
-      ))
+      )))
 
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
     #expect(allText.contains("shell"))
@@ -58,12 +58,12 @@ struct ChatDriverTests {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
     driver.handleUserSubmitted("complex question")
-    driver.handle(TranscriptEvent.enterAssistantSection(.reasoning, previous: nil))
-    driver.handle(TranscriptEvent.appendAssistantText(.reasoning, text: "Let me think..."))
-    driver.handle(TranscriptEvent.finalizeAssistantStream)
-    driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: .reasoning))
-    driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "The answer is 42"))
-    driver.handle(TranscriptEvent.finalizeAssistantStream)
+    driver.handle(AgentEvent.output(.sectionStarted(.reasoning, previous: nil)))
+    driver.handle(AgentEvent.output(.text(.reasoning, "Let me think...")))
+    driver.handle(AgentEvent.output(.finalized))
+    driver.handle(AgentEvent.output(.sectionStarted(.answer, previous: .reasoning)))
+    driver.handle(AgentEvent.output(.text(.answer, "The answer is 42")))
+    driver.handle(AgentEvent.output(.finalized))
 
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
     #expect(allText.contains("reasoning"))
@@ -78,9 +78,9 @@ struct ChatDriverTests {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
     driver.handleUserSubmitted("long task")
-    driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
-    driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Working..."))
-    driver.handle(TranscriptEvent.turnInterrupted)
+    driver.handle(AgentEvent.output(.sectionStarted(.answer, previous: nil)))
+    driver.handle(AgentEvent.output(.text(.answer, "Working...")))
+    driver.handle(AgentEvent.lifecycle(.interrupted))
 
     #expect(driver.state.streamingOpenLine == nil)
     #expect(driver.state.streamingOpenLineRaw.isEmpty)
@@ -96,8 +96,8 @@ struct ChatDriverTests {
     let u1 = ScribeUsage(promptTokens: 100, completionTokens: 50, totalTokens: 150)
     let u2 = ScribeUsage(promptTokens: 200, completionTokens: 75, totalTokens: 275)
 
-    driver.handle(TranscriptEvent.usage(u1, tokensPerSecond: nil))
-    driver.handle(TranscriptEvent.usage(u2, tokensPerSecond: nil))
+    driver.handle(AgentEvent.lifecycle(.usage(u1, tokensPerSecond: nil)))
+    driver.handle(AgentEvent.lifecycle(.usage(u2, tokensPerSecond: nil)))
 
     #expect(driver.state.usageTurnPrompt == 300)
     #expect(driver.state.usageTurnTotal == 425)
@@ -110,7 +110,7 @@ struct ChatDriverTests {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
     driver.handleUserSubmitted("do nothing")
-    driver.handle(TranscriptEvent.emptyAssistantTurn)
+    driver.handle(AgentEvent.output(.empty))
 
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
     #expect(allText.contains("(empty turn)"))

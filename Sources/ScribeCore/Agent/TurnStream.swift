@@ -3,7 +3,7 @@ import ScribeLLM
 
 // MARK: - TurnStream
 
-/// A live stream of ``TranscriptEvent`` values plus a deferred result that
+/// A live stream of ``AgentEvent`` values plus a deferred result that
 /// resolves when the turn completes (success, interruption, or error).
 ///
 /// Iterate `events` to react to streaming progress; await `result` for the
@@ -11,12 +11,12 @@ import ScribeLLM
 public struct TurnStream: Sendable {
   /// Yields events as the turn progresses (text deltas, tool calls, usage,
   /// errors, etc.). The stream finishes before or concurrently with `result`.
-  public let events: AsyncStream<TranscriptEvent>
+  public let events: AsyncStream<AgentEvent>
 
   /// Await this `Task` to obtain the final messages and outcome.
   public let result: Task<TurnResult, Error>
 
-  public init(events: AsyncStream<TranscriptEvent>, result: Task<TurnResult, Error>) {
+  public init(events: AsyncStream<AgentEvent>, result: Task<TurnResult, Error>) {
     self.events = events
     self.result = result
   }

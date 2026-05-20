@@ -53,7 +53,7 @@ struct TranscriptController {
   ///   - contextWindow: Optional context window size for usage percentage.
   /// - Returns: Side effects the host must execute.
   static func apply(
-    _ event: TranscriptEvent,
+    _ event: AgentEvent,
     to state: inout TranscriptState,
     theme: CLITheme,
     renderer: MarkdownRenderer,
@@ -61,26 +61,33 @@ struct TranscriptController {
     contextWindow: Int?
   ) -> Effects {
     switch event {
-    case .enterAssistantSection(let section, let previous):
+    case .output(.sectionStarted(let section, let previous)):
       return applyEnterAssistantSection(section, previous: previous, state: &state, theme: theme)
 
-    case .appendAssistantText(let section, let text):
+    case .output(.text(let section, let text)):
       return applyAppendAssistantText(
         section, text: text, state: &state, theme: theme, renderer: renderer, followingLive: followingLive)
 
-    case .finalizeAssistantStream:
+    case .output(.finalized):
       return applyFinalizeAssistantStream(state: &state, theme: theme, renderer: renderer)
 
-    case .emptyAssistantTurn:
+    case .output(.empty):
       return applyEmptyAssistantTurn(state: &state, theme: theme)
 
-    case .toolInvocation(let name, let arguments, let output):
+    case .tool(.invocation(let name, let arguments, let output)):
       return applyToolInvocation(name: name, arguments: arguments, output: output, state: &state, theme: theme)
 
-    case .usage(let usage, let tps):
+    case .tool(.warning(let message)):
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(fg: theme.warningFG, bg: theme.background, bold: false, text: "warning: \(message)")
+        ]))
+      return Effects(needsRender: true)
+
+    case .lifecycle(.usage(let usage, let tps)):
       return applyUsage(usage, tokensPerSecond: tps, state: &state, contextWindow: contextWindow)
 
-    case .harnessError(let error):
+    case .lifecycle(.error(let error)):
       state.lines.append(
         TLine(spans: [
           StyledSpan(
@@ -89,7 +96,7 @@ struct TranscriptController {
         ]))
       return Effects(needsRender: true)
 
-    case .turnInterrupted:
+    case .lifecycle(.interrupted):
       state.lines.append(
         TLine(spans: [
           StyledSpan(fg: theme.interruptedFG, bg: theme.background, bold: false, text: "(interrupted)")
@@ -99,10 +106,10 @@ struct TranscriptController {
       state.streamingSectionStartLineIndex = nil
       return Effects(needsRender: true)
 
-    case .warning(let message):
+    case .lifecycle(.recovered(let reason)):
       state.lines.append(
         TLine(spans: [
-          StyledSpan(fg: theme.warningFG, bg: theme.background, bold: false, text: "warning: \(message)")
+          StyledSpan(fg: theme.warningFG, bg: theme.background, bold: false, text: "(recovered: \(reason))")
         ]))
       return Effects(needsRender: true)
     }

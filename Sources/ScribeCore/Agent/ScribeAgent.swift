@@ -184,26 +184,26 @@ public struct ScribeAgent: Sendable {
     get async { await storage.isStreaming }
   }
 
-  // MARK: - prompt
+  // MARK: - stream
 
-  public func prompt(
+  public func stream(
     _ input: String,
     options: AgentRunOptions = AgentRunOptions(),
     log: Logger
   ) async -> TurnStream {
-    await prompt([ScribeMessage(role: .user, content: input)], options: options, log: log)
+    await stream([ScribeMessage(role: .user, content: input)], options: options, log: log)
   }
 
   /// Send a batch of ``ScribeMessage`` values as the next turn. Messages
   /// are bridged to the wire shape once on the way into ``runAgentLoop`` —
   /// the OpenAPI type never crosses the public API surface.
-  public func prompt(
+  public func stream(
     _ promptMessages: [ScribeMessage],
     options: AgentRunOptions = AgentRunOptions(),
     log: Logger
   ) async -> TurnStream {
     let wireMessages = promptMessages.toChatMessages()
-    let (stream, continuation) = AsyncStream<TranscriptEvent>.makeStream()
+    let (stream, continuation) = AsyncStream<AgentEvent>.makeStream()
 
     let snapshot = await storage.snapshot()
     await storage.setStreaming(true)
@@ -249,7 +249,7 @@ public struct ScribeAgent: Sendable {
             messages: finalMessages.toScribeMessages(),
             outcome: .completed)
         case .interrupted:
-          continuation.yield(.turnInterrupted)
+          continuation.yield(.lifecycle(.interrupted))
           let current = await storage.messages
           return TurnResult(
             messages: current.toScribeMessages(),
@@ -261,7 +261,7 @@ public struct ScribeAgent: Sendable {
             outcome: .toolRoundLimit(rounds: rounds))
         }
       } catch is AgentTurnInterruptedError {
-        continuation.yield(.turnInterrupted)
+        continuation.yield(.lifecycle(.interrupted))
         let current = await storage.messages
         return TurnResult(
           messages: current.toScribeMessages(),

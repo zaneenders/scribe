@@ -2,7 +2,7 @@ import Foundation
 import ScribeLLM
 
 /// Token usage snapshot emitted by the model provider, surfaced through the
-/// public ``TranscriptEvent`` and ``TokenTracker`` APIs.
+/// public ``AgentEvent`` and ``TokenTracker`` APIs.
 ///
 /// Mirrors the OpenAI chat-completions "usage" payload but is owned by
 /// `ScribeCore`, so embedders never see the OpenAPI-generated
