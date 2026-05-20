@@ -52,6 +52,36 @@ private final class FakeClientTransport: ClientTransport, Sendable {
   }
 }
 
+/// Transport that varies status code per call, used to simulate failures
+/// in the middle of a multi-round agent loop (e.g. round 1 succeeds, round 2
+/// returns HTTP 400, round 3 succeeds again after recovery).
+private final class VariedStatusTransport: ClientTransport, Sendable {
+  private let callPlan: [(Int, [HTTPBody.ByteChunk])]
+  private let state: Mutex<Int> = Mutex(0)
+
+  init(callPlan: [(Int, [HTTPBody.ByteChunk])]) {
+    self.callPlan = callPlan
+  }
+
+  func send(
+    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+  ) async throws -> (HTTPResponse, HTTPBody?) {
+    let (statusCode, chunks) = state.withLock { idx -> (Int, [HTTPBody.ByteChunk]) in
+      let i = min(idx, callPlan.count - 1)
+      idx += 1
+      return callPlan[i]
+    }
+    let response = HTTPResponse(status: .init(code: statusCode))
+    if chunks.isEmpty { return (response, nil) }
+    let body = HTTPBody(
+      AsyncStream { continuation in
+        for chunk in chunks { continuation.yield(chunk) }
+        continuation.finish()
+      }, length: .unknown)
+    return (response, body)
+  }
+}
+
 // MARK: - Fake tools
 
 private struct FakeTool: ScribeTool {
@@ -628,6 +658,146 @@ struct AgentLoopTests {
     #expect(messages.count == 4)
     #expect(messages[2].role == .tool)
     #expect(stringContent(messages[2])?.contains("ok") == true)
+  }
+
+  // MARK: - Attachment-overflow recovery
+
+  /// A tool whose result conforms to `AttachableToolResult` so the agent
+  /// loop appends a synthetic-attachment user message after the tool result.
+  /// This is the shape that produces the bug fixed by recovery: the next
+  /// LLM round explodes with a context-length error.
+  private struct AttachingTool: ScribeTool {
+    static var name: String { "attaching_tool" }
+    static var description: String { "Returns an image attachment for testing." }
+    static var parameters: [ScribeToolParameter] { [] }
+    static var promptHint: String? { nil }
+    struct Result: Encodable, AttachableToolResult {
+      let ok = true
+      var toolAttachments: [ToolAttachment] {
+        [ToolAttachment(mimeType: "image/png", base64: "AAAA", filename: "tiny.png", sourcePath: nil)]
+      }
+    }
+    func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable { Result() }
+  }
+
+  @Test func contextOverflowRecoversByRollingBackAttachments() async throws {
+    // Round 1 (200): assistant requests attaching_tool.
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"attaching_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    // Round 2 (400): provider rejects the request — context length exceeded.
+    let overflowBody: HTTPBody.ByteChunk = ArraySlice(
+      #"{"error":{"message":"The prompt is too long: 798932, model maximum context length: 262143"}}"#
+        .utf8)
+    // Round 3 (200): assistant produces final answer after recovery.
+    let recoveryChunks = [
+      sseChunk(#"{"id":"3","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = VariedStatusTransport(callPlan: [
+      (200, toolChunks),
+      (400, [overflowBody]),
+      (200, recoveryChunks),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool()])
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
+    let (messages, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { e in events.withLock { $0.append(e) } },
+      log: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+
+    // Exactly one recovery event surfaced.
+    let recovered = events.withLock { $0 }.compactMap { e -> String? in
+      if case .lifecycle(.recovered(let reason)) = e { return reason }
+      return nil
+    }
+    #expect(recovered.count == 1)
+    #expect(recovered.first?.contains("attachment") == true)
+
+    // No synthetic-attachment user messages survive in the final transcript.
+    let attachmentSurvivors = messages.filter { msg in
+      guard msg.role == .user, case .case2 = msg.content else { return false }
+      return true
+    }
+    #expect(attachmentSurvivors.isEmpty)
+
+    // The tool result that previously held the image was rewritten to a
+    // synthetic error JSON so the model could self-correct.
+    let toolMsg = messages.first { $0.role == .tool }
+    #expect(toolMsg?.toolCallId == "c1")
+    #expect(stringContent(toolMsg!)?.contains("exceeded model context") == true)
+
+    // Final assistant turn from the recovery round.
+    #expect(messages.last?.role == .assistant)
+    #expect(stringContent(messages.last!) == "done")
+  }
+
+  /// Recovery is capped at one attempt per turn: if the very next request
+  /// also fails with a context-length error, the loop must propagate it
+  /// rather than spin forever.
+  @Test func contextOverflowRecoveryRunsAtMostOncePerTurn() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"attaching_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let overflowBody: HTTPBody.ByteChunk = ArraySlice(
+      #"{"error":{"message":"The prompt is too long: 798932, model maximum context length: 262143"}}"#
+        .utf8)
+    let transport = VariedStatusTransport(callPlan: [
+      (200, toolChunks),
+      (400, [overflowBody]),
+      (400, [overflowBody]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool()])
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
+    )
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
+    do {
+      _ = try await runAgentLoop(
+        promptMessages: [userMsg],
+        context: AgentContext(messages: []),
+        config: config,
+        emit: { _ in },
+        log: testLogger,
+        abortObserver: AbortNotifier()
+      )
+      #expect(Bool(false), "expected error")
+    } catch let ScribeError.apiHTTPError(statusCode, _, _) {
+      #expect(statusCode == 400)
+    } catch {
+      #expect(Bool(false), "unexpected error: \(error)")
+    }
   }
 
   // MARK: - AgentTurnInterruptedError mid-stream

@@ -27,5 +27,10 @@ public enum AgentEvent: Sendable {
     case usage(ScribeUsage, tokensPerSecond: Double?)
     case error(ScribeError)
     case interrupted
+    /// Emitted when the harness recovered from a recoverable error
+    /// (e.g. tool output blew the context window) by rolling back
+    /// the offending messages and replacing them with a synthetic
+    /// tool error so the model can self-correct.
+    case recovered(reason: String)
   }
 }

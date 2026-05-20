@@ -105,6 +105,13 @@ struct TranscriptController {
       state.streamingOpenLineRaw = ""
       state.streamingSectionStartLineIndex = nil
       return Effects(needsRender: true)
+
+    case .lifecycle(.recovered(let reason)):
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(fg: theme.warningFG, bg: theme.background, bold: false, text: "(recovered: \(reason))")
+        ]))
+      return Effects(needsRender: true)
     }
   }
 
