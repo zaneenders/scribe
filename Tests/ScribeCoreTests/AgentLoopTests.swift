@@ -485,7 +485,7 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"1","choices":[],"usage":{"prompt_tokens":10,"total_tokens":10}}"#),
       doneChunk(),
     ]
-    let events = Mutex<[TranscriptEvent]>([])
+    let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("test"))
     let (_, termination) = try await runAgentLoop(
       promptMessages: [userMsg],
@@ -497,8 +497,8 @@ struct AgentLoopTests {
     )
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
-    let usageEvents = captured.compactMap { (e: TranscriptEvent) -> (ScribeUsage, Double?)? in
-      if case .usage(let u, let tps) = e { return (u, tps) }
+    let usageEvents = captured.compactMap { (e: AgentEvent) -> (ScribeUsage, Double?)? in
+      if case .lifecycle(.usage(let u, let tps)) = e { return (u, tps) }
       return nil
     }
     #expect(usageEvents.count == 1)

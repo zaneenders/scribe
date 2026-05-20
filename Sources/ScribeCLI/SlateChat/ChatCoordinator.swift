@@ -147,9 +147,9 @@ final class ChatCoordinator: Sendable {
         // turn never produced a TurnResult (e.g. HTTP error before stream).
         var committed: [ScribeMessage]? = nil
         do {
-          let ts = await agent.prompt(promptMessages, log: log)
+          let ts = await agent.stream(promptMessages, log: log)
           for await event in ts.events {
-            if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
+            if case .lifecycle(.usage(let usage, _)) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))
           }
           let result = try await ts.result.value
@@ -160,17 +160,17 @@ final class ChatCoordinator: Sendable {
             tracker.logStatus(logger: log)
           case .interrupted:
             log.notice("event=agent.turn.end status=interrupted")
-            enqueue(.transcript(.turnInterrupted))
+            enqueue(.transcript(.lifecycle(.interrupted)))
           case .toolRoundLimit(let max):
             log.notice("event=agent.turn.end status=tool-round-limit limit=\(max)")
-            enqueue(.transcript(.turnInterrupted))
+            enqueue(.transcript(.lifecycle(.interrupted)))
           }
         } catch {
           let se = (error as? ScribeError) ?? .generic(String(describing: error))
           log.error(
             "event=agent.turn.end status=error err=\"\(se.errorDescription ?? String(describing: se))\""
           )
-          enqueue(.transcript(.harnessError(se)))
+          enqueue(.transcript(.lifecycle(.error(se))))
         }
 
         let allMessages: [ScribeMessage]
@@ -188,7 +188,7 @@ final class ChatCoordinator: Sendable {
       log.debug("event=chat.coordinator.end transcript_messages=\(trailing.count)")
     } catch {
       let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-      enqueue(.transcript(.harnessError(scribeError)))
+      enqueue(.transcript(.lifecycle(.error(scribeError))))
       log.error(
         "chat.coordinator.fail",
         metadata: [

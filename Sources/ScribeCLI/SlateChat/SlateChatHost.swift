@@ -39,7 +39,7 @@ private actor UserLineGate {
 }
 
 enum HostEvent: Sendable {
-  case transcript(TranscriptEvent)
+  case transcript(AgentEvent)
   case userSubmitted(String)
   case modelTurnRunning(Bool)
   case coordinatorFinished
@@ -229,7 +229,7 @@ internal final class SlateChatHost {
           )
         } catch {
           let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-          eventQueue.enqueue(.transcript(.harnessError(scribeError)))
+          eventQueue.enqueue(.transcript(.lifecycle(.error(scribeError))))
           eventQueue.enqueue(.coordinatorFinished)
           self.log.error(
             "chat.coordinator.init.fail",

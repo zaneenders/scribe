@@ -55,7 +55,7 @@ func runAgentLoop(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
   config: AgentLoopConfig,
-  emit: @escaping @Sendable (TranscriptEvent) -> Void,
+  emit: @escaping @Sendable (AgentEvent) -> Void,
   log: Logger,
   abortObserver: some AbortObserver
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
@@ -176,9 +176,9 @@ func runAgentLoop(
             "attachments": "\(result.attachments.count)",
             "elapsed_ms": "\(elapsedMs)",
           ])
-        emit(.toolInvocation(name: inv.name, arguments: inv.arguments, output: result.text))
+        emit(.tool(.invocation(name: inv.name, arguments: inv.arguments, output: result.text)))
         for warning in result.warnings {
-          emit(.warning(warning))
+          emit(.tool(.warning(warning)))
         }
         let toolMsg = Components.Schemas.ChatMessage(
           role: .tool, content: .case1(result.text), name: nil, toolCalls: nil, toolCallId: inv.id)
@@ -227,7 +227,7 @@ private enum RoundOutcome: Sendable, Equatable {
 private func runSingleRound(
   context: inout AgentContext,
   config: AgentLoopConfig,
-  emit: @escaping @Sendable (TranscriptEvent) -> Void,
+  emit: @escaping @Sendable (AgentEvent) -> Void,
   log: Logger,
   clock: ContinuousClock,
   round: Int,
@@ -349,7 +349,7 @@ private func runSingleRound(
       completion_tokens=\(u.completionTokens.map(String.init(describing:)) ?? "nil") \
       tps=\(tps.map { String(format: "%.1f", $0) } ?? "nil")
       """)
-    emit(.usage(ScribeUsage(u), tokensPerSecond: tps))
+    emit(.lifecycle(.usage(ScribeUsage(u), tokensPerSecond: tps)))
   }
 
   if toolInvocations.isEmpty {

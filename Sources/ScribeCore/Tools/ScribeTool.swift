@@ -40,7 +40,7 @@ public struct ToolResult: Sendable {
   public let text: String
   /// Attachments to inject as follow-up user messages.
   public let attachments: [ToolAttachment]
-  /// User-visible warnings to surface as `TranscriptEvent.warning`.
+  /// User-visible warnings to surface as `AgentEvent.tool(.warning(_))`.
   public let warnings: [String]
 
   public init(text: String, attachments: [ToolAttachment] = [], warnings: [String] = []) {
@@ -63,7 +63,7 @@ public protocol AttachableToolResult {
 /// Opt-in protocol for tool result types that carry user-visible warnings.
 ///
 /// ``ToolRegistry`` detects the conformance and populates ``ToolResult/warnings``,
-/// which ``AgentLoop`` emits as ``TranscriptEvent/warning(_:)`` entries.
+/// which ``AgentLoop`` emits as ``AgentEvent`` `.tool(.warning(_))` entries.
 public protocol WarnableToolResult {
   var toolWarnings: [String] { get }
 }

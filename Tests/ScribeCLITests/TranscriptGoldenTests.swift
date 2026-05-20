@@ -28,9 +28,9 @@ struct TranscriptGoldenTests {
     // Streaming path
     var driver = ChatDriver(renderer: renderer, theme: theme)
     driver.handleUserSubmitted("hello")
-    driver.handle(TranscriptEvent.enterAssistantSection(.answer, previous: nil))
-    driver.handle(TranscriptEvent.appendAssistantText(.answer, text: "Hi there!"))
-    driver.handle(TranscriptEvent.finalizeAssistantStream)
+    driver.handle(AgentEvent.output(.sectionStarted(.answer, previous: nil)))
+    driver.handle(AgentEvent.output(.text(.answer, "Hi there!")))
+    driver.handle(AgentEvent.output(.finalized))
 
     let streamingText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
     let batchText = batchLines.flatMap { $0.spans.map(\.text) }.joined()
