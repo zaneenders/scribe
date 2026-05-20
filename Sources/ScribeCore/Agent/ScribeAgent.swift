@@ -250,14 +250,16 @@ public struct ScribeAgent: Sendable {
             outcome: .completed)
         case .interrupted:
           continuation.yield(.lifecycle(.interrupted))
-          let current = await storage.messages
+          await storage.appendMessages(result.messages)
+          let finalMessages = await storage.messages
           return TurnResult(
-            messages: current.toScribeMessages(),
+            messages: finalMessages.toScribeMessages(),
             outcome: .interrupted)
         case .toolRoundLimit(let rounds):
-          let current = await storage.messages
+          await storage.appendMessages(result.messages)
+          let finalMessages = await storage.messages
           return TurnResult(
-            messages: current.toScribeMessages(),
+            messages: finalMessages.toScribeMessages(),
             outcome: .toolRoundLimit(rounds: rounds))
         }
       } catch is AgentTurnInterruptedError {
