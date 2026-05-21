@@ -8,19 +8,32 @@ import ScribeCore
 enum SessionSummarizer {
 
   private static let summarizerSystemPrompt = """
-    You are summarizing the work an AI coding assistant just performed. The \
-    transcript below contains the assistant's actions (its text, the tools it \
-    called, and the tool outputs) in response to a user request. Produce a \
-    concise summary that can replace the transcript so a future conversation \
-    can continue from this point without losing the key information.
+    You are describing the PATH an AI coding assistant took through a slice \
+    of a coding session. The transcript below shows the assistant's actions \
+    — tool calls (file reads, greps, shell commands, edits), tool results, \
+    and any inline reasoning — in response to a user request. Your output \
+    will replace this slice in the session log so future turns have a \
+    record of *how* the assistant arrived where it did.
 
-    Cover:
-    - The task or question the assistant was addressing
-    - What was tried or executed (file paths, commands, decisions)
-    - The outcome or current state
-    - Any open questions, blockers, or next steps
+    The final answer or conclusion the assistant produced is preserved \
+    elsewhere in the session — DO NOT restate it. Write about the journey, \
+    not the destination. If you find yourself rewriting the assistant's \
+    final response, stop and describe the discovery work instead.
 
-    Keep it tight: 3 to 8 sentences. Plain prose, no bullets, no headers.
+    Cover concretely, in first person as the assistant:
+    - Which files / directories were read (cite paths; include line ranges \
+      when the read was narrow)
+    - Searches / greps run and what they were looking for
+    - Shell commands executed and what they revealed
+    - Edits or writes that landed (paths, what changed at a high level)
+    - Decisions made along the way and the evidence behind them
+    - Dead ends, blockers, or paths abandoned
+
+    Format: 3–8 sentences of plain prose, no bullets, no headers, no \
+    section titles. Write as the assistant in the first person: \
+    "I read X.swift:10–80 to check Y, then ran `grep Foo` which surfaced \
+    Z, so I edited A.swift to ..." Keep it tight and concrete — file \
+    paths and command shapes beat adjectives.
     """
 
   /// Render a slice of session messages into a transcript-like string that

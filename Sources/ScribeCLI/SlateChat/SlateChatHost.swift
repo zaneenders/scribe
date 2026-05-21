@@ -300,6 +300,8 @@ internal final class SlateChatHost {
                 self.movePickerCursor(by: -1)
               case .arrowDown:
                 self.movePickerCursor(by: +1)
+              case .tab:
+                self.togglePickerActive()
               case .enter:
                 self.confirmPicker()
               case .escape, .ctrlC:
@@ -546,25 +548,32 @@ internal final class SlateChatHost {
     return "\(m.role.rawValue): \(snippet)"
   }
 
-  /// Compute the picker's default cursor position:
-  /// - `.fork`: most recent safe boundary (cut at "now").
-  /// - `.tldr`: the boundary right after the most recent user message
-  ///   (collapses everything the assistant did in response to that turn);
-  ///   falls back to the most recent boundary when no user message exists.
+  /// Compute the picker's default cursor positions.
+  /// - `.fork`: most recent safe boundary (cut at "now"). End cursor is nil.
+  /// - `.tldr`: start defaults to the boundary right after the most recent
+  ///   user message (collapses the assistant's response to that turn); end
+  ///   defaults to the last boundary (today's "summarize to the end"
+  ///   behaviour). Falls back to a non-empty slice when no user message
+  ///   exists.
   private func defaultCursor(
     kind: PickerSnapshot.Kind, messages: [ScribeMessage], boundaries: [Int]
-  ) -> Int {
-    guard !boundaries.isEmpty else { return 0 }
+  ) -> (start: Int, end: Int?) {
+    guard !boundaries.isEmpty else { return (0, nil) }
     switch kind {
     case .fork:
-      return boundaries.count - 1
+      return (boundaries.count - 1, nil)
     case .tldr:
-      if let lastUser = messages.lastIndex(where: { $0.role == .user }),
-        let idx = boundaries.firstIndex(of: lastUser + 1)
-      {
-        return idx
-      }
-      return boundaries.count - 1
+      let endIdx = boundaries.count - 1
+      let startIdx: Int = {
+        if let lastUser = messages.lastIndex(where: { $0.role == .user }),
+          let idx = boundaries.firstIndex(of: lastUser + 1),
+          idx < endIdx
+        {
+          return idx
+        }
+        return max(0, endIdx - 1)
+      }()
+      return (startIdx, endIdx)
     }
   }
 
@@ -587,29 +596,37 @@ internal final class SlateChatHost {
         metadata: ["err": "\(String(describing: error))"])
       return
     }
-    let allBoundaries = messages.safeForkBoundaries()
-    // For `/tldr` the cut must leave at least one message *after* it
-    // to summarize, so trailing `messageCount` is not a valid cut. For
-    // `/fork` every safe boundary is offerable.
-    let boundaries: [Int] = {
-      switch kind {
-      case .fork: return allBoundaries
-      case .tldr: return allBoundaries.filter { $0 < messages.count }
+    // Both `.fork` and `.tldr` cursors index into the same full list of
+    // safe boundaries. `.tldr` enforces `start < end` at move time rather
+    // than by pre-filtering — that keeps `messageCount` as a valid end-cut
+    // (no tail) while still rejecting empty slices.
+    let boundaries = messages.safeForkBoundaries()
+    switch kind {
+    case .fork:
+      guard !boundaries.isEmpty else {
+        log.notice(
+          "event=chat.picker.open.skip",
+          metadata: ["kind": "fork", "reason": "no-safe-boundary"])
+        return
       }
-    }()
-    guard !boundaries.isEmpty else {
-      log.notice(
-        "event=chat.picker.open.skip",
-        metadata: ["kind": "\(kind)", "reason": "no-safe-boundary"])
-      return
+    case .tldr:
+      guard boundaries.count >= 2 else {
+        log.notice(
+          "event=chat.picker.open.skip",
+          metadata: ["kind": "tldr", "reason": "needs-two-boundaries"])
+        return
+      }
     }
-    let cursor = defaultCursor(kind: kind, messages: messages, boundaries: boundaries)
+    let (startC, endC) = defaultCursor(
+      kind: kind, messages: messages, boundaries: boundaries)
     let snap = PickerSnapshot(
       kind: kind,
       boundaries: boundaries,
-      cursor: cursor,
+      startCursor: startC,
+      endCursor: endC,
+      activeIsEnd: false,
       messageCount: messages.count,
-      previewText: pickerPreview(for: messages, at: boundaries[cursor])
+      previewText: pickerPreview(for: messages, at: boundaries[startC])
     )
 
     // Render the disk-persisted history once so cursor moves only restyle
@@ -627,17 +644,46 @@ internal final class SlateChatHost {
       metadata: [
         "kind": "\(kind)",
         "boundaries": "\(boundaries.count)",
-        "default_cut": "\(boundaries[cursor])",
+        "default_start": "\(boundaries[startC])",
+        "default_end": "\(endC.map { "\(boundaries[$0])" } ?? "nil")",
       ])
   }
 
   private func movePickerCursor(by delta: Int) {
     guard var snap = picker else { return }
-    let newCursor = max(0, min(snap.boundaries.count - 1, snap.cursor + delta))
-    if newCursor == snap.cursor { return }
-    snap.cursor = newCursor
+    let activeCurrent =
+      snap.activeIsEnd ? (snap.endCursor ?? snap.startCursor) : snap.startCursor
+    var newCursor = max(0, min(snap.boundaries.count - 1, activeCurrent + delta))
+    // For `.tldr` keep the slice non-empty: start must stay strictly below
+    // end. Block on collision (don't swap or push) — least surprising.
+    if snap.kind == .tldr, let endIdx = snap.endCursor {
+      if snap.activeIsEnd {
+        newCursor = max(newCursor, snap.startCursor + 1)
+      } else {
+        newCursor = min(newCursor, endIdx - 1)
+      }
+      newCursor = max(0, min(snap.boundaries.count - 1, newCursor))
+    }
+    if newCursor == activeCurrent { return }
+    if snap.activeIsEnd {
+      snap.endCursor = newCursor
+    } else {
+      snap.startCursor = newCursor
+    }
     snap.previewText = pickerPreview(
       for: pickerMessages, at: snap.boundaries[newCursor])
+    applyPickerView(snapshot: snap)
+  }
+
+  /// Tab handler for `.tldr`: swap which cursor the arrow keys address.
+  /// No-op for `.fork`.
+  private func togglePickerActive() {
+    guard var snap = picker, snap.kind == .tldr, snap.endCursor != nil else { return }
+    snap.activeIsEnd.toggle()
+    let activeCursor =
+      snap.activeIsEnd ? (snap.endCursor ?? snap.startCursor) : snap.startCursor
+    snap.previewText = pickerPreview(
+      for: pickerMessages, at: snap.boundaries[activeCursor])
     applyPickerView(snapshot: snap)
   }
 
@@ -650,15 +696,30 @@ internal final class SlateChatHost {
   }
 
   /// Restyle the transcript with the current picker snapshot and request a
-  /// scroll-to-divider on the next frame.
+  /// scroll-to-divider on the next frame. For `.tldr` both cuts are placed;
+  /// the viewport snaps to whichever divider is active.
   private func applyPickerView(snapshot: PickerSnapshot) {
     picker = snapshot
-    let cutBaseLine =
-      pickerBaseStarts.indices.contains(snapshot.currentBoundary)
-      ? pickerBaseStarts[snapshot.currentBoundary]
+    let startBase =
+      pickerBaseStarts.indices.contains(snapshot.startBoundary)
+      ? pickerBaseStarts[snapshot.startBoundary]
       : pickerBaseLines.count
+    let endBase: Int?
+    if snapshot.kind == .tldr {
+      let endBoundary = snapshot.endBoundary
+      endBase =
+        pickerBaseStarts.indices.contains(endBoundary)
+        ? pickerBaseStarts[endBoundary]
+        : pickerBaseLines.count
+    } else {
+      endBase = nil
+    }
     let styled = buildPickerStyledLines(
-      base: pickerBaseLines, cutBaseLine: cutBaseLine, kind: snapshot.kind)
+      base: pickerBaseLines,
+      startCutBase: startBase,
+      endCutBase: endBase,
+      kind: snapshot.kind,
+      activeIsEnd: snapshot.activeIsEnd)
     transcriptState.lines = styled.lines
     transcriptState.generation &+= 1
     pickerDividerLogicalLine = styled.dividerLine
@@ -682,53 +743,105 @@ internal final class SlateChatHost {
     pickerScrollDirty = false
   }
 
-  /// Build the picker-styled transcript: `base[0..<cutBaseLine]` unchanged,
-  /// then a blank + divider + blank, then `base[cutBaseLine..<]` with every
-  /// span recolored dim. Returns the new lines and the logical line index
-  /// of the divider row.
+  /// Build the picker-styled transcript.
+  /// - `.fork`: `base[0..<startCutBase]` unchanged, then a blank + divider +
+  ///   blank, then `base[startCutBase..<]` with every span recolored dim.
+  /// - `.tldr`: `base[0..<startCutBase]` unchanged, start divider, dimmed
+  ///   `base[startCutBase..<endCutBase]`, end divider, then
+  ///   `base[endCutBase..<]` unchanged. The active divider (per `activeIsEnd`)
+  ///   gets a brighter colour + bold; the inactive one stays dim.
+  ///
+  /// Returns the new lines and the logical line index of the *active*
+  /// divider row so the viewport can snap to it.
   private func buildPickerStyledLines(
-    base: [TLine], cutBaseLine: Int, kind: PickerSnapshot.Kind
+    base: [TLine],
+    startCutBase: Int,
+    endCutBase: Int?,
+    kind: PickerSnapshot.Kind,
+    activeIsEnd: Bool
   ) -> (lines: [TLine], dividerLine: Int) {
-    let cut = max(0, min(cutBaseLine, base.count))
     let dimFG = theme.inputGutter
-    let divFG = kind == .fork ? theme.errorFG : theme.warningFG
-    let label: String = {
-      switch kind {
-      case .fork:
-        return "──── /fork cut · everything below would be discarded ────"
-      case .tldr:
-        return "──── /tldr · everything below would be collapsed ────"
+    switch kind {
+    case .fork:
+      let cut = max(0, min(startCutBase, base.count))
+      let divFG = theme.errorFG
+      let label = "──── /fork cut · everything below would be discarded ────"
+      var out: [TLine] = []
+      out.reserveCapacity(base.count &+ 3)
+      out.append(contentsOf: base[0..<cut])
+      out.append(TLine(spans: []))
+      let dividerIndex = out.count
+      out.append(
+        TLine(spans: [
+          StyledSpan(fg: divFG, bg: theme.background, bold: true, text: label)
+        ]))
+      out.append(TLine(spans: []))
+      for line in base[cut..<base.count] {
+        if line.spans.isEmpty {
+          out.append(line)
+          continue
+        }
+        let dimmed = line.spans.map { sp in
+          StyledSpan(fg: dimFG, bg: sp.bg, bold: false, text: sp.text)
+        }
+        out.append(TLine(spans: dimmed))
       }
-    }()
-    var out: [TLine] = []
-    out.reserveCapacity(base.count &+ 3)
-    out.append(contentsOf: base[0..<cut])
-    out.append(TLine(spans: []))
-    let dividerIndex = out.count
-    out.append(
-      TLine(spans: [
-        StyledSpan(fg: divFG, bg: theme.background, bold: true, text: label)
-      ]))
-    out.append(TLine(spans: []))
-    for line in base[cut..<base.count] {
-      if line.spans.isEmpty {
-        out.append(line)
-        continue
+      return (out, dividerIndex)
+
+    case .tldr:
+      let endBase = endCutBase ?? base.count
+      let startCut = max(0, min(startCutBase, base.count))
+      let endCut = max(startCut, min(endBase, base.count))
+      let activeFG = theme.warningFG
+      let startFG = activeIsEnd ? dimFG : activeFG
+      let endFG = activeIsEnd ? activeFG : dimFG
+      let startLabel = "──── /tldr start · slice begins here ────"
+      let endLabel = "──── /tldr end · slice ends here · tail preserved ────"
+      var out: [TLine] = []
+      out.reserveCapacity(base.count &+ 6)
+      out.append(contentsOf: base[0..<startCut])
+      out.append(TLine(spans: []))
+      let startDividerIdx = out.count
+      out.append(
+        TLine(spans: [
+          StyledSpan(
+            fg: startFG, bg: theme.background, bold: !activeIsEnd,
+            text: startLabel)
+        ]))
+      out.append(TLine(spans: []))
+      for line in base[startCut..<endCut] {
+        if line.spans.isEmpty {
+          out.append(line)
+          continue
+        }
+        let dimmed = line.spans.map { sp in
+          StyledSpan(fg: dimFG, bg: sp.bg, bold: false, text: sp.text)
+        }
+        out.append(TLine(spans: dimmed))
       }
-      let dimmed = line.spans.map { sp in
-        StyledSpan(fg: dimFG, bg: sp.bg, bold: false, text: sp.text)
-      }
-      out.append(TLine(spans: dimmed))
+      out.append(TLine(spans: []))
+      let endDividerIdx = out.count
+      out.append(
+        TLine(spans: [
+          StyledSpan(
+            fg: endFG, bg: theme.background, bold: activeIsEnd, text: endLabel)
+        ]))
+      out.append(TLine(spans: []))
+      out.append(contentsOf: base[endCut..<base.count])
+      let activeDivider = activeIsEnd ? endDividerIdx : startDividerIdx
+      return (out, activeDivider)
     }
-    return (out, dividerIndex)
   }
 
   private func confirmPicker() {
     guard let snap = picker else { return }
     picker = nil
     pickerScrollDirty = false
-    let cutAt = snap.currentBoundary
     let kind = snap.kind
+    let startCut = snap.startBoundary
+    // For `.fork` this equals `startCut` and is unused; for `.tldr` it marks
+    // the (exclusive) upper bound of the summarized slice.
+    let endCut = snap.endBoundary
     let persistURL = sessionPersistenceURL
     let configuration = self.configuration
     let log = self.log
@@ -737,7 +850,11 @@ internal final class SlateChatHost {
 
     log.notice(
       "event=chat.picker.confirm",
-      metadata: ["kind": "\(kind)", "cut_at": "\(cutAt)"])
+      metadata: [
+        "kind": "\(kind)",
+        "start_cut": "\(startCut)",
+        "end_cut": kind == .tldr ? "\(endCut)" : "n/a",
+      ])
 
     modelBusy = true
     renderWake?.requestRender()
@@ -752,7 +869,7 @@ internal final class SlateChatHost {
         switch kind {
         case .fork:
           result = try ChatSessionStore.forkSession(
-            from: persistURL, cutAt: cutAt, newSessionId: newId,
+            from: persistURL, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
           log.notice(
             "event=chat.fork.create",
@@ -763,22 +880,34 @@ internal final class SlateChatHost {
             ])
         case .tldr:
           let messages = try ChatSessionStore.loadMessages(from: persistURL)
-          let slice = Array(messages[cutAt..<messages.count])
+          let slice = Array(messages[startCut..<endCut])
           let summary = try await SessionSummarizer.summarize(
             slice: slice, configuration: configuration, log: log)
           result = try ChatSessionStore.forkSession(
-            from: persistURL, cutAt: cutAt, newSessionId: newId,
+            from: persistURL, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
           try ChatSessionStore.appendMessages(
             [ScribeMessage(role: .assistant, content: summary)],
             to: result.sessionURL)
+          // Stitch the tail (messages after the summarized slice) so the
+          // forked session ends on the same last message as the parent.
+          // `safeForkBoundaries()` guarantees no tool round straddles
+          // `endCut`, so tool_call ids in the tail don't reference the
+          // collapsed slice.
+          let tailCount = max(0, messages.count - endCut)
+          if endCut < messages.count {
+            let tail = Array(messages[endCut..<messages.count])
+            try ChatSessionStore.appendMessages(tail, to: result.sessionURL)
+          }
           log.notice(
             "event=chat.tldr.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
               "child": "\(result.sessionId.uuidString)",
-              "cut_at": "\(result.cutAt)",
+              "start_cut": "\(startCut)",
+              "end_cut": "\(endCut)",
               "slice_messages": "\(slice.count)",
+              "tail_messages": "\(tailCount)",
               "summary_chars": "\(summary.count)",
             ])
         }
