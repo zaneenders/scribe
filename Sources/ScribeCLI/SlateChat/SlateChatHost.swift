@@ -4,37 +4,31 @@ import ScribeCore
 import SlateCore
 import Synchronization
 
-private actor UserLineGate {
-  private var waiting: CheckedContinuation<String?, Never>?
-  private var queue: [String] = []
-  private var streamContinuation: AsyncStream<String>.Continuation?
+/// Bridges keystroke-driven submissions on the host's MainActor to the
+/// coordinator's `AsyncStream<String>`. Synchronous — the host always calls
+/// it from the MainActor and needs `setStreamContinuation` to land before
+/// the next `complete(...)` (otherwise hot-swap could drop a queued
+/// submission); a Mutex-backed class buys both that ordering and Sendable
+/// access without the actor-hop race the previous actor implementation had.
+private final class UserLineGate: @unchecked Sendable {
+  private let state = Mutex<State>(State())
 
-  func nextLine() async -> String? {
-    if !queue.isEmpty {
-      return queue.removeFirst()
-    }
-    return await withCheckedContinuation { cont in
-      waiting = cont
-    }
+  private struct State {
+    var streamContinuation: AsyncStream<String>.Continuation?
   }
 
   func complete(_ line: String?) {
-    if let cont = waiting {
-      cont.resume(returning: line)
-      waiting = nil
-    } else if let line {
-      queue.append(line)
-    }
-    // Also bridge to AsyncStream for ChatCoordinator.
-    if let line {
-      streamContinuation?.yield(line)
-    } else {
-      streamContinuation?.finish()
+    state.withLock { s in
+      if let line {
+        s.streamContinuation?.yield(line)
+      } else {
+        s.streamContinuation?.finish()
+      }
     }
   }
 
   func setStreamContinuation(_ cont: AsyncStream<String>.Continuation) {
-    streamContinuation = cont
+    state.withLock { $0.streamContinuation = cont }
   }
 }
 
@@ -43,6 +37,15 @@ enum HostEvent: Sendable {
   case userSubmitted(String)
   case modelTurnRunning(Bool)
   case coordinatorFinished
+}
+
+/// Information conveyed back to the CLI after the chat host returns.
+struct ChatExitInfo: Sendable {
+  /// When the user forked or summarized at least once during the session,
+  /// this carries the most recent post-swap session. The CLI uses it to
+  /// point the resume hint at the session the user actually ended on.
+  var forkedToSessionId: UUID?
+  var forkedToURL: URL?
 }
 
 extension TranscriptLayout {
@@ -93,10 +96,20 @@ internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
   private let systemPrompt: String
-  private let resumeMessages: [ScribeMessage]
-  private let sessionPersistenceURL: URL
-  private let sessionId: UUID
-  private let sessionCreatedAt: Date
+  /// Messages used to seed the next coordinator. Initially the resumed
+  /// history (or empty for a fresh session); replaced on hot-swap when the
+  /// user forks or summarizes mid-session.
+  private var currentSeed: [ScribeMessage]
+  /// Session directory the active coordinator is reading from / writing to.
+  /// Mutated on hot-swap.
+  private var sessionPersistenceURL: URL
+  /// UUID of the active session. Mutated on hot-swap.
+  private var sessionId: UUID
+  /// Created-at timestamp of the active session. Mutated on hot-swap.
+  private var sessionCreatedAt: Date
+  /// Current input gate. Replaced on hot-swap so the new coordinator gets a
+  /// fresh stream while the old coordinator's stream cleanly finishes.
+  private var gate: UserLineGate = UserLineGate()
 
   private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
@@ -111,6 +124,20 @@ internal final class SlateChatHost {
   private var inPaste: Bool = false
   private var modelBusy: Bool = false
   private var coordinatorFinished: Bool = false
+  /// `coordinatorFinished` events to swallow before treating one as a real
+  /// shutdown signal. Incremented by `hotSwapToSession` each time it
+  /// retires the previous coordinator so the trailing `.coordinatorFinished`
+  /// the old coordinator emits doesn't tear down the live host.
+  private var pendingFinishesToSwallow: Int = 0
+  private var exitInfo: ChatExitInfo = ChatExitInfo()
+  /// Active boundary picker (driven by `/fork` and `/summarize`). When
+  /// non-nil, the input area renders the picker and keystrokes are routed
+  /// to boundary navigation instead of the normal submit pipeline.
+  private var picker: PickerSnapshot?
+  /// Running async work for a confirmed picker (e.g. summarize LLM call).
+  /// `picker` is set to nil as soon as the user confirms; this task carries
+  /// the side-effect work to completion.
+  private var pickerActionTask: Task<Void, Never>?
   private var queuedTrayTexts: [String] = []
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
@@ -153,7 +180,7 @@ internal final class SlateChatHost {
   ) {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
-    self.resumeMessages = resumeMessages
+    self.currentSeed = resumeMessages
     self.sessionPersistenceURL = sessionPersistenceURL
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
@@ -164,22 +191,18 @@ internal final class SlateChatHost {
     spinnerTask?.cancel()
   }
 
-  func run() async throws {
+  func run() async throws -> ChatExitInfo {
     var slate = try Slate()
-    let gate = UserLineGate()
 
     await slate.subscribe(
       prepare: { [self] wake in
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
 
-        // Replay resume messages into transcript if resuming.
-        if !self.resumeMessages.isEmpty {
-          self.transcriptState.lines = renderMessagesToTranscript(
-            self.resumeMessages, theme: self.theme, renderer: self.markdownRenderer)
-        }
-
-        let persistURL = self.sessionPersistenceURL
+        // Initial transcript seed + banner setup, then start the first
+        // coordinator. Hot-swap (after /fork or /summarize) re-runs only the
+        // installCoordinator step against the new session.
+        self.refreshTranscriptFromSeed()
 
         let cwd = FileManager.default.currentDirectoryPath
         self.banner = BannerSnapshot(
@@ -209,39 +232,7 @@ internal final class SlateChatHost {
           }
         }
 
-        let (lineStream, lineCont) = AsyncStream<String>.makeStream()
-        Task { await gate.setStreamContinuation(lineCont) }
-
-        let coordinator: ChatCoordinator
-        do {
-          coordinator = try ChatCoordinator(
-            configuration: configuration,
-            systemPrompt: systemPrompt,
-            resumeSnapshot: self.resumeMessages,
-            log: self.log,
-            enqueue: { [eventQueue] event in
-              eventQueue.enqueue(event)
-            },
-            persistURL: persistURL,
-            sessionId: self.sessionId,
-            sessionCreatedAt: self.sessionCreatedAt,
-            lines: lineStream
-          )
-        } catch {
-          let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-          eventQueue.enqueue(.transcript(.lifecycle(.error(scribeError))))
-          eventQueue.enqueue(.coordinatorFinished)
-          self.log.error(
-            "chat.coordinator.init.fail",
-            metadata: [
-              "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
-            ])
-          return
-        }
-        self.coordinator = coordinator
-        self.coordinatorTask = Task {
-          await coordinator.run()
-        }
+        self.installCoordinator()
 
         self.spinnerTask?.cancel()
         self.spinnerTask = Task { [weak self] in
@@ -267,7 +258,7 @@ internal final class SlateChatHost {
         case .stdinBytes(let chunk):
           if self.coordinatorFinished { return .stop }
           if chunk.isEmpty {
-            Task { await gate.complete(nil) }
+            self.gate.complete(nil)
             return .stop
           }
 
@@ -275,6 +266,24 @@ internal final class SlateChatHost {
           let actions = self.inputHandler.handle(chunk)
 
           for action in actions {
+            // When the boundary picker is open it owns all input — only its
+            // navigation keys are honored; everything else is ignored so a
+            // stray keystroke can't accidentally submit or scroll.
+            if self.picker != nil {
+              switch action {
+              case .arrowUp:
+                self.movePickerCursor(by: -1)
+              case .arrowDown:
+                self.movePickerCursor(by: +1)
+              case .enter:
+                self.confirmPicker()
+              case .escape, .ctrlC:
+                self.cancelPicker()
+              default:
+                break
+              }
+              continue
+            }
             switch action {
             case .bracketedPasteStart:
               self.inPaste = true
@@ -289,10 +298,17 @@ internal final class SlateChatHost {
                 self.editMode = .edit
               } else {
                 let text = self.inputBuffer
-                self.inputBuffer = ""
-                self.submitCoordinator.setModelBusy(self.modelBusy)
-                let effect = self.submitCoordinator.handleEnter(text: text)
-                shouldStop = self.applySubmitEffect(effect, gate: gate)
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed == "/fork" || trimmed == "/summarize" {
+                  self.inputBuffer = ""
+                  self.openPicker(
+                    kind: trimmed == "/fork" ? .fork : .summarize)
+                } else {
+                  self.inputBuffer = ""
+                  self.submitCoordinator.setModelBusy(self.modelBusy)
+                  let effect = self.submitCoordinator.handleEnter(text: text)
+                  shouldStop = self.applySubmitEffect(effect)
+                }
               }
 
             case .ctrlC:
@@ -306,7 +322,7 @@ internal final class SlateChatHost {
                   self.editMode = .edit
                   self.renderWake?.requestRender()
                 }
-                shouldStop = self.applySubmitEffect(effect, gate: gate)
+                shouldStop = self.applySubmitEffect(effect)
               }
 
             case .escape:
@@ -356,7 +372,7 @@ internal final class SlateChatHost {
           }
 
           if shouldStop {
-            Task { await gate.complete(nil) }
+            self.gate.complete(nil)
             return .stop
           }
         }
@@ -373,7 +389,7 @@ internal final class SlateChatHost {
           }
           self.queuedTrayTexts = self.submitCoordinator.queuedTexts
           for text in drained {
-            Task { await gate.complete(text) }
+            self.gate.complete(text)
           }
         }
 
@@ -417,6 +433,7 @@ internal final class SlateChatHost {
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
             queuedTrayText: self.queuedTrayTexts.first,
+            picker: self.picker,
             theme: .default)
           // Paint semantic spans into the terminal grid
           for (row, spanRow) in spanGrid.enumerated() {
@@ -455,7 +472,287 @@ internal final class SlateChatHost {
     renderWake = nil
 
     coordinatorTask?.cancel()
-    await gate.complete(nil)
+    self.gate.complete(nil)
+    return exitInfo
+  }
+
+  // MARK: - Boundary picker
+
+  /// Build a one-line preview describing the message at `index` so the
+  /// picker can show what would be discarded (for `/fork`) or collapsed
+  /// (for `/summarize`).
+  private func pickerPreview(for messages: [ScribeMessage], at index: Int) -> String {
+    if index >= messages.count { return "<end of session>" }
+    let m = messages[index]
+    let trimmed = m.content.trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "\n", with: " ")
+    let snippet: String = {
+      if !trimmed.isEmpty { return String(trimmed.prefix(60)) }
+      if let calls = m.toolCalls, let first = calls.first {
+        return "[tool call: \(first.name)]"
+      }
+      return "<empty message>"
+    }()
+    return "\(m.role.rawValue): \(snippet)"
+  }
+
+  /// Compute the picker's default cursor position:
+  /// - `.fork`: most recent safe boundary (cut at "now").
+  /// - `.summarize`: the boundary right after the most recent user message
+  ///   (collapses everything the assistant did in response to that turn);
+  ///   falls back to the most recent boundary when no user message exists.
+  private func defaultCursor(
+    kind: PickerSnapshot.Kind, messages: [ScribeMessage], boundaries: [Int]
+  ) -> Int {
+    guard !boundaries.isEmpty else { return 0 }
+    switch kind {
+    case .fork:
+      return boundaries.count - 1
+    case .summarize:
+      if let lastUser = messages.lastIndex(where: { $0.role == .user }),
+        let idx = boundaries.firstIndex(of: lastUser + 1)
+      {
+        return idx
+      }
+      return boundaries.count - 1
+    }
+  }
+
+  private func openPicker(kind: PickerSnapshot.Kind) {
+    let messages: [ScribeMessage]
+    do {
+      messages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
+    } catch {
+      log.warning(
+        "event=chat.picker.open.fail",
+        metadata: ["err": "\(String(describing: error))"])
+      return
+    }
+    let allBoundaries = messages.safeForkBoundaries()
+    // For `/summarize` the cut must leave at least one message *after* it
+    // to summarize, so trailing `messageCount` is not a valid cut. For
+    // `/fork` every safe boundary is offerable.
+    let boundaries: [Int] = {
+      switch kind {
+      case .fork: return allBoundaries
+      case .summarize: return allBoundaries.filter { $0 < messages.count }
+      }
+    }()
+    guard !boundaries.isEmpty else {
+      log.notice(
+        "event=chat.picker.open.skip",
+        metadata: ["kind": "\(kind)", "reason": "no-safe-boundary"])
+      return
+    }
+    let cursor = defaultCursor(kind: kind, messages: messages, boundaries: boundaries)
+    let snap = PickerSnapshot(
+      kind: kind,
+      boundaries: boundaries,
+      cursor: cursor,
+      messageCount: messages.count,
+      previewText: pickerPreview(for: messages, at: boundaries[cursor])
+    )
+    picker = snap
+    log.debug(
+      "event=chat.picker.open",
+      metadata: [
+        "kind": "\(kind)",
+        "boundaries": "\(boundaries.count)",
+        "default_cut": "\(boundaries[cursor])",
+      ])
+    renderWake?.requestRender()
+  }
+
+  private func movePickerCursor(by delta: Int) {
+    guard var snap = picker else { return }
+    let newCursor = max(0, min(snap.boundaries.count - 1, snap.cursor + delta))
+    if newCursor == snap.cursor { return }
+    snap.cursor = newCursor
+    let messages =
+      (try? ChatSessionStore.loadMessages(from: sessionPersistenceURL)) ?? []
+    snap.previewText = pickerPreview(for: messages, at: snap.boundaries[newCursor])
+    picker = snap
+    renderWake?.requestRender()
+  }
+
+  private func cancelPicker() {
+    guard picker != nil else { return }
+    picker = nil
+    log.debug("event=chat.picker.cancel")
+    renderWake?.requestRender()
+  }
+
+  private func confirmPicker() {
+    guard let snap = picker else { return }
+    picker = nil
+    let cutAt = snap.currentBoundary
+    let kind = snap.kind
+    let persistURL = sessionPersistenceURL
+    let configuration = self.configuration
+    let log = self.log
+    let parentSessionId = self.sessionId
+    let eventQueue = self.eventQueue
+
+    log.notice(
+      "event=chat.picker.confirm",
+      metadata: ["kind": "\(kind)", "cut_at": "\(cutAt)"])
+
+    if kind == .summarize { modelBusy = true }
+    renderWake?.requestRender()
+
+    pickerActionTask = Task { [weak self] in
+      do {
+        let newId = UUID()
+        let result: ChatSessionStore.ForkResult
+        switch kind {
+        case .fork:
+          result = try ChatSessionStore.forkSession(
+            from: persistURL, cutAt: cutAt, newSessionId: newId,
+            scribeVersion: GitVersion.hash)
+          log.notice(
+            "event=chat.fork.create",
+            metadata: [
+              "parent": "\(parentSessionId.uuidString)",
+              "child": "\(result.sessionId.uuidString)",
+              "cut_at": "\(result.cutAt)",
+            ])
+        case .summarize:
+          let messages = try ChatSessionStore.loadMessages(from: persistURL)
+          let slice = Array(messages[cutAt..<messages.count])
+          let summary = try await SessionSummarizer.summarize(
+            slice: slice, configuration: configuration, log: log)
+          result = try ChatSessionStore.forkSession(
+            from: persistURL, cutAt: cutAt, newSessionId: newId,
+            scribeVersion: GitVersion.hash)
+          try ChatSessionStore.appendMessages(
+            [ScribeMessage(role: .assistant, content: summary)],
+            to: result.sessionURL)
+          log.notice(
+            "event=chat.summarize.create",
+            metadata: [
+              "parent": "\(parentSessionId.uuidString)",
+              "child": "\(result.sessionId.uuidString)",
+              "cut_at": "\(result.cutAt)",
+              "slice_messages": "\(slice.count)",
+              "summary_chars": "\(summary.count)",
+            ])
+        }
+        await MainActor.run { [weak self] in
+          self?.hotSwapToSession(
+            url: result.sessionURL, sessionId: result.sessionId)
+        }
+      } catch {
+        let se = (error as? ScribeError) ?? .generic(String(describing: error))
+        log.error(
+          "event=chat.picker.action.fail err=\"\(se.errorDescription ?? String(describing: se))\""
+        )
+        eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
+        await MainActor.run { [weak self] in
+          self?.modelBusy = false
+          self?.renderWake?.requestRender()
+        }
+      }
+    }
+  }
+
+  // MARK: - Coordinator install / hot-swap
+
+  /// Build the line stream for `self.gate` and start a fresh ChatCoordinator
+  /// against `self.currentSeed` + `self.sessionPersistenceURL`. Called once
+  /// at startup and again after every hot-swap.
+  private func installCoordinator() {
+    let (lineStream, lineCont) = AsyncStream<String>.makeStream()
+    self.gate.setStreamContinuation(lineCont)
+
+    let coordinator: ChatCoordinator
+    do {
+      coordinator = try ChatCoordinator(
+        configuration: configuration,
+        systemPrompt: systemPrompt,
+        resumeSnapshot: self.currentSeed,
+        log: self.log,
+        enqueue: { [eventQueue] event in
+          eventQueue.enqueue(event)
+        },
+        persistURL: self.sessionPersistenceURL,
+        sessionId: self.sessionId,
+        sessionCreatedAt: self.sessionCreatedAt,
+        lines: lineStream
+      )
+    } catch {
+      let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
+      eventQueue.enqueue(.transcript(.lifecycle(.error(scribeError))))
+      eventQueue.enqueue(.coordinatorFinished)
+      self.log.error(
+        "chat.coordinator.init.fail",
+        metadata: [
+          "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
+        ])
+      return
+    }
+    self.coordinator = coordinator
+    self.coordinatorTask = Task {
+      await coordinator.run()
+    }
+  }
+
+  /// Replay `self.currentSeed` into the transcript pane (initial render and
+  /// post-hot-swap redraw).
+  private func refreshTranscriptFromSeed() {
+    transcriptState.lines = currentSeed.isEmpty
+      ? []
+      : renderMessagesToTranscript(
+        currentSeed, theme: self.theme, renderer: self.markdownRenderer)
+    flattenCache = TranscriptLayout.FlattenCache()
+  }
+
+  /// Tear down the current coordinator and bring up a fresh one pointing at
+  /// the forked session. Called after `/fork` or `/summarize` confirm.
+  private func hotSwapToSession(url newURL: URL, sessionId newId: UUID) {
+    log.notice(
+      "event=chat.hotswap",
+      metadata: [
+        "from": "\(self.sessionId.uuidString)",
+        "to": "\(newId.uuidString)",
+      ])
+
+    // Record where we ended up so the CLI's exit hint points at the right
+    // session if the user types `exit` after this swap.
+    exitInfo.forkedToSessionId = newId
+    exitInfo.forkedToURL = newURL
+
+    // Close the old gate so the old coordinator's stream finishes; the
+    // coordinator's run() will wind down and emit `.coordinatorFinished`,
+    // which we swallow once below so the host stays alive across the swap.
+    self.gate.complete(nil)
+    self.coordinatorTask?.cancel()
+    self.pendingFinishesToSwallow += 1
+
+    self.gate = UserLineGate()
+    self.sessionPersistenceURL = newURL
+    self.sessionId = newId
+    self.sessionCreatedAt = Date()
+    self.currentSeed =
+      (try? ChatSessionStore.loadMessages(from: newURL)) ?? []
+    self.modelBusy = false
+    self.queuedTrayTexts = []
+    self.submitCoordinator = SubmitCoordinator()
+
+    refreshTranscriptFromSeed()
+
+    // Refresh banner with the new session id.
+    if let banner = self.banner {
+      self.banner = BannerSnapshot(
+        baseURL: banner.baseURL,
+        model: banner.model,
+        cwd: banner.cwd,
+        scribeVersion: banner.scribeVersion,
+        gitBranch: banner.gitBranch,
+        sessionId: newId.uuidString)
+    }
+
+    installCoordinator()
+    renderWake?.requestRender()
   }
 
   private func drainIncomingEvents() {
@@ -507,14 +804,17 @@ internal final class SlateChatHost {
           }
         }
       case .coordinatorFinished:
-        coordinatorFinished = true
+        if pendingFinishesToSwallow > 0 {
+          pendingFinishesToSwallow -= 1
+        } else {
+          coordinatorFinished = true
+        }
       }
     }
   }
 
   private func applySubmitEffect(
-    _ effect: SubmitEffect,
-    gate: UserLineGate
+    _ effect: SubmitEffect
   ) -> Bool {
     var state = HostSubmitState(queuedTrayTexts: queuedTrayTexts)
     let fx = HostSubmitState.apply(effect, to: &state)
@@ -527,7 +827,7 @@ internal final class SlateChatHost {
         metadata: ["coordinator": coordinator == nil ? "nil" : "live"])
     }
     if let text = fx.gateText {
-      Task { await gate.complete(text) }
+      self.gate.complete(text)
     }
     if fx.needsDelayedRenderWake {
       scheduleDelayedRenderWake()

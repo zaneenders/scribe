@@ -97,7 +97,7 @@ enum SlateChat {
     sessionPersistenceURL: URL,
     sessionId: UUID,
     log: Logger
-  ) async throws {
+  ) async throws -> ChatExitInfo {
     guard isatty(STDIN_FILENO) != 0 else {
       log.error("event=chat.session.fail reason=stdin-not-tty")
       throw ChatTerminalError.notATerminal
@@ -108,7 +108,7 @@ enum SlateChat {
       session_file=\(sessionPersistenceURL.lastPathComponent)
       """
     )
-    try await Task { @MainActor () throws -> Void in
+    return try await Task { @MainActor () throws -> ChatExitInfo in
       let sessionCreatedAt = Date()
       let host = SlateChatHost(
         configuration: configuration,
@@ -120,7 +120,7 @@ enum SlateChat {
         log: log
       )
       do {
-        try await host.run()
+        return try await host.run()
       } catch Slate.InstallationError.notInteractiveTerminal {
         log.error(
           "event=chat.fullscreen.fail reason=slate-not-interactive"

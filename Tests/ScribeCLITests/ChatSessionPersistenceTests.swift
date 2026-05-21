@@ -203,6 +203,97 @@ struct ChatSessionPersistenceTests {
     #expect(loaded[3].content == "q2")
   }
 
+  // MARK: - Fork
+
+  @Test func forkSessionCopiesPrefixAndLinksParent() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    let parentId = UUID()
+    let parentDir = try ChatSessionStore.sessionDirectoryURL(
+      sessionId: parentId, sessionsDirectoryPath: tempRoot.path)
+    let parentMeta = ChatSessionMetadata(
+      id: parentId,
+      createdAt: Date(),
+      model: "m",
+      cwd: "/tmp",
+      baseURL: "http://x",
+      scribeVersion: "parent-ver"
+    )
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .system, content: "sys"),
+      ScribeMessage(role: .user, content: "q1"),
+      ScribeMessage(role: .assistant, content: "a1"),
+      ScribeMessage(role: .user, content: "q2"),
+      ScribeMessage(role: .assistant, content: "a2"),
+    ]
+    try ChatSessionStore.saveMetadata(parentMeta, to: parentDir)
+    try ChatSessionStore.appendMessages(messages, to: parentDir)
+
+    let childId = UUID()
+    let result = try ChatSessionStore.forkSession(
+      from: parentDir,
+      cutAt: 3,
+      newSessionId: childId,
+      scribeVersion: "child-ver"
+    )
+
+    #expect(result.sessionId == childId)
+    #expect(result.cutAt == 3)
+
+    let childMeta = try ChatSessionStore.loadMetadata(from: result.sessionURL)
+    #expect(childMeta.id == childId)
+    #expect(childMeta.parentSessionId == parentId)
+    #expect(childMeta.forkedAtIndex == 3)
+    #expect(childMeta.model == "m")
+    #expect(childMeta.scribeVersion == "child-ver")
+
+    let childMessages = try ChatSessionStore.loadMessages(from: result.sessionURL)
+    #expect(childMessages.count == 3)
+    #expect(childMessages[0].role == .system)
+    #expect(childMessages[1].content == "q1")
+    #expect(childMessages[2].content == "a1")
+
+    // Parent must be untouched.
+    let parentMessages = try ChatSessionStore.loadMessages(from: parentDir)
+    #expect(parentMessages.count == 5)
+  }
+
+  @Test func forkSessionRejectsUnsafeBoundary() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    let parentId = UUID()
+    let parentDir = try ChatSessionStore.sessionDirectoryURL(
+      sessionId: parentId, sessionsDirectoryPath: tempRoot.path)
+    let parentMeta = ChatSessionMetadata(
+      id: parentId, createdAt: Date(), model: "m", cwd: "/", baseURL: nil, scribeVersion: nil)
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .system, content: "sys"),
+      ScribeMessage(role: .user, content: "q"),
+      ScribeMessage(
+        role: .assistant, content: "",
+        toolCalls: [ScribeToolCall(id: "c1", name: "x", arguments: "{}")]),
+      ScribeMessage(role: .tool, content: "ok", toolCallId: "c1"),
+    ]
+    try ChatSessionStore.saveMetadata(parentMeta, to: parentDir)
+    try ChatSessionStore.appendMessages(messages, to: parentDir)
+
+    // Cut 3 splits between assistant tool_calls and the tool result — not safe.
+    #expect(throws: ScribeError.self) {
+      _ = try ChatSessionStore.forkSession(
+        from: parentDir,
+        cutAt: 3,
+        newSessionId: UUID(),
+        scribeVersion: nil
+      )
+    }
+  }
+
   @Test func incrementalPersistLoadMetadataReadsCorrectly() throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
