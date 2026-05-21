@@ -44,6 +44,7 @@ struct ChatExitInfo: Sendable {
   /// When the user forked or summarized at least once during the session,
   /// this carries the most recent post-swap session. The CLI uses it to
   /// point the resume hint at the session the user actually ended on.
+  var forkedFromSessionId: UUID?
   var forkedToSessionId: UUID?
   var forkedToURL: URL?
 }
@@ -129,8 +130,11 @@ internal final class SlateChatHost {
   /// retires the previous coordinator so the trailing `.coordinatorFinished`
   /// the old coordinator emits doesn't tear down the live host.
   private var pendingFinishesToSwallow: Int = 0
+  /// False once `run()` begins teardown — picker side-effects must not
+  /// hot-swap or mutate UI after the host is winding down.
+  private var hostActive: Bool = true
   private var exitInfo: ChatExitInfo = ChatExitInfo()
-  /// Active boundary picker (driven by `/fork` and `/summarize`). When
+  /// Active boundary picker (driven by `/fork` and `/tldr`). When
   /// non-nil, the input area renders the picker and keystrokes are routed
   /// to boundary navigation instead of the normal submit pipeline.
   private var picker: PickerSnapshot?
@@ -221,7 +225,7 @@ internal final class SlateChatHost {
         self.contextWindow = self.configuration.contextWindow
 
         // Initial transcript seed + banner setup, then start the first
-        // coordinator. Hot-swap (after /fork or /summarize) re-runs only the
+        // coordinator. Hot-swap (after /fork or /tldr) re-runs only the
         // installCoordinator step against the new session.
         self.refreshTranscriptFromSeed()
 
@@ -320,10 +324,10 @@ internal final class SlateChatHost {
               } else {
                 let text = self.inputBuffer
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed == "/fork" || trimmed == "/summarize" {
+                if trimmed == "/fork" || trimmed == "/tldr" {
                   self.inputBuffer = ""
                   self.openPicker(
-                    kind: trimmed == "/fork" ? .fork : .summarize)
+                    kind: trimmed == "/fork" ? .fork : .tldr)
                 } else {
                   self.inputBuffer = ""
                   self.submitCoordinator.setModelBusy(self.modelBusy)
@@ -514,6 +518,9 @@ internal final class SlateChatHost {
     spinnerTask = nil
     renderWake = nil
 
+    hostActive = false
+    pickerActionTask?.cancel()
+    pickerActionTask = nil
     coordinatorTask?.cancel()
     self.gate.complete(nil)
     return exitInfo
@@ -523,7 +530,7 @@ internal final class SlateChatHost {
 
   /// Build a one-line preview describing the message at `index` so the
   /// picker can show what would be discarded (for `/fork`) or collapsed
-  /// (for `/summarize`).
+  /// (for `/tldr`).
   private func pickerPreview(for messages: [ScribeMessage], at index: Int) -> String {
     if index >= messages.count { return "<end of session>" }
     let m = messages[index]
@@ -541,7 +548,7 @@ internal final class SlateChatHost {
 
   /// Compute the picker's default cursor position:
   /// - `.fork`: most recent safe boundary (cut at "now").
-  /// - `.summarize`: the boundary right after the most recent user message
+  /// - `.tldr`: the boundary right after the most recent user message
   ///   (collapses everything the assistant did in response to that turn);
   ///   falls back to the most recent boundary when no user message exists.
   private func defaultCursor(
@@ -551,7 +558,7 @@ internal final class SlateChatHost {
     switch kind {
     case .fork:
       return boundaries.count - 1
-    case .summarize:
+    case .tldr:
       if let lastUser = messages.lastIndex(where: { $0.role == .user }),
         let idx = boundaries.firstIndex(of: lastUser + 1)
       {
@@ -581,13 +588,13 @@ internal final class SlateChatHost {
       return
     }
     let allBoundaries = messages.safeForkBoundaries()
-    // For `/summarize` the cut must leave at least one message *after* it
+    // For `/tldr` the cut must leave at least one message *after* it
     // to summarize, so trailing `messageCount` is not a valid cut. For
     // `/fork` every safe boundary is offerable.
     let boundaries: [Int] = {
       switch kind {
       case .fork: return allBoundaries
-      case .summarize: return allBoundaries.filter { $0 < messages.count }
+      case .tldr: return allBoundaries.filter { $0 < messages.count }
       }
     }()
     guard !boundaries.isEmpty else {
@@ -689,8 +696,8 @@ internal final class SlateChatHost {
       switch kind {
       case .fork:
         return "──── /fork cut · everything below would be discarded ────"
-      case .summarize:
-        return "──── /summarize · everything below would be collapsed ────"
+      case .tldr:
+        return "──── /tldr · everything below would be collapsed ────"
       }
     }()
     var out: [TLine] = []
@@ -732,11 +739,14 @@ internal final class SlateChatHost {
       "event=chat.picker.confirm",
       metadata: ["kind": "\(kind)", "cut_at": "\(cutAt)"])
 
-    if kind == .summarize { modelBusy = true }
+    modelBusy = true
     renderWake?.requestRender()
 
+    pickerActionTask?.cancel()
     pickerActionTask = Task { [weak self] in
       do {
+        guard await MainActor.run(body: { self?.hostActive ?? false }) else { return }
+
         let newId = UUID()
         let result: ChatSessionStore.ForkResult
         switch kind {
@@ -751,7 +761,7 @@ internal final class SlateChatHost {
               "child": "\(result.sessionId.uuidString)",
               "cut_at": "\(result.cutAt)",
             ])
-        case .summarize:
+        case .tldr:
           let messages = try ChatSessionStore.loadMessages(from: persistURL)
           let slice = Array(messages[cutAt..<messages.count])
           let summary = try await SessionSummarizer.summarize(
@@ -763,7 +773,7 @@ internal final class SlateChatHost {
             [ScribeMessage(role: .assistant, content: summary)],
             to: result.sessionURL)
           log.notice(
-            "event=chat.summarize.create",
+            "event=chat.tldr.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
               "child": "\(result.sessionId.uuidString)",
@@ -773,21 +783,24 @@ internal final class SlateChatHost {
             ])
         }
         await MainActor.run { [weak self] in
-          self?.hotSwapToSession(
+          guard let self, self.hostActive else { return }
+          self.hotSwapToSession(
             url: result.sessionURL, sessionId: result.sessionId)
         }
       } catch {
+        if Task.isCancelled { return }
         let se = (error as? ScribeError) ?? .generic(String(describing: error))
         log.error(
           "event=chat.picker.action.fail err=\"\(se.errorDescription ?? String(describing: se))\""
         )
         eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
         await MainActor.run { [weak self] in
+          guard let self, self.hostActive else { return }
           // Drop the styled picker view so the user sees their live
           // transcript again instead of a stuck dim/divider state.
-          self?.restoreFromPickerBackup()
-          self?.modelBusy = false
-          self?.renderWake?.requestRender()
+          self.restoreFromPickerBackup()
+          self.modelBusy = false
+          self.renderWake?.requestRender()
         }
       }
     }
@@ -846,8 +859,12 @@ internal final class SlateChatHost {
   }
 
   /// Tear down the current coordinator and bring up a fresh one pointing at
-  /// the forked session. Called after `/fork` or `/summarize` confirm.
+  /// the forked session. Called after `/fork` or `/tldr` confirm.
   private func hotSwapToSession(url newURL: URL, sessionId newId: UUID) {
+    guard hostActive else {
+      log.notice("event=chat.hotswap.skip reason=host-inactive")
+      return
+    }
     // The picker backup holds the *parent* session's pre-styled lines; once
     // we hot-swap they're meaningless. Drop them along with the cached
     // picker base, but skip restoreFromPickerBackup — refreshTranscriptFromSeed
@@ -866,6 +883,7 @@ internal final class SlateChatHost {
 
     // Record where we ended up so the CLI's exit hint points at the right
     // session if the user types `exit` after this swap.
+    exitInfo.forkedFromSessionId = self.sessionId
     exitInfo.forkedToSessionId = newId
     exitInfo.forkedToURL = newURL
 

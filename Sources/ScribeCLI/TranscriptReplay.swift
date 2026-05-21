@@ -21,7 +21,7 @@ public func renderMessagesToTranscript(
 /// trailing entry equals `lines.count`. Indices that don't produce their
 /// own output (system, tool absorbed into an assistant round) inherit the
 /// next produced line so a "cut here" lookup always lands on a sensible
-/// row. Used by the `/fork` and `/summarize` boundary picker to position
+/// row. Used by the `/fork` and `/tldr` boundary picker to position
 /// the viewport and draw a divider at the cut.
 public func renderMessagesToTranscriptWithStarts(
   _ messages: [ScribeMessage],

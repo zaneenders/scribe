@@ -189,7 +189,7 @@ import ScribeCore
     log.notice("chat.session.end", metadata: ["status": "ok"])
     if let forkedId = exitInfo.forkedToSessionId, let forkedURL = exitInfo.forkedToURL {
       printForkResumeHint(
-        parentSessionId: sessionId,
+        parentSessionId: exitInfo.forkedFromSessionId ?? sessionId,
         forkedSessionId: forkedId,
         forkedSessionURL: forkedURL
       )

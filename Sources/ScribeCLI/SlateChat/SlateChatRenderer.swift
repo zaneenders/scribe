@@ -293,7 +293,7 @@ internal enum SlateChatRenderer {
         textWidth: trayTextWidth, visualLines: trayVisualLines, theme: theme)
     }
 
-    // Input rows (or picker rows when a /fork or /summarize boundary picker
+    // Input rows (or picker rows when a /fork or /tldr boundary picker
     // is open — picker fully replaces the input box for the duration).
     if let picker {
       buildSemanticPickerRows(
@@ -330,7 +330,7 @@ internal enum SlateChatRenderer {
     let label: String = {
       switch picker.kind {
       case .fork: return "[FORK] "
-      case .summarize: return "[SUMM] "
+      case .tldr: return "[TLDR] "
       }
     }()
     let labelColor = theme.userPrefix
@@ -350,7 +350,7 @@ internal enum SlateChatRenderer {
     guard rowCount >= 2 else { return }
     let row1 = startRow + 1
     if row1 >= 0, row1 < grid.count {
-      let prefix = picker.kind == .summarize ? "first to collapse: " : "next: "
+      let prefix = picker.kind == .tldr ? "first to collapse: " : "next: "
       let spans: [StyledSpan] = [
         StyledSpan(fg: theme.inputGutter, bg: bg, bold: false, text: prefix),
         StyledSpan(fg: theme.inputText, bg: bg, bold: false, text: picker.previewText),

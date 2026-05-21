@@ -3,7 +3,7 @@ import Logging
 import ScribeCore
 
 /// One-shot agent that condenses a slice of a session's transcript into a
-/// short prose summary, used by `/summarize` when the user wants to collapse
+/// short prose summary, used by `/tldr` when the user wants to collapse
 /// a long agent loop before continuing.
 enum SessionSummarizer {
 
