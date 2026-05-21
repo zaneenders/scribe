@@ -11,7 +11,26 @@ public func renderMessagesToTranscript(
   theme: CLITheme,
   renderer: MarkdownRenderer
 ) -> [TLine] {
+  renderMessagesToTranscriptWithStarts(messages, theme: theme, renderer: renderer).lines
+}
+
+/// Like `renderMessagesToTranscript` but also returns `messageStartLines` —
+/// a parallel array of length `messages.count + 1` mapping a slice cut
+/// index to the resulting line index. `messageStartLines[i]` is the line
+/// index at which the rendering of `messages[i..<count]` begins; the
+/// trailing entry equals `lines.count`. Indices that don't produce their
+/// own output (system, tool absorbed into an assistant round) inherit the
+/// next produced line so a "cut here" lookup always lands on a sensible
+/// row. Used by the `/fork` and `/summarize` boundary picker to position
+/// the viewport and draw a divider at the cut.
+public func renderMessagesToTranscriptWithStarts(
+  _ messages: [ScribeMessage],
+  theme: CLITheme,
+  renderer: MarkdownRenderer
+) -> (lines: [TLine], messageStartLines: [Int]) {
   var lines: [TLine] = []
+  // -1 = unset; filled in a backward pass after the main loop.
+  var starts: [Int] = Array(repeating: -1, count: messages.count + 1)
   var i = 0
   // Skip leading system message(s).
   while i < messages.count, messages[i].role == .system {
@@ -19,6 +38,7 @@ public func renderMessagesToTranscript(
   }
   var toolRoundCounter = 0
   while i < messages.count {
+    starts[i] = lines.count
     let msg = messages[i]
     switch msg.role {
     case .system:
@@ -171,5 +191,13 @@ public func renderMessagesToTranscript(
       i += 1
     }
   }
-  return lines
+  // Trailing sentinel + backward fill: any message that produced no output
+  // of its own inherits the line index of whatever comes after it. This way
+  // a cut at an unsafe index still maps somewhere sensible.
+  starts[messages.count] = lines.count
+  var next = lines.count
+  for j in stride(from: messages.count - 1, through: 0, by: -1) {
+    if starts[j] == -1 { starts[j] = next } else { next = starts[j] }
+  }
+  return (lines, starts)
 }

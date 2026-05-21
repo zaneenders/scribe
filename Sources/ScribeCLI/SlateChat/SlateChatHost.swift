@@ -138,6 +138,27 @@ internal final class SlateChatHost {
   /// `picker` is set to nil as soon as the user confirms; this task carries
   /// the side-effect work to completion.
   private var pickerActionTask: Task<Void, Never>?
+  /// While the picker is open the host swaps `transcriptState.lines` for a
+  /// styled preview (kept lines, divider, dimmed cut) and scrolls to the
+  /// cut. This snapshot lets cancel restore both the transcript and the
+  /// viewport position; confirm discards it because the hot-swap re-seeds.
+  private var pickerBackup: (lines: [TLine], generation: Int, viewport: TranscriptViewport)?
+  /// Disk messages displayed by the active picker — cached to avoid a
+  /// re-read on every cursor move.
+  private var pickerMessages: [ScribeMessage] = []
+  /// Base (un-styled) transcript lines for `pickerMessages`, rebuilt on
+  /// open. Restyled into `transcriptState.lines` on every cursor move.
+  private var pickerBaseLines: [TLine] = []
+  /// `messageStartLines` for `pickerBaseLines` (length `pickerMessages.count + 1`).
+  /// Cursor index `cutAt` maps to base line `pickerBaseStarts[cutAt]`.
+  private var pickerBaseStarts: [Int] = []
+  /// Logical line index of the divider inside the *styled* picker
+  /// transcript (the value the render closure flattens up to so it can
+  /// snap the viewport on the divider).
+  private var pickerDividerLogicalLine: Int = 0
+  /// Set on open and on every cursor move; the render closure consumes it
+  /// to queue a viewport scroll-to-row, then clears it.
+  private var pickerScrollDirty: Bool = false
   private var queuedTrayTexts: [String] = []
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
@@ -399,6 +420,28 @@ internal final class SlateChatHost {
           let scrCols = grid.cols
           let scrRows = grid.rows
 
+          // Picker just opened or moved: snap the viewport so the divider
+          // sits roughly a third of the way down the transcript pane.
+          // Needs scrCols (only known at frame time) to convert the
+          // divider's logical-line index into a flattened-row target.
+          if self.picker != nil, self.pickerScrollDirty, scrCols > 0 {
+            let prefixEnd = min(
+              self.transcriptState.lines.count,
+              self.pickerDividerLogicalLine &+ 1)
+            let prefix = Array(self.transcriptState.lines.prefix(prefixEnd))
+            let flatPrefix = TranscriptLayout.flattenedRows(
+              from: prefix, width: scrCols)
+            let dividerFlatRow = max(0, flatPrefix.count &- 1)
+            let contentRows = SlateChatRenderer.transcriptContentRows(
+              cols: scrCols, rows: scrRows,
+              banner: self.banner, usage: self.transcriptState.usageHUD,
+              inputLine: self.inputBuffer, waitingForLLM: self.modelBusy,
+              queuedTrayText: self.queuedTrayTexts.first)
+            let topOffset = max(0, contentRows / 3)
+            self.viewport.queueScrollToRow(max(0, dividerFlatRow &- topOffset))
+            self.pickerScrollDirty = false
+          }
+
           let prepareStart = Date()
           var renderState = RenderState(
             transcriptLines: self.transcriptState.lines,
@@ -519,6 +562,15 @@ internal final class SlateChatHost {
   }
 
   private func openPicker(kind: PickerSnapshot.Kind) {
+    // Disk-persisted messages lag the live coordinator while a turn is
+    // streaming, so opening the picker mid-turn would let the user pick
+    // boundaries that don't reflect what's on screen. Make them wait.
+    if modelBusy {
+      log.notice(
+        "event=chat.picker.open.skip",
+        metadata: ["kind": "\(kind)", "reason": "model-busy"])
+      return
+    }
     let messages: [ScribeMessage]
     do {
       messages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
@@ -552,7 +604,17 @@ internal final class SlateChatHost {
       messageCount: messages.count,
       previewText: pickerPreview(for: messages, at: boundaries[cursor])
     )
-    picker = snap
+
+    // Render the disk-persisted history once so cursor moves only restyle
+    // the cached base lines (no markdown re-render per arrow key).
+    let rendered = renderMessagesToTranscriptWithStarts(
+      messages, theme: theme, renderer: markdownRenderer)
+    self.pickerMessages = messages
+    self.pickerBaseLines = rendered.lines
+    self.pickerBaseStarts = rendered.messageStartLines
+    self.pickerBackup = (transcriptState.lines, transcriptState.generation, viewport)
+
+    applyPickerView(snapshot: snap)
     log.debug(
       "event=chat.picker.open",
       metadata: [
@@ -560,7 +622,6 @@ internal final class SlateChatHost {
         "boundaries": "\(boundaries.count)",
         "default_cut": "\(boundaries[cursor])",
       ])
-    renderWake?.requestRender()
   }
 
   private func movePickerCursor(by delta: Int) {
@@ -568,23 +629,97 @@ internal final class SlateChatHost {
     let newCursor = max(0, min(snap.boundaries.count - 1, snap.cursor + delta))
     if newCursor == snap.cursor { return }
     snap.cursor = newCursor
-    let messages =
-      (try? ChatSessionStore.loadMessages(from: sessionPersistenceURL)) ?? []
-    snap.previewText = pickerPreview(for: messages, at: snap.boundaries[newCursor])
-    picker = snap
-    renderWake?.requestRender()
+    snap.previewText = pickerPreview(
+      for: pickerMessages, at: snap.boundaries[newCursor])
+    applyPickerView(snapshot: snap)
   }
 
   private func cancelPicker() {
     guard picker != nil else { return }
     picker = nil
+    restoreFromPickerBackup()
     log.debug("event=chat.picker.cancel")
     renderWake?.requestRender()
+  }
+
+  /// Restyle the transcript with the current picker snapshot and request a
+  /// scroll-to-divider on the next frame.
+  private func applyPickerView(snapshot: PickerSnapshot) {
+    picker = snapshot
+    let cutBaseLine =
+      pickerBaseStarts.indices.contains(snapshot.currentBoundary)
+      ? pickerBaseStarts[snapshot.currentBoundary]
+      : pickerBaseLines.count
+    let styled = buildPickerStyledLines(
+      base: pickerBaseLines, cutBaseLine: cutBaseLine, kind: snapshot.kind)
+    transcriptState.lines = styled.lines
+    transcriptState.generation &+= 1
+    pickerDividerLogicalLine = styled.dividerLine
+    pickerScrollDirty = true
+    flattenCache = TranscriptLayout.FlattenCache()
+    renderWake?.requestRender()
+  }
+
+  /// Restore the pre-picker transcript captured in `pickerBackup`. Called
+  /// from cancel; confirm skips this because hot-swap re-seeds anyway.
+  private func restoreFromPickerBackup() {
+    guard let backup = pickerBackup else { return }
+    transcriptState.lines = backup.lines
+    transcriptState.generation = backup.generation &+ 1
+    viewport = backup.viewport
+    flattenCache = TranscriptLayout.FlattenCache()
+    pickerBackup = nil
+    pickerMessages = []
+    pickerBaseLines = []
+    pickerBaseStarts = []
+    pickerScrollDirty = false
+  }
+
+  /// Build the picker-styled transcript: `base[0..<cutBaseLine]` unchanged,
+  /// then a blank + divider + blank, then `base[cutBaseLine..<]` with every
+  /// span recolored dim. Returns the new lines and the logical line index
+  /// of the divider row.
+  private func buildPickerStyledLines(
+    base: [TLine], cutBaseLine: Int, kind: PickerSnapshot.Kind
+  ) -> (lines: [TLine], dividerLine: Int) {
+    let cut = max(0, min(cutBaseLine, base.count))
+    let dimFG = theme.inputGutter
+    let divFG = kind == .fork ? theme.errorFG : theme.warningFG
+    let label: String = {
+      switch kind {
+      case .fork:
+        return "──── /fork cut · everything below would be discarded ────"
+      case .summarize:
+        return "──── /summarize · everything below would be collapsed ────"
+      }
+    }()
+    var out: [TLine] = []
+    out.reserveCapacity(base.count &+ 3)
+    out.append(contentsOf: base[0..<cut])
+    out.append(TLine(spans: []))
+    let dividerIndex = out.count
+    out.append(
+      TLine(spans: [
+        StyledSpan(fg: divFG, bg: theme.background, bold: true, text: label)
+      ]))
+    out.append(TLine(spans: []))
+    for line in base[cut..<base.count] {
+      if line.spans.isEmpty {
+        out.append(line)
+        continue
+      }
+      let dimmed = line.spans.map { sp in
+        StyledSpan(fg: dimFG, bg: sp.bg, bold: false, text: sp.text)
+      }
+      out.append(TLine(spans: dimmed))
+    }
+    return (out, dividerIndex)
   }
 
   private func confirmPicker() {
     guard let snap = picker else { return }
     picker = nil
+    pickerScrollDirty = false
     let cutAt = snap.currentBoundary
     let kind = snap.kind
     let persistURL = sessionPersistenceURL
@@ -648,6 +783,9 @@ internal final class SlateChatHost {
         )
         eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
         await MainActor.run { [weak self] in
+          // Drop the styled picker view so the user sees their live
+          // transcript again instead of a stuck dim/divider state.
+          self?.restoreFromPickerBackup()
           self?.modelBusy = false
           self?.renderWake?.requestRender()
         }
@@ -699,7 +837,8 @@ internal final class SlateChatHost {
   /// Replay `self.currentSeed` into the transcript pane (initial render and
   /// post-hot-swap redraw).
   private func refreshTranscriptFromSeed() {
-    transcriptState.lines = currentSeed.isEmpty
+    transcriptState.lines =
+      currentSeed.isEmpty
       ? []
       : renderMessagesToTranscript(
         currentSeed, theme: self.theme, renderer: self.markdownRenderer)
@@ -709,6 +848,15 @@ internal final class SlateChatHost {
   /// Tear down the current coordinator and bring up a fresh one pointing at
   /// the forked session. Called after `/fork` or `/summarize` confirm.
   private func hotSwapToSession(url newURL: URL, sessionId newId: UUID) {
+    // The picker backup holds the *parent* session's pre-styled lines; once
+    // we hot-swap they're meaningless. Drop them along with the cached
+    // picker base, but skip restoreFromPickerBackup — refreshTranscriptFromSeed
+    // below replaces transcriptState entirely.
+    pickerBackup = nil
+    pickerMessages = []
+    pickerBaseLines = []
+    pickerBaseStarts = []
+    pickerScrollDirty = false
     log.notice(
       "event=chat.hotswap",
       metadata: [
