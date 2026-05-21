@@ -108,9 +108,8 @@ final class ChatCoordinator: Sendable {
           scribeVersion: GitVersion.hash
         )
         try? ChatSessionStore.saveMetadata(meta, to: persistURL)
+        try ChatSessionStore.appendMessages(initialMessages, to: persistURL)
       }
-
-      try ChatSessionStore.appendMessages(initialMessages, to: persistURL)
       var persistedCount = initialMessages.count
 
       let msgCount = initialMessages.count

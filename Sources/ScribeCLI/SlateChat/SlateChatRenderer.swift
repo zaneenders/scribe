@@ -155,6 +155,7 @@ internal enum SlateChatRenderer {
     llmWaitAnimationFrame: Int,
     waitingForLLM: Bool,
     queuedTrayText: String?,
+    picker: PickerSnapshot? = nil,
     theme: CLITheme
   ) -> [[StyledSpan]] {
     let transcriptFill = StyledSpan(fg: theme.inputText, bg: theme.background, bold: false, text: " ")
@@ -292,14 +293,100 @@ internal enum SlateChatRenderer {
         textWidth: trayTextWidth, visualLines: trayVisualLines, theme: theme)
     }
 
-    // Input rows
-    buildSemanticInputRows(
-      &grid, startRow: firstInputRow, cols: cols,
-      textWidth: textWidth, visualLines: visualLines, rowCount: inputRowCount,
-      inputMode: inputMode,
-      llmWaitAnimationFrame: llmWaitAnimationFrame, waitingForLLM: waitingForLLM, theme: theme)
+    // Input rows (or picker rows when a /fork or /tldr boundary picker
+    // is open — picker fully replaces the input box for the duration).
+    if let picker {
+      buildSemanticPickerRows(
+        &grid, startRow: firstInputRow, cols: cols,
+        rowCount: inputRowCount, picker: picker, theme: theme)
+    } else {
+      buildSemanticInputRows(
+        &grid, startRow: firstInputRow, cols: cols,
+        textWidth: textWidth, visualLines: visualLines, rowCount: inputRowCount,
+        inputMode: inputMode,
+        llmWaitAnimationFrame: llmWaitAnimationFrame, waitingForLLM: waitingForLLM,
+        theme: theme)
+    }
 
     return grid
+  }
+
+  /// Render the boundary-picker overlay in place of the input rows. Two
+  /// logical lines are produced and clipped to the available `rowCount`:
+  ///
+  ///   ```
+  ///   [FORK] msg 14 / 21               ↑↓ change · Enter confirm · Esc cancel
+  ///   next: <preview>
+  ///
+  ///   [TLDR] start 14 · end 21 of 21   ↑↓ move · Tab switch · Enter confirm · Esc cancel
+  ///   first to collapse: <preview>      (or "first preserved:" when end is active)
+  ///   ```
+  ///
+  /// For `.tldr` the active cursor's number is rendered in the warning
+  /// colour + bold so the user can see at a glance which one Tab has
+  /// landed on.
+  nonisolated static func buildSemanticPickerRows(
+    _ grid: inout [[StyledSpan]],
+    startRow: Int, cols: Int, rowCount: Int,
+    picker: PickerSnapshot,
+    theme: CLITheme
+  ) {
+    guard rowCount >= 1, cols > 0 else { return }
+    let bg = theme.inputAreaBg
+    let labelColor = theme.userPrefix
+    let normalFG = theme.inputText
+    let hintFG = theme.inputGutter
+    let activeFG = theme.warningFG
+
+    let row0 = startRow
+    if row0 >= 0, row0 < grid.count {
+      var spans: [StyledSpan] = []
+      switch picker.kind {
+      case .fork:
+        let position = "msg \(picker.currentBoundary) / \(picker.messageCount)"
+        let hint = "   ↑↓ change · Enter confirm · Esc cancel"
+        spans = [
+          StyledSpan(fg: labelColor, bg: bg, bold: true, text: "[FORK] "),
+          StyledSpan(fg: normalFG, bg: bg, bold: false, text: position),
+          StyledSpan(fg: hintFG, bg: bg, bold: false, text: hint),
+        ]
+      case .tldr:
+        let startActive = !picker.activeIsEnd
+        let endActive = picker.activeIsEnd
+        let hint = "   ↑↓ move · Tab switch · Enter confirm · Esc cancel"
+        spans = [
+          StyledSpan(fg: labelColor, bg: bg, bold: true, text: "[TLDR] "),
+          StyledSpan(fg: normalFG, bg: bg, bold: false, text: "start "),
+          StyledSpan(
+            fg: startActive ? activeFG : normalFG, bg: bg, bold: startActive,
+            text: "\(picker.startBoundary)"),
+          StyledSpan(fg: normalFG, bg: bg, bold: false, text: " · end "),
+          StyledSpan(
+            fg: endActive ? activeFG : normalFG, bg: bg, bold: endActive,
+            text: "\(picker.endBoundary)"),
+          StyledSpan(fg: normalFG, bg: bg, bold: false, text: " of \(picker.messageCount)"),
+          StyledSpan(fg: hintFG, bg: bg, bold: false, text: hint),
+        ]
+      }
+      writeSemanticSpans(&grid, col: 0, row: row0, maxWidth: cols, spans: spans)
+    }
+
+    guard rowCount >= 2 else { return }
+    let row1 = startRow + 1
+    if row1 >= 0, row1 < grid.count {
+      let prefix: String = {
+        switch picker.kind {
+        case .fork: return "next: "
+        case .tldr:
+          return picker.activeIsEnd ? "first preserved: " : "first to collapse: "
+        }
+      }()
+      let spans: [StyledSpan] = [
+        StyledSpan(fg: hintFG, bg: bg, bold: false, text: prefix),
+        StyledSpan(fg: normalFG, bg: bg, bold: false, text: picker.previewText),
+      ]
+      writeSemanticSpans(&grid, col: 0, row: row1, maxWidth: cols, spans: spans)
+    }
   }
 
   // MARK: - Semantic grid helpers (pure, operate on [[StyledSpan]])

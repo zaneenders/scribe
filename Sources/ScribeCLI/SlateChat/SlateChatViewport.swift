@@ -16,6 +16,10 @@ struct TranscriptViewport: Equatable, Sendable {
   private var pendingScrollDelta: Int = 0
   private var pendingGoToTop = false
   private var pendingGoToBottom = false
+  /// Absolute flattened-row target to snap to on the next resolve. Used by
+  /// the boundary picker to position the cut row near the top of the view.
+  /// Overrides delta-based scrolling when set.
+  private var pendingScrollToRow: Int?
 
   // MARK: - Queue operations (call during key processing)
 
@@ -43,6 +47,17 @@ struct TranscriptViewport: Equatable, Sendable {
     pendingScrollDelta = 0
   }
 
+  /// Snap the viewport so `row` (an absolute index in the flattened
+  /// transcript) becomes `firstVisibleRow` on the next resolve, clamped to
+  /// the available range. Disables live tail-follow. Used by the boundary
+  /// picker so arrow keys scroll to the cut.
+  mutating func queueScrollToRow(_ row: Int) {
+    pendingScrollToRow = row
+    pendingScrollDelta = 0
+    pendingGoToTop = false
+    pendingGoToBottom = false
+  }
+
   // MARK: - Resolve (call once per render frame)
 
   /// Apply all queued scroll operations and update tail tracking.
@@ -56,6 +71,13 @@ struct TranscriptViewport: Equatable, Sendable {
     if pendingGoToBottom {
       followingLive = true
       pendingGoToBottom = false
+    }
+    if let target = pendingScrollToRow {
+      followingLive = false
+      let maxTailStart = max(0, flatCount &- contentRows)
+      firstVisibleRow = min(max(0, target), maxTailStart)
+      pendingScrollToRow = nil
+      return updateTail(flatCount: flatCount, contentRows: contentRows)
     }
 
     let page = max(1, contentRows)
