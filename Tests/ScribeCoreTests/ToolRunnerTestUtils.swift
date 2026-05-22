@@ -1,7 +1,10 @@
 import Foundation
+import Logging
 import Synchronization
 
 @testable import ScribeCore
+
+let toolRunnerTestLogger = Logger(label: "test.tool-runner")
 
 struct ShellPayload: Decodable {
   let ok: Bool

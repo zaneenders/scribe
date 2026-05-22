@@ -60,13 +60,12 @@ struct StreamProcessor<AO: AbortObserver> {
     for try await sse in sseStream {
       if abortObserver.isAborted() {
         logger.notice(
-          """
-          event=agent.stream.abort \
-          where=mid-stream \
-          chunks=\(decodedChunkCount) \
-          had_visible_tokens=\(streamStarted)
-          """
-        )
+          "agent.stream.abort",
+          metadata: [
+            "where": "mid-stream",
+            "chunks": "\(decodedChunkCount)",
+            "had_visible_tokens": "\(streamStarted)",
+          ])
         if streamStarted {
           onEvent(.output(.finalized))
         }
@@ -85,13 +84,12 @@ struct StreamProcessor<AO: AbortObserver> {
       } catch {
         skippedChunkCount += 1
         logger.warning(
-          """
-          event=agent.stream.unreadable-chunk \
-          chunk_index=\(decodedChunkCount + 1) \
-          err="\(error.localizedDescription)" \
-          raw_prefix="\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))"
-          """
-        )
+          "agent.stream.unreadable-chunk",
+          metadata: [
+            "chunk_index": "\(decodedChunkCount + 1)",
+            "err": "\(error.localizedDescription)",
+            "raw_prefix": "\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))",
+          ])
         continue
       }
       decodedChunkCount += 1
@@ -137,22 +135,20 @@ struct StreamProcessor<AO: AbortObserver> {
       if !loggedFirstChunk {
         loggedFirstChunk = true
         logger.debug(
-          """
-          event=agent.stream.first-chunk \
-          ttfb_ms=\((clock.now - httpStart) / .milliseconds(1))
-          """
-        )
+          "agent.stream.first-chunk",
+          metadata: [
+            "ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))",
+          ])
       } else if decodedChunkCount % streamProgressEvery == 0 {
         let elapsedMs = Int((clock.now - streamWallStart) / .milliseconds(1))
         let chunksPerSec = Double(decodedChunkCount) / (Double(elapsedMs) / 1000.0)
         logger.trace(
-          """
-          event=agent.stream.progress \
-          chunks=\(decodedChunkCount) \
-          elapsed=\(elapsedMs) \
-          chunks_per_s=\(String(format: "%.1f", chunksPerSec))
-          """
-        )
+          "agent.stream.progress",
+          metadata: [
+            "chunks": "\(decodedChunkCount)",
+            "elapsed_ms": "\(elapsedMs)",
+            "chunks_per_s": "\(String(format: "%.1f", chunksPerSec))",
+          ])
       }
     }
 
@@ -161,11 +157,8 @@ struct StreamProcessor<AO: AbortObserver> {
       onEvent(.output(.finalized))
     } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
       logger.notice(
-        """
-        event=agent.stream.empty \
-        chunks=\(decodedChunkCount)
-        """
-      )
+        "agent.stream.empty",
+        metadata: ["chunks": "\(decodedChunkCount)"])
       onEvent(.output(.empty))
     }
   }

@@ -90,7 +90,10 @@ private struct FakeTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable { Result() }
+  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    _ = logger
+    return Result()
+  }
 }
 
 /// A tool that throws `AgentTurnInterruptedError` directly from `run`.
@@ -100,7 +103,8 @@ private struct InterruptedTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
+  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    _ = logger
     throw AgentTurnInterruptedError()
   }
 }
@@ -150,7 +154,7 @@ private func makeConfig(
 ) -> AgentLoopConfig {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-  let registry = ToolRegistry(tools: tools)
+  let registry = ToolRegistry(tools: tools, logger: testLogger)
   return AgentLoopConfig(
     model: model,
     client: client,
@@ -175,7 +179,7 @@ private func runLoop(
     context: context,
     config: config,
     emit: { _ in },
-    log: testLogger,
+    logger: testLogger,
     abortObserver: abortNotifier
   )
 }
@@ -192,7 +196,7 @@ private func runLoop(
     context: context,
     config: config,
     emit: { _ in },
-    log: testLogger,
+    logger: testLogger,
     abortObserver: countingAbortObserver
   )
 }
@@ -288,7 +292,7 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [FakeTool()])
+    let registry = ToolRegistry(tools: [FakeTool()], logger: toolRunnerTestLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
@@ -412,7 +416,7 @@ struct AgentLoopTests {
       let transport = FakeClientTransport(
         statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
       let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-      let registry = ToolRegistry(tools: [FakeTool()])
+      let registry = ToolRegistry(tools: [FakeTool()], logger: toolRunnerTestLogger)
       let config = AgentLoopConfig(
         model: "test-model",
         client: client,
@@ -522,7 +526,7 @@ struct AgentLoopTests {
       context: AgentContext(messages: []),
       config: makeConfig(chunks: chunks),
       emit: { event in events.withLock { $0.append(event) } },
-      log: testLogger,
+      logger: testLogger,
       abortObserver: AbortNotifier()
     )
     expectTermination(termination, .completed)
@@ -572,7 +576,7 @@ struct AgentLoopTests {
       context: context,
       config: makeConfig(chunks: chunks),
       emit: { _ in },
-      log: testLogger,
+      logger: testLogger,
       abortObserver: AbortNotifier()
     )
     expectTermination(termination, .completed)
@@ -598,7 +602,7 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [FakeTool()])
+    let registry = ToolRegistry(tools: [FakeTool()], logger: toolRunnerTestLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
@@ -639,7 +643,7 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [chunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [InterruptedTool()])
+    let registry = ToolRegistry(tools: [InterruptedTool()], logger: toolRunnerTestLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
@@ -677,7 +681,10 @@ struct AgentLoopTests {
         [ToolAttachment(mimeType: "image/png", base64: "AAAA", filename: "tiny.png", sourcePath: nil)]
       }
     }
-    func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable { Result() }
+    func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+      _ = logger
+      return Result()
+    }
   }
 
   @Test func contextOverflowRecoversByRollingBackAttachments() async throws {
@@ -703,7 +710,7 @@ struct AgentLoopTests {
       (200, recoveryChunks),
     ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [AttachingTool()])
+    let registry = ToolRegistry(tools: [AttachingTool()], logger: testLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
@@ -721,7 +728,7 @@ struct AgentLoopTests {
       context: AgentContext(messages: []),
       config: config,
       emit: { e in events.withLock { $0.append(e) } },
-      log: testLogger,
+      logger: testLogger,
       abortObserver: AbortNotifier()
     )
     expectTermination(termination, .completed)
@@ -771,7 +778,7 @@ struct AgentLoopTests {
       (400, [overflowBody]),
     ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [AttachingTool()])
+    let registry = ToolRegistry(tools: [AttachingTool()], logger: testLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,
@@ -789,7 +796,7 @@ struct AgentLoopTests {
         context: AgentContext(messages: []),
         config: config,
         emit: { _ in },
-        log: testLogger,
+        logger: testLogger,
         abortObserver: AbortNotifier()
       )
       #expect(Bool(false), "expected error")

@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
+import SystemPackage
 import Synchronization
 import Testing
 
@@ -13,7 +14,7 @@ import Testing
 @Suite
 struct ChatCoordinatorTests {
 
-  private let log = Logger(label: "test.chat-coordinator")
+  private let logger = Logger(label: "test.chat-coordinator")
 
   // MARK: - Initialization
 
@@ -25,11 +26,11 @@ struct ChatCoordinatorTests {
       configuration: .testValue,
       systemPrompt: "test prompt",
       resumeSnapshot: [],
-      log: log,
+      logger: logger,
       enqueue: { event in
         events.withLock { $0.append(event) }
       },
-      persistURL: URL(fileURLWithPath: "/tmp/test"),
+      persistDirectory: FilePath("/tmp/test"),
       sessionId: UUID(),
       sessionCreatedAt: Date(),
       lines: lines
@@ -52,9 +53,9 @@ struct ChatCoordinatorTests {
       configuration: .testValue,
       systemPrompt: "test prompt",
       resumeSnapshot: [],
-      log: log,
+      logger: logger,
       enqueue: { event in events.withLock { $0.append(event) } },
-      persistURL: URL(fileURLWithPath: "/tmp/test"),
+      persistDirectory: FilePath("/tmp/test"),
       sessionId: UUID(),
       sessionCreatedAt: Date(),
       lines: lines
@@ -78,9 +79,9 @@ struct ChatCoordinatorTests {
         configuration: .testValue,
         systemPrompt: "test prompt",
         resumeSnapshot: badSnapshot,
-        log: log,
+        logger: logger,
         enqueue: { event in events.withLock { $0.append(event) } },
-        persistURL: URL(fileURLWithPath: "/tmp/test"),
+        persistDirectory: FilePath("/tmp/test"),
         sessionId: UUID(),
         sessionCreatedAt: Date(),
         lines: lines

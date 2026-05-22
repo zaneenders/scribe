@@ -9,17 +9,14 @@ public struct ToolRegistry: Sendable, ToolExecutor {
   // The ChatTool schemas sent to the LLM, derived from the same tools.
   let chatTools: [Components.Schemas.ChatTool]
 
-  private static let defaultLogger = Logger(label: "scribe.tool.registry")
-  private static var logger: Logger { scribeSessionLogger ?? defaultLogger }
-
-  public init(tools: [any ScribeTool]) {
+  public init(tools: [any ScribeTool], logger: Logger) {
     var map: [String: any ScribeTool] = [:]
     for tool in tools {
       let name = type(of: tool).name
       map[name] = tool
     }
     self.tools = map
-    self.chatTools = tools.map { type(of: $0).toChatTool() }
+    self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
   }
 
   /// ``ToolExecutor`` conformance: route a resolved invocation through the
@@ -27,12 +24,14 @@ public struct ToolRegistry: Sendable, ToolExecutor {
   public func execute(
     _ invocation: ToolInvocation,
     workingDirectory: FilePath,
+    logger: Logger,
     abort: any AbortObserver
   ) async throws -> ToolResult {
     try await run(
       name: invocation.name,
       arguments: invocation.arguments,
       workingDirectory: workingDirectory,
+      logger: logger,
       abortObserver: abort
     )
   }
@@ -58,10 +57,11 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     name: String,
     arguments: String,
     workingDirectory: FilePath,
+    logger: Logger,
     abortObserver: some AbortObserver
   ) async throws -> ToolResult {
     guard let tool = tools[name] else {
-      Self.logger.debug(
+      logger.debug(
         "agent.tool.unknown",
         metadata: [
           "tool": "\(name)"
@@ -70,7 +70,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     }
     let clock = ContinuousClock()
     let start = clock.now
-    Self.logger.debug(
+    logger.debug(
       "agent.tool.start",
       metadata: [
         "tool": "\(name)",
@@ -82,7 +82,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     // a race where the tool completes but the watch task wakes before we
     // dequeue.
     if abortObserver.isAborted() {
-      Self.logger.debug(
+      logger.debug(
         "agent.tool.aborted-before-start",
         metadata: [
           "tool": "\(name)",
@@ -97,10 +97,11 @@ public struct ToolRegistry: Sendable, ToolExecutor {
       result = try await withThrowingTaskGroup(of: ToolResult.self) { group in
         group.addTask {
           do {
-            Self.logger.trace(
+            logger.trace(
               "agent.tool.task.calling-run",
               metadata: ["tool": "\(name)"])
-            let value = try await tool.run(arguments: arguments, workingDirectory: workingDirectory)
+            let value = try await tool.run(
+              arguments: arguments, workingDirectory: workingDirectory, logger: logger)
             let elapsed = start.duration(to: clock.now)
             let elapsedMs = Int(elapsed / .milliseconds(1))
             do {
@@ -111,7 +112,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               if let attachable = value as? AttachableToolResult {
                 attachments = attachable.toolAttachments
                 if !attachments.isEmpty {
-                  Self.logger.info(
+                  logger.info(
                     "agent.tool.attachments.detected",
                     metadata: [
                       "tool": "\(name)",
@@ -124,7 +125,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
                 attachments = []
               }
               let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
-              Self.logger.debug(
+              logger.debug(
                 "agent.tool.completed",
                 metadata: [
                   "tool": "\(name)",
@@ -136,7 +137,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
                 ])
               return ToolResult(text: encoded, attachments: attachments, warnings: warnings)
             } catch {
-              Self.logger.warning(
+              logger.warning(
                 "agent.tool.encode_failed",
                 metadata: [
                   "tool": "\(name)",
@@ -149,7 +150,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
           } catch {
             let elapsed = start.duration(to: clock.now)
             let elapsedMs = Int(elapsed / .milliseconds(1))
-            Self.logger.trace(
+            logger.trace(
               "agent.tool.task.exited",
               metadata: [
                 "tool": "\(name)",
@@ -167,12 +168,12 @@ public struct ToolRegistry: Sendable, ToolExecutor {
           // catching a residual signal from a previous turn that the host
           // hasn't cleared yet).  Zero idle wake-ups — the AsyncStream
           // suspends until either signal or task-group cancellation.
-          Self.logger.trace(
+          logger.trace(
             "agent.tool.abort-watch.start",
             metadata: ["tool": "\(name)"])
           for await _ in abortObserver.signals() {
             if abortObserver.isAborted() {
-              Self.logger.trace(
+              logger.trace(
                 "agent.tool.abort-watch.fired",
                 metadata: ["tool": "\(name)"])
               throw AgentTurnInterruptedError()
@@ -190,7 +191,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
         // can exit cleanly.  (In the abort case the poller already threw,
         // so cancelAll() is a harmless no-op here.)
         group.cancelAll()
-        Self.logger.trace(
+        logger.trace(
           "agent.tool.taskgroup.first-completed",
           metadata: [
             "tool": "\(name)",
@@ -200,7 +201,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
         return winner
       }
       let cleanupMs = Int(start.duration(to: clock.now) / .milliseconds(1))
-      Self.logger.trace(
+      logger.trace(
         "agent.tool.taskgroup.all-completed",
         metadata: [
           "tool": "\(name)",
@@ -208,7 +209,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
         ])
     } catch is AgentTurnInterruptedError {
       let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
-      Self.logger.debug(
+      logger.debug(
         "agent.tool.errored",
         metadata: [
           "tool": "\(name)",
@@ -220,7 +221,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     } catch {
       let elapsed = start.duration(to: clock.now)
       let elapsedMs = Int(elapsed / .milliseconds(1))
-      Self.logger.debug(
+      logger.debug(
         "agent.tool.errored",
         metadata: [
           "tool": "\(name)",

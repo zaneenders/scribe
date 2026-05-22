@@ -10,10 +10,10 @@ import Testing
 @Suite
 struct ToolRunnerShellTests {
   @Test func echoProducesStdout() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     let args = try jsonArguments(["command": "/bin/echo scribetest"])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 0)
@@ -26,14 +26,14 @@ struct ToolRunnerShellTests {
   }
 
   @Test func honorsWorkingDirectory() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let marker = dir.appendingPathComponent("only_here.txt")
       try "cwd_ok".write(to: marker, atomically: true, encoding: .utf8)
 
       let args = try jsonArguments(["command": "/bin/cat only_here.txt", "cwd": dir.path])
       let json = try! await registry.run(
-        name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+        name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let out = try decodeShell(json)
       #expect(out.ok == true)
       #expect(out.exitCode == 0)
@@ -45,30 +45,31 @@ struct ToolRunnerShellTests {
   }
 
   @Test func reportsNonZeroExitWithoutOkFalse() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     let args = try jsonArguments(["command": "/bin/sh -c 'exit 7'"])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let out = try decodeShell(json)
     #expect(out.ok == true)
     #expect(out.exitCode == 7)
   }
 
   @Test func emptyCommandFails() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     let args = try jsonArguments(["command": "   "])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("command is empty") == true)
   }
 
   @Test func emptyCwdIsTreatedAsNil() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
+    // Passing cwd as empty string exercises the if-let-empty-to-nil conversion.
     let args = try jsonArguments(["command": "/bin/echo ok", "cwd": ""])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let out = try decodeShell(json)
     #expect(out.ok == true)
     let stdout = try readFileIfExists(out.stdoutFile)
@@ -76,20 +77,21 @@ struct ToolRunnerShellTests {
   }
 
   @Test func invalidWorkingDirectoryFails() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     let bogusDir =
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-no-such-cwd-\(UUID().uuidString)", isDirectory: true)
     let args = try jsonArguments(["command": "/bin/true", "cwd": bogusDir.path])
     let json = try! await registry.run(
-      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+      name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)
   }
 
   @Test func interruptKillsLongRunningCommand() async throws {
-    let registry = ToolRegistry(tools: [ShellTool()])
+    let registry = ToolRegistry(tools: [ShellTool()], logger: toolRunnerTestLogger)
+    // Pure shell loop — no external binaries, no output on stdout/stderr.
     let args = try jsonArguments([
       "command": "i=0; while [ $i -lt 1000000000 ]; do i=$((i+1)); done"
     ])
@@ -104,6 +106,7 @@ struct ToolRunnerShellTests {
             name: "shell",
             arguments: args,
             workingDirectory: FilePath("/tmp"),
+            logger: toolRunnerTestLogger,
             abortObserver: notifier
           ).text
         }
@@ -125,7 +128,7 @@ struct ToolRunnerShellTests {
 
   #if os(Linux)
   @Test func interruptKillsProcessTreeWithSeparateGroups() async throws {
-    let registry = ToolRegistry(tools: [ShellTool()])
+    let registry = ToolRegistry(tools: [ShellTool()], logger: toolRunnerTestLogger)
     let args = try jsonArguments([
       "command": """
       setsid sh -c 'while true; do sleep 0.1; done' &
@@ -145,6 +148,7 @@ struct ToolRunnerShellTests {
             name: "shell",
             arguments: args,
             workingDirectory: FilePath("/tmp"),
+            logger: toolRunnerTestLogger,
             abortObserver: notifier
           ).text
         }
@@ -175,6 +179,7 @@ struct ToolRunnerShellTests {
         command: command,
         cwd: nil,
         workingDirectory: FilePath("/tmp"),
+        logger: toolRunnerTestLogger,
         killer: spy)
     }
     try await Task.sleep(for: .milliseconds(200))
@@ -195,6 +200,7 @@ struct ToolRunnerShellTests {
       command: "/bin/echo hello",
       cwd: nil,
       workingDirectory: FilePath("/tmp"),
+      logger: toolRunnerTestLogger,
       killer: spy)
     #expect(result.exitCodeForJSON == 0)
     #expect(spy.snapshot().isEmpty, "killer should not be invoked when the task completes normally")
@@ -206,7 +212,7 @@ struct ToolRunnerShellTests {
 
     let task = Task {
       try await Shell.run(
-        command: command, cwd: nil, workingDirectory: FilePath("/tmp"))
+        command: command, cwd: nil, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger)
     }
     try await Task.sleep(for: .milliseconds(200))
     task.cancel()

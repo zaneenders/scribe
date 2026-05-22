@@ -58,6 +58,7 @@ public struct ScribeAgent: Sendable {
   private let toolExecutor: any ToolExecutor
   private let client: Client
   private let workingDirectory: FilePath
+  private let logger: Logger
   private let abortNotifier = AbortNotifier()
 
   // MARK: - Designated initializer (transport-injected)
@@ -95,6 +96,8 @@ public struct ScribeAgent: Sendable {
   ///     session). May omit a leading system message — see `systemPrompt`.
   ///   - workingDirectory: Absolute working directory used for tool path
   ///     resolution.
+  ///   - logger: Caller-owned logger (server request logger, CLI session file,
+  ///     etc.). Used for the agent loop and built-in tool execution.
   public init(
     client: Client,
     model: String,
@@ -103,10 +106,12 @@ public struct ScribeAgent: Sendable {
     toolExecutor: (any ToolExecutor)? = nil,
     initialMessages: [ScribeMessage] = [],
     workingDirectory: FilePath,
-    reasoningEnabled: Bool?
+    reasoningEnabled: Bool?,
+    logger: Logger
   ) {
     self.client = client
     self.workingDirectory = workingDirectory
+    self.logger = logger
     // Schemas the model is told about.  When using the default
     // ToolRegistry, both `chatTools` and the execution surface come from
     // the same `tools` array — they cannot diverge.  When a custom
@@ -116,9 +121,9 @@ public struct ScribeAgent: Sendable {
     // that the assistant can self-correct).
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
-      self.chatTools = tools.map { type(of: $0).toChatTool() }
+      self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
     } else {
-      let registry = ToolRegistry(tools: tools)
+      let registry = ToolRegistry(tools: tools, logger: logger)
       self.toolExecutor = registry
       self.chatTools = registry.chatTools
     }
@@ -139,7 +144,8 @@ public struct ScribeAgent: Sendable {
   public init(
     configuration: ScribeConfig,
     systemPrompt: String,
-    initialMessages: [ScribeMessage] = []
+    initialMessages: [ScribeMessage] = [],
+    logger: Logger
   ) throws {
     guard let serverURL = URL(string: configuration.serverURL) else {
       throw ScribeError.configuration(
@@ -156,7 +162,8 @@ public struct ScribeAgent: Sendable {
       toolExecutor: nil,
       initialMessages: initialMessages,
       workingDirectory: FilePath(configuration.workingDirectory),
-      reasoningEnabled: configuration.reasoningEnabled
+      reasoningEnabled: configuration.reasoningEnabled,
+      logger: logger
     )
   }
 
@@ -188,10 +195,9 @@ public struct ScribeAgent: Sendable {
 
   public func stream(
     _ input: String,
-    options: AgentRunOptions = AgentRunOptions(),
-    log: Logger
+    options: AgentRunOptions = AgentRunOptions()
   ) async -> TurnStream {
-    await stream([ScribeMessage(role: .user, content: input)], options: options, log: log)
+    await stream([ScribeMessage(role: .user, content: input)], options: options)
   }
 
   /// Send a batch of ``ScribeMessage`` values as the next turn. Messages
@@ -199,8 +205,7 @@ public struct ScribeAgent: Sendable {
   /// the OpenAPI type never crosses the public API surface.
   public func stream(
     _ promptMessages: [ScribeMessage],
-    options: AgentRunOptions = AgentRunOptions(),
-    log: Logger
+    options: AgentRunOptions = AgentRunOptions()
   ) async -> TurnStream {
     let wireMessages = promptMessages.toChatMessages()
     let (stream, continuation) = AsyncStream<AgentEvent>.makeStream()
@@ -209,9 +214,10 @@ public struct ScribeAgent: Sendable {
     await storage.setStreaming(true)
     abortNotifier.clear()
 
+    let agentLogger = logger
     let task = Task {
       [
-        storage, toolExecutor, chatTools, client, wireMessages, options, log,
+        storage, toolExecutor, chatTools, client, wireMessages, options, agentLogger,
         abortNotifier
       ] in
       defer {
@@ -238,7 +244,7 @@ public struct ScribeAgent: Sendable {
           context: ctx,
           config: config,
           emit: { continuation.yield($0) },
-          log: log,
+          logger: agentLogger,
           abortObserver: abortNotifier
         )
         switch result.termination {

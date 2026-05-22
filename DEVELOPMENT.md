@@ -107,3 +107,18 @@ Release builds omit frame pointers by default, which breaks stack walking.
 The `ScribeCLI` target already includes `-Xcc -fno-omit-frame-pointer` so
 release-mode profiling works out of the box.
 
+## Logging
+
+- **CLI file logs:** `~/.scribe/sessions/{sessionId}/scribe.log` (see `Sources/ScribeCLI/Logging/`).
+- **Legacy path:** `~/.scribe/logs/scribe-{sessionId}.log` from older builds is not migrated.
+- **Format:** `2026-05-18T12:00:00.123Z [info] chat.session.start session_id=… mode=new …`
+- **Convention:** message = `domain.action` (e.g. `agent.tool.start`); dimensions in swift-log `metadata`.
+- **Degraded mode:** if the session log file cannot be opened or a write fails, lines go to stderr (one warning on first write failure).
+
+### Embedder API (breaking vs pre–logging-clean-up)
+
+- Pass a host `Logger` into ``ScribeAgent`` at init (both `init(client:…)` and `init(configuration:…)`); the same instance flows through ``runAgentLoop``, ``ToolRegistry``, and built-in tools.
+- ``ToolRegistry/init(tools:logger:)`` requires a logger.
+- ``ToolExecutor/execute(_:workingDirectory:logger:abort:)`` takes `logger:` per call.
+- Removed: global `ScribeCore.scribeSessionLogger` — callers must not rely on a package-level log sink.
+

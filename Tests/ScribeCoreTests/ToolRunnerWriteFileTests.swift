@@ -7,13 +7,13 @@ import Testing
 @Suite
 struct ToolRunnerWriteFileTests {
   @Test func createsFileWithContent() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("out.txt")
       let body = "written_once\nγ\n"
       let args = try jsonArguments(["path": fileURL.path, "content": body])
       let json = try! await registry.run(
-        name: "write_file", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+        name: "write_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let payload = try decodeWrite(json)
       #expect(payload.ok == true)
       #expect(payload.written == true)
@@ -24,20 +24,22 @@ struct ToolRunnerWriteFileTests {
       let reread = try decodeRead(
         try! await registry.run(
           name: "read_file", arguments: try jsonArguments(["path": fileURL.path]),
-          workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text)
+          workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()
+        ).text
+      )
       #expect(reread.ok == true)
       #expect(reread.content == body)
     }
   }
 
   @Test func overwritesExistingFile() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("overwrite.txt")
       try "old".write(to: fileURL, atomically: true, encoding: .utf8)
       let args = try jsonArguments(["path": fileURL.path, "content": "new"])
       let json = try! await registry.run(
-        name: "write_file", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+        name: "write_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let payload = try decodeWrite(json)
       #expect(payload.ok == true)
       let onDisk = try String(contentsOf: fileURL, encoding: .utf8)
@@ -46,25 +48,25 @@ struct ToolRunnerWriteFileTests {
   }
 
   @Test func failsWhenParentDirectoryMissing() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     let deep =
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-deep-\(UUID().uuidString)/nope/out.txt")
     let args = try jsonArguments(["path": deep.path, "content": "x"])
     let json = try! await registry.run(
-      name: "write_file", arguments: args, workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+      name: "write_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("parent directory does not exist") == true)
   }
 
   @Test func missingContentFieldFails() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()])
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("only_path.txt")
       let json = try! await registry.run(
         name: "write_file", arguments: try jsonArguments(["path": fileURL.path]),
-        workingDirectory: FilePath("/tmp"), abortObserver: AbortNotifier()).text
+        workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let fail = try decodeFail(json)
       #expect(fail.ok == false)
       #expect(fail.error?.contains("missing or empty field content") == true)
