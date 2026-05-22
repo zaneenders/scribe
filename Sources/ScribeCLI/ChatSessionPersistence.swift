@@ -136,21 +136,41 @@ enum ChatSessionStore {
     }
   }
 
+  /// Keeps `messages.jsonl` open for repeated appends (e.g. one chat coordinator).
+  final class MessagesAppender: Sendable {
+    private let writer: AppendOnlyFileWriter
+    private let directory: FilePath
+
+    init(directory: FilePath) throws {
+      self.directory = directory
+      try FileManager.default.createDirectory(
+        atPath: directory.string,
+        withIntermediateDirectories: true
+      )
+      self.writer = try AppendOnlyFileWriter(filePath: messagesFile(in: directory))
+    }
+
+    func append(_ messages: [ScribeMessage]) throws {
+      guard !messages.isEmpty else { return }
+      for message in messages {
+        var data = try enc.encode(message)
+        data.append(UInt8(ascii: "\n"))
+        try writer.append(data)
+      }
+      try ChatSessionStore.touchModificationDate(of: directory)
+    }
+  }
+
   static func appendMessages(
     _ messages: [ScribeMessage],
     to directory: FilePath
   ) throws {
     guard !messages.isEmpty else { return }
-    try FileManager.default.createDirectory(
-      atPath: directory.string,
-      withIntermediateDirectories: true
-    )
-    let writer = try AppendOnlyFileWriter(filePath: messagesFile(in: directory))
-    for message in messages {
-      var data = try enc.encode(message)
-      data.append(UInt8(ascii: "\n"))
-      try writer.append(data)
-    }
+    let appender = try MessagesAppender(directory: directory)
+    try appender.append(messages)
+  }
+
+  private static func touchModificationDate(of directory: FilePath) throws {
     try FileManager.default.setAttributes(
       [.modificationDate: Date()],
       ofItemAtPath: directory.string

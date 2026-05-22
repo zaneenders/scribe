@@ -590,7 +590,7 @@ internal final class SlateChatHost {
     // boundaries that don't reflect what's on screen. Make them wait.
     if modelBusy {
       logger.notice(
-        "event=chat.picker.open.skip",
+        "chat.picker.open.skip",
         metadata: ["kind": "\(kind)", "reason": "model-busy"])
       return
     }
@@ -599,7 +599,7 @@ internal final class SlateChatHost {
       messages = try ChatSessionStore.loadMessages(from: sessionDirectory)
     } catch {
       logger.warning(
-        "event=chat.picker.open.fail",
+        "chat.picker.open.fail",
         metadata: ["err": "\(String(describing: error))"])
       return
     }
@@ -612,14 +612,14 @@ internal final class SlateChatHost {
     case .fork:
       guard !boundaries.isEmpty else {
         logger.notice(
-          "event=chat.picker.open.skip",
+          "chat.picker.open.skip",
           metadata: ["kind": "fork", "reason": "no-safe-boundary"])
         return
       }
     case .tldr:
       guard boundaries.count >= 2 else {
         logger.notice(
-          "event=chat.picker.open.skip",
+          "chat.picker.open.skip",
           metadata: ["kind": "tldr", "reason": "needs-two-boundaries"])
         return
       }
@@ -647,7 +647,7 @@ internal final class SlateChatHost {
 
     applyPickerView(snapshot: snap)
     logger.debug(
-      "event=chat.picker.open",
+      "chat.picker.open",
       metadata: [
         "kind": "\(kind)",
         "boundaries": "\(boundaries.count)",
@@ -698,7 +698,7 @@ internal final class SlateChatHost {
     guard picker != nil else { return }
     picker = nil
     restoreFromPickerBackup()
-    logger.debug("event=chat.picker.cancel")
+    logger.debug("chat.picker.cancel")
     renderWake?.requestRender()
   }
 
@@ -856,7 +856,7 @@ internal final class SlateChatHost {
     let eventQueue = self.eventQueue
 
     logger.notice(
-      "event=chat.picker.confirm",
+      "chat.picker.confirm",
       metadata: [
         "kind": "\(kind)",
         "start_cut": "\(startCut)",
@@ -879,7 +879,7 @@ internal final class SlateChatHost {
             from: persistDirectory, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
           logger.notice(
-            "event=chat.fork.create",
+            "chat.fork.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
               "child": "\(result.sessionId.uuidString)",
@@ -907,7 +907,7 @@ internal final class SlateChatHost {
             try ChatSessionStore.appendMessages(tail, to: result.sessionDirectory)
           }
           logger.notice(
-            "event=chat.tldr.create",
+            "chat.tldr.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
               "child": "\(result.sessionId.uuidString)",
@@ -927,7 +927,10 @@ internal final class SlateChatHost {
         if Task.isCancelled { return }
         let se = (error as? ScribeError) ?? .generic(String(describing: error))
         logger.error(
-          "event=chat.picker.action.fail err=\"\(se.errorDescription ?? String(describing: se))\""
+          "chat.picker.action.fail",
+          metadata: [
+            "err": "\(se.errorDescription ?? String(describing: se))"
+          ]
         )
         eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
         await MainActor.run { [weak self] in
@@ -998,7 +1001,7 @@ internal final class SlateChatHost {
   /// the forked session. Called after `/fork` or `/tldr` confirm.
   private func hotSwapToSession(directory newDirectory: FilePath, sessionId newId: UUID) {
     guard hostActive else {
-      logger.notice("event=chat.hotswap.skip reason=host-inactive")
+      logger.notice("chat.hotswap.skip", metadata: ["reason": "host-inactive"])
       return
     }
     // The picker backup holds the *parent* session's pre-styled lines; once
@@ -1011,7 +1014,7 @@ internal final class SlateChatHost {
     pickerBaseStarts = []
     pickerScrollDirty = false
     logger.notice(
-      "event=chat.hotswap",
+      "chat.hotswap",
       metadata: [
         "from": "\(self.sessionId.uuidString)",
         "to": "\(newId.uuidString)",

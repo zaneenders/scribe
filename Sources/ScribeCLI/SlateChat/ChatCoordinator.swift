@@ -69,6 +69,20 @@ final class ChatCoordinator: Sendable {
   }
 
   func run() async {
+    let messagesAppender: ChatSessionStore.MessagesAppender
+    do {
+      messagesAppender = try ChatSessionStore.MessagesAppender(directory: persistDirectory)
+    } catch {
+      logger.error(
+        "chat.persist.init.fail",
+        metadata: [
+          "path": "\(persistDirectory.string)",
+          "err": "\(error.localizedDescription)",
+        ])
+      enqueue(.coordinatorFinished)
+      return
+    }
+
     /// Append messages produced by the most recent turn to the JSONL store.
     /// Uses the messages returned by ``TurnResult`` rather than reaching back
     /// into the agent's internal buffer — keeping the coordinator on the
@@ -80,7 +94,7 @@ final class ChatCoordinator: Sendable {
       guard persistedCount < allMessages.count else { return }
       let newMessages = Array(allMessages[persistedCount...])
       do {
-        try ChatSessionStore.appendMessages(newMessages, to: persistDirectory)
+        try messagesAppender.append(newMessages)
         logger.trace(
           "chat.persist.append",
           metadata: [
@@ -110,7 +124,7 @@ final class ChatCoordinator: Sendable {
           scribeVersion: GitVersion.hash
         )
         try? ChatSessionStore.saveMetadata(meta, to: persistDirectory)
-        try ChatSessionStore.appendMessages(initialMessages, to: persistDirectory)
+        try messagesAppender.append(initialMessages)
       }
       var persistedCount = initialMessages.count
 

@@ -95,7 +95,7 @@ enum SessionSummarizer {
     let userPrompt = "Transcript to summarize:\n\n\(rendered)"
 
     logger.debug(
-      "event=summarize.start",
+      "summarize.start",
       metadata: [
         "slice_messages": "\(slice.count)",
         "transcript_chars": "\(rendered.count)",
@@ -112,7 +112,7 @@ enum SessionSummarizer {
       throw ScribeError.generic("Summarizer produced no assistant text.")
     }
     logger.info(
-      "event=summarize.end",
+      "summarize.end",
       metadata: ["summary_chars": "\(summary.count)"])
     return summary
   }

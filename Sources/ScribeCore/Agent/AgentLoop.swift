@@ -116,7 +116,7 @@ func runAgentLoop(
         throw scribeError
       }
       attemptedRecovery = true
-      logger.notice("event=agent.recover reason=\"\(reason)\"")
+      logger.notice("agent.recover", metadata: ["reason": "\(reason)"])
       emit(.lifecycle(.recovered(reason: reason)))
       continue
     }
@@ -165,7 +165,6 @@ func runAgentLoop(
           newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
           return (newMessages, .interrupted)
         }
-        let toolStarted = clock.now
         let result: ToolResult
         do {
           result = try await config.toolExecutor.execute(
@@ -192,15 +191,6 @@ func runAgentLoop(
             ])
           result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
         }
-        let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
-        logger.debug(
-          "agent.tool.invoke",
-          metadata: [
-            "round": "\(round)", "tool": "\(inv.name)",
-            "args_chars": "\(inv.arguments.count)", "output_chars": "\(result.text.count)",
-            "attachments": "\(result.attachments.count)",
-            "elapsed_ms": "\(elapsedMs)",
-          ])
         emit(.tool(.invocation(name: inv.name, arguments: inv.arguments, output: result.text)))
         for warning in result.warnings {
           emit(.tool(.warning(warning)))

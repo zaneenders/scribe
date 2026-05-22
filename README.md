@@ -81,6 +81,20 @@ Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
     └── scribe.log                       # diagnostic log for that session
 ```
 
+Per-session logs live under `sessions/{uuid}/scribe.log`. Older releases wrote
+`~/.scribe/logs/scribe-{uuid}.log`; those files are not moved automatically.
+
+### Embedding ScribeCore
+
+When building on ``ScribeAgent`` directly (server, tests, custom CLI):
+
+- Pass a host-owned `Logger` into ``ScribeAgent`` at init; it flows through the agent loop and built-in tools.
+- ``ToolRegistry`` requires `init(tools:logger:)`.
+- ``ToolExecutor/execute`` takes `logger:` for each invocation.
+- The global `ScribeCore.scribeSessionLogger` sink was removed — inject your own logger instead.
+
+See `DEVELOPMENT.md` (Logging) for line format and message conventions.
+
 ## Documentation
 
 Preview generated documentation with Swift DocC (included in the Swift toolchain):
