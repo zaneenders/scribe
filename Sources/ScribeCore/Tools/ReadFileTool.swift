@@ -79,9 +79,7 @@ public struct ReadFileTool: ScribeTool {
   /// subsequent model turn re-uploads the full transcript).
   static let defaultLineLimit = 2000
 
-  private static let logger = Logger(label: "scribe.tool.read_file")
-
-  public func run(arguments: String, workingDirectory: FilePath) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let offset = ToolArgumentParsing.optionalInt(obj["offset"])
@@ -99,13 +97,13 @@ public struct ReadFileTool: ScribeTool {
       {
         let name = URL(fileURLWithPath: s).lastPathComponent
         let msg = "\(name) is too large to attach (\(fileSize / (1024 * 1024)) MB, limit 5 MB)"
-        Self.logger.warning(
+        logger.warning(
           "agent.tool.read_file.image.too-large",
           metadata: ["path": "\(s)", "bytes": "\(fileSize)", "limit_bytes": "\(maxImageBytes)"])
         return ReadFileImageTooLargeResult(path: s, error: msg)
       }
       let result = try await Self.readImage(path: s)
-      Self.logger.debug(
+      logger.debug(
         "agent.tool.read_file.image",
         metadata: [
           "ok": "true",
@@ -118,7 +116,7 @@ public struct ReadFileTool: ScribeTool {
 
     let result = try Self.readFile(path: path, offset: offset, limit: limit, workingDirectory: workingDirectory)
     let returnedLines = max(0, result.endLine - result.startLine + 1)
-    Self.logger.debug(
+    logger.debug(
       "agent.tool.read_file",
       metadata: [
         "ok": "true",

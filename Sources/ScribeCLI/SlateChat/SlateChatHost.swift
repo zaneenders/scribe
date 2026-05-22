@@ -3,6 +3,7 @@ import Logging
 import ScribeCore
 import SlateCore
 import Synchronization
+import SystemPackage
 
 /// Bridges keystroke-driven submissions on the host's MainActor to the
 /// coordinator's `AsyncStream<String>`. Synchronous — the host always calls
@@ -46,7 +47,7 @@ struct ChatExitInfo: Sendable {
   /// point the resume hint at the session the user actually ended on.
   var forkedFromSessionId: UUID?
   var forkedToSessionId: UUID?
-  var forkedToURL: URL?
+  var forkedToDirectory: FilePath?
 }
 
 extension TranscriptLayout {
@@ -103,7 +104,7 @@ internal final class SlateChatHost {
   private var currentSeed: [ScribeMessage]
   /// Session directory the active coordinator is reading from / writing to.
   /// Mutated on hot-swap.
-  private var sessionPersistenceURL: URL
+  private var sessionDirectory: FilePath
   /// UUID of the active session. Mutated on hot-swap.
   private var sessionId: UUID
   /// Created-at timestamp of the active session. Mutated on hot-swap.
@@ -192,24 +193,24 @@ internal final class SlateChatHost {
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
   private var coordinator: ChatCoordinator?
-  private let log: Logger
+  private let logger: Logger
 
   init(
     configuration: ScribeConfig,
     systemPrompt: String,
     resumeMessages: [ScribeMessage],
-    sessionPersistenceURL: URL,
+    sessionDirectory: FilePath,
     sessionId: UUID,
     sessionCreatedAt: Date,
-    log: Logger
+    logger: Logger
   ) {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
     self.currentSeed = resumeMessages
-    self.sessionPersistenceURL = sessionPersistenceURL
+    self.sessionDirectory = sessionDirectory
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
-    self.log = log
+    self.logger = logger
   }
 
   deinit {
@@ -321,7 +322,9 @@ internal final class SlateChatHost {
               if self.inPaste {
                 if self.editMode == .edit { self.inputBuffer.append("\n") }
               } else if self.editMode == .read {
-                self.log.debug("event=chat.mode.to-edit source=enter")
+                self.logger.debug(
+                  "chat.mode.to-edit",
+                  metadata: ["source": "enter"])
                 self.editMode = .edit
               } else {
                 let text = self.inputBuffer
@@ -340,7 +343,9 @@ internal final class SlateChatHost {
 
             case .ctrlC:
               if self.editMode == .edit {
-                self.log.debug("event=chat.mode.to-read source=ctrl-c")
+                self.logger.debug(
+                  "chat.mode.to-read",
+                  metadata: ["source": "ctrl-c"])
                 self.editMode = .read
               } else {
                 let (effect, recallText) = self.submitCoordinator.handleCtrlC()
@@ -354,12 +359,14 @@ internal final class SlateChatHost {
 
             case .escape:
               if self.editMode == .edit {
-                self.log.debug("event=chat.mode.to-read source=escape")
+                self.logger.debug(
+                  "chat.mode.to-read",
+                  metadata: ["source": "escape"])
                 self.editMode = .read
               }
 
             case .ctrlD:
-              self.log.debug("chat.user.ctrl-d", metadata: ["action": "exit"])
+              self.logger.debug("chat.user.ctrl-d", metadata: ["action": "exit"])
               shouldStop = true
 
             case .arrowUp:
@@ -377,7 +384,7 @@ internal final class SlateChatHost {
 
             case .shiftEnter:
               if self.editMode == .edit { self.inputBuffer.append("\n") }
-              self.log.debug(
+              self.logger.debug(
                 "chat.user.input.shift-enter",
                 metadata: [
                   "source": "shift-enter",
@@ -410,7 +417,7 @@ internal final class SlateChatHost {
         let drained = self.submitCoordinator.handleModelTurnEnd()
         if !drained.isEmpty {
           for text in drained {
-            self.log.debug(
+            self.logger.debug(
               "chat.queue.auto-flush",
               metadata: ["trigger": "busy-to-idle", "chars": "\(text.count)"])
           }
@@ -498,7 +505,7 @@ internal final class SlateChatHost {
           let submitMs = Int(Date().timeIntervalSince(submitStart) * 1000)
           let totalMs = prepareMs &+ submitMs
           if totalMs >= 50 {
-            self.log.debug(
+            self.logger.debug(
               "chat.render.slow",
               metadata: [
                 "elapsed_ms": "\(totalMs)",
@@ -582,17 +589,17 @@ internal final class SlateChatHost {
     // streaming, so opening the picker mid-turn would let the user pick
     // boundaries that don't reflect what's on screen. Make them wait.
     if modelBusy {
-      log.notice(
-        "event=chat.picker.open.skip",
+      logger.notice(
+        "chat.picker.open.skip",
         metadata: ["kind": "\(kind)", "reason": "model-busy"])
       return
     }
     let messages: [ScribeMessage]
     do {
-      messages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
+      messages = try ChatSessionStore.loadMessages(from: sessionDirectory)
     } catch {
-      log.warning(
-        "event=chat.picker.open.fail",
+      logger.warning(
+        "chat.picker.open.fail",
         metadata: ["err": "\(String(describing: error))"])
       return
     }
@@ -604,15 +611,15 @@ internal final class SlateChatHost {
     switch kind {
     case .fork:
       guard !boundaries.isEmpty else {
-        log.notice(
-          "event=chat.picker.open.skip",
+        logger.notice(
+          "chat.picker.open.skip",
           metadata: ["kind": "fork", "reason": "no-safe-boundary"])
         return
       }
     case .tldr:
       guard boundaries.count >= 2 else {
-        log.notice(
-          "event=chat.picker.open.skip",
+        logger.notice(
+          "chat.picker.open.skip",
           metadata: ["kind": "tldr", "reason": "needs-two-boundaries"])
         return
       }
@@ -639,8 +646,8 @@ internal final class SlateChatHost {
     self.pickerBackup = (transcriptState.lines, transcriptState.generation, viewport)
 
     applyPickerView(snapshot: snap)
-    log.debug(
-      "event=chat.picker.open",
+    logger.debug(
+      "chat.picker.open",
       metadata: [
         "kind": "\(kind)",
         "boundaries": "\(boundaries.count)",
@@ -691,7 +698,7 @@ internal final class SlateChatHost {
     guard picker != nil else { return }
     picker = nil
     restoreFromPickerBackup()
-    log.debug("event=chat.picker.cancel")
+    logger.debug("chat.picker.cancel")
     renderWake?.requestRender()
   }
 
@@ -842,14 +849,14 @@ internal final class SlateChatHost {
     // For `.fork` this equals `startCut` and is unused; for `.tldr` it marks
     // the (exclusive) upper bound of the summarized slice.
     let endCut = snap.endBoundary
-    let persistURL = sessionPersistenceURL
+    let persistDirectory = sessionDirectory
     let configuration = self.configuration
-    let log = self.log
+    let logger = self.logger
     let parentSessionId = self.sessionId
     let eventQueue = self.eventQueue
 
-    log.notice(
-      "event=chat.picker.confirm",
+    logger.notice(
+      "chat.picker.confirm",
       metadata: [
         "kind": "\(kind)",
         "start_cut": "\(startCut)",
@@ -869,26 +876,26 @@ internal final class SlateChatHost {
         switch kind {
         case .fork:
           result = try ChatSessionStore.forkSession(
-            from: persistURL, cutAt: startCut, newSessionId: newId,
+            from: persistDirectory, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
-          log.notice(
-            "event=chat.fork.create",
+          logger.notice(
+            "chat.fork.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
               "child": "\(result.sessionId.uuidString)",
               "cut_at": "\(result.cutAt)",
             ])
         case .tldr:
-          let messages = try ChatSessionStore.loadMessages(from: persistURL)
+          let messages = try ChatSessionStore.loadMessages(from: persistDirectory)
           let slice = Array(messages[startCut..<endCut])
           let summary = try await SessionSummarizer.summarize(
-            slice: slice, configuration: configuration, log: log)
+            slice: slice, configuration: configuration, logger: logger)
           result = try ChatSessionStore.forkSession(
-            from: persistURL, cutAt: startCut, newSessionId: newId,
+            from: persistDirectory, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
           try ChatSessionStore.appendMessages(
             [ScribeMessage(role: .assistant, content: summary)],
-            to: result.sessionURL)
+            to: result.sessionDirectory)
           // Stitch the tail (messages after the summarized slice) so the
           // forked session ends on the same last message as the parent.
           // `safeForkBoundaries()` guarantees no tool round straddles
@@ -897,10 +904,10 @@ internal final class SlateChatHost {
           let tailCount = max(0, messages.count - endCut)
           if endCut < messages.count {
             let tail = Array(messages[endCut..<messages.count])
-            try ChatSessionStore.appendMessages(tail, to: result.sessionURL)
+            try ChatSessionStore.appendMessages(tail, to: result.sessionDirectory)
           }
-          log.notice(
-            "event=chat.tldr.create",
+          logger.notice(
+            "chat.tldr.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
               "child": "\(result.sessionId.uuidString)",
@@ -914,13 +921,16 @@ internal final class SlateChatHost {
         await MainActor.run { [weak self] in
           guard let self, self.hostActive else { return }
           self.hotSwapToSession(
-            url: result.sessionURL, sessionId: result.sessionId)
+            directory: result.sessionDirectory, sessionId: result.sessionId)
         }
       } catch {
         if Task.isCancelled { return }
         let se = (error as? ScribeError) ?? .generic(String(describing: error))
-        log.error(
-          "event=chat.picker.action.fail err=\"\(se.errorDescription ?? String(describing: se))\""
+        logger.error(
+          "chat.picker.action.fail",
+          metadata: [
+            "err": "\(se.errorDescription ?? String(describing: se))"
+          ]
         )
         eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
         await MainActor.run { [weak self] in
@@ -938,7 +948,7 @@ internal final class SlateChatHost {
   // MARK: - Coordinator install / hot-swap
 
   /// Build the line stream for `self.gate` and start a fresh ChatCoordinator
-  /// against `self.currentSeed` + `self.sessionPersistenceURL`. Called once
+  /// against `self.currentSeed` + `self.sessionDirectory`. Called once
   /// at startup and again after every hot-swap.
   private func installCoordinator() {
     let (lineStream, lineCont) = AsyncStream<String>.makeStream()
@@ -950,11 +960,11 @@ internal final class SlateChatHost {
         configuration: configuration,
         systemPrompt: systemPrompt,
         resumeSnapshot: self.currentSeed,
-        log: self.log,
+        logger: self.logger,
         enqueue: { [eventQueue] event in
           eventQueue.enqueue(event)
         },
-        persistURL: self.sessionPersistenceURL,
+        persistDirectory: self.sessionDirectory,
         sessionId: self.sessionId,
         sessionCreatedAt: self.sessionCreatedAt,
         lines: lineStream
@@ -963,7 +973,7 @@ internal final class SlateChatHost {
       let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
       eventQueue.enqueue(.transcript(.lifecycle(.error(scribeError))))
       eventQueue.enqueue(.coordinatorFinished)
-      self.log.error(
+      self.logger.error(
         "chat.coordinator.init.fail",
         metadata: [
           "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
@@ -989,9 +999,9 @@ internal final class SlateChatHost {
 
   /// Tear down the current coordinator and bring up a fresh one pointing at
   /// the forked session. Called after `/fork` or `/tldr` confirm.
-  private func hotSwapToSession(url newURL: URL, sessionId newId: UUID) {
+  private func hotSwapToSession(directory newDirectory: FilePath, sessionId newId: UUID) {
     guard hostActive else {
-      log.notice("event=chat.hotswap.skip reason=host-inactive")
+      logger.notice("chat.hotswap.skip", metadata: ["reason": "host-inactive"])
       return
     }
     // The picker backup holds the *parent* session's pre-styled lines; once
@@ -1003,8 +1013,8 @@ internal final class SlateChatHost {
     pickerBaseLines = []
     pickerBaseStarts = []
     pickerScrollDirty = false
-    log.notice(
-      "event=chat.hotswap",
+    logger.notice(
+      "chat.hotswap",
       metadata: [
         "from": "\(self.sessionId.uuidString)",
         "to": "\(newId.uuidString)",
@@ -1014,7 +1024,7 @@ internal final class SlateChatHost {
     // session if the user types `exit` after this swap.
     exitInfo.forkedFromSessionId = self.sessionId
     exitInfo.forkedToSessionId = newId
-    exitInfo.forkedToURL = newURL
+    exitInfo.forkedToDirectory = newDirectory
 
     // Close the old gate so the old coordinator's stream finishes; the
     // coordinator's run() will wind down and emit `.coordinatorFinished`,
@@ -1024,11 +1034,11 @@ internal final class SlateChatHost {
     self.pendingFinishesToSwallow += 1
 
     self.gate = UserLineGate()
-    self.sessionPersistenceURL = newURL
+    self.sessionDirectory = newDirectory
     self.sessionId = newId
     self.sessionCreatedAt = Date()
     self.currentSeed =
-      (try? ChatSessionStore.loadMessages(from: newURL)) ?? []
+      (try? ChatSessionStore.loadMessages(from: newDirectory)) ?? []
     self.modelBusy = false
     self.queuedTrayTexts = []
     self.submitCoordinator = SubmitCoordinator()
@@ -1117,7 +1127,7 @@ internal final class SlateChatHost {
 
     if let tag = fx.interruptLogTag {
       coordinator?.interrupt()
-      log.trace(
+      logger.trace(
         "chat.interrupt-flag.\(tag)",
         metadata: ["coordinator": coordinator == nil ? "nil" : "live"])
     }

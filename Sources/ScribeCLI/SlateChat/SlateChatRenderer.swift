@@ -29,7 +29,7 @@ import SlateCore
 ///    pump with `externalCoalesceMaxFramesPerSecond: 60`, so SSE chunks /
 ///    persistence saves / usage updates produce at most ~60 main-actor renders
 ///    per second regardless of how busy the producer is.
-/// 4. **Slow-frame log line.** `event=chat.render.slow elapsed_ms=… flat_rows=… …`
+/// 4. **Slow-frame log line.** `chat.render.slow` with `elapsed_ms`, `flat_rows`, etc. in metadata.
 ///    fires when the on-actor portion of a render exceeds 50 ms.  `frame_ms`
 ///    covers the pure `buildFrame` call plus the grid-to-Slate copy
 ///    (the actual tty drain is off-actor and **not** included).

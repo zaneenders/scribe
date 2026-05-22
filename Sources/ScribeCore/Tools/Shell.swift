@@ -3,9 +3,6 @@ import Logging
 import Subprocess
 import SystemPackage
 
-// TODO: Address logging mess.
-package nonisolated(unsafe) var scribeSessionLogger: Logger?
-
 /// Thin orchestrator for "run a shell command, capture its output, kill
 /// the whole tree on cancellation."
 ///
@@ -14,8 +11,8 @@ package nonisolated(unsafe) var scribeSessionLogger: Logger?
 /// - `ProcessKiller` — platform-specific tree kill (`/proc` walk on Linux,
 ///   pgroup signal on macOS, `terminate` on Windows).
 ///
-/// Public API (`Shell.run(command:cwd:workingDirectory:)`) is unchanged
-/// from before the split.
+/// Public API (`Shell.run(command:cwd:workingDirectory:logger:)`) takes the
+/// caller's logger for all shell diagnostics.
 enum Shell {
   struct Result: Sendable {
     let exitCode: TerminationStatus
@@ -39,9 +36,6 @@ enum Shell {
     let description: String
   }
 
-  private static let defaultLogger = Logger(label: "scribe.tool.shell")
-  private static var logger: Logger { scribeSessionLogger ?? defaultLogger }
-
   /// Run a shell command, supporting cooperative cancellation.
   ///
   /// When the calling `Task` is cancelled, the configured `ProcessKiller`
@@ -59,6 +53,7 @@ enum Shell {
     command: String,
     cwd: String?,
     workingDirectory: FilePath,
+    logger: Logger,
     killer: any ProcessKiller = DefaultProcessKiller()
   ) async throws -> Result {
     let id = UUID()

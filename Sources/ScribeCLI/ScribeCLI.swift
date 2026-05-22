@@ -2,6 +2,7 @@ import ArgumentParser
 import Foundation
 import ProfileRecorderServer
 import ScribeCore
+import SystemPackage
 
 @main struct ScribeCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -52,32 +53,39 @@ import ScribeCore
     let cwd = FileManager.default.currentDirectoryPath
 
     if listSessions {
-      let root = try ChatSessionStore.sessionsDirectoryURL(
-        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
+      let root = loaded.paths.sessionsDirectory
+      try ChatSessionStore.ensureSessionsDirectory(root)
       let cwdFilter: String? = all ? nil : cwd
-      let files = try ChatSessionStore.listSessionFiles(
-        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath,
+      let files = try ChatSessionStore.listSessionDirectories(
+        sessionsRoot: root,
         cwdFilter: cwdFilter)
       guard !files.isEmpty else {
         if all {
-          print("No saved sessions under \(root.path)")
+          print("No saved sessions under \(root.string)")
         } else {
-          print("No saved sessions under \(root.path) for \(cwd) (use --all to list all sessions)")
+          print("No saved sessions under \(root.string) for \(cwd) (use --all to list all sessions)")
         }
         return
       }
       let home = FileManager.default.homeDirectoryForCurrentUser.path
-      for url in files {
-        guard let meta = try? ChatSessionStore.loadMetadata(from: url) else { continue }
+      for directory in files {
+        guard let meta = try? ChatSessionStore.loadMetadata(from: directory) else { continue }
         let shortId = String(meta.id.uuidString.prefix(8))
         let updatedAt =
-          (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-          ?? meta.createdAt
+          (try? FileManager.default.attributesOfItem(atPath: directory.string)[.modificationDate]
+            as? Date) ?? meta.createdAt
         let when = relativeTime(from: updatedAt)
         let displayCwd = meta.cwd.replacingOccurrences(of: home, with: "~")
 
+        let logFile = loaded.paths.logFile(sessionId: meta.id).string
+        let displayLog = logFile.replacingOccurrences(of: home, with: "~")
         print(
-          formatSessionLine(shortId: shortId, when: when, cwd: displayCwd, version: meta.scribeVersion ?? "unknown"))
+          formatSessionLine(
+            shortId: shortId,
+            when: when,
+            cwd: displayCwd,
+            logFile: displayLog,
+            version: meta.scribeVersion ?? "unknown"))
       }
       return
     }
@@ -118,43 +126,42 @@ import ScribeCore
       reasoningEnabled: loaded.scribeConfig.reasoningEnabled
     )
 
-    let sessionPersistenceURL: URL
+    let sessionDirectory: FilePath
     let resumeMetadata: ChatSessionMetadata?
     let resumeMessages: [ScribeMessage]
     let sessionId: UUID
 
     if resumeLatest {
       let spec = "latest"
-      sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
+      sessionDirectory = try ChatSessionStore.resolveResumeDirectory(
         specifier: spec,
-        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath,
+        sessionsRoot: loaded.paths.sessionsDirectory,
         preferCWD: cwd)
-      resumeMetadata = try ChatSessionStore.loadMetadata(from: sessionPersistenceURL)
-      resumeMessages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
+      resumeMetadata = try ChatSessionStore.loadMetadata(from: sessionDirectory)
+      resumeMessages = try ChatSessionStore.loadMessages(from: sessionDirectory)
       sessionId = resumeMetadata!.id
     } else if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
-      sessionPersistenceURL = try ChatSessionStore.resolveResumeURL(
+      sessionDirectory = try ChatSessionStore.resolveResumeDirectory(
         specifier: spec,
-        sessionsDirectoryPath: loaded.chatSessionsDirectoryPath,
+        sessionsRoot: loaded.paths.sessionsDirectory,
         preferCWD: cwd)
-      resumeMetadata = try ChatSessionStore.loadMetadata(from: sessionPersistenceURL)
-      resumeMessages = try ChatSessionStore.loadMessages(from: sessionPersistenceURL)
+      resumeMetadata = try ChatSessionStore.loadMetadata(from: sessionDirectory)
+      resumeMessages = try ChatSessionStore.loadMessages(from: sessionDirectory)
       sessionId = resumeMetadata!.id
     } else {
       sessionId = UUID()
-      sessionPersistenceURL = try ChatSessionStore.sessionDirectoryURL(
-        sessionId: sessionId, sessionsDirectoryPath: loaded.chatSessionsDirectoryPath)
+      sessionDirectory = try ChatSessionStore.sessionDirectory(
+        sessionId: sessionId, sessionsRoot: loaded.paths.sessionsDirectory)
       resumeMetadata = nil
       resumeMessages = []
     }
 
-    let log = loaded.makeSessionLogger(sessionId: sessionId)
+    var logger = loaded.makeSessionLogger(sessionId: sessionId)
     let mode = resumeMetadata == nil ? "new" : "resume"
-    log.notice(
+    logger[metadataKey: "mode"] = "\(mode)"
+    logger.notice(
       "chat.session.start",
       metadata: [
-        "session_id": "\(sessionId.uuidString)",
-        "mode": "\(mode)",
         "scribe_version": "\(GitVersion.hash)",
         "model": "\(scribeConfig.agentModel)",
         "base_url": "\(scribeConfig.serverURL)",
@@ -162,11 +169,11 @@ import ScribeCore
         "reasoning": "\(String(describing: scribeConfig.reasoningEnabled))",
         "log_level": "\(loaded.logLevel.rawValue)",
         "cwd": "\(cwd)",
-        "session_file": "\(sessionPersistenceURL.path)",
+        "session_file": "\(sessionDirectory.string)",
         "config_file": "\(loaded.resolvedConfigurationPath)",
       ])
     if let meta = resumeMetadata, meta.model != scribeConfig.agentModel {
-      log.warning(
+      logger.warning(
         "chat.session.resume.model-mismatch",
         metadata: [
           "archived_model": "\(meta.model)",
@@ -176,27 +183,27 @@ import ScribeCore
 
     async let _ = ProfileRecorderServer(
       configuration: .parseFromEnvironment()
-    ).runIgnoringFailures(logger: log)
+    ).runIgnoringFailures(logger: logger)
 
     let exitInfo = try await SlateChat.runFullscreen(
       configuration: scribeConfig,
       systemPrompt: systemPrompt,
       resumeMessages: resumeMessages,
-      sessionPersistenceURL: sessionPersistenceURL,
+      sessionDirectory: sessionDirectory,
       sessionId: sessionId,
-      log: log
+      logger: logger
     )
-    log.notice("chat.session.end", metadata: ["status": "ok"])
-    if let forkedId = exitInfo.forkedToSessionId, let forkedURL = exitInfo.forkedToURL {
+    logger.notice("chat.session.end", metadata: ["status": "ok"])
+    if let forkedId = exitInfo.forkedToSessionId, let forkedDirectory = exitInfo.forkedToDirectory {
       printForkResumeHint(
         parentSessionId: exitInfo.forkedFromSessionId ?? sessionId,
         forkedSessionId: forkedId,
-        forkedSessionURL: forkedURL
+        forkedSessionDirectory: forkedDirectory
       )
     } else {
       printExitResumeHint(
         sessionId: sessionId,
-        sessionPersistenceURL: sessionPersistenceURL
+        sessionDirectory: sessionDirectory
       )
     }
   }
@@ -217,10 +224,11 @@ import ScribeCore
     let scribeHomeEnv = ProcessInfo.processInfo.environment["SCRIBE_HOME"]
 
     print("Scribe version:  \(GitVersion.hash)")
-    print("Data home:       \(abbreviate(p.dataHome))")
+    print("Data home:       \(abbreviate(p.dataHomePath))")
     print("Config:          \(abbreviate(loaded.resolvedConfigurationPath))")
-    print("Logs:            \(abbreviate(p.logDirectoryPath))")
-    print("Sessions:        \(abbreviate(p.sessionsDirectoryPath))")
+    print(
+      "Sessions:        \(abbreviate(p.sessionsDirectoryPath))  ({sessionId}/metadata.json, messages.jsonl, scribe.log)"
+    )
     if let env = scribeHomeEnv {
       print("SCRIBE_HOME:     \(env)")
     } else {
@@ -233,7 +241,7 @@ extension ScribeCLI {
   /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only — structured logs stay in log files).
   fileprivate func printExitResumeHint(
     sessionId: UUID,
-    sessionPersistenceURL: URL
+    sessionDirectory: FilePath
   ) {
     let specifier = sessionId.uuidString
     let binaryName =
@@ -246,7 +254,7 @@ extension ScribeCLI {
   fileprivate func printForkResumeHint(
     parentSessionId: UUID,
     forkedSessionId: UUID,
-    forkedSessionURL: URL
+    forkedSessionDirectory: FilePath
   ) {
     let binaryName =
       CommandLine.arguments.first.map { NSString(string: $0).lastPathComponent } ?? "scribe"
@@ -281,10 +289,11 @@ extension ScribeCLI {
     shortId: String,
     when: String,
     cwd: String,
+    logFile: String,
     version: String
   ) -> String {
     let timeCol = when.padding(toLength: 9, withPad: " ", startingAt: 0)
     return
-      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m(\(version))\u{001B}[0m"
+      "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m\(logFile)\u{001B}[0m  \u{001B}[2m(\(version))\u{001B}[0m"
   }
 }
