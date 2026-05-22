@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
+import SystemPackage
 
 /// Reference embedder that drives a ``ScribeAgent`` from a `lines` stream
 /// of user submissions.
@@ -18,7 +19,7 @@ final class ChatCoordinator: Sendable {
   private let resumeSnapshot: [ScribeMessage]
   private let logger: Logger
   private let enqueue: @Sendable (HostEvent) -> Void
-  private let persistURL: URL
+  private let persistDirectory: FilePath
   private let sessionId: UUID
   private let sessionCreatedAt: Date
   private let lines: AsyncStream<String>
@@ -33,7 +34,7 @@ final class ChatCoordinator: Sendable {
     resumeSnapshot: [ScribeMessage],
     logger: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
-    persistURL: URL,
+    persistDirectory: FilePath,
     sessionId: UUID,
     sessionCreatedAt: Date,
     lines: AsyncStream<String>
@@ -57,7 +58,7 @@ final class ChatCoordinator: Sendable {
     self.resumeSnapshot = resumeSnapshot
     self.logger = logger
     self.enqueue = enqueue
-    self.persistURL = persistURL
+    self.persistDirectory = persistDirectory
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.lines = lines
@@ -79,19 +80,19 @@ final class ChatCoordinator: Sendable {
       guard persistedCount < allMessages.count else { return }
       let newMessages = Array(allMessages[persistedCount...])
       do {
-        try ChatSessionStore.appendMessages(newMessages, to: persistURL)
+        try ChatSessionStore.appendMessages(newMessages, to: persistDirectory)
         logger.trace(
           "chat.persist.append",
           metadata: [
             "new": "\(newMessages.count)",
             "total": "\(allMessages.count)",
-            "path": "\(persistURL.path)",
+            "path": "\(persistDirectory.string)",
           ])
       } catch {
         logger.error(
           "chat.persist.fail",
           metadata: [
-            "path": "\(persistURL.path)",
+            "path": "\(persistDirectory.string)",
             "err": "\(error.localizedDescription)",
           ])
       }
@@ -108,8 +109,8 @@ final class ChatCoordinator: Sendable {
           baseURL: configuration.serverURL,
           scribeVersion: GitVersion.hash
         )
-        try? ChatSessionStore.saveMetadata(meta, to: persistURL)
-        try ChatSessionStore.appendMessages(initialMessages, to: persistURL)
+        try? ChatSessionStore.saveMetadata(meta, to: persistDirectory)
+        try ChatSessionStore.appendMessages(initialMessages, to: persistDirectory)
       }
       var persistedCount = initialMessages.count
 

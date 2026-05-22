@@ -2,6 +2,7 @@ import Foundation
 import Logging
 import ScribeCore
 import SlateCore
+import SystemPackage
 
 #if canImport(Darwin)
 import Darwin
@@ -32,7 +33,7 @@ enum SlateChat {
   ///
   /// - Parameters:
   ///   - resumeMessages: Prior transcript restored from `sessions/{sessionId}/messages.jsonl`.
-  ///   - sessionPersistenceURL: Directory `sessions/{sessionId}/` for metadata and JSONL.
+  ///   - sessionDirectory: Directory `sessions/{sessionId}/` for metadata and JSONL.
   ///   - sessionId: UUID shared with `sessions/{sessionId}/scribe.log`.
   ///   - logger: Session logger from ``LoadedConfig/makeSessionLogger(sessionId:)`` (also passed
   ///     into ``ScribeAgent`` inside ``ChatCoordinator``).
@@ -49,7 +50,7 @@ enum SlateChat {
     configuration: ScribeConfig,
     systemPrompt: String,
     resumeMessages: [ScribeMessage] = [],
-    sessionPersistenceURL: URL,
+    sessionDirectory: FilePath,
     sessionId: UUID,
     logger: Logger
   ) async throws -> ChatExitInfo {
@@ -61,14 +62,14 @@ enum SlateChat {
     }
     logger.debug(
       "chat.fullscreen.attach",
-      metadata: ["session_file": "\(sessionPersistenceURL.lastPathComponent)"])
+      metadata: ["session_file": "\(sessionDirectory.lastComponent?.string ?? sessionDirectory.string)"])
     return try await Task { @MainActor () throws -> ChatExitInfo in
       let sessionCreatedAt = Date()
       let host = SlateChatHost(
         configuration: configuration,
         systemPrompt: systemPrompt,
         resumeMessages: resumeMessages,
-        sessionPersistenceURL: sessionPersistenceURL,
+        sessionDirectory: sessionDirectory,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
         logger: logger

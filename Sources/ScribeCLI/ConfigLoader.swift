@@ -76,7 +76,7 @@ public struct LoadedConfig: Sendable {
     SessionLoggerFactory.makeSessionLogger(
       sessionId: sessionId,
       minimumLevel: logLevel.swiftLogLevel,
-      logFilePath: paths.logFilePath(sessionId: sessionId)
+      logFile: paths.logFile(sessionId: sessionId)
     )
   }
 }
@@ -98,8 +98,8 @@ public enum ConfigLoader {
     }
 
     // 2. Check {dataHome}/scribe-config.json.
-    if FileManager.default.fileExists(atPath: paths.defaultConfigPath) {
-      return try await loadConfig(at: FilePath(paths.defaultConfigPath), paths: paths)
+    if FileManager.default.fileExists(atPath: paths.defaultConfigPath.string) {
+      return try await loadConfig(at: paths.defaultConfigPath, paths: paths)
     }
 
     // 3. Check cwd/scribe-config.json.
@@ -112,13 +112,13 @@ public enum ConfigLoader {
 
     // 4. Not found — write a default config to {dataHome}/, then load it.
     let defaultCandidate = paths.defaultConfigPath
-    try writeDefaultConfig(to: defaultCandidate)
-    if let data = "scribe: no config found — wrote default \(configFileName) to \(defaultCandidate)\n"
+    try writeDefaultConfig(to: defaultCandidate.string)
+    if let data = "scribe: no config found — wrote default \(configFileName) to \(defaultCandidate.string)\n"
       .data(using: .utf8)
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
-    return try await loadConfig(at: FilePath(defaultCandidate), paths: paths)
+    return try await loadConfig(at: defaultCandidate, paths: paths)
   }
 
   private static func loadConfig(

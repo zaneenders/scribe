@@ -1,16 +1,17 @@
 import Foundation
+import SystemPackage
 import Testing
 
 @testable import ScribeCLI
 
 @Suite
 struct ScribePathsTests {
-  @Test func logFilePathUsesSessionDirectory() throws {
+  @Test func logFileUsesSessionDirectory() throws {
     let root = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
 
-    let paths = ScribePaths(dataHome: root.path)
+    let paths = ScribePaths(dataHome: FilePath(root.path))
     let id = UUID()
     let expected =
       root
@@ -19,6 +20,6 @@ struct ScribePathsTests {
       .appendingPathComponent("scribe.log", isDirectory: false)
       .path
 
-    #expect(paths.logFilePath(sessionId: id) == expected)
+    #expect(paths.logFile(sessionId: id).string == expected)
   }
 }

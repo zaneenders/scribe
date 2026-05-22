@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
+import SystemPackage
 import Synchronization
 import Testing
 
@@ -29,7 +30,7 @@ struct ChatCoordinatorTests {
       enqueue: { event in
         events.withLock { $0.append(event) }
       },
-      persistURL: URL(fileURLWithPath: "/tmp/test"),
+      persistDirectory: FilePath("/tmp/test"),
       sessionId: UUID(),
       sessionCreatedAt: Date(),
       lines: lines
@@ -54,7 +55,7 @@ struct ChatCoordinatorTests {
       resumeSnapshot: [],
       logger: logger,
       enqueue: { event in events.withLock { $0.append(event) } },
-      persistURL: URL(fileURLWithPath: "/tmp/test"),
+      persistDirectory: FilePath("/tmp/test"),
       sessionId: UUID(),
       sessionCreatedAt: Date(),
       lines: lines
@@ -80,7 +81,7 @@ struct ChatCoordinatorTests {
         resumeSnapshot: badSnapshot,
         logger: logger,
         enqueue: { event in events.withLock { $0.append(event) } },
-        persistURL: URL(fileURLWithPath: "/tmp/test"),
+        persistDirectory: FilePath("/tmp/test"),
         sessionId: UUID(),
         sessionCreatedAt: Date(),
         lines: lines

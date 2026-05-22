@@ -60,6 +60,7 @@ let package = Package(
       name: "ScribeCLI",
       dependencies: [
         "ScribeCore",
+        .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "Markdown", package: "swift-markdown"),

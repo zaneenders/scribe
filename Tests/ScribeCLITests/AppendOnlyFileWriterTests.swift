@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import SystemPackage
 
 @testable import ScribeCLI
 
@@ -11,7 +12,7 @@ struct AppendOnlyFileWriterTests {
       .appendingPathComponent("out.jsonl", isDirectory: false)
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 
-    let writer = try AppendOnlyFileWriter(fileURL: url)
+    let writer = try AppendOnlyFileWriter(filePath: FilePath(url.path))
     try writer.append(Data("line1\n".utf8))
     try writer.append(Data("line2\n".utf8))
     writer.close()
@@ -32,7 +33,7 @@ struct AppendOnlyFileWriterTests {
     )
     try Data("existing\n".utf8).write(to: url)
 
-    let writer = try AppendOnlyFileWriter(fileURL: url)
+    let writer = try AppendOnlyFileWriter(filePath: FilePath(url.path))
     try writer.append(Data("new\n".utf8))
     writer.close()
 
