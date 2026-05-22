@@ -56,7 +56,7 @@ func runAgentLoop(
   context: AgentContext,
   config: AgentLoopConfig,
   emit: @escaping @Sendable (AgentEvent) -> Void,
-  log: Logger,
+  logger: Logger,
   abortObserver: some AbortObserver
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
   var currentContext = context
@@ -75,7 +75,7 @@ func runAgentLoop(
   while true {
     round += 1
     if abortObserver.isAborted() {
-      log.debug("agent.abort", metadata: ["where": "before-http", "round": "\(round)"])
+      logger.debug("agent.abort", metadata: ["where": "before-http", "round": "\(round)"])
       return (newMessages, .interrupted)
     }
 
@@ -86,13 +86,13 @@ func runAgentLoop(
         context: &currentContext,
         config: config,
         emit: emit,
-        log: log,
+        logger: logger,
         clock: clock,
         round: round,
         abortObserver: abortObserver
       )
     } catch is AgentTurnInterruptedError {
-      log.notice(
+      logger.notice(
         "agent.abort",
         metadata: [
           "where": "mid-stream", "round": "\(round)",
@@ -116,7 +116,7 @@ func runAgentLoop(
         throw scribeError
       }
       attemptedRecovery = true
-      log.notice("event=agent.recover reason=\"\(reason)\"")
+      logger.notice("event=agent.recover reason=\"\(reason)\"")
       emit(.lifecycle(.recovered(reason: reason)))
       continue
     }
@@ -126,7 +126,7 @@ func runAgentLoop(
     newMessages.append(contentsOf: roundMessages)
 
     if abortObserver.isAborted() {
-      log.debug("agent.abort", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
+      logger.debug("agent.abort", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
       // Remove uncommitted round messages
       currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
       newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
@@ -139,7 +139,7 @@ func runAgentLoop(
 
     case .toolCalls(let invocations):
       if round >= config.maxToolRounds {
-        log.notice(
+        logger.notice(
           "agent.turn.tool-round-limit",
           metadata: ["max": "\(config.maxToolRounds)"])
         currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
@@ -147,7 +147,7 @@ func runAgentLoop(
         return (newMessages, .toolRoundLimit(rounds: config.maxToolRounds))
       }
 
-      log.info(
+      logger.info(
         "agent.tool.round",
         metadata: [
           "round": "\(round)", "tool_count": "\(invocations.count)",
@@ -156,7 +156,7 @@ func runAgentLoop(
 
       for inv in invocations {
         if abortObserver.isAborted() {
-          log.notice(
+          logger.notice(
             "agent.abort",
             metadata: [
               "where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)",
@@ -171,20 +171,20 @@ func runAgentLoop(
           result = try await config.toolExecutor.execute(
             inv,
             workingDirectory: config.workingDirectory,
-            log: log,
+            logger: logger,
             abort: abortObserver)
         } catch is AgentTurnInterruptedError {
           currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
           newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
           return (newMessages, .interrupted)
         } catch let ScribeError.toolUnknown(name) {
-          log.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
+          logger.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
           result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
         } catch {
           // Defensive: a custom ToolExecutor may throw arbitrary errors.
           // Surface them to the model as a JSON-encoded tool failure so the
           // assistant can self-correct, rather than aborting the turn.
-          log.warning(
+          logger.warning(
             "agent.tool.executor.error",
             metadata: [
               "tool": "\(inv.name)", "round": "\(round)",
@@ -193,7 +193,7 @@ func runAgentLoop(
           result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
         }
         let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
-        log.debug(
+        logger.debug(
           "agent.tool.invoke",
           metadata: [
             "round": "\(round)", "tool": "\(inv.name)",
@@ -216,7 +216,7 @@ func runAgentLoop(
         // tool results, so media must flow through synthetic user messages.
         for attachment in result.attachments {
           let b64chars = attachment.base64.count
-          log.info(
+          logger.info(
             "agent.tool.attachment.inject",
             metadata: [
               "round": "\(round)",
@@ -253,7 +253,7 @@ private func runSingleRound(
   context: inout AgentContext,
   config: AgentLoopConfig,
   emit: @escaping @Sendable (AgentEvent) -> Void,
-  log: Logger,
+  logger: Logger,
   clock: ContinuousClock,
   round: Int,
   abortObserver: some AbortObserver
@@ -275,7 +275,7 @@ private func runSingleRound(
 
   // ── Send HTTP request ────────────────────────────────
   let httpStart = clock.now
-  log.info(
+  logger.info(
     "agent.http.request",
     metadata: [
       "messages": "\(requestBody.messages.count)",
@@ -286,7 +286,7 @@ private func runSingleRound(
   let httpBody: HTTPBody
   switch response {
   case .ok(let ok):
-    log.debug(
+    logger.debug(
       "agent.http.response",
       metadata: [
         "status": "200",
@@ -315,7 +315,7 @@ private func runSingleRound(
     }()
     let detailSnippet = detail.count > 512 ? String(detail.prefix(512)) + "…(\(detail.count) chars)" : detail
     let level: Logger.Level = code >= 500 ? .error : .warning
-    log.log(
+    logger.log(
       level: level,
       "agent.http.response",
       metadata: [
@@ -329,7 +329,7 @@ private func runSingleRound(
   var turn = StreamedAssistantTurn()
   var processor = StreamProcessor(
     onEvent: emit,
-    logger: log,
+    logger: logger,
     abortObserver: abortObserver,
     streamWallStart: clock.now
   )
@@ -365,7 +365,7 @@ private func runSingleRound(
       guard let c = u.completionTokens, c > 0 else { return nil }
       return Double(c) / max(0.001, genSec)
     }()
-    log.debug(
+    logger.debug(
       "agent.stream.end",
       metadata: [
         "chunks": "\(processor.decodedChunkCount)",
@@ -378,7 +378,7 @@ private func runSingleRound(
   }
 
   if toolInvocations.isEmpty {
-    log.info(
+    logger.info(
       "agent.assistant.final",
       metadata: [
         "answer_chars": "\(assistantText.count)",

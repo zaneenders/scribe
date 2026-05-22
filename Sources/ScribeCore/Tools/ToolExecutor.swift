@@ -28,7 +28,7 @@ public protocol ToolExecutor: Sendable {
   func execute(
     _ invocation: ToolInvocation,
     workingDirectory: FilePath,
-    log: Logger,
+    logger: Logger,
     abort: any AbortObserver
   ) async throws -> ToolResult
 }

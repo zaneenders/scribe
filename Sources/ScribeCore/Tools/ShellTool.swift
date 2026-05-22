@@ -46,14 +46,14 @@ public struct ShellTool: ScribeTool {
 
   public init() {}
 
-  public func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let command = try ToolArgumentParsing.string(obj["command"], field: "command")
     var cwd: String? = ToolArgumentParsing.optionalString(obj["cwd"])
     if let c = cwd, c.isEmpty { cwd = nil }
     let result = try await Shell.run(
-      command: command, cwd: cwd, workingDirectory: workingDirectory, logger: log)
-    log.debug(
+      command: command, cwd: cwd, workingDirectory: workingDirectory, logger: logger)
+    logger.debug(
       "agent.tool.shell",
       metadata: [
         "pid": "\(result.pid)",

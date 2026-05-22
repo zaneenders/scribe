@@ -102,7 +102,7 @@ public protocol ScribeTool: Sendable {
   ///   - arguments: JSON-encoded arguments string from the LLM.
   ///   - workingDirectory: The absolute working directory for path resolution.
   /// - Returns: An `Encodable` value that the registry will serialize as JSON.
-  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable
+  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable
 }
 
 // MARK: - ScribeTool → ChatTool conversion
@@ -111,7 +111,7 @@ extension ScribeTool {
   /// Converts this tool's schema into the `ChatTool` form the LLM API
   /// expects. `package` so the wire shape stays inside ScribeCore — only
   /// `ScribeAgent` and `ToolRegistry` need to build the request payload.
-  package static func toChatTool(log: Logger) -> Components.Schemas.ChatTool {
+  package static func toChatTool(logger: Logger) -> Components.Schemas.ChatTool {
     var props: [String: (any Sendable)?] = [:]
     var required: [String] = []
     for p in parameters {
@@ -127,7 +127,7 @@ extension ScribeTool {
     do {
       container = try OpenAPIObjectContainer(unvalidatedValue: payload)
     } catch {
-      log.warning(
+      logger.warning(
         "tool.chatTool.payload.invalid",
         metadata: [
           "tool": "\(name)",

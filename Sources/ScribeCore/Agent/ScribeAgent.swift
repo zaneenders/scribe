@@ -58,7 +58,7 @@ public struct ScribeAgent: Sendable {
   private let toolExecutor: any ToolExecutor
   private let client: Client
   private let workingDirectory: FilePath
-  private let log: Logger
+  private let logger: Logger
   private let abortNotifier = AbortNotifier()
 
   // MARK: - Designated initializer (transport-injected)
@@ -96,7 +96,7 @@ public struct ScribeAgent: Sendable {
   ///     session). May omit a leading system message — see `systemPrompt`.
   ///   - workingDirectory: Absolute working directory used for tool path
   ///     resolution.
-  ///   - log: Caller-owned logger (server request logger, CLI session file,
+  ///   - logger: Caller-owned logger (server request logger, CLI session file,
   ///     etc.). Used for the agent loop and built-in tool execution.
   public init(
     client: Client,
@@ -107,11 +107,11 @@ public struct ScribeAgent: Sendable {
     initialMessages: [ScribeMessage] = [],
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
-    log: Logger
+    logger: Logger
   ) {
     self.client = client
     self.workingDirectory = workingDirectory
-    self.log = log
+    self.logger = logger
     // Schemas the model is told about.  When using the default
     // ToolRegistry, both `chatTools` and the execution surface come from
     // the same `tools` array — they cannot diverge.  When a custom
@@ -121,9 +121,9 @@ public struct ScribeAgent: Sendable {
     // that the assistant can self-correct).
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
-      self.chatTools = tools.map { type(of: $0).toChatTool(log: log) }
+      self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
     } else {
-      let registry = ToolRegistry(tools: tools, log: log)
+      let registry = ToolRegistry(tools: tools, logger: logger)
       self.toolExecutor = registry
       self.chatTools = registry.chatTools
     }
@@ -145,7 +145,7 @@ public struct ScribeAgent: Sendable {
     configuration: ScribeConfig,
     systemPrompt: String,
     initialMessages: [ScribeMessage] = [],
-    log: Logger
+    logger: Logger
   ) throws {
     guard let serverURL = URL(string: configuration.serverURL) else {
       throw ScribeError.configuration(
@@ -163,7 +163,7 @@ public struct ScribeAgent: Sendable {
       initialMessages: initialMessages,
       workingDirectory: FilePath(configuration.workingDirectory),
       reasoningEnabled: configuration.reasoningEnabled,
-      log: log
+      logger: logger
     )
   }
 
@@ -214,10 +214,10 @@ public struct ScribeAgent: Sendable {
     await storage.setStreaming(true)
     abortNotifier.clear()
 
-    let agentLog = log
+    let agentLogger = logger
     let task = Task {
       [
-        storage, toolExecutor, chatTools, client, wireMessages, options, agentLog,
+        storage, toolExecutor, chatTools, client, wireMessages, options, agentLogger,
         abortNotifier
       ] in
       defer {
@@ -244,7 +244,7 @@ public struct ScribeAgent: Sendable {
           context: ctx,
           config: config,
           emit: { continuation.yield($0) },
-          log: agentLog,
+          logger: agentLogger,
           abortObserver: abortNotifier
         )
         switch result.termination {

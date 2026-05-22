@@ -7,7 +7,7 @@ import Testing
 @Suite
 struct ToolRunnerReadFileTests {
   @Test func returnsUtf8ContentWithMetadata() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("sample.txt")
       let body = "alpha\nβ\n"
@@ -15,7 +15,7 @@ struct ToolRunnerReadFileTests {
 
       let args = try jsonArguments(["path": fileURL.path])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), log: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
+        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.content == body)
@@ -29,7 +29,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func returnsRequestedSliceWithOffsetAndLimit() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("multi.txt")
       let body = (1...10).map { "line\($0)" }.joined(separator: "\n")
@@ -41,7 +41,7 @@ struct ToolRunnerReadFileTests {
         "limit": 3,
       ])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), log: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
+        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.content == "line4\nline5\nline6")
@@ -53,7 +53,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func returnsEmptyContentWhenOffsetPastEnd() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("short.txt")
       let body = "only-line"
@@ -61,7 +61,7 @@ struct ToolRunnerReadFileTests {
 
       let args = try jsonArguments(["path": fileURL.path, "offset": 99])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), log: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
+        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.content == "")
@@ -71,7 +71,7 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func limitZeroMeansNoCap() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("all.txt")
       let body = (1...50).map { "L\($0)" }.joined(separator: "\n")
@@ -79,7 +79,7 @@ struct ToolRunnerReadFileTests {
 
       let args = try jsonArguments(["path": fileURL.path, "limit": 0])
       let json = try! await registry.run(
-        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), log: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
+        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
       let payload = try decodeRead(json)
       #expect(payload.ok == true)
       #expect(payload.totalLines == 50)
@@ -89,22 +89,22 @@ struct ToolRunnerReadFileTests {
   }
 
   @Test func missingFileFails() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     let bogus =
       FileManager.default.temporaryDirectory
       .appendingPathComponent("scribe-no-such-file-\(UUID().uuidString).txt")
     let args = try jsonArguments(["path": bogus.path])
     let json = try! await registry.run(
-      name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), log: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
+      name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("path does not exist") == true)
   }
 
   @Test func missingPathFieldFails() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     let json = try! await registry.run(
-      name: "read_file", arguments: "{}", workingDirectory: FilePath("/tmp"), log: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
+      name: "read_file", arguments: "{}", workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
     let fail = try decodeFail(json)
     #expect(fail.ok == false)
     #expect(fail.error?.contains("missing or empty field path") == true)

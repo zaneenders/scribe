@@ -155,10 +155,10 @@ import ScribeCore
       resumeMessages = []
     }
 
-    var log = loaded.makeSessionLogger(sessionId: sessionId)
+    var logger = loaded.makeSessionLogger(sessionId: sessionId)
     let mode = resumeMetadata == nil ? "new" : "resume"
-    log[metadataKey: "mode"] = "\(mode)"
-    log.notice(
+    logger[metadataKey: "mode"] = "\(mode)"
+    logger.notice(
       "chat.session.start",
       metadata: [
         "scribe_version": "\(GitVersion.hash)",
@@ -172,7 +172,7 @@ import ScribeCore
         "config_file": "\(loaded.resolvedConfigurationPath)",
       ])
     if let meta = resumeMetadata, meta.model != scribeConfig.agentModel {
-      log.warning(
+      logger.warning(
         "chat.session.resume.model-mismatch",
         metadata: [
           "archived_model": "\(meta.model)",
@@ -182,7 +182,7 @@ import ScribeCore
 
     async let _ = ProfileRecorderServer(
       configuration: .parseFromEnvironment()
-    ).runIgnoringFailures(logger: log)
+    ).runIgnoringFailures(logger: logger)
 
     let exitInfo = try await SlateChat.runFullscreen(
       configuration: scribeConfig,
@@ -190,9 +190,9 @@ import ScribeCore
       resumeMessages: resumeMessages,
       sessionPersistenceURL: sessionPersistenceURL,
       sessionId: sessionId,
-      log: log
+      logger: logger
     )
-    log.notice("chat.session.end", metadata: ["status": "ok"])
+    logger.notice("chat.session.end", metadata: ["status": "ok"])
     if let forkedId = exitInfo.forkedToSessionId, let forkedURL = exitInfo.forkedToURL {
       printForkResumeHint(
         parentSessionId: exitInfo.forkedFromSessionId ?? sessionId,

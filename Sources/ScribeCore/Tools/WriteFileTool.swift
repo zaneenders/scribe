@@ -24,7 +24,7 @@ public struct WriteFileTool: ScribeTool {
 
   public init() {}
 
-  public func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+  public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let content = try ToolArgumentParsing.string(obj["content"], field: "content")
@@ -32,7 +32,7 @@ public struct WriteFileTool: ScribeTool {
     let s = fp.string
     try FileSystemToolHelpers.requireParentDirectoryForWrite(filesystemPath: s, userPath: path)
     try content.write(toFile: s, atomically: true, encoding: .utf8)
-    log.debug(
+    logger.debug(
       "agent.tool.write_file",
       metadata: [
         "path": "\(s.replacingOccurrences(of: "\"", with: "\\\""))",

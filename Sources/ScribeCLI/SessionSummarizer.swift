@@ -74,7 +74,7 @@ enum SessionSummarizer {
   static func summarize(
     slice: [ScribeMessage],
     configuration: ScribeConfig,
-    log: Logger
+    logger: Logger
   ) async throws -> String {
     let summarizerConfig = ScribeConfig(
       agentModel: configuration.agentModel,
@@ -89,12 +89,12 @@ enum SessionSummarizer {
     let agent = try ScribeAgent(
       configuration: summarizerConfig,
       systemPrompt: summarizerSystemPrompt,
-      log: log
+      logger: logger
     )
     let rendered = renderSlice(slice)
     let userPrompt = "Transcript to summarize:\n\n\(rendered)"
 
-    log.debug(
+    logger.debug(
       "event=summarize.start",
       metadata: [
         "slice_messages": "\(slice.count)",
@@ -111,7 +111,7 @@ enum SessionSummarizer {
     else {
       throw ScribeError.generic("Summarizer produced no assistant text.")
     }
-    log.info(
+    logger.info(
       "event=summarize.end",
       metadata: ["summary_chars": "\(summary.count)"])
     return summary

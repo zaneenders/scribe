@@ -8,7 +8,7 @@ import Testing
 struct ToolRunnerReadImageTests {
 
   @Test func readFileReturnsBase64ForImage() async throws {
-    let registry = ToolRegistry(tools: [ReadFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let imageURL = dir.appendingPathComponent("test.png")
       let data = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
@@ -19,7 +19,7 @@ struct ToolRunnerReadImageTests {
         name: "read_file",
         arguments: args,
         workingDirectory: FilePath("/tmp"),
-        log: toolRunnerTestLogger,
+        logger: toolRunnerTestLogger,
         abortObserver: AbortNotifier()
       )
 
@@ -45,7 +45,7 @@ struct ToolRunnerReadImageTests {
   }
 
   @Test func readFileStillReadsTextFiles() async throws {
-    let registry = ToolRegistry(tools: [ReadFileTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("sample.txt")
       let body = "hello world"
@@ -56,7 +56,7 @@ struct ToolRunnerReadImageTests {
         name: "read_file",
         arguments: args,
         workingDirectory: FilePath("/tmp"),
-        log: toolRunnerTestLogger,
+        logger: toolRunnerTestLogger,
         abortObserver: AbortNotifier()
       )
       // Text files have no attachments.

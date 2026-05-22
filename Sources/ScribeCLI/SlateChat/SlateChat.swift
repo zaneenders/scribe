@@ -34,7 +34,7 @@ enum SlateChat {
   ///   - resumeMessages: Prior transcript restored from `sessions/{sessionId}/messages.jsonl`.
   ///   - sessionPersistenceURL: Directory `sessions/{sessionId}/` for metadata and JSONL.
   ///   - sessionId: UUID shared with `sessions/{sessionId}/scribe.log`.
-  ///   - log: Session logger from ``LoadedConfig/makeSessionLogger(sessionId:)`` (also passed
+  ///   - logger: Session logger from ``LoadedConfig/makeSessionLogger(sessionId:)`` (also passed
   ///     into ``ScribeAgent`` inside ``ChatCoordinator``).
   ///
   /// ## Logs
@@ -51,15 +51,15 @@ enum SlateChat {
     resumeMessages: [ScribeMessage] = [],
     sessionPersistenceURL: URL,
     sessionId: UUID,
-    log: Logger
+    logger: Logger
   ) async throws -> ChatExitInfo {
     guard isatty(STDIN_FILENO) != 0 else {
-      log.error(
+      logger.error(
         "chat.session.fail",
         metadata: ["reason": "stdin-not-tty"])
       throw ChatTerminalError.notATerminal
     }
-    log.debug(
+    logger.debug(
       "chat.fullscreen.attach",
       metadata: ["session_file": "\(sessionPersistenceURL.lastPathComponent)"])
     return try await Task { @MainActor () throws -> ChatExitInfo in
@@ -71,12 +71,12 @@ enum SlateChat {
         sessionPersistenceURL: sessionPersistenceURL,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
-        log: log
+        logger: logger
       )
       do {
         return try await host.run()
       } catch Slate.InstallationError.notInteractiveTerminal {
-        log.error(
+        logger.error(
           "chat.fullscreen.fail",
           metadata: ["reason": "slate-not-interactive"])
         throw ChatTerminalError.slateNotInteractive

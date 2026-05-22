@@ -93,7 +93,7 @@ struct AbortNotifierTests {
   /// long time inside its run() body so the only way out is the watch task
   /// firing.
   @Test func toolRegistryWakesPromptlyOnNotifierRequest() async throws {
-    let registry = ToolRegistry(tools: [SleepyTool()], log: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [SleepyTool()], logger: toolRunnerTestLogger)
     let notifier = AbortNotifier()
 
     let start = ContinuousClock.now
@@ -104,7 +104,7 @@ struct AbortNotifierTests {
             name: "sleepy",
             arguments: "{}",
             workingDirectory: FilePath("/tmp"),
-            log: toolRunnerTestLogger,
+            logger: toolRunnerTestLogger,
             abortObserver: notifier)
         }
         group.addTask {
@@ -140,8 +140,8 @@ private struct SleepyTool: ScribeTool {
 
   struct Output: Encodable { let ok: Bool }
 
-  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
-    _ = log
+  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    _ = logger
     try await Task.sleep(for: .seconds(60))
     return Output(ok: true)
   }

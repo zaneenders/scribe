@@ -59,8 +59,8 @@ private struct FakeTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
-    _ = log
+  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    _ = logger
     return Result()
   }
 }
@@ -75,8 +75,8 @@ private struct SleepyAgentTool: ScribeTool {
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
-    _ = log
+  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    _ = logger
     try await Task.sleep(for: .seconds(60))
     return Result()
   }
@@ -114,7 +114,7 @@ private func makeAgent(
     initialMessages: [],
     workingDirectory: FilePath("/tmp"),
     reasoningEnabled: nil,
-    log: testLogger
+    logger: testLogger
   )
 }
 
@@ -135,7 +135,7 @@ private func makeAgent(
     initialMessages: [],
     workingDirectory: FilePath("/tmp"),
     reasoningEnabled: nil,
-    log: testLogger
+    logger: testLogger
   )
 }
 
@@ -443,7 +443,7 @@ struct ScribeAgentTests {
       ],
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
-      log: testLogger
+      logger: testLogger
     )
     let messages = await agent.messages
     #expect(messages.count == 2)
@@ -480,8 +480,8 @@ struct ScribeAgentTests {
     static var parameters: [ScribeToolParameter] { [] }
     static var promptHint: String? { nil }
     struct Result: Encodable { let ok = false }
-    func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
-      _ = log
+    func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+      _ = logger
       Issue.record("Built-in tool ran despite a custom ToolExecutor being installed.")
       return Result()
     }
@@ -501,7 +501,7 @@ struct ScribeAgentTests {
     func execute(
       _ invocation: ToolInvocation,
       workingDirectory: FilePath,
-      log: Logger,
+      logger: Logger,
       abort: any AbortObserver
     ) async throws -> ToolResult {
       invocations.withLock { $0.append(invocation) }
@@ -535,7 +535,7 @@ struct ScribeAgentTests {
       initialMessages: [],
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
-      log: testLogger
+      logger: testLogger
     )
     let ts = await agent.stream("call the tool")
     Task { for await _ in ts.events {} }

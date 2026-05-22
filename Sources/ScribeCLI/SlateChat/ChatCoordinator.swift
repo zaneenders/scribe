@@ -16,7 +16,7 @@ final class ChatCoordinator: Sendable {
 
   private let configuration: ScribeConfig
   private let resumeSnapshot: [ScribeMessage]
-  private let log: Logger
+  private let logger: Logger
   private let enqueue: @Sendable (HostEvent) -> Void
   private let persistURL: URL
   private let sessionId: UUID
@@ -31,7 +31,7 @@ final class ChatCoordinator: Sendable {
     configuration: ScribeConfig,
     systemPrompt: String,
     resumeSnapshot: [ScribeMessage],
-    log: Logger,
+    logger: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
     persistURL: URL,
     sessionId: UUID,
@@ -51,11 +51,11 @@ final class ChatCoordinator: Sendable {
       configuration: configuration,
       systemPrompt: systemPrompt,
       initialMessages: self.initialMessages,
-      log: log
+      logger: logger
     )
     self.configuration = configuration
     self.resumeSnapshot = resumeSnapshot
-    self.log = log
+    self.logger = logger
     self.enqueue = enqueue
     self.persistURL = persistURL
     self.sessionId = sessionId
@@ -80,7 +80,7 @@ final class ChatCoordinator: Sendable {
       let newMessages = Array(allMessages[persistedCount...])
       do {
         try ChatSessionStore.appendMessages(newMessages, to: persistURL)
-        log.trace(
+        logger.trace(
           "chat.persist.append",
           metadata: [
             "new": "\(newMessages.count)",
@@ -88,7 +88,7 @@ final class ChatCoordinator: Sendable {
             "path": "\(persistURL.path)",
           ])
       } catch {
-        log.error(
+        logger.error(
           "chat.persist.fail",
           metadata: [
             "path": "\(persistURL.path)",
@@ -114,7 +114,7 @@ final class ChatCoordinator: Sendable {
       var persistedCount = initialMessages.count
 
       let msgCount = initialMessages.count
-      log.debug(
+      logger.debug(
         "chat.coordinator.start",
         metadata: [
           "messages": "\(msgCount)",
@@ -129,16 +129,16 @@ final class ChatCoordinator: Sendable {
       for await line in lines {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == "exit" {
-          log.notice("chat.user.exit-command")
+          logger.notice("chat.user.exit-command")
           break
         }
         if trimmed.isEmpty {
-          log.trace("chat.user.empty-skip")
+          logger.trace("chat.user.empty-skip")
           continue
         }
 
         enqueue(.userSubmitted(trimmed))
-        log.debug(
+        logger.debug(
           "agent.turn.dispatch",
           metadata: ["chars": "\(trimmed.count)"])
 
@@ -162,20 +162,20 @@ final class ChatCoordinator: Sendable {
           committed = result.messages
           switch result.outcome {
           case .completed:
-            log.info("agent.turn.end", metadata: ["status": "completed"])
-            tracker.logStatus(logger: log)
+            logger.info("agent.turn.end", metadata: ["status": "completed"])
+            tracker.logStatus(logger: logger)
           case .interrupted:
-            log.notice("agent.turn.end", metadata: ["status": "interrupted"])
+            logger.notice("agent.turn.end", metadata: ["status": "interrupted"])
             enqueue(.transcript(.lifecycle(.interrupted)))
           case .toolRoundLimit(let max):
-            log.notice(
+            logger.notice(
               "agent.turn.end",
               metadata: ["status": "tool-round-limit", "limit": "\(max)"])
             enqueue(.transcript(.lifecycle(.interrupted)))
           }
         } catch {
           let se = (error as? ScribeError) ?? .generic(String(describing: error))
-          log.error(
+          logger.error(
             "agent.turn.end",
             metadata: [
               "status": "error",
@@ -196,13 +196,13 @@ final class ChatCoordinator: Sendable {
       // Final flush in case the loop exited with un-persisted messages.
       let trailing = await agent.messages
       persistNew(allMessages: trailing, persistedCount: persistedCount)
-      log.debug(
+      logger.debug(
         "chat.coordinator.end",
         metadata: ["transcript_messages": "\(trailing.count)"])
     } catch {
       let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
       enqueue(.transcript(.lifecycle(.error(scribeError))))
-      log.error(
+      logger.error(
         "chat.coordinator.fail",
         metadata: [
           "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
