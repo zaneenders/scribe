@@ -10,7 +10,7 @@ import Synchronization
 final class AppendOnlyFileWriter: Sendable {
   private let state: Mutex<State?>
 
-  private struct State {
+  private struct State: ~Copyable {
     var handle: FileHandle
   }
 
@@ -33,16 +33,16 @@ final class AppendOnlyFileWriter: Sendable {
 
   func append(_ data: Data) throws {
     try state.withLock { stored in
-      guard let stored else { throw AppendOnlyFileError.closed }
-      try stored.handle.write(contentsOf: data)
+      guard stored != nil else { throw AppendOnlyFileError.closed }
+      try stored!.handle.write(contentsOf: data)
     }
   }
 
   func close() {
     state.withLock { slot in
-      guard let active = slot else { return }
-      try? active.handle.synchronize()
-      try? active.handle.close()
+      guard slot != nil else { return }
+      try? slot!.handle.synchronize()
+      try? slot!.handle.close()
       slot = nil
     }
   }
