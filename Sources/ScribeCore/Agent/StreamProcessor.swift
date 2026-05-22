@@ -14,7 +14,7 @@ import ScribeLLM
 /// to emit, eliminating the double-processing that previously existed when
 /// both `processStreamChunks` and `turn.apply` iterated the same fields.
 struct StreamProcessor<AO: AbortObserver> {
-  private let onEvent: (TranscriptEvent) -> Void
+  private let onEvent: (AgentEvent) -> Void
   private let logger: Logger
   private let abortObserver: AO
   private let clock = ContinuousClock()
@@ -30,7 +30,7 @@ struct StreamProcessor<AO: AbortObserver> {
   let streamWallStart: ContinuousClock.Instant
 
   init(
-    onEvent: @escaping (TranscriptEvent) -> Void,
+    onEvent: @escaping (AgentEvent) -> Void,
     logger: Logger,
     abortObserver: AO,
     streamWallStart: ContinuousClock.Instant
@@ -67,7 +67,7 @@ struct StreamProcessor<AO: AbortObserver> {
             "had_visible_tokens": "\(streamStarted)",
           ])
         if streamStarted {
-          onEvent(.finalizeAssistantStream)
+          onEvent(.output(.finalized))
         }
         throw AgentTurnInterruptedError()
       }
@@ -111,10 +111,10 @@ struct StreamProcessor<AO: AbortObserver> {
           if case .some(.reasoning) = streamSection {
             // already in reasoning section
           } else {
-            onEvent(.enterAssistantSection(.reasoning, previous: streamSection))
+            onEvent(.output(.sectionStarted(.reasoning, previous: streamSection)))
             streamSection = .reasoning
           }
-          onEvent(.appendAssistantText(.reasoning, text: r))
+          onEvent(.output(.text(.reasoning, r)))
         }
 
         // Answer text events
@@ -124,10 +124,10 @@ struct StreamProcessor<AO: AbortObserver> {
           if case .some(.answer) = streamSection {
             // already in answer section
           } else {
-            onEvent(.enterAssistantSection(.answer, previous: streamSection))
+            onEvent(.output(.sectionStarted(.answer, previous: streamSection)))
             streamSection = .answer
           }
-          onEvent(.appendAssistantText(.answer, text: t))
+          onEvent(.output(.text(.answer, t)))
         }
       }
 
@@ -154,12 +154,12 @@ struct StreamProcessor<AO: AbortObserver> {
 
     // --- end-of-stream events ---
     if streamStarted {
-      onEvent(.finalizeAssistantStream)
+      onEvent(.output(.finalized))
     } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {
       logger.notice(
         "agent.stream.empty",
         metadata: ["chunks": "\(decodedChunkCount)"])
-      onEvent(.emptyAssistantTurn)
+      onEvent(.output(.empty))
     }
   }
 }

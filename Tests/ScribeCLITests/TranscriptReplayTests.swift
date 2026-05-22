@@ -176,4 +176,55 @@ struct TranscriptReplayTests {
     let texts = lines.map { $0.spans.map(\.text).joined() }
     #expect(!texts.contains("you:"))
   }
+
+  // MARK: - renderMessagesToTranscriptWithStarts
+
+  /// `messageStartLines` has length `count + 1`, starts at 0 for the first
+  /// rendered message, ends at `lines.count`, and is non-decreasing.
+  /// Messages that produce no own output (system, tool absorbed into an
+  /// assistant round) share a start with the next produced line so the
+  /// boundary picker can map any cut index to a real row.
+  @Test func renderWithStartsProducesMonotonicMap() {
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .system, content: "sys"),
+      ScribeMessage(role: .user, content: "q1"),
+      ScribeMessage(role: .assistant, content: "a1"),
+      ScribeMessage(role: .user, content: "q2"),
+      ScribeMessage(
+        role: .assistant, content: "",
+        toolCalls: [ScribeToolCall(id: "c1", name: "shell", arguments: "{}")]),
+      ScribeMessage(role: .tool, content: "ok", name: "shell", toolCallId: "c1"),
+      ScribeMessage(role: .assistant, content: "done"),
+    ]
+    let result = renderMessagesToTranscriptWithStarts(
+      messages, theme: .default, renderer: SwiftMarkdownRenderer())
+
+    #expect(result.messageStartLines.count == messages.count + 1)
+    #expect(result.messageStartLines.last == result.lines.count)
+    #expect(result.messageStartLines.first == 0)
+    let starts = result.messageStartLines
+    for i in 1..<starts.count {
+      #expect(starts[i] >= starts[i - 1])
+    }
+    // The trailing assistant ("done") starts after the tool round, so its
+    // line points at a real "scribe:" row, not the very end.
+    let doneStart = starts[6]
+    #expect(doneStart < result.lines.count)
+    let lineText = result.lines[doneStart].spans.map(\.text).joined()
+    #expect(lineText.isEmpty || lineText.contains("scribe") || lineText.contains("done"))
+  }
+
+  /// The existing `renderMessagesToTranscript` is now a thin wrapper —
+  /// confirm it returns the same lines as the `WithStarts` form.
+  @Test func renderWrapperMatchesWithStarts() {
+    let messages: [ScribeMessage] = [
+      ScribeMessage(role: .user, content: "hi"),
+      ScribeMessage(role: .assistant, content: "yo"),
+    ]
+    let plain = renderMessagesToTranscript(
+      messages, theme: .default, renderer: SwiftMarkdownRenderer())
+    let withStarts = renderMessagesToTranscriptWithStarts(
+      messages, theme: .default, renderer: SwiftMarkdownRenderer())
+    #expect(plain == withStarts.lines)
+  }
 }

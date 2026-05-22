@@ -9,15 +9,22 @@ struct ChatSessionMetadata: Codable, Sendable {
   var cwd: String
   var baseURL: String?
   var scribeVersion: String?
+  /// Session this one was forked from. `nil` for top-level (non-forked) sessions.
+  var parentSessionId: UUID?
+  /// Number of messages copied from the parent at fork time — i.e. the cut
+  /// index in the parent's log. `nil` for non-forked sessions.
+  var forkedAtIndex: Int?
 
   init(
-    schemaVersion: Int = 1,
+    schemaVersion: Int = 2,
     id: UUID,
     createdAt: Date,
     model: String,
     cwd: String,
     baseURL: String?,
-    scribeVersion: String?
+    scribeVersion: String?,
+    parentSessionId: UUID? = nil,
+    forkedAtIndex: Int? = nil
   ) {
     self.schemaVersion = schemaVersion
     self.id = id
@@ -26,6 +33,8 @@ struct ChatSessionMetadata: Codable, Sendable {
     self.cwd = cwd
     self.baseURL = baseURL
     self.scribeVersion = scribeVersion
+    self.parentSessionId = parentSessionId
+    self.forkedAtIndex = forkedAtIndex
   }
 }
 
@@ -134,6 +143,65 @@ enum ChatSessionStore {
       [.modificationDate: Date()],
       ofItemAtPath: directory.path
     )
+  }
+
+  /// Result of a successful fork.
+  struct ForkResult: Sendable {
+    let sessionId: UUID
+    let sessionURL: URL
+    let cutAt: Int
+  }
+
+  /// Fork a session at the given safe boundary into a new sibling session.
+  ///
+  /// Validates `cutAt` against `safeForkBoundaries()` so a fork cannot land
+  /// inside a tool round. Copies messages `[0..cutAt)` into a freshly minted
+  /// session directory whose metadata points back at the parent.
+  ///
+  /// - Parameters:
+  ///   - parentDirectory: Existing session directory containing `metadata.json`
+  ///     and `messages.jsonl`.
+  ///   - cutAt: Number of messages from the parent to copy. Must be present
+  ///     in `messages.safeForkBoundaries()`.
+  ///   - newSessionId: UUID for the new session (caller provides so the host
+  ///     can log it before the call lands).
+  ///   - scribeVersion: Override for the `scribeVersion` field; defaults to
+  ///     the parent's value.
+  static func forkSession(
+    from parentDirectory: URL,
+    cutAt: Int,
+    newSessionId: UUID,
+    scribeVersion: String? = nil
+  ) throws -> ForkResult {
+    let parentMeta = try loadMetadata(from: parentDirectory)
+    let allMessages = try loadMessages(from: parentDirectory)
+    let boundaries = allMessages.safeForkBoundaries()
+    guard boundaries.contains(cutAt) else {
+      throw ScribeError.invalidInput(
+        message:
+          "Cut index \(cutAt) is not a safe fork boundary (would split a tool round).")
+    }
+    let prefix = Array(allMessages.prefix(cutAt))
+
+    let sessionsRoot = parentDirectory.deletingLastPathComponent()
+    let newDir = sessionsRoot.appendingPathComponent(
+      newSessionId.uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: newDir, withIntermediateDirectories: true)
+
+    let newMeta = ChatSessionMetadata(
+      id: newSessionId,
+      createdAt: Date(),
+      model: parentMeta.model,
+      cwd: parentMeta.cwd,
+      baseURL: parentMeta.baseURL,
+      scribeVersion: scribeVersion ?? parentMeta.scribeVersion,
+      parentSessionId: parentMeta.id,
+      forkedAtIndex: cutAt
+    )
+    try saveMetadata(newMeta, to: newDir)
+    try appendMessages(prefix, to: newDir)
+    return ForkResult(sessionId: newSessionId, sessionURL: newDir, cutAt: cutAt)
   }
 
   static func resolveResumeURL(

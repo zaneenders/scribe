@@ -13,7 +13,7 @@ import ScribeCore
 ///
 /// - ``MarkdownRenderer`` — swap in a plain-text / HTML renderer for
 ///   non-terminal hosts.
-/// - the `TranscriptEvent` sink — any sequence of events emitted by
+/// - the `AgentEvent` sink — any sequence of events emitted by
 ///   ``ScribeAgent.prompt(_:options:)`` (or relayed by
 ///   ``ChatCoordinator``) feeds straight in via ``handle(_:followingLive:)``.
 ///
@@ -40,7 +40,7 @@ struct ChatDriver {
   /// Feed a transcript event into the pipeline and return the resulting effects.
   @discardableResult
   mutating func handle(
-    _ event: TranscriptEvent,
+    _ event: AgentEvent,
     followingLive: Bool = true
   ) -> TranscriptController.Effects {
     TranscriptController.apply(
@@ -54,7 +54,7 @@ struct ChatDriver {
   }
 
   /// Feed a sequence of events (simulating a full turn).
-  mutating func handle(_ events: [TranscriptEvent], followingLive: Bool = true) {
+  mutating func handle(_ events: [AgentEvent], followingLive: Bool = true) {
     for event in events {
       handle(event, followingLive: followingLive)
     }

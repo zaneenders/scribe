@@ -191,7 +191,7 @@ public struct ScribeAgent: Sendable {
     get async { await storage.isStreaming }
   }
 
-  // MARK: - prompt
+  // MARK: - stream
 
   public func prompt(
     _ input: String,
@@ -208,7 +208,7 @@ public struct ScribeAgent: Sendable {
     options: AgentRunOptions = AgentRunOptions()
   ) async -> TurnStream {
     let wireMessages = promptMessages.toChatMessages()
-    let (stream, continuation) = AsyncStream<TranscriptEvent>.makeStream()
+    let (stream, continuation) = AsyncStream<AgentEvent>.makeStream()
 
     let snapshot = await storage.snapshot()
     await storage.setStreaming(true)
@@ -255,19 +255,21 @@ public struct ScribeAgent: Sendable {
             messages: finalMessages.toScribeMessages(),
             outcome: .completed)
         case .interrupted:
-          continuation.yield(.turnInterrupted)
-          let current = await storage.messages
+          continuation.yield(.lifecycle(.interrupted))
+          await storage.appendMessages(result.messages)
+          let finalMessages = await storage.messages
           return TurnResult(
-            messages: current.toScribeMessages(),
+            messages: finalMessages.toScribeMessages(),
             outcome: .interrupted)
         case .toolRoundLimit(let rounds):
-          let current = await storage.messages
+          await storage.appendMessages(result.messages)
+          let finalMessages = await storage.messages
           return TurnResult(
-            messages: current.toScribeMessages(),
+            messages: finalMessages.toScribeMessages(),
             outcome: .toolRoundLimit(rounds: rounds))
         }
       } catch is AgentTurnInterruptedError {
-        continuation.yield(.turnInterrupted)
+        continuation.yield(.lifecycle(.interrupted))
         let current = await storage.messages
         return TurnResult(
           messages: current.toScribeMessages(),
@@ -295,7 +297,7 @@ public struct ScribeAgent: Sendable {
     guard !systemPrompt.isEmpty else { return initialMessages }
     if initialMessages.first?.role == .system { return initialMessages }
     var result = initialMessages
-    result.insert(.init(role: .system, content: systemPrompt), at: 0)
+    result.insert(.init(role: .system, content: .case1(systemPrompt)), at: 0)
     return result
   }
 }

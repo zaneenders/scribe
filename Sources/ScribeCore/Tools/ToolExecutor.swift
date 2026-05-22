@@ -30,5 +30,5 @@ public protocol ToolExecutor: Sendable {
     workingDirectory: FilePath,
     log: Logger,
     abort: any AbortObserver
-  ) async throws -> String
+  ) async throws -> ToolResult
 }

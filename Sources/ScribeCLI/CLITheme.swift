@@ -42,6 +42,8 @@ public struct CLITheme: Sendable {
   public var skippedStreamLine: TerminalRGB
   /// Error messages.
   public var errorFG: TerminalRGB
+  /// Inline warning notices.
+  public var warningFG: TerminalRGB
   /// "(interrupted)" notice.
   public var interruptedFG: TerminalRGB
   /// Base text color for reasoning sections.
@@ -126,6 +128,7 @@ public struct CLITheme: Sendable {
     toolOutput: ScribePalette.grayLight,
     skippedStreamLine: ScribePalette.gray,
     errorFG: ScribePalette.red,
+    warningFG: ScribePalette.yellow,
     interruptedFG: ScribePalette.gray,
     reasoningBaseFG: ScribePalette.grayLight,
     answerBaseFG: ScribePalette.cyan,

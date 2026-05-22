@@ -14,7 +14,7 @@ struct TranscriptControllerTests {
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
-  // MARK: - applyUserSubmitted (direct call — no longer a TranscriptEvent)
+  // MARK: - applyUserSubmitted (direct call — no longer a AgentEvent)
 
   @Test func userSubmittedProducesYouPrefix() {
     var state = TranscriptState()
@@ -47,9 +47,9 @@ struct TranscriptControllerTests {
   @Test func toolInvocationAppendsTrailingBlankLine() {
     var state = TranscriptState()
     let effects = TranscriptController.apply(
-      .toolInvocation(
+      .tool(.invocation(
         name: "shell", arguments: #"{"command":"ls"}"#,
-        output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#),
+        output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
@@ -65,7 +65,7 @@ struct TranscriptControllerTests {
   @Test func harnessError() {
     var state = TranscriptState()
     let effects = TranscriptController.apply(
-      .harnessError(.generic("test error")),
+      .lifecycle(.error(.generic("test error"))),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
@@ -82,7 +82,7 @@ struct TranscriptControllerTests {
     state.streamingSectionStartLineIndex = 3
 
     let effects = TranscriptController.apply(
-      .turnInterrupted, to: &state, theme: theme, renderer: renderer,
+      .lifecycle(.interrupted), to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
     #expect(state.streamingOpenLine == nil)
@@ -96,7 +96,7 @@ struct TranscriptControllerTests {
   @Test func emptyAssistantTurn() {
     var state = TranscriptState()
     let effects = TranscriptController.apply(
-      .emptyAssistantTurn, to: &state, theme: theme, renderer: renderer,
+      .output(.empty), to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
     #expect(state.lines.count == 2)
@@ -111,7 +111,7 @@ struct TranscriptControllerTests {
     _ = TranscriptController.applyUserSubmitted("test", state: &state, theme: theme)
 
     let effects = TranscriptController.apply(
-      .enterAssistantSection(.answer, previous: nil),
+      .output(.sectionStarted(.answer, previous: nil)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
@@ -128,7 +128,7 @@ struct TranscriptControllerTests {
     _ = TranscriptController.applyUserSubmitted("test", state: &state, theme: theme)
 
     let effects = TranscriptController.apply(
-      .enterAssistantSection(.reasoning, previous: nil),
+      .output(.sectionStarted(.reasoning, previous: nil)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
@@ -141,13 +141,13 @@ struct TranscriptControllerTests {
   @Test func finalizeAssistantStreamAppendsTrailingBlankLine() {
     var state = TranscriptState()
     _ = TranscriptController.apply(
-      .enterAssistantSection(.answer, previous: nil),
+      .output(.sectionStarted(.answer, previous: nil)),
       to: &state, theme: theme, renderer: renderer, followingLive: true, contextWindow: nil)
     _ = TranscriptController.apply(
-      .appendAssistantText(.answer, text: "hello"),
+      .output(.text(.answer, "hello")),
       to: &state, theme: theme, renderer: renderer, followingLive: true, contextWindow: nil)
     _ = TranscriptController.apply(
-      .finalizeAssistantStream,
+      .output(.finalized),
       to: &state, theme: theme, renderer: renderer, followingLive: true, contextWindow: nil)
     // Last line should be the blank separator.
     #expect(state.lines.last?.spans.isEmpty == true)
@@ -159,7 +159,7 @@ struct TranscriptControllerTests {
     var state = TranscriptState()
     let usage = ScribeUsage(promptTokens: 100, completionTokens: 50, totalTokens: 150)
     let effects = TranscriptController.apply(
-      .usage(usage, tokensPerSecond: 10.5),
+      .lifecycle(.usage(usage, tokensPerSecond: 10.5)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: 4000)
     #expect(effects.needsRender)
@@ -174,12 +174,12 @@ struct TranscriptControllerTests {
     var state = TranscriptState()
     let u1 = ScribeUsage(promptTokens: 10, completionTokens: 5, totalTokens: 15)
     _ = TranscriptController.apply(
-      .usage(u1, tokensPerSecond: nil),
+      .lifecycle(.usage(u1, tokensPerSecond: nil)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     let u2 = ScribeUsage(promptTokens: 20, completionTokens: 10, totalTokens: 30)
     _ = TranscriptController.apply(
-      .usage(u2, tokensPerSecond: nil),
+      .lifecycle(.usage(u2, tokensPerSecond: nil)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(state.usageTurnPrompt == 30)
@@ -191,7 +191,7 @@ struct TranscriptControllerTests {
     var state = TranscriptState()
     let usage = ScribeUsage(promptTokens: 2000, completionTokens: 100, totalTokens: 2100)
     _ = TranscriptController.apply(
-      .usage(usage, tokensPerSecond: nil),
+      .lifecycle(.usage(usage, tokensPerSecond: nil)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: 4000)
     #expect(state.usageHUD?.contextWindowUsedPercent == 50)
@@ -202,12 +202,12 @@ struct TranscriptControllerTests {
   @Test func appendAssistantTextSkipsRenderWhenScrolledUp() {
     var state = TranscriptState()
     _ = TranscriptController.apply(
-      .enterAssistantSection(.answer, previous: nil),
+      .output(.sectionStarted(.answer, previous: nil)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
 
     let effects = TranscriptController.apply(
-      .appendAssistantText(.answer, text: "some text"),
+      .output(.text(.answer, "some text")),
       to: &state, theme: theme, renderer: renderer,
       followingLive: false, contextWindow: nil)
     #expect(!effects.needsRender)

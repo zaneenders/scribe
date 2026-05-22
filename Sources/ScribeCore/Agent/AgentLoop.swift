@@ -55,7 +55,7 @@ func runAgentLoop(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
   config: AgentLoopConfig,
-  emit: @escaping @Sendable (TranscriptEvent) -> Void,
+  emit: @escaping @Sendable (AgentEvent) -> Void,
   log: Logger,
   abortObserver: some AbortObserver
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
@@ -70,6 +70,7 @@ func runAgentLoop(
 
   let clock = ContinuousClock()
   var round = 0
+  var attemptedRecovery = false
 
   while true {
     round += 1
@@ -97,6 +98,27 @@ func runAgentLoop(
           "where": "mid-stream", "round": "\(round)",
         ])
       return (newMessages, .interrupted)
+    } catch let scribeError as ScribeError where !attemptedRecovery && isContextLengthError(scribeError) {
+      // Attachment-overflow recovery: the previous round's tool likely
+      // injected a too-large synthetic-attachment user message. Drop the
+      // attachments, replace the tool result with an error so the model
+      // sees the failure, and retry once.
+      guard case .apiHTTPError(_, let detail, _) = scribeError else {
+        throw scribeError
+      }
+      guard
+        let reason = rollbackAttachmentOverflow(
+          messages: &currentContext.messages,
+          newMessages: &newMessages,
+          providerDetail: detail)
+      else {
+        // No recoverable shape at the tail — propagate the original error.
+        throw scribeError
+      }
+      attemptedRecovery = true
+      log.notice("event=agent.recover reason=\"\(reason)\"")
+      emit(.lifecycle(.recovered(reason: reason)))
+      continue
     }
 
     // Collect new messages from this round
@@ -144,9 +166,9 @@ func runAgentLoop(
           return (newMessages, .interrupted)
         }
         let toolStarted = clock.now
-        let jsonOutput: String
+        let result: ToolResult
         do {
-          jsonOutput = try await config.toolExecutor.execute(
+          result = try await config.toolExecutor.execute(
             inv,
             workingDirectory: config.workingDirectory,
             log: log,
@@ -157,7 +179,7 @@ func runAgentLoop(
           return (newMessages, .interrupted)
         } catch let ScribeError.toolUnknown(name) {
           log.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
-          jsonOutput = ToolRegistry.jsonError("unknown tool \(name)")
+          result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
         } catch {
           // Defensive: a custom ToolExecutor may throw arbitrary errors.
           // Surface them to the model as a JSON-encoded tool failure so the
@@ -168,21 +190,49 @@ func runAgentLoop(
               "tool": "\(inv.name)", "round": "\(round)",
               "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
             ])
-          jsonOutput = ToolRegistry.jsonError(String(describing: error))
+          result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
         }
         let elapsedMs = Int(toolStarted.duration(to: clock.now) / .milliseconds(1))
         log.debug(
           "agent.tool.invoke",
           metadata: [
             "round": "\(round)", "tool": "\(inv.name)",
-            "args_chars": "\(inv.arguments.count)", "output_chars": "\(jsonOutput.count)",
+            "args_chars": "\(inv.arguments.count)", "output_chars": "\(result.text.count)",
+            "attachments": "\(result.attachments.count)",
             "elapsed_ms": "\(elapsedMs)",
           ])
-        emit(.toolInvocation(name: inv.name, arguments: inv.arguments, output: jsonOutput))
+        emit(.tool(.invocation(name: inv.name, arguments: inv.arguments, output: result.text)))
+        for warning in result.warnings {
+          emit(.tool(.warning(warning)))
+        }
         let toolMsg = Components.Schemas.ChatMessage(
-          role: .tool, content: jsonOutput, name: nil, toolCalls: nil, toolCallId: inv.id)
+          role: .tool, content: .case1(result.text), name: nil, toolCalls: nil, toolCallId: inv.id)
         currentContext.messages.append(toolMsg)
         newMessages.append(toolMsg)
+
+        // If the tool returned attachments (images, PDFs, etc.), inject a
+        // follow-up user message so the model can view them on the next
+        // turn.  OpenAI-compatible APIs only accept string content in
+        // tool results, so media must flow through synthetic user messages.
+        for attachment in result.attachments {
+          let b64chars = attachment.base64.count
+          log.info(
+            "agent.tool.attachment.inject",
+            metadata: [
+              "round": "\(round)",
+              "tool": "\(inv.name)",
+              "mime_type": "\(attachment.mimeType)",
+              "base64_chars": "\(b64chars)",
+              "source_path": "\(attachment.sourcePath ?? "nil")",
+            ])
+          let parts: [ScribeContentPart] = [
+            .text((attachment.sourcePath ?? attachment.filename).map { "\($0):" } ?? "Attached media:"),
+            .image(url: attachment.dataUri, detail: nil),
+          ]
+          let imageMsg = ScribeMessage(role: .user, contentParts: parts).toChatMessage()
+          currentContext.messages.append(imageMsg)
+          newMessages.append(imageMsg)
+        }
       }
     }
   }
@@ -202,7 +252,7 @@ private enum RoundOutcome: Sendable, Equatable {
 private func runSingleRound(
   context: inout AgentContext,
   config: AgentLoopConfig,
-  emit: @escaping @Sendable (TranscriptEvent) -> Void,
+  emit: @escaping @Sendable (AgentEvent) -> Void,
   log: Logger,
   clock: ContinuousClock,
   round: Int,
@@ -292,7 +342,7 @@ private func runSingleRound(
 
   let assistantMessage = Components.Schemas.ChatMessage(
     role: .assistant,
-    content: assistantText,
+    content: .case1(assistantText),
     name: nil,
     toolCalls: toolInvocations.isEmpty
       ? nil
@@ -324,7 +374,7 @@ private func runSingleRound(
         "completion_tokens": "\(u.completionTokens.map(String.init(describing:)) ?? "nil")",
         "tps": "\(tps.map { String(format: "%.1f", $0) } ?? "nil")",
       ])
-    emit(.usage(ScribeUsage(u), tokensPerSecond: tps))
+    emit(.lifecycle(.usage(ScribeUsage(u), tokensPerSecond: tps)))
   }
 
   if toolInvocations.isEmpty {
@@ -338,4 +388,83 @@ private func runSingleRound(
   }
 
   return .toolCalls(toolInvocations)
+}
+
+// MARK: - Attachment-overflow recovery
+
+/// Heuristic: does this HTTP error look like a context-length / prompt-too-long
+/// failure that we can recover from by dropping over-sized tool attachments?
+///
+/// Provider phrasing varies — match a few common substrings rather than parse
+/// the JSON. We intentionally only recover from this specific failure shape;
+/// other 400s (bad tool args, schema mismatches) bubble up so the user sees
+/// the real cause.
+func isContextLengthError(_ error: ScribeError) -> Bool {
+  guard case .apiHTTPError(let statusCode, let detail, _) = error, statusCode == 400 else {
+    return false
+  }
+  let lower = detail.lowercased()
+  return lower.contains("context length")
+    || lower.contains("prompt is too long")
+    || lower.contains("prompt too long")
+    || lower.contains("maximum context")
+}
+
+/// Roll back the trailing synthetic-attachment user messages and replace the
+/// preceding `.tool` result with an error JSON so the model can react.
+///
+/// The shape we're rolling back is the one produced by the tool-loop in this
+/// file: a `.tool` message followed by zero or more `.user` messages whose
+/// content is multi-part (`.case2`, i.e. image/text parts). When the next LLM
+/// round explodes with a context-length error, the attachment we injected is
+/// the most likely culprit.
+///
+/// Returns the reason string suitable for the `.lifecycle(.recovered)` event,
+/// or `nil` if no recoverable shape was found at the tail (in which case the
+/// caller must propagate the original error).
+func rollbackAttachmentOverflow(
+  messages: inout [Components.Schemas.ChatMessage],
+  newMessages: inout [Components.Schemas.ChatMessage],
+  providerDetail: String
+) -> String? {
+  // Walk back past synthetic-attachment user messages (multi-part content).
+  var droppedAttachments = 0
+  while let last = messages.last,
+    last.role == .user,
+    case .case2 = last.content
+  {
+    messages.removeLast()
+    if !newMessages.isEmpty, newMessages.last?.role == .user,
+      case .case2 = newMessages.last?.content
+    {
+      newMessages.removeLast()
+    }
+    droppedAttachments += 1
+  }
+  guard droppedAttachments > 0 else { return nil }
+
+  // The tool result immediately before the attachments is what overflowed.
+  // Replace its content with a synthetic error so the model sees the
+  // cause-and-effect and can self-correct on the next round.
+  guard let toolMsgIdx = messages.lastIndex(where: { $0.role == .tool }),
+    toolMsgIdx == messages.count - 1
+  else { return nil }
+
+  let original = messages[toolMsgIdx]
+  let errorJSON = ToolRegistry.jsonError(
+    "tool output exceeded model context window — attachment(s) discarded. provider error: \(providerDetail)"
+  )
+  let replacement = Components.Schemas.ChatMessage(
+    role: .tool,
+    content: .case1(errorJSON),
+    name: original.name,
+    toolCalls: nil,
+    toolCallId: original.toolCallId
+  )
+  messages[toolMsgIdx] = replacement
+  if let newIdx = newMessages.lastIndex(where: { $0.role == .tool && $0.toolCallId == original.toolCallId })
+  {
+    newMessages[newIdx] = replacement
+  }
+  return "tool output exceeded model context — dropped \(droppedAttachments) attachment(s)"
 }

@@ -185,7 +185,7 @@ struct ScribeAgentTests {
     let ts = await agent.prompt("test")
     var texts: [String] = []
     for await event in ts.events {
-      if case .appendAssistantText(_, let text) = event { texts.append(text) }
+      if case .output(.text(_, let text)) = event { texts.append(text) }
     }
     let result = try await ts.result.value
     #expect(texts == ["hello", " world"])
@@ -205,12 +205,12 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
     let ts = await agent.prompt("test")
-    var events: [TranscriptEvent] = []
+    var events: [AgentEvent] = []
     for await event in ts.events { events.append(event) }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
     let hasInvocation = events.contains(where: {
-      if case .toolInvocation(let name, _, _) = $0, name == "fake_tool" { return true }
+      if case .tool(.invocation(let name, _, _)) = $0, name == "fake_tool" { return true }
       return false
     })
     #expect(hasInvocation)
@@ -224,11 +224,11 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks)
     let ts = await agent.prompt("test")
-    var events: [TranscriptEvent] = []
+    var events: [AgentEvent] = []
     for await event in ts.events { events.append(event) }
     _ = try await ts.result.value
     let hasUsage = events.contains(where: {
-      if case .usage(let u, _) = $0, u.promptTokens == 10, u.completionTokens == 5, u.totalTokens == 15 { return true }
+      if case .lifecycle(.usage(let u, _)) = $0, u.promptTokens == 10, u.completionTokens == 5, u.totalTokens == 15 { return true }
       return false
     })
     #expect(hasUsage)
@@ -503,10 +503,9 @@ struct ScribeAgentTests {
       workingDirectory: FilePath,
       log: Logger,
       abort: any AbortObserver
-    ) async throws -> String {
-      _ = log
+    ) async throws -> ToolResult {
       invocations.withLock { $0.append(invocation) }
-      return canned
+      return ToolResult(text: canned)
     }
   }
 
@@ -540,7 +539,8 @@ struct ScribeAgentTests {
     )
     let ts = await agent.prompt("call the tool")
     Task { for await _ in ts.events {} }
-    let result = try await ts.result.value
+    let task = ts.result
+    let result = try await task.value
     #expect(result.outcome == .completed)
     let recorded = recorder.invocations.withLock { $0 }
     #expect(recorded.count == 1)
@@ -551,6 +551,11 @@ struct ScribeAgentTests {
     // confirming the assistant saw the executor's response (not the
     // unreachable built-in).
     let toolMessage = result.messages.first { $0.role == .tool }
-    #expect(toolMessage?.content == recorder.canned)
+    #expect(stringContent(toolMessage) == recorder.canned)
   }
+}
+
+private func stringContent(_ msg: ScribeMessage?) -> String? {
+  guard let msg else { return nil }
+  return msg.content.isEmpty ? nil : msg.content
 }

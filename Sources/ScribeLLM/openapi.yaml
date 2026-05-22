@@ -101,9 +101,11 @@ components:
           type: string
           enum: [system, user, assistant, tool]
         content:
-          type:
-            - string
-            - "null"
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/ChatContentPart"
         name:
           type: string
         tool_calls:
@@ -117,6 +119,43 @@ components:
           description: >
             Chain-of-thought from a prior assistant turn; some providers (e.g. DeepSeek thinking mode)
             require this to be echoed on follow-up requests unchanged.
+      additionalProperties: true
+    ChatContentPart:
+      oneOf:
+        - $ref: "#/components/schemas/ChatTextContentPart"
+        - $ref: "#/components/schemas/ChatImageContentPart"
+      discriminator:
+        propertyName: type
+        mapping:
+          text: "#/components/schemas/ChatTextContentPart"
+          image_url: "#/components/schemas/ChatImageContentPart"
+    ChatTextContentPart:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          enum: [text]
+        text:
+          type: string
+    ChatImageContentPart:
+      type: object
+      required: [type, image_url]
+      properties:
+        type:
+          type: string
+          enum: [image_url]
+        image_url:
+          type: object
+          required: [url]
+          properties:
+            url:
+              type: string
+              description: URL or data URI (e.g. "data:image/png;base64,...")
+            detail:
+              type: string
+              enum: [auto, low, high]
+              description: Image detail level
       additionalProperties: true
     AssistantToolCall:
       type: object

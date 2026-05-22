@@ -52,6 +52,36 @@ private final class FakeClientTransport: ClientTransport, Sendable {
   }
 }
 
+/// Transport that varies status code per call, used to simulate failures
+/// in the middle of a multi-round agent loop (e.g. round 1 succeeds, round 2
+/// returns HTTP 400, round 3 succeeds again after recovery).
+private final class VariedStatusTransport: ClientTransport, Sendable {
+  private let callPlan: [(Int, [HTTPBody.ByteChunk])]
+  private let state: Mutex<Int> = Mutex(0)
+
+  init(callPlan: [(Int, [HTTPBody.ByteChunk])]) {
+    self.callPlan = callPlan
+  }
+
+  func send(
+    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+  ) async throws -> (HTTPResponse, HTTPBody?) {
+    let (statusCode, chunks) = state.withLock { idx -> (Int, [HTTPBody.ByteChunk]) in
+      let i = min(idx, callPlan.count - 1)
+      idx += 1
+      return callPlan[i]
+    }
+    let response = HTTPResponse(status: .init(code: statusCode))
+    if chunks.isEmpty { return (response, nil) }
+    let body = HTTPBody(
+      AsyncStream { continuation in
+        for chunk in chunks { continuation.yield(chunk) }
+        continuation.finish()
+      }, length: .unknown)
+    return (response, body)
+  }
+}
+
 // MARK: - Fake tools
 
 private struct FakeTool: ScribeTool {
@@ -143,7 +173,7 @@ private func runLoop(
   config: AgentLoopConfig,
   abortNotifier: AbortNotifier = AbortNotifier()
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
-  let userMsg = Components.Schemas.ChatMessage(role: .user, content: prompt)
+  let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
   return try await runAgentLoop(
     promptMessages: [userMsg],
     context: context,
@@ -160,7 +190,7 @@ private func runLoop(
   config: AgentLoopConfig,
   countingAbortObserver: CountingAbortObserver = CountingAbortObserver(triggerAt: 1)
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
-  let userMsg = Components.Schemas.ChatMessage(role: .user, content: prompt)
+  let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
   return try await runAgentLoop(
     promptMessages: [userMsg],
     context: context,
@@ -169,6 +199,14 @@ private func runLoop(
     log: testLogger,
     abortObserver: countingAbortObserver
   )
+}
+
+private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
+  guard let content = msg.content else { return nil }
+  switch content {
+  case .case1(let text): return text
+  case .case2: return nil
+  }
 }
 
 // MARK: - LoopTermination pattern helpers
@@ -201,9 +239,9 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 2)  // user + assistant
     #expect(messages[0].role == .user)
-    #expect(messages[0].content == "hello")
+    #expect(stringContent(messages[0]) == "hello")
     #expect(messages[1].role == .assistant)
-    #expect(messages[1].content == "reply")
+    #expect(stringContent(messages[1]) == "reply")
   }
 
   @Test func completesWithEmptyAssistantText() async throws {
@@ -217,7 +255,7 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(messages[1].role == .assistant)
-    #expect(messages[1].content == "")
+    #expect(stringContent(messages[1]) == "")
   }
 
   // MARK: - Tool round limit
@@ -274,7 +312,7 @@ struct AgentLoopTests {
     #expect(messages[2].role == .tool)
     #expect(messages[2].toolCallId == "c1")
     #expect(messages[3].role == .assistant)
-    #expect(messages[3].content == "done")
+    #expect(stringContent(messages[3]) == "done")
   }
 
   // MARK: - Abort: before-http
@@ -398,7 +436,7 @@ struct AgentLoopTests {
       #expect(toolMessages.count >= 1)
       if let toolMsg = toolMessages.first {
         #expect(toolMsg.toolCallId == "c1")
-        #expect(toolMsg.content?.contains("unknown tool") == true)
+        #expect(stringContent(toolMsg)?.contains("unknown tool") == true)
       }
     }
   }
@@ -481,8 +519,8 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"1","choices":[],"usage":{"prompt_tokens":10,"total_tokens":10}}"#),
       doneChunk(),
     ]
-    let events = Mutex<[TranscriptEvent]>([])
-    let userMsg = Components.Schemas.ChatMessage(role: .user, content: "test")
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("test"))
     let (_, termination) = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
@@ -493,8 +531,8 @@ struct AgentLoopTests {
     )
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
-    let usageEvents = captured.compactMap { (e: TranscriptEvent) -> (ScribeUsage, Double?)? in
-      if case .usage(let u, let tps) = e { return (u, tps) }
+    let usageEvents = captured.compactMap { (e: AgentEvent) -> (ScribeUsage, Double?)? in
+      if case .lifecycle(.usage(let u, let tps)) = e { return (u, tps) }
       return nil
     }
     #expect(usageEvents.count == 1)
@@ -516,7 +554,7 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(messages[1].role == .assistant)
-    #expect(messages[1].content == "answer")
+    #expect(stringContent(messages[1]) == "answer")
     #expect(messages[1].reasoningContent == "Let me think...")
   }
 
@@ -528,9 +566,9 @@ struct AgentLoopTests {
       doneChunk(),
     ]
     let initialMessages: [Components.Schemas.ChatMessage] = [
-      .init(role: .system, content: "System prompt"),
-      .init(role: .user, content: "previous question"),
-      .init(role: .assistant, content: "previous answer"),
+      .init(role: .system, content: .case1("System prompt")),
+      .init(role: .user, content: .case1("previous question")),
+      .init(role: .assistant, content: .case1("previous answer")),
     ]
     let context = AgentContext(messages: initialMessages)
     let (messages, termination) = try await runAgentLoop(
@@ -545,7 +583,7 @@ struct AgentLoopTests {
     // Only the new assistant message is returned
     #expect(messages.count == 1)
     #expect(messages[0].role == .assistant)
-    #expect(messages[0].content == "reply")
+    #expect(stringContent(messages[0]) == "reply")
   }
 
   // MARK: - Multiple tool calls in one round
@@ -586,7 +624,7 @@ struct AgentLoopTests {
     #expect(messages[3].role == .tool)
     #expect(messages[3].toolCallId == "c2")
     #expect(messages[4].role == .assistant)
-    #expect(messages[4].content == "all done")
+    #expect(stringContent(messages[4]) == "all done")
   }
 
   // MARK: - Tool that throws (error is caught and converted to jsonError)
@@ -623,7 +661,150 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 4)
     #expect(messages[2].role == .tool)
-    #expect(messages[2].content?.contains("ok") == true)
+    #expect(stringContent(messages[2])?.contains("ok") == true)
+  }
+
+  // MARK: - Attachment-overflow recovery
+
+  /// A tool whose result conforms to `AttachableToolResult` so the agent
+  /// loop appends a synthetic-attachment user message after the tool result.
+  /// This is the shape that produces the bug fixed by recovery: the next
+  /// LLM round explodes with a context-length error.
+  private struct AttachingTool: ScribeTool {
+    static var name: String { "attaching_tool" }
+    static var description: String { "Returns an image attachment for testing." }
+    static var parameters: [ScribeToolParameter] { [] }
+    static var promptHint: String? { nil }
+    struct Result: Encodable, AttachableToolResult {
+      let ok = true
+      var toolAttachments: [ToolAttachment] {
+        [ToolAttachment(mimeType: "image/png", base64: "AAAA", filename: "tiny.png", sourcePath: nil)]
+      }
+    }
+    func run(arguments: String, workingDirectory: FilePath, log: Logger) async throws -> Encodable {
+      _ = log
+      return Result()
+    }
+  }
+
+  @Test func contextOverflowRecoversByRollingBackAttachments() async throws {
+    // Round 1 (200): assistant requests attaching_tool.
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"attaching_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    // Round 2 (400): provider rejects the request — context length exceeded.
+    let overflowBody: HTTPBody.ByteChunk = ArraySlice(
+      #"{"error":{"message":"The prompt is too long: 798932, model maximum context length: 262143"}}"#
+        .utf8)
+    // Round 3 (200): assistant produces final answer after recovery.
+    let recoveryChunks = [
+      sseChunk(#"{"id":"3","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = VariedStatusTransport(callPlan: [
+      (200, toolChunks),
+      (400, [overflowBody]),
+      (200, recoveryChunks),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool()], log: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
+    let (messages, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { e in events.withLock { $0.append(e) } },
+      log: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+
+    // Exactly one recovery event surfaced.
+    let recovered = events.withLock { $0 }.compactMap { e -> String? in
+      if case .lifecycle(.recovered(let reason)) = e { return reason }
+      return nil
+    }
+    #expect(recovered.count == 1)
+    #expect(recovered.first?.contains("attachment") == true)
+
+    // No synthetic-attachment user messages survive in the final transcript.
+    let attachmentSurvivors = messages.filter { msg in
+      guard msg.role == .user, case .case2 = msg.content else { return false }
+      return true
+    }
+    #expect(attachmentSurvivors.isEmpty)
+
+    // The tool result that previously held the image was rewritten to a
+    // synthetic error JSON so the model could self-correct.
+    let toolMsg = messages.first { $0.role == .tool }
+    #expect(toolMsg?.toolCallId == "c1")
+    #expect(stringContent(toolMsg!)?.contains("exceeded model context") == true)
+
+    // Final assistant turn from the recovery round.
+    #expect(messages.last?.role == .assistant)
+    #expect(stringContent(messages.last!) == "done")
+  }
+
+  /// Recovery is capped at one attempt per turn: if the very next request
+  /// also fails with a context-length error, the loop must propagate it
+  /// rather than spin forever.
+  @Test func contextOverflowRecoveryRunsAtMostOncePerTurn() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"attaching_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let overflowBody: HTTPBody.ByteChunk = ArraySlice(
+      #"{"error":{"message":"The prompt is too long: 798932, model maximum context length: 262143"}}"#
+        .utf8)
+    let transport = VariedStatusTransport(callPlan: [
+      (200, toolChunks),
+      (400, [overflowBody]),
+      (400, [overflowBody]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool()], log: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
+    )
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
+    do {
+      _ = try await runAgentLoop(
+        promptMessages: [userMsg],
+        context: AgentContext(messages: []),
+        config: config,
+        emit: { _ in },
+        log: testLogger,
+        abortObserver: AbortNotifier()
+      )
+      #expect(Bool(false), "expected error")
+    } catch let ScribeError.apiHTTPError(statusCode, _, _) {
+      #expect(statusCode == 400)
+    } catch {
+      #expect(Bool(false), "unexpected error: \(error)")
+    }
   }
 
   // MARK: - AgentTurnInterruptedError mid-stream

@@ -184,7 +184,7 @@ import ScribeCore
       configuration: .parseFromEnvironment()
     ).runIgnoringFailures(logger: log)
 
-    try await SlateChat.runFullscreen(
+    let exitInfo = try await SlateChat.runFullscreen(
       configuration: scribeConfig,
       systemPrompt: systemPrompt,
       resumeMessages: resumeMessages,
@@ -193,10 +193,18 @@ import ScribeCore
       log: log
     )
     log.notice("chat.session.end", metadata: ["status": "ok"])
-    printExitResumeHint(
-      sessionId: sessionId,
-      sessionPersistenceURL: sessionPersistenceURL
-    )
+    if let forkedId = exitInfo.forkedToSessionId, let forkedURL = exitInfo.forkedToURL {
+      printForkResumeHint(
+        parentSessionId: exitInfo.forkedFromSessionId ?? sessionId,
+        forkedSessionId: forkedId,
+        forkedSessionURL: forkedURL
+      )
+    } else {
+      printExitResumeHint(
+        sessionId: sessionId,
+        sessionPersistenceURL: sessionPersistenceURL
+      )
+    }
   }
 
   // MARK: - Info
@@ -239,6 +247,20 @@ extension ScribeCLI {
       CommandLine.arguments.first.map { NSString(string: $0).lastPathComponent } ?? "scribe"
     let hint = "\(binaryName) -r  # or \(binaryName) --resume \(specifier)"
     guard let text = ("Resume with: \(hint)\n").data(using: .utf8) else { return }
+    try? FileHandle.standardError.write(contentsOf: text)
+  }
+
+  fileprivate func printForkResumeHint(
+    parentSessionId: UUID,
+    forkedSessionId: UUID,
+    forkedSessionURL: URL
+  ) {
+    let binaryName =
+      CommandLine.arguments.first.map { NSString(string: $0).lastPathComponent } ?? "scribe"
+    let line =
+      "Session ended on fork \(forkedSessionId.uuidString) (parent: \(parentSessionId.uuidString))\n"
+      + "Resume with: \(binaryName) --resume \(forkedSessionId.uuidString)\n"
+    guard let text = line.data(using: .utf8) else { return }
     try? FileHandle.standardError.write(contentsOf: text)
   }
 

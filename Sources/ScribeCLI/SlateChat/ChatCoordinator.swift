@@ -109,9 +109,8 @@ final class ChatCoordinator: Sendable {
           scribeVersion: GitVersion.hash
         )
         try? ChatSessionStore.saveMetadata(meta, to: persistURL)
+        try ChatSessionStore.appendMessages(initialMessages, to: persistURL)
       }
-
-      try ChatSessionStore.appendMessages(initialMessages, to: persistURL)
       var persistedCount = initialMessages.count
 
       let msgCount = initialMessages.count
@@ -146,15 +145,17 @@ final class ChatCoordinator: Sendable {
         enqueue(.modelTurnRunning(true))
         defer { enqueue(.modelTurnRunning(false)) }
 
+        let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
+
         // Track the messages the agent committed during this turn so we can
         // persist + emit `turnComplete` without reaching back into the
         // agent's storage actor. Falls back to the agent's snapshot if the
         // turn never produced a TurnResult (e.g. HTTP error before stream).
         var committed: [ScribeMessage]? = nil
         do {
-          let ts = await agent.prompt(trimmed)
+          let ts = await agent.prompt(promptMessages)
           for await event in ts.events {
-            if case .usage(let usage, _) = event { tracker.accumulate(usage: usage) }
+            if case .lifecycle(.usage(let usage, _)) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))
           }
           let result = try await ts.result.value
@@ -165,12 +166,12 @@ final class ChatCoordinator: Sendable {
             tracker.logStatus(logger: log)
           case .interrupted:
             log.notice("agent.turn.end", metadata: ["status": "interrupted"])
-            enqueue(.transcript(.turnInterrupted))
+            enqueue(.transcript(.lifecycle(.interrupted)))
           case .toolRoundLimit(let max):
             log.notice(
               "agent.turn.end",
               metadata: ["status": "tool-round-limit", "limit": "\(max)"])
-            enqueue(.transcript(.turnInterrupted))
+            enqueue(.transcript(.lifecycle(.interrupted)))
           }
         } catch {
           let se = (error as? ScribeError) ?? .generic(String(describing: error))
@@ -180,7 +181,7 @@ final class ChatCoordinator: Sendable {
               "status": "error",
               "err": "\(se.errorDescription ?? String(describing: se))",
             ])
-          enqueue(.transcript(.harnessError(se)))
+          enqueue(.transcript(.lifecycle(.error(se))))
         }
 
         let allMessages: [ScribeMessage]
@@ -200,7 +201,7 @@ final class ChatCoordinator: Sendable {
         metadata: ["transcript_messages": "\(trailing.count)"])
     } catch {
       let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-      enqueue(.transcript(.harnessError(scribeError)))
+      enqueue(.transcript(.lifecycle(.error(scribeError))))
       log.error(
         "chat.coordinator.fail",
         metadata: [

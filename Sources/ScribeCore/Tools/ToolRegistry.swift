@@ -26,7 +26,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     workingDirectory: FilePath,
     log: Logger,
     abort: any AbortObserver
-  ) async throws -> String {
+  ) async throws -> ToolResult {
     try await run(
       name: invocation.name,
       arguments: invocation.arguments,
@@ -52,14 +52,14 @@ public struct ToolRegistry: Sendable, ToolExecutor {
   ///
   /// - Throws: `AgentTurnInterruptedError` if abort fires.
   /// - Throws: `ScribeError.toolUnknown` if the tool `name` is not in the registry.
-  /// - Returns: JSON-encoded tool result (or JSON error string for tool failures).
+  /// - Returns: `ToolResult` with JSON-encoded tool output and any attachments.
   internal func run(
     name: String,
     arguments: String,
     workingDirectory: FilePath,
     log: Logger,
     abortObserver: some AbortObserver
-  ) async throws -> String {
+  ) async throws -> ToolResult {
     guard let tool = tools[name] else {
       log.debug(
         "agent.tool.unknown",
@@ -91,10 +91,10 @@ public struct ToolRegistry: Sendable, ToolExecutor {
       throw AgentTurnInterruptedError()
     }
 
-    let json: String
+    let result: ToolResult
     do {
       let groupStart = clock.now
-      json = try await withThrowingTaskGroup(of: String.self) { group in
+      result = try await withThrowingTaskGroup(of: ToolResult.self) { group in
         group.addTask {
           do {
             log.trace(
@@ -108,15 +108,34 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               let encoder = JSONEncoder()
               encoder.keyEncodingStrategy = .convertToSnakeCase
               let encoded = try Self.encode(value, using: encoder)
+              let attachments: [ToolAttachment]
+              if let attachable = value as? AttachableToolResult {
+                attachments = attachable.toolAttachments
+                if !attachments.isEmpty {
+                  log.info(
+                    "agent.tool.attachments.detected",
+                    metadata: [
+                      "tool": "\(name)",
+                      "count": "\(attachments.count)",
+                      "mime_types": "\(attachments.map(\.mimeType).joined(separator: ", "))",
+                      "total_base64_chars": "\(attachments.map(\.base64.count).reduce(0, +))",
+                    ])
+                }
+              } else {
+                attachments = []
+              }
+              let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
               log.debug(
                 "agent.tool.completed",
                 metadata: [
                   "tool": "\(name)",
                   "elapsed_ms": "\(elapsedMs)",
                   "output_chars": "\(encoded.count)",
+                  "attachments": "\(attachments.count)",
+                  "warnings": "\(warnings.count)",
                   "args": "\(arguments.logSafe())",
                 ])
-              return encoded
+              return ToolResult(text: encoded, attachments: attachments, warnings: warnings)
             } catch {
               log.warning(
                 "agent.tool.encode_failed",
@@ -126,7 +145,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
                   "args": "\(arguments.logSafe())",
                   "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
                 ])
-              return Self.jsonError(String(describing: error))
+              return ToolResult.text(Self.jsonError(String(describing: error)))
             }
           } catch {
             let elapsed = start.duration(to: clock.now)
@@ -139,7 +158,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
                 "args": "\(arguments.logSafe())",
                 "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
               ])
-            return Self.jsonError(String(describing: error))
+            return ToolResult.text(Self.jsonError(String(describing: error)))
           }
         }
         group.addTask {
@@ -163,7 +182,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
           // Stream ended without an abort — only happens when this watch
           // task itself is cancelled (the tool task already won).  Throw
           // CancellationError to satisfy the throwing-task-group's
-          // `String` return contract; the group has already accepted the
+          // `ToolResult` return contract; the group has already accepted the
           // tool's result, so this error is dropped.
           throw CancellationError()
         }
@@ -177,7 +196,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
           metadata: [
             "tool": "\(name)",
             "elapsed_ms": "\(Int(groupStart.duration(to: clock.now) / .milliseconds(1)))",
-            "result_chars": "\(winner.count)",
+            "result_chars": "\(winner.text.count)",
           ])
         return winner
       }
@@ -210,10 +229,10 @@ public struct ToolRegistry: Sendable, ToolExecutor {
           "args": "\(arguments.logSafe())",
           "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
         ])
-      return Self.jsonError(String(describing: error))
+      return ToolResult.text(Self.jsonError(String(describing: error)))
     }
 
-    return json
+    return result
   }
 
   // MARK: - Encoding helpers

@@ -4,6 +4,79 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
+// MARK: - ToolAttachment / ToolResult
+
+/// Media content returned by a tool — images, PDFs, audio, etc.
+///
+/// When a tool produces an attachment, the agent loop injects a synthetic
+/// user message carrying the attachment so the model can view it on the next
+/// turn (OpenAI-compatible APIs only accept string content in tool results).
+public struct ToolAttachment: Sendable {
+  public let mimeType: String  // e.g. "image/png", "application/pdf"
+  public let base64: String    // base64-encoded bytes
+  public let filename: String? // optional display name
+  public let sourcePath: String? // optional source path
+
+  public init(
+    mimeType: String,
+    base64: String,
+    filename: String? = nil,
+    sourcePath: String? = nil
+  ) {
+    self.mimeType = mimeType
+    self.base64 = base64
+    self.filename = filename
+    self.sourcePath = sourcePath
+  }
+
+  /// "data:\(mimeType);base64,\(base64)" data URI for use in `ScribeContentPart.image(url:)`.
+  public var dataUri: String { "data:\(mimeType);base64,\(base64)" }
+}
+
+/// Bundled tool output: JSON/text content for the tool-result message plus
+/// optional attachments that get injected as synthetic user messages.
+public struct ToolResult: Sendable {
+  /// JSON/text output to place in the `role: .tool` message.
+  public let text: String
+  /// Attachments to inject as follow-up user messages.
+  public let attachments: [ToolAttachment]
+  /// User-visible warnings to surface as `AgentEvent.tool(.warning(_))`.
+  public let warnings: [String]
+
+  public init(text: String, attachments: [ToolAttachment] = [], warnings: [String] = []) {
+    self.text = text
+    self.attachments = attachments
+    self.warnings = warnings
+  }
+}
+
+/// Opt-in protocol for tool result types that carry attachments.
+///
+/// Conform a tool's `Encodable` result type to this protocol and return
+/// non-empty ``toolAttachments``. ``ToolRegistry`` detects the conformance
+/// and builds a ``ToolResult`` with the attachments, avoiding the old
+/// `isImage` / JSON-parse dance in the agent loop.
+public protocol AttachableToolResult {
+  var toolAttachments: [ToolAttachment] { get }
+}
+
+/// Opt-in protocol for tool result types that carry user-visible warnings.
+///
+/// ``ToolRegistry`` detects the conformance and populates ``ToolResult/warnings``,
+/// which ``AgentLoop`` emits as ``AgentEvent`` `.tool(.warning(_))` entries.
+public protocol WarnableToolResult {
+  var toolWarnings: [String] { get }
+}
+
+// MARK: - Tool executor result helper
+
+extension ToolResult {
+  /// Create a text-only `ToolResult` suitable for error / unknown-tool reporting.
+  public static func text(_ string: String) -> ToolResult {
+    ToolResult(text: string)
+  }
+}
+
 // MARK: - Tool protocol
 
 /// A tool that can be registered and invoked by the agent.

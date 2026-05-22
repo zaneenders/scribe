@@ -63,7 +63,7 @@ struct TranscriptRenderIntegrationTests {
       "Frame 1: transcript area should be blank")
 
     // ── Frame 2: User message arrives (after coordinator runs) ──
-    // Simulate handleTranscriptEvent(.userSubmitted("hello"))
+    // Simulate handleAgentEvent(.userSubmitted("hello"))
     transcriptLines.append(
       TLine(spans: [StyledSpan(fg: theme.userPrefix, bg: theme.background, bold: false, text: "you:")]))
     transcriptLines.append(
