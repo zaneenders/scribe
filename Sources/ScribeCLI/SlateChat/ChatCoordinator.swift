@@ -153,7 +153,7 @@ final class ChatCoordinator: Sendable {
         // turn never produced a TurnResult (e.g. HTTP error before stream).
         var committed: [ScribeMessage]? = nil
         do {
-          let ts = await agent.prompt(promptMessages)
+          let ts = await agent.stream(promptMessages)
           for await event in ts.events {
             if case .lifecycle(.usage(let usage, _)) = event { tracker.accumulate(usage: usage) }
             enqueue(.transcript(event))

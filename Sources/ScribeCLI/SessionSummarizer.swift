@@ -101,7 +101,7 @@ enum SessionSummarizer {
         "transcript_chars": "\(rendered.count)",
       ])
 
-    let turn = await agent.prompt(userPrompt)
+    let turn = await agent.stream(userPrompt)
     for await _ in turn.events { /* drain — we only need the result */ }
     let result = try await turn.result.value
     // The last assistant message contains the summary; storage holds

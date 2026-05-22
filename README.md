@@ -59,7 +59,7 @@ Set `SCRIBE_HOME` to override the `~/.scribe` data directory for config, logs, a
 | `agent.model` | `gemma4:e2b` | Model name |
 | `agent.contextWindow` | `128000` | Token context window size |
 | `agent.contextWindowThreshold` | `0.8` | Fraction (0–1) that triggers context compaction |
-| `logging.level` | `info` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
+| `logging.level` | `trace` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
 
 > Only OpenAI-compatible `completions` APIs are supported right now.
 

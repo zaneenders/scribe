@@ -193,17 +193,17 @@ public struct ScribeAgent: Sendable {
 
   // MARK: - stream
 
-  public func prompt(
+  public func stream(
     _ input: String,
     options: AgentRunOptions = AgentRunOptions()
   ) async -> TurnStream {
-    await prompt([ScribeMessage(role: .user, content: input)], options: options)
+    await stream([ScribeMessage(role: .user, content: input)], options: options)
   }
 
   /// Send a batch of ``ScribeMessage`` values as the next turn. Messages
   /// are bridged to the wire shape once on the way into ``runAgentLoop`` —
   /// the OpenAPI type never crosses the public API surface.
-  public func prompt(
+  public func stream(
     _ promptMessages: [ScribeMessage],
     options: AgentRunOptions = AgentRunOptions()
   ) async -> TurnStream {

@@ -247,7 +247,7 @@ public enum ConfigLoader {
         reasoning: false
       ),
       logging: ConfigTemplate.LoggingSection(
-        level: "info"
+        level: "trace"
       )
     )
     let encoder = JSONEncoder()
