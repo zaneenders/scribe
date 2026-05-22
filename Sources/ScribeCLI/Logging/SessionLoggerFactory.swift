@@ -1,7 +1,7 @@
 import Foundation
 import Logging
 
-/// Builds per-invocation loggers for the CLI (file under the session directory or stderr fallback).
+/// Builds per-invocation loggers for the CLI (append-only file under the session directory).
 enum SessionLoggerFactory {
 
   /// Appends to the given log file path (creates parent directories and file if needed).
@@ -13,25 +13,21 @@ enum SessionLoggerFactory {
   ) -> Logger {
     let fileURL = URL(fileURLWithPath: logFilePath, isDirectory: false)
 
-    if let writer = try? AppendOnlyFileWriter(fileURL: fileURL) {
-      let dataWriter = LockedDataWriter { data in
-        try? writer.append(data)
-      }
-      var sessionLogger = Logger(label: "scribe.session") { _ in
-        ScribeLineLogHandler(minimumLevel: minimumLevel, dataWriter: dataWriter)
-      }
-      sessionLogger[metadataKey: "session_id"] = "\(sessionId.uuidString)"
-      return sessionLogger
+    let writer: AppendOnlyFileWriter
+    do {
+      writer = try AppendOnlyFileWriter(fileURL: fileURL)
+    } catch {
+      fatalError(
+        "Could not open session log at \(logFilePath): \(error.localizedDescription)")
     }
 
-    var fallback = Logger(label: "scribe.session") { _ in
-      ScribeLineLogHandler(
-        minimumLevel: minimumLevel,
-        dataWriter: LockedDataWriter { data in
-          try? FileHandle.standardError.write(contentsOf: data)
-        })
+    let dataWriter = LockedDataWriter { data in
+      try? writer.append(data)
     }
-    fallback[metadataKey: "session_id"] = "\(sessionId.uuidString)"
-    return fallback
+    var sessionLogger = Logger(label: "scribe.session") { _ in
+      ScribeLineLogHandler(minimumLevel: minimumLevel, dataWriter: dataWriter)
+    }
+    sessionLogger[metadataKey: "session_id"] = "\(sessionId.uuidString)"
+    return sessionLogger
   }
 }
