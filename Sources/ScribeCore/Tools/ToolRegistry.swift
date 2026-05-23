@@ -93,65 +93,48 @@ public struct ToolRegistry: Sendable, ToolExecutor {
 
     let result: ToolResult
     do {
-      let groupStart = clock.now
-      result = try await withThrowingTaskGroup(of: ToolResult.self) { group in
-        group.addTask {
+      result = try await abortObserver.race {
+        [tool, arguments, workingDirectory, logger, start, clock, name] in
+        logger.trace("agent.tool.task.calling-run", metadata: ["tool": "\(name)"])
+        do {
+          let value = try await tool.run(
+            arguments: arguments, workingDirectory: workingDirectory, logger: logger)
+          let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
           do {
-            logger.trace(
-              "agent.tool.task.calling-run",
-              metadata: ["tool": "\(name)"])
-            let value = try await tool.run(
-              arguments: arguments, workingDirectory: workingDirectory, logger: logger)
-            let elapsed = start.duration(to: clock.now)
-            let elapsedMs = Int(elapsed / .milliseconds(1))
-            do {
-              let encoder = JSONEncoder()
-              encoder.keyEncodingStrategy = .convertToSnakeCase
-              let encoded = try Self.encode(value, using: encoder)
-              let attachments: [ToolAttachment]
-              if let attachable = value as? AttachableToolResult {
-                attachments = attachable.toolAttachments
-                if !attachments.isEmpty {
-                  logger.info(
-                    "agent.tool.attachments.detected",
-                    metadata: [
-                      "tool": "\(name)",
-                      "count": "\(attachments.count)",
-                      "mime_types": "\(attachments.map(\.mimeType).joined(separator: ", "))",
-                      "total_base64_chars": "\(attachments.map(\.base64.count).reduce(0, +))",
-                    ])
-                }
-              } else {
-                attachments = []
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            let encoded = try Self.encode(value, using: encoder)
+            let attachments: [ToolAttachment]
+            if let attachable = value as? AttachableToolResult {
+              attachments = attachable.toolAttachments
+              if !attachments.isEmpty {
+                logger.info(
+                  "agent.tool.attachments.detected",
+                  metadata: [
+                    "tool": "\(name)",
+                    "count": "\(attachments.count)",
+                    "mime_types": "\(attachments.map(\.mimeType).joined(separator: ", "))",
+                    "total_base64_chars": "\(attachments.map(\.base64.count).reduce(0, +))",
+                  ])
               }
-              let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
-              logger.debug(
-                "agent.tool.completed",
-                metadata: [
-                  "tool": "\(name)",
-                  "elapsed_ms": "\(elapsedMs)",
-                  "output_chars": "\(encoded.count)",
-                  "attachments": "\(attachments.count)",
-                  "warnings": "\(warnings.count)",
-                  "args": "\(arguments.logSafe())",
-                ])
-              return ToolResult(text: encoded, attachments: attachments, warnings: warnings)
-            } catch {
-              logger.warning(
-                "agent.tool.encode_failed",
-                metadata: [
-                  "tool": "\(name)",
-                  "elapsed_ms": "\(elapsedMs)",
-                  "args": "\(arguments.logSafe())",
-                  "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
-                ])
-              return ToolResult.text(Self.jsonError(String(describing: error)))
+            } else {
+              attachments = []
             }
+            let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
+            logger.debug(
+              "agent.tool.completed",
+              metadata: [
+                "tool": "\(name)",
+                "elapsed_ms": "\(elapsedMs)",
+                "output_chars": "\(encoded.count)",
+                "attachments": "\(attachments.count)",
+                "warnings": "\(warnings.count)",
+                "args": "\(arguments.logSafe())",
+              ])
+            return ToolResult(text: encoded, attachments: attachments, warnings: warnings)
           } catch {
-            let elapsed = start.duration(to: clock.now)
-            let elapsedMs = Int(elapsed / .milliseconds(1))
-            logger.trace(
-              "agent.tool.task.exited",
+            logger.warning(
+              "agent.tool.encode_failed",
               metadata: [
                 "tool": "\(name)",
                 "elapsed_ms": "\(elapsedMs)",
@@ -160,54 +143,27 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               ])
             return ToolResult.text(Self.jsonError(String(describing: error)))
           }
-        }
-        group.addTask {
-          // Watch task: sleeps inside `notifier.signals()` until
-          // `request()` fires, then re-checks `isAborted()` as a cheap
-          // defence against spurious yields (e.g. a late subscriber
-          // catching a residual signal from a previous turn that the host
-          // hasn't cleared yet).  Zero idle wake-ups — the AsyncStream
-          // suspends until either signal or task-group cancellation.
+        } catch {
+          // Convert any tool error (including AgentTurnInterruptedError thrown
+          // by the tool itself) to a JSON error result. This keeps tool-level
+          // failures as recoverable tool messages rather than loop aborts.
+          // CancellationError from abort-race cancellation is also caught here
+          // but its result is discarded — the watcher task already won the race.
+          let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
           logger.trace(
-            "agent.tool.abort-watch.start",
-            metadata: ["tool": "\(name)"])
-          for await _ in abortObserver.signals() {
-            if abortObserver.isAborted() {
-              logger.trace(
-                "agent.tool.abort-watch.fired",
-                metadata: ["tool": "\(name)"])
-              throw AgentTurnInterruptedError()
-            }
-          }
-          // Stream ended without an abort — only happens when this watch
-          // task itself is cancelled (the tool task already won).  Throw
-          // CancellationError to satisfy the throwing-task-group's
-          // `ToolResult` return contract; the group has already accepted the
-          // tool's result, so this error is dropped.
-          throw CancellationError()
+            "agent.tool.task.exited",
+            metadata: [
+              "tool": "\(name)",
+              "elapsed_ms": "\(elapsedMs)",
+              "args": "\(arguments.logSafe())",
+              "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+            ])
+          return ToolResult.text(Self.jsonError(String(describing: error)))
         }
-        let winner = try await group.next()!
-        // Tool task completed — cancel the polling task so the group
-        // can exit cleanly.  (In the abort case the poller already threw,
-        // so cancelAll() is a harmless no-op here.)
-        group.cancelAll()
-        logger.trace(
-          "agent.tool.taskgroup.first-completed",
-          metadata: [
-            "tool": "\(name)",
-            "elapsed_ms": "\(Int(groupStart.duration(to: clock.now) / .milliseconds(1)))",
-            "result_chars": "\(winner.text.count)",
-          ])
-        return winner
       }
-      let cleanupMs = Int(start.duration(to: clock.now) / .milliseconds(1))
-      logger.trace(
-        "agent.tool.taskgroup.all-completed",
-        metadata: [
-          "tool": "\(name)",
-          "cleanup_elapsed_ms": "\(cleanupMs)",
-        ])
     } catch is AgentTurnInterruptedError {
+      // Only the watcher task throws AgentTurnInterruptedError out of `race`
+      // (tool errors are converted above). Re-throw to unwind the agent loop.
       let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
       logger.debug(
         "agent.tool.errored",
@@ -218,18 +174,6 @@ public struct ToolRegistry: Sendable, ToolExecutor {
           "error": "AgentTurnInterruptedError",
         ])
       throw AgentTurnInterruptedError()
-    } catch {
-      let elapsed = start.duration(to: clock.now)
-      let elapsedMs = Int(elapsed / .milliseconds(1))
-      logger.debug(
-        "agent.tool.errored",
-        metadata: [
-          "tool": "\(name)",
-          "elapsed_ms": "\(elapsedMs)",
-          "args": "\(arguments.logSafe())",
-          "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
-        ])
-      return ToolResult.text(Self.jsonError(String(describing: error)))
     }
 
     return result

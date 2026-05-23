@@ -88,7 +88,7 @@ func runAgentLoop(
       // alone never reaches those `await`s. Running the round as a child task
       // lets the watcher task cancel it on abort, which propagates down to
       // AsyncHTTPClient and tears down the connection.
-      let outcome = try await runWithAbortRace(observer: abortObserver) {
+      let outcome = try await abortObserver.race {
         [currentContext, config, emit, logger, round] in
         var localCtx = currentContext
         let result = try await runSingleRound(
@@ -255,42 +255,6 @@ private enum RoundOutcome: Sendable, Equatable {
 private struct RoundExecutionResult: Sendable {
   let context: AgentContext
   let outcome: RoundOutcome
-}
-
-// MARK: - Abort race
-
-/// Race an async operation against the abort observer. If `observer` fires
-/// before `operation` completes, the operation task is cancelled — which
-/// propagates down to AsyncHTTPClient and breaks any in-flight network I/O —
-/// and `AgentTurnInterruptedError` is thrown.
-///
-/// Mirrors the pattern in ``ToolRegistry/run`` so cooperative-cancellation
-/// semantics stay consistent across the agent loop and tool execution paths.
-private func runWithAbortRace<T: Sendable, AO: AbortObserver>(
-  observer: AO,
-  operation: @escaping @Sendable () async throws -> T
-) async throws -> T {
-  try await withThrowingTaskGroup(of: T.self) { group in
-    group.addTask { try await operation() }
-    group.addTask {
-      for await _ in observer.signals() {
-        if observer.isAborted() {
-          throw AgentTurnInterruptedError()
-        }
-      }
-      // Stream ended without an abort. With the real ``AbortNotifier`` this
-      // only happens when the watch task itself is cancelled (operation
-      // already won). With test fakes that synthesize an empty stream we
-      // must not throw here — that would preempt the operation and surface
-      // as a spurious cancellation. Suspend until the parent cancels us;
-      // the operation's own polling checkpoints handle abort in that mode.
-      try await Task.sleep(for: .seconds(86_400))
-      throw CancellationError()
-    }
-    let winner = try await group.next()!
-    group.cancelAll()
-    return winner
-  }
 }
 
 // MARK: - Single round
