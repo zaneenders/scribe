@@ -82,15 +82,28 @@ func runAgentLoop(
     let messagesCountBeforeRound = currentContext.messages.count
     let roundResult: RoundOutcome
     do {
-      roundResult = try await runSingleRound(
-        context: &currentContext,
-        config: config,
-        emit: emit,
-        logger: logger,
-        clock: clock,
-        round: round,
-        abortObserver: abortObserver
-      )
+      // Race the round against the abort observer. The HTTP request and SSE
+      // stream consumption inside `runSingleRound` suspend indefinitely when
+      // the network is down or the connection stalls; polling `isAborted()`
+      // alone never reaches those `await`s. Running the round as a child task
+      // lets the watcher task cancel it on abort, which propagates down to
+      // AsyncHTTPClient and tears down the connection.
+      let outcome = try await runWithAbortRace(observer: abortObserver) {
+        [currentContext, config, emit, logger, round] in
+        var localCtx = currentContext
+        let result = try await runSingleRound(
+          context: &localCtx,
+          config: config,
+          emit: emit,
+          logger: logger,
+          clock: clock,
+          round: round,
+          abortObserver: abortObserver
+        )
+        return RoundExecutionResult(context: localCtx, outcome: result)
+      }
+      currentContext = outcome.context
+      roundResult = outcome.outcome
     } catch is AgentTurnInterruptedError {
       logger.notice(
         "agent.abort",
@@ -233,6 +246,51 @@ func runAgentLoop(
 private enum RoundOutcome: Sendable, Equatable {
   case completed
   case toolCalls([ToolInvocation])
+}
+
+/// Carries the post-round context snapshot back across the abort-race task
+/// group. `runSingleRound` mutates its `inout context`; the child task owns a
+/// local copy and returns the new state so the parent can commit it after the
+/// race resolves.
+private struct RoundExecutionResult: Sendable {
+  let context: AgentContext
+  let outcome: RoundOutcome
+}
+
+// MARK: - Abort race
+
+/// Race an async operation against the abort observer. If `observer` fires
+/// before `operation` completes, the operation task is cancelled — which
+/// propagates down to AsyncHTTPClient and breaks any in-flight network I/O —
+/// and `AgentTurnInterruptedError` is thrown.
+///
+/// Mirrors the pattern in ``ToolRegistry/run`` so cooperative-cancellation
+/// semantics stay consistent across the agent loop and tool execution paths.
+private func runWithAbortRace<T: Sendable, AO: AbortObserver>(
+  observer: AO,
+  operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+  try await withThrowingTaskGroup(of: T.self) { group in
+    group.addTask { try await operation() }
+    group.addTask {
+      for await _ in observer.signals() {
+        if observer.isAborted() {
+          throw AgentTurnInterruptedError()
+        }
+      }
+      // Stream ended without an abort. With the real ``AbortNotifier`` this
+      // only happens when the watch task itself is cancelled (operation
+      // already won). With test fakes that synthesize an empty stream we
+      // must not throw here — that would preempt the operation and surface
+      // as a spurious cancellation. Suspend until the parent cancels us;
+      // the operation's own polling checkpoints handle abort in that mode.
+      try await Task.sleep(for: .seconds(86_400))
+      throw CancellationError()
+    }
+    let winner = try await group.next()!
+    group.cancelAll()
+    return winner
+  }
 }
 
 // MARK: - Single round
