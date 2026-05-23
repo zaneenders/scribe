@@ -52,6 +52,22 @@ private final class FakeClientTransport: ClientTransport, Sendable {
   }
 }
 
+/// Transport that suspends `send` indefinitely until the calling task is
+/// cancelled. Used to simulate the network-down / server-unreachable case
+/// where the HTTP request hangs and the agent loop must rely on the abort
+/// race (not checkpoint polling) to unwind.
+private final class HangingClientTransport: ClientTransport, Sendable {
+  func send(
+    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+  ) async throws -> (HTTPResponse, HTTPBody?) {
+    // Sleep for a long time — the task will be cancelled by the abort race
+    // long before this returns. `Task.sleep` throws `CancellationError` on
+    // cancel, mirroring how AsyncHTTPClient unwinds an in-flight request.
+    try await Task.sleep(for: .seconds(3600))
+    return (HTTPResponse(status: .init(code: 200)), nil)
+  }
+}
+
 /// Transport that varies status code per call, used to simulate failures
 /// in the middle of a multi-round agent loop (e.g. round 1 succeeds, round 2
 /// returns HTTP 400, round 3 succeeds again after recovery).
@@ -396,6 +412,45 @@ struct AgentLoopTests {
     )
     expectTermination(termination, .interrupted)
     #expect(messages.count == 1)
+  }
+
+  // MARK: - Abort: interrupts a hung HTTP request
+
+  /// Regression: when the network is down (HTTP request suspends forever),
+  /// `abort()` must unwind the loop promptly. Before the abort-race fix this
+  /// hung indefinitely because `isAborted()` was only polled at checkpoints
+  /// between awaits — never reached while suspended inside the HTTP call.
+  @Test func abortInterruptsHungHTTPRequest() async throws {
+    let transport = HangingClientTransport()
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil
+    )
+    let notifier = AbortNotifier()
+
+    let start = ContinuousClock.now
+    async let loopResult = runLoop(prompt: "test", config: config, abortNotifier: notifier)
+
+    // Let the loop reach the HTTP send before tripping abort.
+    try await Task.sleep(for: .milliseconds(50))
+    notifier.request()
+
+    let (_, termination) = try await loopResult
+    let elapsed = start.duration(to: .now)
+    expectTermination(termination, .interrupted)
+    // Generous bound: even on slow CI the abort race should unwind in <1s.
+    #expect(
+      elapsed < .seconds(1),
+      "abort should interrupt a hung HTTP request promptly; took \(elapsed)"
+    )
   }
 
   // MARK: - Unknown tool
