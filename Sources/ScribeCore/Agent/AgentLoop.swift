@@ -82,15 +82,28 @@ func runAgentLoop(
     let messagesCountBeforeRound = currentContext.messages.count
     let roundResult: RoundOutcome
     do {
-      roundResult = try await runSingleRound(
-        context: &currentContext,
-        config: config,
-        emit: emit,
-        logger: logger,
-        clock: clock,
-        round: round,
-        abortObserver: abortObserver
-      )
+      // Race the round against the abort observer. The HTTP request and SSE
+      // stream consumption inside `runSingleRound` suspend indefinitely when
+      // the network is down or the connection stalls; polling `isAborted()`
+      // alone never reaches those `await`s. Running the round as a child task
+      // lets the watcher task cancel it on abort, which propagates down to
+      // AsyncHTTPClient and tears down the connection.
+      let outcome = try await abortObserver.race {
+        [currentContext, config, emit, logger, round] in
+        var localCtx = currentContext
+        let result = try await runSingleRound(
+          context: &localCtx,
+          config: config,
+          emit: emit,
+          logger: logger,
+          clock: clock,
+          round: round,
+          abortObserver: abortObserver
+        )
+        return RoundExecutionResult(context: localCtx, outcome: result)
+      }
+      currentContext = outcome.context
+      roundResult = outcome.outcome
     } catch is AgentTurnInterruptedError {
       logger.notice(
         "agent.abort",
@@ -233,6 +246,15 @@ func runAgentLoop(
 private enum RoundOutcome: Sendable, Equatable {
   case completed
   case toolCalls([ToolInvocation])
+}
+
+/// Carries the post-round context snapshot back across the abort-race task
+/// group. `runSingleRound` mutates its `inout context`; the child task owns a
+/// local copy and returns the new state so the parent can commit it after the
+/// race resolves.
+private struct RoundExecutionResult: Sendable {
+  let context: AgentContext
+  let outcome: RoundOutcome
 }
 
 // MARK: - Single round

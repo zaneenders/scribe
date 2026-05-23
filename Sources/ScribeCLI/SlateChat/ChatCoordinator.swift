@@ -181,7 +181,6 @@ final class ChatCoordinator: Sendable {
             tracker.logStatus(logger: logger)
           case .interrupted:
             logger.notice("agent.turn.end", metadata: ["status": "interrupted"])
-            enqueue(.transcript(.lifecycle(.interrupted)))
           case .toolRoundLimit(let max):
             logger.notice(
               "agent.turn.end",

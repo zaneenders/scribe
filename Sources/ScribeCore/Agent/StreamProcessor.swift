@@ -57,6 +57,7 @@ struct StreamProcessor<AO: AbortObserver> {
     var loggedFirstChunk = false
     let streamProgressEvery = 200
 
+    do {
     for try await sse in sseStream {
       if abortObserver.isAborted() {
         logger.notice(
@@ -150,6 +151,30 @@ struct StreamProcessor<AO: AbortObserver> {
             "chunks_per_s": "\(String(format: "%.1f", chunksPerSec))",
           ])
       }
+    }
+    } catch is AgentTurnInterruptedError {
+      throw AgentTurnInterruptedError()
+    } catch {
+      // The SSE iterator throws when its parent task is cancelled — which is
+      // how the abort race in ``runWithAbortRace`` interrupts a stalled
+      // network read. Treat any stream error that coincides with an abort
+      // request as an interrupt so the loop unwinds cleanly and the UI
+      // finalizes any partial output.
+      if abortObserver.isAborted() {
+        logger.notice(
+          "agent.stream.abort",
+          metadata: [
+            "where": "mid-stream-cancelled",
+            "chunks": "\(decodedChunkCount)",
+            "had_visible_tokens": "\(streamStarted)",
+            "err": "\(String(describing: error))",
+          ])
+        if streamStarted {
+          onEvent(.output(.finalized))
+        }
+        throw AgentTurnInterruptedError()
+      }
+      throw error
     }
 
     // --- end-of-stream events ---
