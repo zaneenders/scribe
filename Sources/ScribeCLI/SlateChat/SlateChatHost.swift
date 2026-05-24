@@ -135,35 +135,8 @@ internal final class SlateChatHost {
   /// hot-swap or mutate UI after the host is winding down.
   private var hostActive: Bool = true
   private var exitInfo: ChatExitInfo = ChatExitInfo()
-  /// Active boundary picker (driven by `/fork` and `/tldr`). When
-  /// non-nil, the input area renders the picker and keystrokes are routed
-  /// to boundary navigation instead of the normal submit pipeline.
-  private var picker: PickerSnapshot?
-  /// Running async work for a confirmed picker (e.g. summarize LLM call).
-  /// `picker` is set to nil as soon as the user confirms; this task carries
-  /// the side-effect work to completion.
-  private var pickerActionTask: Task<Void, Never>?
-  /// While the picker is open the host swaps `transcriptState.lines` for a
-  /// styled preview (kept lines, divider, dimmed cut) and scrolls to the
-  /// cut. This snapshot lets cancel restore both the transcript and the
-  /// viewport position; confirm discards it because the hot-swap re-seeds.
-  private var pickerBackup: (lines: [TLine], generation: Int, viewport: TranscriptViewport)?
-  /// Disk messages displayed by the active picker — cached to avoid a
-  /// re-read on every cursor move.
-  private var pickerMessages: [ScribeMessage] = []
-  /// Base (un-styled) transcript lines for `pickerMessages`, rebuilt on
-  /// open. Restyled into `transcriptState.lines` on every cursor move.
-  private var pickerBaseLines: [TLine] = []
-  /// `messageStartLines` for `pickerBaseLines` (length `pickerMessages.count + 1`).
-  /// Cursor index `cutAt` maps to base line `pickerBaseStarts[cutAt]`.
-  private var pickerBaseStarts: [Int] = []
-  /// Logical line index of the divider inside the *styled* picker
-  /// transcript (the value the render closure flattens up to so it can
-  /// snap the viewport on the divider).
-  private var pickerDividerLogicalLine: Int = 0
-  /// Set on open and on every cursor move; the render closure consumes it
-  /// to queue a viewport scroll-to-row, then clears it.
-  private var pickerScrollDirty: Bool = false
+  /// Boundary picker controller (driven by `/fork` and `/tldr`).
+  private var pickerController = BoundaryPickerController()
   private var queuedTrayTexts: [String] = []
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
@@ -211,6 +184,36 @@ internal final class SlateChatHost {
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
     self.logger = logger
+
+    // Wire picker controller callbacks back to the host.
+    pickerController.logger = logger
+    pickerController.theme = theme
+    pickerController.markdownRenderer = markdownRenderer
+    pickerController.setModelBusy = { [weak self] busy in
+      self?.modelBusy = busy
+    }
+    pickerController.requestRender = { [weak self] in
+      self?.renderWake?.requestRender()
+    }
+    pickerController.isHostActive = { [weak self] in
+      self?.hostActive ?? false
+    }
+    pickerController.currentSessionId = { [weak self] in
+      self?.sessionId ?? UUID()
+    }
+    pickerController.enqueueHostEvent = { [weak self] event in
+      self?.eventQueue.enqueue(event)
+    }
+    pickerController.onHotSwap = { [weak self] directory, newId in
+      self?.hotSwapToSession(directory: directory, sessionId: newId)
+    }
+    pickerController.restoreHostFromBackup = { [weak self] in
+      guard let self, let backup = self.pickerController.backupForRestore else { return }
+      self.transcriptState.lines = backup.lines
+      self.transcriptState.generation = backup.generation &+ 1
+      self.viewport = backup.viewport
+      self.flattenCache = TranscriptLayout.FlattenCache()
+    }
   }
 
   deinit {
@@ -224,6 +227,10 @@ internal final class SlateChatHost {
       prepare: { [self] wake in
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
+
+        // Wire picker controller's session-dependent state.
+        self.pickerController.sessionDirectory = self.sessionDirectory
+        self.pickerController.configuration = self.configuration
 
         // Initial transcript seed + banner setup, then start the first
         // coordinator. Hot-swap (after /fork or /tldr) re-runs only the
@@ -293,24 +300,14 @@ internal final class SlateChatHost {
 
           for action in actions {
             // When the boundary picker is open it owns all input — only its
-            // navigation keys are honored; everything else is ignored so a
-            // stray keystroke can't accidentally submit or scroll.
-            if self.picker != nil {
-              switch action {
-              case .arrowUp:
-                self.movePickerCursor(by: -1)
-              case .arrowDown:
-                self.movePickerCursor(by: +1)
-              case .tab:
-                self.togglePickerActive()
-              case .enter:
-                self.confirmPicker()
-              case .escape, .ctrlC:
-                self.cancelPicker()
-              default:
-                break
+            // navigation keys are honored; everything else is ignored.
+            if self.pickerController.picker != nil {
+              if self.pickerController.handleInput(
+                action, transcriptState: &self.transcriptState,
+                viewport: &self.viewport, flattenCache: &self.flattenCache)
+              {
+                continue
               }
-              continue
             }
             switch action {
             case .bracketedPasteStart:
@@ -331,8 +328,12 @@ internal final class SlateChatHost {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed == "/fork" || trimmed == "/tldr" {
                   self.inputBuffer = ""
-                  self.openPicker(
-                    kind: trimmed == "/fork" ? .fork : .tldr)
+                  _ = self.pickerController.open(
+                    kind: trimmed == "/fork" ? .fork : .tldr,
+                    modelBusy: self.modelBusy,
+                    transcriptState: &self.transcriptState,
+                    viewport: &self.viewport,
+                    flattenCache: &self.flattenCache)
                 } else {
                   self.inputBuffer = ""
                   self.submitCoordinator.setModelBusy(self.modelBusy)
@@ -437,10 +438,10 @@ internal final class SlateChatHost {
           // sits roughly a third of the way down the transcript pane.
           // Needs scrCols (only known at frame time) to convert the
           // divider's logical-line index into a flattened-row target.
-          if self.picker != nil, self.pickerScrollDirty, scrCols > 0 {
+          if self.pickerController.picker != nil, self.pickerController.scrollDirty, scrCols > 0 {
             let prefixEnd = min(
               self.transcriptState.lines.count,
-              self.pickerDividerLogicalLine &+ 1)
+              self.pickerController.dividerLogicalLine &+ 1)
             let prefix = Array(self.transcriptState.lines.prefix(prefixEnd))
             let flatPrefix = TranscriptLayout.flattenedRows(
               from: prefix, width: scrCols)
@@ -452,7 +453,7 @@ internal final class SlateChatHost {
               queuedTrayText: self.queuedTrayTexts.first)
             let topOffset = max(0, contentRows / 3)
             self.viewport.queueScrollToRow(max(0, dividerFlatRow &- topOffset))
-            self.pickerScrollDirty = false
+            self.pickerController.scrollDirty = false
           }
 
           let prepareStart = Date()
@@ -489,7 +490,7 @@ internal final class SlateChatHost {
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
             queuedTrayText: self.queuedTrayTexts.first,
-            picker: self.picker,
+            picker: self.pickerController.picker,
             theme: .default)
           // Paint semantic spans into the terminal grid
           for (row, spanRow) in spanGrid.enumerated() {
@@ -528,421 +529,10 @@ internal final class SlateChatHost {
     renderWake = nil
 
     hostActive = false
-    pickerActionTask?.cancel()
-    pickerActionTask = nil
+    pickerController.cancelTask()
     coordinatorTask?.cancel()
     self.gate.complete(nil)
     return exitInfo
-  }
-
-  // MARK: - Boundary picker
-
-  /// Build a one-line preview describing the message at `index` so the
-  /// picker can show what would be discarded (for `/fork`) or collapsed
-  /// (for `/tldr`).
-  private func pickerPreview(for messages: [ScribeMessage], at index: Int) -> String {
-    if index >= messages.count { return "<end of session>" }
-    let m = messages[index]
-    let trimmed = m.content.trimmingCharacters(in: .whitespacesAndNewlines)
-      .replacingOccurrences(of: "\n", with: " ")
-    let snippet: String = {
-      if !trimmed.isEmpty { return String(trimmed.prefix(60)) }
-      if let calls = m.toolCalls, let first = calls.first {
-        return "[tool call: \(first.name)]"
-      }
-      return "<empty message>"
-    }()
-    return "\(m.role.rawValue): \(snippet)"
-  }
-
-  /// Compute the picker's default cursor positions.
-  /// - `.fork`: most recent safe boundary (cut at "now"). End cursor is nil.
-  /// - `.tldr`: start defaults to the boundary right after the most recent
-  ///   user message (collapses the assistant's response to that turn); end
-  ///   defaults to the last boundary (today's "summarize to the end"
-  ///   behaviour). Falls back to a non-empty slice when no user message
-  ///   exists.
-  private func defaultCursor(
-    kind: PickerSnapshot.Kind, messages: [ScribeMessage], boundaries: [Int]
-  ) -> (start: Int, end: Int?) {
-    guard !boundaries.isEmpty else { return (0, nil) }
-    switch kind {
-    case .fork:
-      return (boundaries.count - 1, nil)
-    case .tldr:
-      let endIdx = boundaries.count - 1
-      let startIdx: Int = {
-        if let lastUser = messages.lastIndex(where: { $0.role == .user }),
-          let idx = boundaries.firstIndex(of: lastUser + 1),
-          idx < endIdx
-        {
-          return idx
-        }
-        return max(0, endIdx - 1)
-      }()
-      return (startIdx, endIdx)
-    }
-  }
-
-  private func openPicker(kind: PickerSnapshot.Kind) {
-    // Disk-persisted messages lag the live coordinator while a turn is
-    // streaming, so opening the picker mid-turn would let the user pick
-    // boundaries that don't reflect what's on screen. Make them wait.
-    if modelBusy {
-      logger.notice(
-        "chat.picker.open.skip",
-        metadata: ["kind": "\(kind)", "reason": "model-busy"])
-      return
-    }
-    let messages: [ScribeMessage]
-    do {
-      messages = try ChatSessionStore.loadMessages(from: sessionDirectory)
-    } catch {
-      logger.warning(
-        "chat.picker.open.fail",
-        metadata: ["err": "\(String(describing: error))"])
-      return
-    }
-    // Both `.fork` and `.tldr` cursors index into the same full list of
-    // safe boundaries. `.tldr` enforces `start < end` at move time rather
-    // than by pre-filtering — that keeps `messageCount` as a valid end-cut
-    // (no tail) while still rejecting empty slices.
-    let boundaries = messages.safeForkBoundaries()
-    switch kind {
-    case .fork:
-      guard !boundaries.isEmpty else {
-        logger.notice(
-          "chat.picker.open.skip",
-          metadata: ["kind": "fork", "reason": "no-safe-boundary"])
-        return
-      }
-    case .tldr:
-      guard boundaries.count >= 2 else {
-        logger.notice(
-          "chat.picker.open.skip",
-          metadata: ["kind": "tldr", "reason": "needs-two-boundaries"])
-        return
-      }
-    }
-    let (startC, endC) = defaultCursor(
-      kind: kind, messages: messages, boundaries: boundaries)
-    let snap = PickerSnapshot(
-      kind: kind,
-      boundaries: boundaries,
-      startCursor: startC,
-      endCursor: endC,
-      activeIsEnd: false,
-      messageCount: messages.count,
-      previewText: pickerPreview(for: messages, at: boundaries[startC])
-    )
-
-    // Render the disk-persisted history once so cursor moves only restyle
-    // the cached base lines (no markdown re-render per arrow key).
-    let rendered = renderMessagesToTranscriptWithStarts(
-      messages, theme: theme, renderer: markdownRenderer)
-    self.pickerMessages = messages
-    self.pickerBaseLines = rendered.lines
-    self.pickerBaseStarts = rendered.messageStartLines
-    self.pickerBackup = (transcriptState.lines, transcriptState.generation, viewport)
-
-    applyPickerView(snapshot: snap)
-    logger.debug(
-      "chat.picker.open",
-      metadata: [
-        "kind": "\(kind)",
-        "boundaries": "\(boundaries.count)",
-        "default_start": "\(boundaries[startC])",
-        "default_end": "\(endC.map { "\(boundaries[$0])" } ?? "nil")",
-      ])
-  }
-
-  private func movePickerCursor(by delta: Int) {
-    guard var snap = picker else { return }
-    let activeCurrent =
-      snap.activeIsEnd ? (snap.endCursor ?? snap.startCursor) : snap.startCursor
-    var newCursor = max(0, min(snap.boundaries.count - 1, activeCurrent + delta))
-    // For `.tldr` keep the slice non-empty: start must stay strictly below
-    // end. Block on collision (don't swap or push) — least surprising.
-    if snap.kind == .tldr, let endIdx = snap.endCursor {
-      if snap.activeIsEnd {
-        newCursor = max(newCursor, snap.startCursor + 1)
-      } else {
-        newCursor = min(newCursor, endIdx - 1)
-      }
-      newCursor = max(0, min(snap.boundaries.count - 1, newCursor))
-    }
-    if newCursor == activeCurrent { return }
-    if snap.activeIsEnd {
-      snap.endCursor = newCursor
-    } else {
-      snap.startCursor = newCursor
-    }
-    snap.previewText = pickerPreview(
-      for: pickerMessages, at: snap.boundaries[newCursor])
-    applyPickerView(snapshot: snap)
-  }
-
-  /// Tab handler for `.tldr`: swap which cursor the arrow keys address.
-  /// No-op for `.fork`.
-  private func togglePickerActive() {
-    guard var snap = picker, snap.kind == .tldr, snap.endCursor != nil else { return }
-    snap.activeIsEnd.toggle()
-    let activeCursor =
-      snap.activeIsEnd ? (snap.endCursor ?? snap.startCursor) : snap.startCursor
-    snap.previewText = pickerPreview(
-      for: pickerMessages, at: snap.boundaries[activeCursor])
-    applyPickerView(snapshot: snap)
-  }
-
-  private func cancelPicker() {
-    guard picker != nil else { return }
-    picker = nil
-    restoreFromPickerBackup()
-    logger.debug("chat.picker.cancel")
-    renderWake?.requestRender()
-  }
-
-  /// Restyle the transcript with the current picker snapshot and request a
-  /// scroll-to-divider on the next frame. For `.tldr` both cuts are placed;
-  /// the viewport snaps to whichever divider is active.
-  private func applyPickerView(snapshot: PickerSnapshot) {
-    picker = snapshot
-    let startBase =
-      pickerBaseStarts.indices.contains(snapshot.startBoundary)
-      ? pickerBaseStarts[snapshot.startBoundary]
-      : pickerBaseLines.count
-    let endBase: Int?
-    if snapshot.kind == .tldr {
-      let endBoundary = snapshot.endBoundary
-      endBase =
-        pickerBaseStarts.indices.contains(endBoundary)
-        ? pickerBaseStarts[endBoundary]
-        : pickerBaseLines.count
-    } else {
-      endBase = nil
-    }
-    let styled = buildPickerStyledLines(
-      base: pickerBaseLines,
-      startCutBase: startBase,
-      endCutBase: endBase,
-      kind: snapshot.kind,
-      activeIsEnd: snapshot.activeIsEnd)
-    transcriptState.lines = styled.lines
-    transcriptState.generation &+= 1
-    pickerDividerLogicalLine = styled.dividerLine
-    pickerScrollDirty = true
-    flattenCache = TranscriptLayout.FlattenCache()
-    renderWake?.requestRender()
-  }
-
-  /// Restore the pre-picker transcript captured in `pickerBackup`. Called
-  /// from cancel; confirm skips this because hot-swap re-seeds anyway.
-  private func restoreFromPickerBackup() {
-    guard let backup = pickerBackup else { return }
-    transcriptState.lines = backup.lines
-    transcriptState.generation = backup.generation &+ 1
-    viewport = backup.viewport
-    flattenCache = TranscriptLayout.FlattenCache()
-    pickerBackup = nil
-    pickerMessages = []
-    pickerBaseLines = []
-    pickerBaseStarts = []
-    pickerScrollDirty = false
-  }
-
-  /// Build the picker-styled transcript.
-  /// - `.fork`: `base[0..<startCutBase]` unchanged, then a blank + divider +
-  ///   blank, then `base[startCutBase..<]` with every span recolored dim.
-  /// - `.tldr`: `base[0..<startCutBase]` unchanged, start divider, dimmed
-  ///   `base[startCutBase..<endCutBase]`, end divider, then
-  ///   `base[endCutBase..<]` unchanged. The active divider (per `activeIsEnd`)
-  ///   gets a brighter colour + bold; the inactive one stays dim.
-  ///
-  /// Returns the new lines and the logical line index of the *active*
-  /// divider row so the viewport can snap to it.
-  private func buildPickerStyledLines(
-    base: [TLine],
-    startCutBase: Int,
-    endCutBase: Int?,
-    kind: PickerSnapshot.Kind,
-    activeIsEnd: Bool
-  ) -> (lines: [TLine], dividerLine: Int) {
-    let dimFG = theme.inputGutter
-    switch kind {
-    case .fork:
-      let cut = max(0, min(startCutBase, base.count))
-      let divFG = theme.errorFG
-      let label = "──── /fork cut · everything below would be discarded ────"
-      var out: [TLine] = []
-      out.reserveCapacity(base.count &+ 3)
-      out.append(contentsOf: base[0..<cut])
-      out.append(TLine(spans: []))
-      let dividerIndex = out.count
-      out.append(
-        TLine(spans: [
-          StyledSpan(fg: divFG, bg: theme.background, bold: true, text: label)
-        ]))
-      out.append(TLine(spans: []))
-      for line in base[cut..<base.count] {
-        if line.spans.isEmpty {
-          out.append(line)
-          continue
-        }
-        let dimmed = line.spans.map { sp in
-          StyledSpan(fg: dimFG, bg: sp.bg, bold: false, text: sp.text)
-        }
-        out.append(TLine(spans: dimmed))
-      }
-      return (out, dividerIndex)
-
-    case .tldr:
-      let endBase = endCutBase ?? base.count
-      let startCut = max(0, min(startCutBase, base.count))
-      let endCut = max(startCut, min(endBase, base.count))
-      let activeFG = theme.warningFG
-      let startFG = activeIsEnd ? dimFG : activeFG
-      let endFG = activeIsEnd ? activeFG : dimFG
-      let startLabel = "──── /tldr start · slice begins here ────"
-      let endLabel = "──── /tldr end · slice ends here · tail preserved ────"
-      var out: [TLine] = []
-      out.reserveCapacity(base.count &+ 6)
-      out.append(contentsOf: base[0..<startCut])
-      out.append(TLine(spans: []))
-      let startDividerIdx = out.count
-      out.append(
-        TLine(spans: [
-          StyledSpan(
-            fg: startFG, bg: theme.background, bold: !activeIsEnd,
-            text: startLabel)
-        ]))
-      out.append(TLine(spans: []))
-      for line in base[startCut..<endCut] {
-        if line.spans.isEmpty {
-          out.append(line)
-          continue
-        }
-        let dimmed = line.spans.map { sp in
-          StyledSpan(fg: dimFG, bg: sp.bg, bold: false, text: sp.text)
-        }
-        out.append(TLine(spans: dimmed))
-      }
-      out.append(TLine(spans: []))
-      let endDividerIdx = out.count
-      out.append(
-        TLine(spans: [
-          StyledSpan(
-            fg: endFG, bg: theme.background, bold: activeIsEnd, text: endLabel)
-        ]))
-      out.append(TLine(spans: []))
-      out.append(contentsOf: base[endCut..<base.count])
-      let activeDivider = activeIsEnd ? endDividerIdx : startDividerIdx
-      return (out, activeDivider)
-    }
-  }
-
-  private func confirmPicker() {
-    guard let snap = picker else { return }
-    picker = nil
-    pickerScrollDirty = false
-    let kind = snap.kind
-    let startCut = snap.startBoundary
-    // For `.fork` this equals `startCut` and is unused; for `.tldr` it marks
-    // the (exclusive) upper bound of the summarized slice.
-    let endCut = snap.endBoundary
-    let persistDirectory = sessionDirectory
-    let configuration = self.configuration
-    let logger = self.logger
-    let parentSessionId = self.sessionId
-    let eventQueue = self.eventQueue
-
-    logger.notice(
-      "chat.picker.confirm",
-      metadata: [
-        "kind": "\(kind)",
-        "start_cut": "\(startCut)",
-        "end_cut": kind == .tldr ? "\(endCut)" : "n/a",
-      ])
-
-    modelBusy = true
-    renderWake?.requestRender()
-
-    pickerActionTask?.cancel()
-    pickerActionTask = Task { [weak self] in
-      do {
-        guard await MainActor.run(body: { self?.hostActive ?? false }) else { return }
-
-        let newId = UUID()
-        let result: ChatSessionStore.ForkResult
-        switch kind {
-        case .fork:
-          result = try ChatSessionStore.forkSession(
-            from: persistDirectory, cutAt: startCut, newSessionId: newId,
-            scribeVersion: GitVersion.hash)
-          logger.notice(
-            "chat.fork.create",
-            metadata: [
-              "parent": "\(parentSessionId.uuidString)",
-              "child": "\(result.sessionId.uuidString)",
-              "cut_at": "\(result.cutAt)",
-            ])
-        case .tldr:
-          let messages = try ChatSessionStore.loadMessages(from: persistDirectory)
-          let slice = Array(messages[startCut..<endCut])
-          let summary = try await SessionSummarizer.summarize(
-            slice: slice, configuration: configuration, logger: logger)
-          result = try ChatSessionStore.forkSession(
-            from: persistDirectory, cutAt: startCut, newSessionId: newId,
-            scribeVersion: GitVersion.hash)
-          try ChatSessionStore.appendMessages(
-            [ScribeMessage(role: .assistant, content: summary)],
-            to: result.sessionDirectory)
-          // Stitch the tail (messages after the summarized slice) so the
-          // forked session ends on the same last message as the parent.
-          // `safeForkBoundaries()` guarantees no tool round straddles
-          // `endCut`, so tool_call ids in the tail don't reference the
-          // collapsed slice.
-          let tailCount = max(0, messages.count - endCut)
-          if endCut < messages.count {
-            let tail = Array(messages[endCut..<messages.count])
-            try ChatSessionStore.appendMessages(tail, to: result.sessionDirectory)
-          }
-          logger.notice(
-            "chat.tldr.create",
-            metadata: [
-              "parent": "\(parentSessionId.uuidString)",
-              "child": "\(result.sessionId.uuidString)",
-              "start_cut": "\(startCut)",
-              "end_cut": "\(endCut)",
-              "slice_messages": "\(slice.count)",
-              "tail_messages": "\(tailCount)",
-              "summary_chars": "\(summary.count)",
-            ])
-        }
-        await MainActor.run { [weak self] in
-          guard let self, self.hostActive else { return }
-          self.hotSwapToSession(
-            directory: result.sessionDirectory, sessionId: result.sessionId)
-        }
-      } catch {
-        if Task.isCancelled { return }
-        let se = (error as? ScribeError) ?? .generic(String(describing: error))
-        logger.error(
-          "chat.picker.action.fail",
-          metadata: [
-            "err": "\(se.errorDescription ?? String(describing: se))"
-          ]
-        )
-        eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
-        await MainActor.run { [weak self] in
-          guard let self, self.hostActive else { return }
-          // Drop the styled picker view so the user sees their live
-          // transcript again instead of a stuck dim/divider state.
-          self.restoreFromPickerBackup()
-          self.modelBusy = false
-          self.renderWake?.requestRender()
-        }
-      }
-    }
   }
 
   // MARK: - Coordinator install / hot-swap
@@ -1005,14 +595,9 @@ internal final class SlateChatHost {
       return
     }
     // The picker backup holds the *parent* session's pre-styled lines; once
-    // we hot-swap they're meaningless. Drop them along with the cached
-    // picker base, but skip restoreFromPickerBackup — refreshTranscriptFromSeed
-    // below replaces transcriptState entirely.
-    pickerBackup = nil
-    pickerMessages = []
-    pickerBaseLines = []
-    pickerBaseStarts = []
-    pickerScrollDirty = false
+    // we hot-swap they're meaningless. Clear controller state;
+    // refreshTranscriptFromSeed below replaces transcriptState entirely.
+    pickerController.clear()
     logger.notice(
       "chat.hotswap",
       metadata: [
@@ -1042,6 +627,10 @@ internal final class SlateChatHost {
     self.modelBusy = false
     self.queuedTrayTexts = []
     self.submitCoordinator = SubmitCoordinator()
+
+    // Refresh picker controller's session-linked state.
+    pickerController.sessionDirectory = newDirectory
+    pickerController.configuration = self.configuration
 
     refreshTranscriptFromSeed()
 
@@ -1150,10 +739,6 @@ internal final class SlateChatHost {
       try? await Task.sleep(for: .milliseconds(20))
       wake?.requestRender()
     }
-  }
-
-  private func spansToDebugString(_ line: TLine) -> String {
-    line.spans.map { $0.text }.joined()
   }
 
   private nonisolated static func detectGitBranch(cwd: String) -> String? {
