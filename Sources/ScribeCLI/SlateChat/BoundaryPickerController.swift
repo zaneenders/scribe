@@ -353,13 +353,13 @@ internal final class BoundaryPickerController {
         enqueue?(.transcript(.lifecycle(.error(se))))
         await MainActor.run { [weak self] in
           guard let self, self.isHostActive?() ?? false else { return }
+          self.restoreHostFromBackup?()
           self.picker = nil
           self.pickerBackup = nil
           self.pickerMessages = []
           self.pickerBaseLines = []
           self.pickerBaseStarts = []
           self.scrollDirty = false
-          self.restoreHostFromBackup?()
           self.setModelBusy?(false)
           self.requestRender?()
         }
