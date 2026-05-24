@@ -3,18 +3,22 @@ import Foundation
 import Logging
 import ScribeLLM
 
+// MARK: - ScribeAgent
+
+/// A pure-verb model client.
+///
+/// `ScribeAgent` holds the configuration needed to drive a single LLM
+/// turn — model id, transport, tool schemas, execution backend — and
+/// nothing else. The caller owns the conversation history (typically in
+/// a ``SessionDocument``) and passes a snapshot in per call. The
+/// returned ``TurnStream`` carries live events plus a ``TurnResult``
+/// whose ``TurnResult/newMessages`` is just the diff for the caller to
+/// fold back into its own state.
+///
+/// The agent has no concept of "current session" — it can be invoked
+/// against different histories in parallel without interference.
 public struct ScribeAgent: Sendable {
 
-  /// Flag used by ``isStreaming``. The transcript and identity now live on
-  /// the ``SessionDocument``; only the streaming flag remained agent-local.
-  private actor StreamingFlag {
-    var value = false
-    func get() -> Bool { value }
-    func set(_ v: Bool) { value = v }
-  }
-
-  private let document: SessionDocument
-  private let streamingFlag = StreamingFlag()
   private let model: String
   private let reasoningEnabled: Bool?
   /// Schemas advertised to the LLM. Lives alongside the tool executor — even
@@ -27,20 +31,14 @@ public struct ScribeAgent: Sendable {
   private let logger: Logger
   private let abortNotifier = AbortNotifier()
 
-  // MARK: - Designated initializer (document-backed)
+  // MARK: - Designated initializer
 
-  /// Construct an agent that reads from / writes to a caller-supplied
-  /// ``SessionDocument``. The same document can be shared with the chat
-  /// host so picker commands (`/fork`, `/tldr`) and agent appends both
-  /// land on the same in-memory + on-disk state.
+  /// Construct an agent against a caller-supplied transport.
   ///
   /// - Parameters:
   ///   - client: HTTP client speaking the OpenAI-compatible chat
   ///     completions surface (see ``ScribeLLM/OpenAICompatibleClient``).
   ///   - model: Model id sent on the wire.
-  ///   - document: Shared session state. The agent reads its snapshot at
-  ///     the start of every turn and applies an ``EditOp/append(_:)`` at
-  ///     the end of every turn.
   ///   - tools: Tool schemas advertised to the model (also used by the
   ///     default ``ToolRegistry`` when `toolExecutor` is `nil`).
   ///   - toolExecutor: Custom execution backend (HITL gate, sandbox,
@@ -55,7 +53,6 @@ public struct ScribeAgent: Sendable {
   public init(
     client: Client,
     model: String,
-    document: SessionDocument,
     tools: [any ScribeTool] = [],
     toolExecutor: (any ToolExecutor)? = nil,
     workingDirectory: FilePath,
@@ -67,7 +64,6 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
     self.model = model
     self.reasoningEnabled = reasoningEnabled
-    self.document = document
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -78,88 +74,12 @@ public struct ScribeAgent: Sendable {
     }
   }
 
-  // MARK: - Convenience initializers (in-memory document)
-
-  /// Construct an agent against a caller-supplied transport, building an
-  /// in-memory ``SessionDocument`` seeded with `initialMessages`.
-  ///
-  /// Use this for embedders that don't need on-disk persistence (server,
-  /// sub-agent, tests). For a CLI-style session-on-disk, construct a
-  /// ``SessionDocument`` with a file-backed ``SessionPersister`` and pass
-  /// it to the document-backed init.
-  ///
-  /// If `systemPrompt` is non-empty and `initialMessages` doesn't begin
-  /// with a `.system` message, one is inserted at the head so the model
-  /// always sees the instructions.
-  public init(
-    client: Client,
-    model: String,
-    systemPrompt: String = "",
-    tools: [any ScribeTool] = [],
-    toolExecutor: (any ToolExecutor)? = nil,
-    initialMessages: [ScribeMessage] = [],
-    workingDirectory: FilePath,
-    reasoningEnabled: Bool?,
-    logger: Logger
-  ) {
-    let seeded = Self.applySystemPrompt(
-      systemPrompt: systemPrompt, initialMessages: initialMessages)
-    let doc = SessionDocument(
-      sessionId: UUID(),
-      directory: FilePath("/in-memory"),
-      initialMessages: seeded,
-      persister: InMemorySessionPersister(),
-      logger: logger
-    )
-    self.init(
-      client: client,
-      model: model,
-      document: doc,
-      tools: tools,
-      toolExecutor: toolExecutor,
-      workingDirectory: workingDirectory,
-      reasoningEnabled: reasoningEnabled,
-      logger: logger
-    )
-  }
-
-  /// Build an agent from a ``ScribeConfig`` against a caller-supplied
-  /// ``SessionDocument``. Constructs the transport from
-  /// `configuration.serverURL` so embedders don't have to reach into
-  /// ``ScribeLLM``.
-  public init(
-    configuration: ScribeConfig,
-    document: SessionDocument,
-    logger: Logger
-  ) throws {
-    guard let serverURL = URL(string: configuration.serverURL) else {
-      throw ScribeError.configuration(
-        key: "serverURL",
-        reason: "Invalid serverURL in ScribeConfig: \(configuration.serverURL)")
-    }
-    let client = OpenAICompatibleClient.make(
-      serverURL: serverURL, apiKey: configuration.apiKey)
-    self.init(
-      client: client,
-      model: configuration.agentModel,
-      document: document,
-      tools: configuration.tools,
-      toolExecutor: nil,
-      workingDirectory: FilePath(configuration.workingDirectory),
-      reasoningEnabled: configuration.reasoningEnabled,
-      logger: logger
-    )
-  }
+  // MARK: - Convenience initializer
 
   /// Build an agent from a ``ScribeConfig``. Internally constructs an
-  /// OpenAI-compatible client from `configuration.serverURL` and an
-  /// in-memory ``SessionDocument``. Prefer the
-  /// `init(configuration:document:logger:)` overload when sharing state
-  /// with a host.
+  /// OpenAI-compatible client from `configuration.serverURL`.
   public init(
     configuration: ScribeConfig,
-    systemPrompt: String,
-    initialMessages: [ScribeMessage] = [],
     logger: Logger
   ) throws {
     guard let serverURL = URL(string: configuration.serverURL) else {
@@ -172,78 +92,57 @@ public struct ScribeAgent: Sendable {
     self.init(
       client: client,
       model: configuration.agentModel,
-      systemPrompt: systemPrompt,
       tools: configuration.tools,
       toolExecutor: nil,
-      initialMessages: initialMessages,
       workingDirectory: FilePath(configuration.workingDirectory),
       reasoningEnabled: configuration.reasoningEnabled,
       logger: logger
     )
   }
 
-  // MARK: - State accessors
+  // MARK: - run
 
-  /// The full conversation history as ``ScribeMessage`` values — the
-  /// public, transport-agnostic message type.
-  public var messages: [ScribeMessage] {
-    get async { await document.snapshot() }
-  }
-
-  public func messages(since start: Int) async -> [ScribeMessage] {
-    let all = await document.snapshot()
-    guard start < all.count else { return [] }
-    let clamped = max(0, start)
-    return Array(all[clamped...])
-  }
-
-  public func messages(in range: Range<Int>) async -> [ScribeMessage] {
-    let all = await document.snapshot()
-    let lower = max(0, range.lowerBound)
-    let upper = min(all.count, range.upperBound)
-    guard lower < upper else { return [] }
-    return Array(all[lower..<upper])
-  }
-
-  public var isStreaming: Bool {
-    get async { await streamingFlag.get() }
-  }
-
-  // MARK: - stream
-
-  public func stream(
+  /// Run a turn with a single user input against `history`.
+  public func run(
     _ input: String,
+    history: [ScribeMessage],
     options: AgentRunOptions = AgentRunOptions()
-  ) async -> TurnStream {
-    await stream([ScribeMessage(role: .user, content: input)], options: options)
+  ) -> TurnStream {
+    run(
+      [ScribeMessage(role: .user, content: input)],
+      history: history,
+      options: options)
   }
 
-  /// Send a batch of ``ScribeMessage`` values as the next turn. Messages
-  /// are bridged to the wire shape once on the way into ``runAgentLoop`` —
-  /// the OpenAPI type never crosses the public API surface.
-  public func stream(
+  /// Run a turn with one or more prompt messages against `history`.
+  ///
+  /// The agent reads `history` once at the start of the turn and never
+  /// mutates the caller's state. ``TurnResult/newMessages`` contains
+  /// only the messages produced during this turn (assistant deltas, tool
+  /// invocations, tool results) — the caller is responsible for
+  /// appending them to its own conversation store.
+  public func run(
     _ promptMessages: [ScribeMessage],
+    history: [ScribeMessage],
     options: AgentRunOptions = AgentRunOptions()
-  ) async -> TurnStream {
+  ) -> TurnStream {
     let wireMessages = promptMessages.toChatMessages()
+    let historyWire = history.toChatMessages()
     let (stream, continuation) = AsyncStream<AgentEvent>.makeStream()
 
-    let preTurnSnapshot = await document.snapshotChatMessages()
-    await streamingFlag.set(true)
     abortNotifier.clear()
 
     let agentLogger = logger
     let task = Task {
       [
-        document, streamingFlag, toolExecutor, chatTools, client, wireMessages, options,
+        toolExecutor, chatTools, client, wireMessages, historyWire, options,
         agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory
       ] in
       defer {
         continuation.finish()
-        Task { await streamingFlag.set(false) }
       }
 
-      let ctx = AgentContext(messages: preTurnSnapshot)
+      let ctx = AgentContext(messages: historyWire)
 
       let config = AgentLoopConfig(
         model: model,
@@ -265,27 +164,24 @@ public struct ScribeAgent: Sendable {
           logger: agentLogger,
           abortObserver: abortNotifier
         )
-        let newScribeMessages = result.messages.toScribeMessages()
+        // `runAgentLoop` already includes the prompt messages at the
+        // head of `result.messages`, so the diff for the caller is
+        // exactly that array.
+        let newMessages = result.messages.toScribeMessages()
         switch result.termination {
         case .completed:
-          try await document.apply(.append(newScribeMessages))
-          let finalMessages = await document.snapshot()
-          return TurnResult(messages: finalMessages, outcome: .completed)
+          return TurnResult(newMessages: newMessages, outcome: .completed)
         case .interrupted:
           continuation.yield(.lifecycle(.interrupted))
-          try await document.apply(.append(newScribeMessages))
-          let finalMessages = await document.snapshot()
-          return TurnResult(messages: finalMessages, outcome: .interrupted)
+          return TurnResult(newMessages: newMessages, outcome: .interrupted)
         case .toolRoundLimit(let rounds):
-          try await document.apply(.append(newScribeMessages))
-          let finalMessages = await document.snapshot()
           return TurnResult(
-            messages: finalMessages, outcome: .toolRoundLimit(rounds: rounds))
+            newMessages: newMessages, outcome: .toolRoundLimit(rounds: rounds))
         }
       } catch is AgentTurnInterruptedError {
         continuation.yield(.lifecycle(.interrupted))
-        let current = await document.snapshot()
-        return TurnResult(messages: current, outcome: .interrupted)
+        // No loop messages got committed; the prompt was never persisted.
+        return TurnResult(newMessages: [], outcome: .interrupted)
       }
     }
 
@@ -294,22 +190,5 @@ public struct ScribeAgent: Sendable {
 
   public func abort() {
     abortNotifier.request()
-  }
-
-  // MARK: - Helpers
-
-  /// Inject a system message at the head of `initialMessages` when one is
-  /// not already present and a non-empty `systemPrompt` is supplied. Keeps
-  /// older callers (which baked the system message into `initialMessages`)
-  /// working unchanged.
-  private static func applySystemPrompt(
-    systemPrompt: String,
-    initialMessages: [ScribeMessage]
-  ) -> [ScribeMessage] {
-    guard !systemPrompt.isEmpty else { return initialMessages }
-    if initialMessages.first?.role == .system { return initialMessages }
-    var result = initialMessages
-    result.insert(ScribeMessage(role: .system, content: systemPrompt), at: 0)
-    return result
   }
 }

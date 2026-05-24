@@ -49,11 +49,15 @@ internal final class BoundaryPickerController {
 
   // MARK: - Dependencies (set by host after init)
 
-  /// The shared session document. Picker reads its snapshot for boundary
-  /// computation and applies `/fork` / `/tldr` via ``SessionDocument/apply(_:)``.
-  /// The doc emits a `.identityChanged` event back to the host so transcript
-  /// state catches up — the picker doesn't notify the host directly.
-  var document: SessionDocument?
+  /// Borrow the host-owned ``SessionDocument`` long enough to copy out a
+  /// snapshot. The picker doesn't get a reference to the doc itself — only
+  /// the host owns the `~Copyable` value.
+  var snapshot: (@MainActor () -> [ScribeMessage])?
+  /// Apply an `EditOp` (`.fork` or `.forkSplice`) to the host-owned
+  /// document. The host inspects the returned ``ChangeSet`` and updates
+  /// transcript / banner / exit-hint state inline; the picker only needs
+  /// to know the call succeeded.
+  var applyEdit: (@MainActor (EditOp) async throws -> ChangeSet)?
   var configuration: ScribeConfig = ScribeConfig(
     agentModel: "", contextWindow: 0, contextWindowThreshold: 0,
     serverURL: "", apiKey: nil, workingDirectory: ".", reasoningEnabled: false)
@@ -277,8 +281,8 @@ internal final class BoundaryPickerController {
     let logger = self.logger
     let parentSessionId = currentSessionId?() ?? UUID()
     let enqueue = enqueueHostEvent
-    guard let document = self.document else {
-      logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-document"])
+    guard let applyEdit = self.applyEdit, let snapshot = self.snapshot else {
+      logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-document-callbacks"])
       setModelBusy?(false)
       requestRender?()
       return
@@ -304,7 +308,7 @@ internal final class BoundaryPickerController {
         let newId = UUID()
         switch kind {
         case .fork:
-          try await document.apply(.fork(cutAt: startCut, newSessionId: newId))
+          _ = try await applyEdit(.fork(cutAt: startCut, newSessionId: newId))
           logger.notice(
             "chat.fork.create",
             metadata: [
@@ -313,12 +317,14 @@ internal final class BoundaryPickerController {
               "cut_at": "\(startCut)",
             ])
         case .tldr:
-          let messages = await document.snapshot()
+          // `snapshot` is a synchronous `@MainActor` borrow; the doc
+          // isn't held across the LLM call below.
+          let messages = snapshot()
           let slice = Array(messages[startCut..<endCut])
           let summary = try await SessionSummarizer.summarize(
             slice: slice, configuration: configuration, logger: logger)
           let replacement = [ScribeMessage(role: .assistant, content: summary)]
-          try await document.apply(
+          _ = try await applyEdit(
             .forkSplice(
               startCut: startCut,
               endCut: endCut,
@@ -337,9 +343,9 @@ internal final class BoundaryPickerController {
               "summary_chars": "\(summary.count)",
             ])
         }
-        // Identity-change observer on the host picks up the doc event and
-        // refreshes transcript / banner / exit hint; the picker only needs
-        // to release model-busy after the doc has accepted the edit.
+        // `applyEdit` inside the host already inspects the returned
+        // ChangeSet and updates transcript / banner / exit hint inline.
+        // The picker only needs to release model-busy here.
         await MainActor.run { [weak self] in
           guard let self, self.isHostActive?() ?? false else { return }
           self.setModelBusy?(false)

@@ -88,7 +88,6 @@ enum SessionSummarizer {
     )
     let agent = try ScribeAgent(
       configuration: summarizerConfig,
-      systemPrompt: summarizerSystemPrompt,
       logger: logger
     )
     let rendered = renderSlice(slice)
@@ -101,12 +100,17 @@ enum SessionSummarizer {
         "transcript_chars": "\(rendered.count)",
       ])
 
-    let turn = await agent.stream(userPrompt)
+    // No persistence needed — the summarizer is a one-shot. Give the
+    // agent a synthetic history made of just the system prompt.
+    let history: [ScribeMessage] = [
+      ScribeMessage(role: .system, content: summarizerSystemPrompt)
+    ]
+    let turn = agent.run(userPrompt, history: history)
     for await _ in turn.events { /* drain — we only need the result */ }
     let result = try await turn.result.value
-    // The last assistant message contains the summary; storage holds
-    // [system, user, assistant] after a successful turn.
-    guard let summary = result.messages.last(where: { $0.role == .assistant })?.content,
+    // newMessages = [user(prompt), assistant(summary)] on a clean run.
+    guard
+      let summary = result.newMessages.last(where: { $0.role == .assistant })?.content,
       !summary.isEmpty
     else {
       throw ScribeError.generic("Summarizer produced no assistant text.")

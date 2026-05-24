@@ -63,12 +63,56 @@ enum SlateChat {
     logger.debug(
       "chat.fullscreen.attach",
       metadata: ["session_file": "\(sessionDirectory.lastComponent?.string ?? sessionDirectory.string)"])
+    // Build the persister + session document up front so the host can
+    // own a fully-formed `~Copyable` doc from init. Doing this here (in
+    // the caller, before slate attaches) keeps the host's stored
+    // property non-optional.
+    let sessionCreatedAt = Date()
+    let isNewSession = resumeMessages.isEmpty
+    if !isNewSession, resumeMessages.first?.role != .system {
+      throw ScribeError.sessionCorrupted(
+        reason: "Resumed conversation must begin with a system message.")
+    }
+    let initialMessages: [ScribeMessage] = isNewSession
+      ? [ScribeMessage(role: .system, content: systemPrompt)]
+      : resumeMessages
+
+    let cwdString = FilePath.currentDirectory.string
+    let persister = try await FileSessionPersister.open(
+      sessionId: sessionId,
+      directory: sessionDirectory,
+      sessionCreatedAt: sessionCreatedAt,
+      isNewSession: isNewSession,
+      model: configuration.agentModel,
+      cwd: cwdString,
+      baseURL: configuration.serverURL,
+      scribeVersion: GitVersion.hash,
+      logger: logger
+    )
+    if isNewSession {
+      // The persister wrote metadata.json but not the seed; the doc
+      // will initialise its rope with `initialMessages` so we persist
+      // them once here. Going through the persister directly avoids the
+      // double-write of routing through `apply(.append(...))`.
+      try await persister.append(initialMessages)
+    }
     return try await Task { @MainActor () throws -> ChatExitInfo in
-      let sessionCreatedAt = Date()
+      // Build the `~Copyable` document on the MainActor so the value is
+      // born in the same isolation domain that will own it (the host
+      // also runs on the MainActor). The doc holds no persister — the
+      // host pairs the two and orchestrates persistence around sync
+      // doc mutations.
+      let document = SessionDocument(
+        sessionId: sessionId,
+        directory: sessionDirectory,
+        initialMessages: initialMessages,
+        logger: logger
+      )
       let host = SlateChatHost(
         configuration: configuration,
-        systemPrompt: systemPrompt,
-        resumeMessages: resumeMessages,
+        document: consume document,
+        persister: persister,
+        initialMessages: initialMessages,
         sessionDirectory: sessionDirectory,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
