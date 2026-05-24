@@ -653,12 +653,12 @@ internal final class SlateChatHost {
       // before the async fork() call.
       let snap = document.snapshot()
       let parentId = document.sessionId
+      let newContent = Array(snap.prefix(cutAt))
       let result = try await persister.fork(
-        cutAt: cutAt,
-        tail: [],
-        currentMessages: snap,
+        newContent: newContent,
         newSessionId: newSessionId,
-        parentSessionId: parentId
+        parentSessionId: parentId,
+        parentForkPoint: cutAt
       )
       let change = document.swapIdentity(
         cutAt: cutAt,
@@ -678,14 +678,13 @@ internal final class SlateChatHost {
       precondition(startCut <= endCut, "forkSplice startCut > endCut")
       precondition(endCut <= snap.count, "forkSplice endCut out of bounds")
       // forkSplice = prefix(startCut) + replacement + suffix(endCut...).
-      // The persister sees the full new content via cutAt + tail.
       let tail = replacement + Array(snap[endCut..<snap.count])
+      let newContent = Array(snap.prefix(startCut)) + tail
       let result = try await persister.fork(
-        cutAt: startCut,
-        tail: tail,
-        currentMessages: snap,
+        newContent: newContent,
         newSessionId: newSessionId,
-        parentSessionId: parentId
+        parentSessionId: parentId,
+        parentForkPoint: startCut
       )
       let change = document.swapIdentity(
         cutAt: startCut,

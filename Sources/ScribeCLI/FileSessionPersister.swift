@@ -104,20 +104,18 @@ final class FileSessionPersister: SessionPersister {
   }
 
   func fork(
-    cutAt: Int,
-    tail: [ScribeMessage],
-    currentMessages: [ScribeMessage],
+    newContent: [ScribeMessage],
     newSessionId: UUID,
-    parentSessionId: UUID
+    parentSessionId: UUID,
+    parentForkPoint: Int
   ) async throws -> (sessionId: UUID, directory: FilePath) {
-    precondition(cutAt >= 0 && cutAt <= currentMessages.count, "fork cutAt out of bounds")
-
     let currentDir = state.withLock { $0.directory }
     let sessionsRoot = currentDir.removingLastComponent()
     let newDir = sessionsRoot.appendingPathComponent(newSessionId.uuidString)
 
-    // Create the new directory + write metadata + write content. All-or-
-    // nothing: if any step fails the doc rolls back its identity swap.
+    // Create the new directory + write metadata + write content. The
+    // caller commits to its in-memory doc only after this returns, so a
+    // failure here leaves the in-memory rope untouched.
     try await FileSystem.shared.createDirectory(
       at: newDir, withIntermediateDirectories: true)
 
@@ -129,15 +127,13 @@ final class FileSessionPersister: SessionPersister {
       baseURL: baseURL,
       scribeVersion: scribeVersion,
       parentSessionId: parentSessionId,
-      forkedAtIndex: cutAt
+      forkedAtIndex: parentForkPoint
     )
     try await ChatSessionStore.saveMetadata(meta, to: newDir)
 
     let newAppender = try ChatSessionStore.MessagesAppender(directory: newDir)
-    let prefix = Array(currentMessages.prefix(cutAt))
-    try newAppender.append(prefix)
-    if !tail.isEmpty {
-      try newAppender.append(tail)
+    if !newContent.isEmpty {
+      try newAppender.append(newContent)
     }
 
     // Swap appender + identity atomically. The old appender's file handle
@@ -154,8 +150,8 @@ final class FileSessionPersister: SessionPersister {
       metadata: [
         "parent": "\(parentSessionId.uuidString)",
         "child": "\(newSessionId.uuidString)",
-        "cut_at": "\(cutAt)",
-        "tail_messages": "\(tail.count)",
+        "parent_fork_point": "\(parentForkPoint)",
+        "new_messages": "\(newContent.count)",
         "new_dir": "\(newDir.string)",
       ])
 
