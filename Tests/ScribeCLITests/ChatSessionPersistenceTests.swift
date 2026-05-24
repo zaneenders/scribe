@@ -8,7 +8,7 @@ import Testing
 
 @Suite
 struct ChatSessionPersistenceTests {
-  @Test func roundTripsThroughSaveAndLoad() throws {
+  @Test func roundTripsThroughSaveAndLoad() async throws {
     let id = UUID()
     let stamp = Date(timeIntervalSince1970: 1_700_000_000)
     let messages: [ScribeMessage] = [
@@ -27,7 +27,7 @@ struct ChatSessionPersistenceTests {
     let temp = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
 
-    try ChatSessionStore.saveMetadata(meta, to: FilePath(temp.path))
+    try await ChatSessionStore.saveMetadata(meta, to: FilePath(temp.path))
     try ChatSessionStore.appendMessages(messages, to: FilePath(temp.path))
     defer { try? FileManager.default.removeItem(at: temp) }
 
@@ -41,7 +41,7 @@ struct ChatSessionPersistenceTests {
     #expect(loadedMessages[1].content == "hello")
   }
 
-  @Test func listSessionsReadsFromConfiguredDirectory() throws {
+  @Test func listSessionsReadsFromConfiguredDirectory() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -53,28 +53,28 @@ struct ChatSessionPersistenceTests {
       role: .system, content: "sys")
     let meta = ChatSessionMetadata(
       id: id, createdAt: stem, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
-    let dir = try ChatSessionStore.sessionDirectory(
+    let dir = try await ChatSessionStore.sessionDirectory(
       sessionId: id, sessionsRoot: FilePath(tempRoot.path))
-    try ChatSessionStore.saveMetadata(meta, to: dir)
+    try await ChatSessionStore.saveMetadata(meta, to: dir)
     try ChatSessionStore.appendMessages([sys], to: dir)
 
-    let files = try ChatSessionStore.listSessionDirectories(sessionsRoot: FilePath(tempRoot.path))
+    let files = try await ChatSessionStore.listSessionDirectories(sessionsRoot: FilePath(tempRoot.path))
     #expect(files.count == 1)
   }
 
-  @Test func sessionDirectoryCreatesParentDirs() throws {
+  @Test func sessionDirectoryCreatesParentDirs() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: tempRoot) }
 
     let id = UUID()
-    let dir = try ChatSessionStore.sessionDirectory(
+    let dir = try await ChatSessionStore.sessionDirectory(
       sessionId: id, sessionsRoot: FilePath(tempRoot.path))
     #expect(dir.lastComponent?.string == id.uuidString)
     #expect(FileManager.default.fileExists(atPath: tempRoot.path))
   }
 
-  @Test func listSessionsSkipsNonSessionDirs() throws {
+  @Test func listSessionsSkipsNonSessionDirs() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
@@ -83,21 +83,21 @@ struct ChatSessionPersistenceTests {
     let stray = tempRoot.appendingPathComponent("stray", isDirectory: true)
     try FileManager.default.createDirectory(at: stray, withIntermediateDirectories: true)
 
-    let files = try ChatSessionStore.listSessionDirectories(sessionsRoot: FilePath(tempRoot.path))
+    let files = try await ChatSessionStore.listSessionDirectories(sessionsRoot: FilePath(tempRoot.path))
     #expect(files.isEmpty)
   }
 
-  @Test func listSessionsEmpty() throws {
+  @Test func listSessionsEmpty() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-    let files = try ChatSessionStore.listSessionDirectories(sessionsRoot: FilePath(tempRoot.path))
+    let files = try await ChatSessionStore.listSessionDirectories(sessionsRoot: FilePath(tempRoot.path))
     #expect(files.isEmpty)
   }
 
-  @Test func appendMessagesExtendsMessagesFile() throws {
+  @Test func appendMessagesExtendsMessagesFile() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -108,9 +108,9 @@ struct ChatSessionPersistenceTests {
       role: .system, content: "sys")
     let meta = ChatSessionMetadata(
       id: id, createdAt: stem, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
-    let dir = try ChatSessionStore.sessionDirectory(
+    let dir = try await ChatSessionStore.sessionDirectory(
       sessionId: id, sessionsRoot: FilePath(tempRoot.path))
-    try ChatSessionStore.saveMetadata(meta, to: dir)
+    try await ChatSessionStore.saveMetadata(meta, to: dir)
     try ChatSessionStore.appendMessages([sys], to: dir)
 
     let user = ScribeMessage(
@@ -122,7 +122,7 @@ struct ChatSessionPersistenceTests {
     #expect(loadedMessages[1].content == "hello")
   }
 
-  @Test func resolveResumeDirectoryMatchesUUIDPrefix() throws {
+  @Test func resolveResumeDirectoryMatchesUUIDPrefix() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -133,31 +133,31 @@ struct ChatSessionPersistenceTests {
       role: .system, content: "sys")
     let meta = ChatSessionMetadata(
       id: id, createdAt: stem, model: "m", cwd: "/", baseURL: nil, scribeVersion: "test")
-    let dir = try ChatSessionStore.sessionDirectory(
+    let dir = try await ChatSessionStore.sessionDirectory(
       sessionId: id, sessionsRoot: FilePath(tempRoot.path))
-    try ChatSessionStore.saveMetadata(meta, to: dir)
+    try await ChatSessionStore.saveMetadata(meta, to: dir)
     try ChatSessionStore.appendMessages([sys], to: dir)
 
-    let resolved = try ChatSessionStore.resolveResumeDirectory(
+    let resolved = try await ChatSessionStore.resolveResumeDirectory(
       specifier: id.uuidString, sessionsRoot: FilePath(tempRoot.path))
     #expect(resolved.lastComponent?.string == id.uuidString)
   }
 
-  @Test func resolveResumeDirectoryThrowsForMissingID() throws {
+  @Test func resolveResumeDirectoryThrowsForMissingID() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-    #expect(throws: (any Error).self) {
-      _ = try ChatSessionStore.resolveResumeDirectory(
+    await #expect(throws: (any Error).self) {
+      _ = try await ChatSessionStore.resolveResumeDirectory(
         specifier: "bbbb", sessionsRoot: FilePath(tempRoot.path))
     }
   }
 
   // MARK: - Incremental persist
 
-  @Test func incrementalPersistWritesMetadataThenAppendsMessages() throws {
+  @Test func incrementalPersistWritesMetadataThenAppendsMessages() async throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -177,7 +177,7 @@ struct ChatSessionPersistenceTests {
     let user = ScribeMessage(
       role: .user, content: "hello")
 
-    try ChatSessionStore.saveMetadata(meta, to: FilePath(dir.path))
+    try await ChatSessionStore.saveMetadata(meta, to: FilePath(dir.path))
     try ChatSessionStore.appendMessages([sys, user], to: FilePath(dir.path))
 
     let loadedMessages = try ChatSessionStore.loadMessages(from: FilePath(dir.path))
@@ -185,7 +185,7 @@ struct ChatSessionPersistenceTests {
     #expect(loadedMessages[1].content == "hello")
   }
 
-  @Test func incrementalPersistAppendsOnlyNewMessages() throws {
+  @Test func incrementalPersistAppendsOnlyNewMessages() async throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -206,14 +206,14 @@ struct ChatSessionPersistenceTests {
 
   // MARK: - Fork
 
-  @Test func forkSessionCopiesPrefixAndLinksParent() throws {
+  @Test func forkSessionCopiesPrefixAndLinksParent() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempRoot) }
 
     let parentId = UUID()
-    let parentDir = try ChatSessionStore.sessionDirectory(
+    let parentDir = try await ChatSessionStore.sessionDirectory(
       sessionId: parentId, sessionsRoot: FilePath(tempRoot.path))
     let parentMeta = ChatSessionMetadata(
       id: parentId,
@@ -230,11 +230,11 @@ struct ChatSessionPersistenceTests {
       ScribeMessage(role: .user, content: "q2"),
       ScribeMessage(role: .assistant, content: "a2"),
     ]
-    try ChatSessionStore.saveMetadata(parentMeta, to: parentDir)
+    try await ChatSessionStore.saveMetadata(parentMeta, to: parentDir)
     try ChatSessionStore.appendMessages(messages, to: parentDir)
 
     let childId = UUID()
-    let result = try ChatSessionStore.forkSession(
+    let result = try await ChatSessionStore.forkSession(
       from: parentDir,
       cutAt: 3,
       newSessionId: childId,
@@ -262,14 +262,14 @@ struct ChatSessionPersistenceTests {
     #expect(parentMessages.count == 5)
   }
 
-  @Test func forkSessionRejectsUnsafeBoundary() throws {
+  @Test func forkSessionRejectsUnsafeBoundary() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempRoot) }
 
     let parentId = UUID()
-    let parentDir = try ChatSessionStore.sessionDirectory(
+    let parentDir = try await ChatSessionStore.sessionDirectory(
       sessionId: parentId, sessionsRoot: FilePath(tempRoot.path))
     let parentMeta = ChatSessionMetadata(
       id: parentId, createdAt: Date(), model: "m", cwd: "/", baseURL: nil, scribeVersion: nil)
@@ -281,12 +281,12 @@ struct ChatSessionPersistenceTests {
         toolCalls: [ScribeToolCall(id: "c1", name: "x", arguments: "{}")]),
       ScribeMessage(role: .tool, content: "ok", toolCallId: "c1"),
     ]
-    try ChatSessionStore.saveMetadata(parentMeta, to: parentDir)
+    try await ChatSessionStore.saveMetadata(parentMeta, to: parentDir)
     try ChatSessionStore.appendMessages(messages, to: parentDir)
 
     // Cut 3 splits between assistant tool_calls and the tool result — not safe.
-    #expect(throws: ScribeError.self) {
-      _ = try ChatSessionStore.forkSession(
+    await #expect(throws: ScribeError.self) {
+      _ = try await ChatSessionStore.forkSession(
         from: parentDir,
         cutAt: 3,
         newSessionId: UUID(),
@@ -295,7 +295,7 @@ struct ChatSessionPersistenceTests {
     }
   }
 
-  @Test func incrementalPersistLoadMetadataReadsCorrectly() throws {
+  @Test func incrementalPersistLoadMetadataReadsCorrectly() async throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -310,7 +310,7 @@ struct ChatSessionPersistenceTests {
       scribeVersion: "abc123"
     )
 
-    try ChatSessionStore.saveMetadata(meta, to: FilePath(dir.path))
+    try await ChatSessionStore.saveMetadata(meta, to: FilePath(dir.path))
     try ChatSessionStore.appendMessages(
       [.init(role: .system, content: "sys")], to: FilePath(dir.path))
 

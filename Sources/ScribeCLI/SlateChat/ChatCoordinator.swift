@@ -4,63 +4,41 @@ import ScribeCore
 import SystemPackage
 
 /// Reference embedder that drives a ``ScribeAgent`` from a `lines` stream
-/// of user submissions.
+/// of user submissions, on top of a caller-owned ``SessionDocument``.
 ///
 /// `ChatCoordinator` is intentionally narrow: it owns nothing UI-shaped
 /// (Slate, `@MainActor`, terminal handling all live in ``SlateChatHost``)
-/// and reaches for the ``ScribeAgent`` only through its public surface —
-/// `prompt(...)`, `abort()`, and the ``TurnResult`` it returns. Copy this
-/// file to ship Scribe inside a server or another tool; the only
-/// outside-the-agent dependencies are ``ChatSessionStore`` (persistence)
-/// and the `enqueue` callback (where transcript events are routed).
+/// and no longer owns persistence either — the document handles that
+/// through its ``SessionPersister``. Copy this file to ship Scribe inside
+/// a server or another tool; the only outside-the-agent dependencies are
+/// a `SessionDocument` (shared by the host so `/fork` and `/tldr` can
+/// mutate the same state) and the `enqueue` callback (where transcript
+/// events are routed).
 final class ChatCoordinator: Sendable {
 
   private let configuration: ScribeConfig
-  private let resumeSnapshot: [ScribeMessage]
   private let logger: Logger
   private let enqueue: @Sendable (HostEvent) -> Void
-  private let persistDirectory: FilePath
-  private let sessionId: UUID
-  private let sessionCreatedAt: Date
   private let lines: AsyncStream<String>
-
+  private let document: SessionDocument
   private let agent: ScribeAgent
-
-  private let initialMessages: [ScribeMessage]
 
   init(
     configuration: ScribeConfig,
-    systemPrompt: String,
-    resumeSnapshot: [ScribeMessage],
     logger: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
-    persistDirectory: FilePath,
-    sessionId: UUID,
-    sessionCreatedAt: Date,
+    document: SessionDocument,
     lines: AsyncStream<String>
   ) throws {
-    if !resumeSnapshot.isEmpty {
-      guard resumeSnapshot.first?.role == .system else {
-        throw ScribeError.sessionCorrupted(
-          reason: "Resumed conversation must begin with a system message.")
-      }
-      self.initialMessages = resumeSnapshot
-    } else {
-      self.initialMessages = [ScribeMessage(role: .system, content: systemPrompt)]
-    }
     self.agent = try ScribeAgent(
       configuration: configuration,
-      systemPrompt: systemPrompt,
-      initialMessages: self.initialMessages,
+      document: document,
       logger: logger
     )
     self.configuration = configuration
-    self.resumeSnapshot = resumeSnapshot
     self.logger = logger
     self.enqueue = enqueue
-    self.persistDirectory = persistDirectory
-    self.sessionId = sessionId
-    self.sessionCreatedAt = sessionCreatedAt
+    self.document = document
     self.lines = lines
   }
 
@@ -69,159 +47,71 @@ final class ChatCoordinator: Sendable {
   }
 
   func run() async {
-    let messagesAppender: ChatSessionStore.MessagesAppender
-    do {
-      messagesAppender = try ChatSessionStore.MessagesAppender(directory: persistDirectory)
-    } catch {
-      logger.error(
-        "chat.persist.init.fail",
-        metadata: [
-          "path": "\(persistDirectory.string)",
-          "err": "\(error.localizedDescription)",
-        ])
-      enqueue(.coordinatorFinished)
-      return
-    }
+    let initialCount = await document.count
+    logger.debug(
+      "chat.coordinator.start",
+      metadata: ["messages": "\(initialCount)"])
 
-    /// Append messages produced by the most recent turn to the JSONL store.
-    /// Uses the messages returned by ``TurnResult`` rather than reaching back
-    /// into the agent's internal buffer — keeping the coordinator on the
-    /// public surface.
-    func persistNew(
-      allMessages: [ScribeMessage],
-      persistedCount: Int
-    ) {
-      guard persistedCount < allMessages.count else { return }
-      let newMessages = Array(allMessages[persistedCount...])
+    let tracker = TokenTracker(
+      contextWindow: configuration.contextWindow,
+      threshold: configuration.contextWindowThreshold
+    )
+
+    for await line in lines {
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed == "exit" {
+        logger.notice("chat.user.exit-command")
+        break
+      }
+      if trimmed.isEmpty {
+        logger.trace("chat.user.empty-skip")
+        continue
+      }
+
+      enqueue(.userSubmitted(trimmed))
+      logger.debug(
+        "agent.turn.dispatch",
+        metadata: ["chars": "\(trimmed.count)"])
+
+      enqueue(.modelTurnRunning(true))
+      defer { enqueue(.modelTurnRunning(false)) }
+
+      let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
+
       do {
-        try messagesAppender.append(newMessages)
-        logger.trace(
-          "chat.persist.append",
-          metadata: [
-            "new": "\(newMessages.count)",
-            "total": "\(allMessages.count)",
-            "path": "\(persistDirectory.string)",
-          ])
-      } catch {
-        logger.error(
-          "chat.persist.fail",
-          metadata: [
-            "path": "\(persistDirectory.string)",
-            "err": "\(error.localizedDescription)",
-          ])
-      }
-    }
-
-    do {
-      if resumeSnapshot.isEmpty {
-        let cwd = FilePath.currentDirectory.string
-        let meta = ChatSessionMetadata(
-          id: sessionId,
-          createdAt: sessionCreatedAt,
-          model: configuration.agentModel,
-          cwd: cwd,
-          baseURL: configuration.serverURL,
-          scribeVersion: GitVersion.hash
-        )
-        try? await ChatSessionStore.saveMetadata(meta, to: persistDirectory)
-        try messagesAppender.append(initialMessages)
-      }
-      var persistedCount = initialMessages.count
-
-      let msgCount = initialMessages.count
-      logger.debug(
-        "chat.coordinator.start",
-        metadata: [
-          "messages": "\(msgCount)",
-          "resumed": "\(!resumeSnapshot.isEmpty)",
-        ])
-
-      let tracker = TokenTracker(
-        contextWindow: configuration.contextWindow,
-        threshold: configuration.contextWindowThreshold
-      )
-
-      for await line in lines {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "exit" {
-          logger.notice("chat.user.exit-command")
-          break
+        let ts = await agent.stream(promptMessages)
+        for await event in ts.events {
+          if case .lifecycle(.usage(let usage, _)) = event { tracker.accumulate(usage: usage) }
+          enqueue(.transcript(event))
         }
-        if trimmed.isEmpty {
-          logger.trace("chat.user.empty-skip")
-          continue
-        }
-
-        enqueue(.userSubmitted(trimmed))
-        logger.debug(
-          "agent.turn.dispatch",
-          metadata: ["chars": "\(trimmed.count)"])
-
-        enqueue(.modelTurnRunning(true))
-        defer { enqueue(.modelTurnRunning(false)) }
-
-        let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
-
-        // Track the messages the agent committed during this turn so we can
-        // persist + emit `turnComplete` without reaching back into the
-        // agent's storage actor. Falls back to the agent's snapshot if the
-        // turn never produced a TurnResult (e.g. HTTP error before stream).
-        var committed: [ScribeMessage]? = nil
-        do {
-          let ts = await agent.stream(promptMessages)
-          for await event in ts.events {
-            if case .lifecycle(.usage(let usage, _)) = event { tracker.accumulate(usage: usage) }
-            enqueue(.transcript(event))
-          }
-          let result = try await ts.result.value
-          committed = result.messages
-          switch result.outcome {
-          case .completed:
-            logger.info("agent.turn.end", metadata: ["status": "completed"])
-            tracker.logStatus(logger: logger)
-          case .interrupted:
-            logger.notice("agent.turn.end", metadata: ["status": "interrupted"])
-          case .toolRoundLimit(let max):
-            logger.notice(
-              "agent.turn.end",
-              metadata: ["status": "tool-round-limit", "limit": "\(max)"])
-            enqueue(.transcript(.lifecycle(.interrupted)))
-          }
-        } catch {
-          let se = (error as? ScribeError) ?? .generic(String(describing: error))
-          logger.error(
+        let result = try await ts.result.value
+        switch result.outcome {
+        case .completed:
+          logger.info("agent.turn.end", metadata: ["status": "completed"])
+          tracker.logStatus(logger: logger)
+        case .interrupted:
+          logger.notice("agent.turn.end", metadata: ["status": "interrupted"])
+        case .toolRoundLimit(let max):
+          logger.notice(
             "agent.turn.end",
-            metadata: [
-              "status": "error",
-              "err": "\(se.errorDescription ?? String(describing: se))",
-            ])
-          enqueue(.transcript(.lifecycle(.error(se))))
+            metadata: ["status": "tool-round-limit", "limit": "\(max)"])
+          enqueue(.transcript(.lifecycle(.interrupted)))
         }
-
-        let allMessages: [ScribeMessage]
-        if let committed {
-          allMessages = committed
-        } else {
-          allMessages = await agent.messages
-        }
-        persistNew(allMessages: allMessages, persistedCount: persistedCount)
-        persistedCount = allMessages.count
+      } catch {
+        let se = (error as? ScribeError) ?? .generic(String(describing: error))
+        logger.error(
+          "agent.turn.end",
+          metadata: [
+            "status": "error",
+            "err": "\(se.errorDescription ?? String(describing: se))",
+          ])
+        enqueue(.transcript(.lifecycle(.error(se))))
       }
-      // Final flush in case the loop exited with un-persisted messages.
-      let trailing = await agent.messages
-      persistNew(allMessages: trailing, persistedCount: persistedCount)
-      logger.debug(
-        "chat.coordinator.end",
-        metadata: ["transcript_messages": "\(trailing.count)"])
-    } catch {
-      let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-      enqueue(.transcript(.lifecycle(.error(scribeError))))
-      logger.error(
-        "chat.coordinator.fail",
-        metadata: [
-          "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
-        ])
     }
+    let finalCount = await document.count
+    logger.debug(
+      "chat.coordinator.end",
+      metadata: ["transcript_messages": "\(finalCount)"])
     enqueue(.coordinatorFinished)
   }
 }

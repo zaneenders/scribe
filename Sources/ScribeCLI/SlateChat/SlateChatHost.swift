@@ -98,20 +98,31 @@ internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
   private let systemPrompt: String
-  /// Messages used to seed the next coordinator. Initially the resumed
-  /// history (or empty for a fresh session); replaced on hot-swap when the
-  /// user forks or summarizes mid-session.
-  private var currentSeed: [ScribeMessage]
-  /// Session directory the active coordinator is reading from / writing to.
-  /// Mutated on hot-swap.
+  /// Messages restored from disk when resuming a session. For a fresh
+  /// session this is empty and the host seeds the document with the
+  /// system prompt.
+  private let resumeMessages: [ScribeMessage]
+  /// Session directory the document is currently writing to. Tracks the
+  /// document — updated when the doc emits ``ChangeSet/identityChanged``.
   private var sessionDirectory: FilePath
-  /// UUID of the active session. Mutated on hot-swap.
+  /// UUID of the active session. Tracks the document.
   private var sessionId: UUID
-  /// Created-at timestamp of the active session. Mutated on hot-swap.
+  /// Created-at timestamp of the active session.
   private var sessionCreatedAt: Date
-  /// Current input gate. Replaced on hot-swap so the new coordinator gets a
-  /// fresh stream while the old coordinator's stream cleanly finishes.
+  /// Input gate the coordinator consumes. Single instance for the whole
+  /// host — `/fork` and `/tldr` mutate the doc in place without needing
+  /// to retire and rebuild the coordinator.
   private var gate: UserLineGate = UserLineGate()
+  /// The shared session document. Built async in ``run()`` before slate
+  /// attaches; lives for the whole host lifetime. Both the coordinator
+  /// (per-turn appends) and the picker (`/fork`, `/tldr`) mutate it.
+  private var document: SessionDocument?
+  /// Disk-backed persister handed to the document. Held so identity
+  /// changes can be traced if needed.
+  private var persister: FileSessionPersister?
+  /// Background task that drains the doc's ``ChangeSet`` stream and
+  /// dispatches identity changes onto the MainActor.
+  private var documentObserverTask: Task<Void, Never>?
 
   private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
@@ -126,13 +137,8 @@ internal final class SlateChatHost {
   private var inPaste: Bool = false
   private var modelBusy: Bool = false
   private var coordinatorFinished: Bool = false
-  /// `coordinatorFinished` events to swallow before treating one as a real
-  /// shutdown signal. Incremented by `hotSwapToSession` each time it
-  /// retires the previous coordinator so the trailing `.coordinatorFinished`
-  /// the old coordinator emits doesn't tear down the live host.
-  private var pendingFinishesToSwallow: Int = 0
   /// False once `run()` begins teardown — picker side-effects must not
-  /// hot-swap or mutate UI after the host is winding down.
+  /// mutate UI after the host is winding down.
   private var hostActive: Bool = true
   private var exitInfo: ChatExitInfo = ChatExitInfo()
   /// Boundary picker controller (driven by `/fork` and `/tldr`).
@@ -179,7 +185,7 @@ internal final class SlateChatHost {
   ) {
     self.configuration = configuration
     self.systemPrompt = systemPrompt
-    self.currentSeed = resumeMessages
+    self.resumeMessages = resumeMessages
     self.sessionDirectory = sessionDirectory
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
@@ -204,9 +210,6 @@ internal final class SlateChatHost {
     pickerController.enqueueHostEvent = { [weak self] event in
       self?.eventQueue.enqueue(event)
     }
-    pickerController.onHotSwap = { [weak self] directory, newId in
-      self?.hotSwapToSession(directory: directory, sessionId: newId)
-    }
     pickerController.restoreHostFromBackup = { [weak self] in
       guard let self, let backup = self.pickerController.backupForRestore else { return }
       self.transcriptState.lines = backup.lines
@@ -221,6 +224,64 @@ internal final class SlateChatHost {
   }
 
   func run() async throws -> ChatExitInfo {
+    // Build the shared session document + disk persister BEFORE slate
+    // attaches. The document is the single source of truth for messages
+    // for both the agent (per-turn appends) and the picker (`/fork`,
+    // `/tldr`). Subscribing to its change stream lets the host update
+    // transcript / banner / exit-hint state without ever rebuilding the
+    // coordinator.
+    let cwdString = FilePath.currentDirectory.string
+    let isNewSession = resumeMessages.isEmpty
+    if !isNewSession, resumeMessages.first?.role != .system {
+      throw ScribeError.sessionCorrupted(
+        reason: "Resumed conversation must begin with a system message.")
+    }
+    let initialMessages: [ScribeMessage] = isNewSession
+      ? [ScribeMessage(role: .system, content: systemPrompt)]
+      : resumeMessages
+
+    let persister = try await FileSessionPersister.open(
+      sessionId: sessionId,
+      directory: sessionDirectory,
+      sessionCreatedAt: sessionCreatedAt,
+      isNewSession: isNewSession,
+      model: configuration.agentModel,
+      cwd: cwdString,
+      baseURL: configuration.serverURL,
+      scribeVersion: GitVersion.hash,
+      logger: logger
+    )
+    let document = SessionDocument(
+      sessionId: sessionId,
+      directory: sessionDirectory,
+      initialMessages: initialMessages,
+      persister: persister,
+      logger: logger
+    )
+    if isNewSession {
+      // The persister wrote metadata.json but not the seed; the doc
+      // initialised its rope with `initialMessages` so we still need to
+      // persist them once. Calling apply here would double-write since
+      // the rope already holds them; go straight through the persister.
+      try await persister.append(initialMessages)
+    }
+    self.document = document
+    self.persister = persister
+
+    // Spawn the doc-change observer. `.identityChanged` is the only event
+    // the host reacts to (transcript snapshot, banner, exit hint);
+    // `.appended` is already covered by the AgentEvent stream the
+    // renderer consumes.
+    let docChanges = await document.changes()
+    self.documentObserverTask = Task { [weak self] in
+      for await change in docChanges {
+        guard case .identityChanged(let prev, let now, let dir, _) = change else { continue }
+        await MainActor.run { [weak self] in
+          self?.handleIdentityChange(previous: prev, sessionId: now, directory: dir)
+        }
+      }
+    }
+
     var slate = try Slate()
 
     await slate.subscribe(
@@ -228,14 +289,14 @@ internal final class SlateChatHost {
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
 
-        // Wire picker controller's session-dependent state.
-        self.pickerController.sessionDirectory = self.sessionDirectory
+        // Wire picker controller's document reference + configuration.
+        self.pickerController.document = document
         self.pickerController.configuration = self.configuration
 
-        // Initial transcript seed + banner setup, then start the first
-        // coordinator. Hot-swap (after /fork or /tldr) re-runs only the
-        // installCoordinator step against the new session.
-        self.refreshTranscriptFromSeed()
+        // Initial transcript seed + banner setup, then start the
+        // coordinator. The coordinator and document live for the host's
+        // whole lifetime — no hot-swap dance on `/fork` / `/tldr`.
+        self.refreshTranscriptFromInitialSeed(initialMessages)
 
         let cwd = FilePath.currentDirectory.string
         self.banner = BannerSnapshot(
@@ -329,14 +390,25 @@ internal final class SlateChatHost {
                 if trimmed == "/fork" || trimmed == "/tldr" {
                   let kind: PickerSnapshot.Kind =
                     trimmed == "/fork" ? .fork : .tldr
-                  if self.pickerController.open(
-                    kind: kind,
-                    modelBusy: self.modelBusy,
-                    transcriptState: &self.transcriptState,
-                    viewport: &self.viewport,
-                    flattenCache: &self.flattenCache)
-                  {
-                    self.inputBuffer = ""
+                  // Picker open needs the doc snapshot for boundary
+                  // computation; the doc is an actor so we await off the
+                  // stdin tick and apply on MainActor.
+                  self.inputBuffer = ""
+                  let busy = self.modelBusy
+                  let doc = self.document
+                  Task { [weak self] in
+                    let snap = await doc?.snapshot() ?? []
+                    await MainActor.run { [weak self] in
+                      guard let self else { return }
+                      _ = self.pickerController.open(
+                        kind: kind,
+                        messages: snap,
+                        modelBusy: busy,
+                        transcriptState: &self.transcriptState,
+                        viewport: &self.viewport,
+                        flattenCache: &self.flattenCache)
+                      self.renderWake?.requestRender()
+                    }
                   }
                 } else {
                   self.inputBuffer = ""
@@ -535,16 +607,26 @@ internal final class SlateChatHost {
     hostActive = false
     pickerController.cancelTask()
     coordinatorTask?.cancel()
+    documentObserverTask?.cancel()
     self.gate.complete(nil)
     return exitInfo
   }
 
-  // MARK: - Coordinator install / hot-swap
+  // MARK: - Coordinator install / document identity
 
-  /// Build the line stream for `self.gate` and start a fresh ChatCoordinator
-  /// against `self.currentSeed` + `self.sessionDirectory`. Called once
-  /// at startup and again after every hot-swap.
+  /// Build the line stream for `self.gate` and start the host's one and
+  /// only ChatCoordinator. The coordinator binds to `self.document` and
+  /// lives for the host's whole lifetime — `/fork` and `/tldr` mutate
+  /// the doc in place and the agent keeps running against the new
+  /// identity automatically.
   private func installCoordinator() {
+    guard let document = self.document else {
+      self.logger.error(
+        "chat.coordinator.init.fail",
+        metadata: ["err": "document not ready before installCoordinator"])
+      eventQueue.enqueue(.coordinatorFinished)
+      return
+    }
     let (lineStream, lineCont) = AsyncStream<String>.makeStream()
     self.gate.setStreamContinuation(lineCont)
 
@@ -552,15 +634,11 @@ internal final class SlateChatHost {
     do {
       coordinator = try ChatCoordinator(
         configuration: configuration,
-        systemPrompt: systemPrompt,
-        resumeSnapshot: self.currentSeed,
         logger: self.logger,
         enqueue: { [eventQueue] event in
           eventQueue.enqueue(event)
         },
-        persistDirectory: self.sessionDirectory,
-        sessionId: self.sessionId,
-        sessionCreatedAt: self.sessionCreatedAt,
+        document: document,
         lines: lineStream
       )
     } catch {
@@ -580,65 +658,50 @@ internal final class SlateChatHost {
     }
   }
 
-  /// Replay `self.currentSeed` into the transcript pane (initial render and
-  /// post-hot-swap redraw).
-  private func refreshTranscriptFromSeed() {
-    transcriptState.lines =
-      currentSeed.isEmpty
+  /// Replay the doc's content into the transcript pane. Used for the
+  /// initial render (where we already have the seed in hand) and after
+  /// the document changes identity via `/fork` or `/tldr`.
+  private func refreshTranscriptFromInitialSeed(_ messages: [ScribeMessage]) {
+    transcriptState.lines = messages.isEmpty
       ? []
       : renderMessagesToTranscript(
-        currentSeed, theme: self.theme, renderer: self.markdownRenderer)
+        messages, theme: self.theme, renderer: self.markdownRenderer)
     flattenCache = TranscriptLayout.FlattenCache()
   }
 
-  /// Tear down the current coordinator and bring up a fresh one pointing at
-  /// the forked session. Called after `/fork` or `/tldr` confirm.
-  private func hotSwapToSession(directory newDirectory: FilePath, sessionId newId: UUID) {
+  /// React to a ``ChangeSet/identityChanged`` event from the document.
+  /// The doc has already swapped its own session id + directory + rope
+  /// content; the host's job is to mirror that into UI state (transcript
+  /// snapshot, banner, exit-hint) and reset per-turn scratch state. No
+  /// coordinator restart — the coordinator + agent operate through the
+  /// document and follow it automatically.
+  private func handleIdentityChange(previous: UUID, sessionId newId: UUID, directory newDirectory: FilePath) {
     guard hostActive else {
-      logger.notice("chat.hotswap.skip", metadata: ["reason": "host-inactive"])
+      logger.notice("chat.identity.skip", metadata: ["reason": "host-inactive"])
       return
     }
-    // The picker backup holds the *parent* session's pre-styled lines; once
-    // we hot-swap they're meaningless. Clear controller state;
-    // refreshTranscriptFromSeed below replaces transcriptState entirely.
+    // Picker backup holds the *parent* session's pre-styled lines; once
+    // identity changes they're meaningless.
     pickerController.clear()
     logger.notice(
-      "chat.hotswap",
+      "chat.identity.swap",
       metadata: [
-        "from": "\(self.sessionId.uuidString)",
+        "from": "\(previous.uuidString)",
         "to": "\(newId.uuidString)",
       ])
 
-    // Record where we ended up so the CLI's exit hint points at the right
-    // session if the user types `exit` after this swap.
-    exitInfo.forkedFromSessionId = self.sessionId
+    exitInfo.forkedFromSessionId = previous
     exitInfo.forkedToSessionId = newId
     exitInfo.forkedToDirectory = newDirectory
 
-    // Close the old gate so the old coordinator's stream finishes; the
-    // coordinator's run() will wind down and emit `.coordinatorFinished`,
-    // which we swallow once below so the host stays alive across the swap.
-    self.gate.complete(nil)
-    self.coordinatorTask?.cancel()
-    self.pendingFinishesToSwallow += 1
-
-    self.gate = UserLineGate()
     self.sessionDirectory = newDirectory
     self.sessionId = newId
     self.sessionCreatedAt = Date()
-    self.currentSeed =
-      (try? ChatSessionStore.loadMessages(from: newDirectory)) ?? []
     self.modelBusy = false
     self.queuedTrayTexts = []
     self.submitCoordinator = SubmitCoordinator()
 
-    // Refresh picker controller's session-linked state.
-    pickerController.sessionDirectory = newDirectory
-    pickerController.configuration = self.configuration
-
-    refreshTranscriptFromSeed()
-
-    // Refresh banner with the new session id.
+    // Refresh banner with the new session id (other fields unchanged).
     if let banner = self.banner {
       self.banner = BannerSnapshot(
         baseURL: banner.baseURL,
@@ -649,7 +712,17 @@ internal final class SlateChatHost {
         sessionId: newId.uuidString)
     }
 
-    installCoordinator()
+    // Re-render transcript from the doc's post-swap content. Doc snapshot
+    // is async; resolve and apply on the MainActor.
+    let doc = self.document
+    Task { [weak self] in
+      let snap = await doc?.snapshot() ?? []
+      await MainActor.run { [weak self] in
+        guard let self else { return }
+        self.refreshTranscriptFromInitialSeed(snap)
+        self.renderWake?.requestRender()
+      }
+    }
     renderWake?.requestRender()
   }
 
@@ -702,11 +775,7 @@ internal final class SlateChatHost {
           }
         }
       case .coordinatorFinished:
-        if pendingFinishesToSwallow > 0 {
-          pendingFinishesToSwallow -= 1
-        } else {
-          coordinatorFinished = true
-        }
+        coordinatorFinished = true
       }
     }
   }

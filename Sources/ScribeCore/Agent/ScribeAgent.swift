@@ -5,52 +5,18 @@ import ScribeLLM
 
 public struct ScribeAgent: Sendable {
 
-  private actor Storage {
-    var model: String
-    var messages: [Components.Schemas.ChatMessage]
-    var isStreaming = false
-    var reasoningEnabled: Bool?
-
-    init(
-      model: String,
-      messages: [Components.Schemas.ChatMessage],
-      reasoningEnabled: Bool?
-    ) {
-      self.model = model
-      self.messages = messages
-      self.reasoningEnabled = reasoningEnabled
-    }
-
-    func snapshot() -> AgentStateSnapshot {
-      AgentStateSnapshot(
-        model: model,
-        messages: messages,
-        isStreaming: isStreaming,
-        reasoningEnabled: reasoningEnabled
-      )
-    }
-
-    func appendMessages(_ newMessages: [Components.Schemas.ChatMessage]) {
-      messages.append(contentsOf: newMessages)
-    }
-
-    func messages(since start: Int) -> [Components.Schemas.ChatMessage] {
-      guard start < messages.count else { return [] }
-      let clamped = max(start, 0)
-      return Array(messages[clamped...])
-    }
-
-    func messages(in range: Range<Int>) -> [Components.Schemas.ChatMessage] {
-      let lower = max(0, range.lowerBound)
-      let upper = min(messages.count, range.upperBound)
-      guard lower < upper else { return [] }
-      return Array(messages[lower..<upper])
-    }
-
-    func setStreaming(_ value: Bool) { isStreaming = value }
+  /// Flag used by ``isStreaming``. The transcript and identity now live on
+  /// the ``SessionDocument``; only the streaming flag remained agent-local.
+  private actor StreamingFlag {
+    var value = false
+    func get() -> Bool { value }
+    func set(_ v: Bool) { value = v }
   }
 
-  private let storage: Storage
+  private let document: SessionDocument
+  private let streamingFlag = StreamingFlag()
+  private let model: String
+  private let reasoningEnabled: Bool?
   /// Schemas advertised to the LLM. Lives alongside the tool executor — even
   /// when an embedder injects a custom ``ToolExecutor``, the loop still needs
   /// to tell the model what tools exist.
@@ -61,43 +27,70 @@ public struct ScribeAgent: Sendable {
   private let logger: Logger
   private let abortNotifier = AbortNotifier()
 
-  // MARK: - Designated initializer (transport-injected)
+  // MARK: - Designated initializer (document-backed)
 
-  /// Construct an agent against a caller-supplied ``ScribeLLM/Client``.
-  ///
-  /// Embedded callers (server, sub-agent, anything that wants its own
-  /// transport / auth middleware / retry policy / metric tagging) use this
-  /// initializer to inject a pre-built `Client` and an optional custom
-  /// ``ToolExecutor`` — no `ScribeConfig`, no `Foundation.URL` parsing.
-  ///
-  /// If `systemPrompt` is non-empty and `initialMessages` does not begin
-  /// with a `.system` message, one is inserted at the head so the model
-  /// always sees the instructions even when callers prefer to pass just
-  /// user/assistant history.
+  /// Construct an agent that reads from / writes to a caller-supplied
+  /// ``SessionDocument``. The same document can be shared with the chat
+  /// host so picker commands (`/fork`, `/tldr`) and agent appends both
+  /// land on the same in-memory + on-disk state.
   ///
   /// - Parameters:
   ///   - client: HTTP client speaking the OpenAI-compatible chat
   ///     completions surface (see ``ScribeLLM/OpenAICompatibleClient``).
-  ///   - model: Model id the loop sends as the `model` field.
-  ///   - systemPrompt: Optional system prompt; injected into
-  ///     `initialMessages` when missing.
-  ///   - tools: Tool definitions whose schemas are advertised to the model.
-  ///     The schema list is derived from `tools` regardless of whether a
-  ///     custom executor is supplied — so callers can declare a richer
-  ///     surface (e.g. tools that the executor forwards over the wire) by
-  ///     handing the agent matching `ScribeTool` descriptors.
-  ///     When `toolExecutor` is `nil`, these tools are also what the agent
-  ///     runs in-process via a default ``ToolRegistry``.
-  ///   - toolExecutor: Custom execution backend (HITL gate, sandbox
-  ///     forwarder, etc.). When `nil`, a ``ToolRegistry`` built from
-  ///     `tools` is used as the executor; when non-`nil`, no registry is
-  ///     constructed.
-  ///   - initialMessages: Pre-loaded conversation history (e.g. resumed
-  ///     session). May omit a leading system message — see `systemPrompt`.
-  ///   - workingDirectory: Absolute working directory used for tool path
+  ///   - model: Model id sent on the wire.
+  ///   - document: Shared session state. The agent reads its snapshot at
+  ///     the start of every turn and applies an ``EditOp/append(_:)`` at
+  ///     the end of every turn.
+  ///   - tools: Tool schemas advertised to the model (also used by the
+  ///     default ``ToolRegistry`` when `toolExecutor` is `nil`).
+  ///   - toolExecutor: Custom execution backend (HITL gate, sandbox,
+  ///     etc.). `nil` → an in-process ``ToolRegistry`` is built from
+  ///     `tools`.
+  ///   - workingDirectory: Absolute working directory for tool path
   ///     resolution.
-  ///   - logger: Caller-owned logger (server request logger, CLI session file,
-  ///     etc.). Used for the agent loop and built-in tool execution.
+  ///   - reasoningEnabled: Forwarded as the `reasoning.enabled` flag on
+  ///     completion requests; `nil` omits the field.
+  ///   - logger: Caller-owned logger for the agent loop and built-in
+  ///     tools.
+  public init(
+    client: Client,
+    model: String,
+    document: SessionDocument,
+    tools: [any ScribeTool] = [],
+    toolExecutor: (any ToolExecutor)? = nil,
+    workingDirectory: FilePath,
+    reasoningEnabled: Bool?,
+    logger: Logger
+  ) {
+    self.client = client
+    self.workingDirectory = workingDirectory
+    self.logger = logger
+    self.model = model
+    self.reasoningEnabled = reasoningEnabled
+    self.document = document
+    if let customExecutor = toolExecutor {
+      self.toolExecutor = customExecutor
+      self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
+    } else {
+      let registry = ToolRegistry(tools: tools, logger: logger)
+      self.toolExecutor = registry
+      self.chatTools = registry.chatTools
+    }
+  }
+
+  // MARK: - Convenience initializers (in-memory document)
+
+  /// Construct an agent against a caller-supplied transport, building an
+  /// in-memory ``SessionDocument`` seeded with `initialMessages`.
+  ///
+  /// Use this for embedders that don't need on-disk persistence (server,
+  /// sub-agent, tests). For a CLI-style session-on-disk, construct a
+  /// ``SessionDocument`` with a file-backed ``SessionPersister`` and pass
+  /// it to the document-backed init.
+  ///
+  /// If `systemPrompt` is non-empty and `initialMessages` doesn't begin
+  /// with a `.system` message, one is inserted at the head so the model
+  /// always sees the instructions.
   public init(
     client: Client,
     model: String,
@@ -109,38 +102,60 @@ public struct ScribeAgent: Sendable {
     reasoningEnabled: Bool?,
     logger: Logger
   ) {
-    self.client = client
-    self.workingDirectory = workingDirectory
-    self.logger = logger
-    // Schemas the model is told about.  When using the default
-    // ToolRegistry, both `chatTools` and the execution surface come from
-    // the same `tools` array — they cannot diverge.  When a custom
-    // ToolExecutor is supplied, schemas are derived from `tools`; the
-    // caller is responsible for passing tools whose schemas match what
-    // the executor can handle (mismatches surface as JSON error strings
-    // that the assistant can self-correct).
-    if let customExecutor = toolExecutor {
-      self.toolExecutor = customExecutor
-      self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
-    } else {
-      let registry = ToolRegistry(tools: tools, logger: logger)
-      self.toolExecutor = registry
-      self.chatTools = registry.chatTools
-    }
-    self.storage = Storage(
+    let seeded = Self.applySystemPrompt(
+      systemPrompt: systemPrompt, initialMessages: initialMessages)
+    let doc = SessionDocument(
+      sessionId: UUID(),
+      directory: FilePath("/in-memory"),
+      initialMessages: seeded,
+      persister: InMemorySessionPersister(),
+      logger: logger
+    )
+    self.init(
+      client: client,
       model: model,
-      messages: Self.applySystemPrompt(
-        systemPrompt: systemPrompt,
-        initialMessages: initialMessages.toChatMessages()),
-      reasoningEnabled: reasoningEnabled
+      document: doc,
+      tools: tools,
+      toolExecutor: toolExecutor,
+      workingDirectory: workingDirectory,
+      reasoningEnabled: reasoningEnabled,
+      logger: logger
     )
   }
 
-  // MARK: - ScribeConfig convenience initializer
+  /// Build an agent from a ``ScribeConfig`` against a caller-supplied
+  /// ``SessionDocument``. Constructs the transport from
+  /// `configuration.serverURL` so embedders don't have to reach into
+  /// ``ScribeLLM``.
+  public init(
+    configuration: ScribeConfig,
+    document: SessionDocument,
+    logger: Logger
+  ) throws {
+    guard let serverURL = URL(string: configuration.serverURL) else {
+      throw ScribeError.configuration(
+        key: "serverURL",
+        reason: "Invalid serverURL in ScribeConfig: \(configuration.serverURL)")
+    }
+    let client = OpenAICompatibleClient.make(
+      serverURL: serverURL, apiKey: configuration.apiKey)
+    self.init(
+      client: client,
+      model: configuration.agentModel,
+      document: document,
+      tools: configuration.tools,
+      toolExecutor: nil,
+      workingDirectory: FilePath(configuration.workingDirectory),
+      reasoningEnabled: configuration.reasoningEnabled,
+      logger: logger
+    )
+  }
 
   /// Build an agent from a ``ScribeConfig``. Internally constructs an
-  /// OpenAI-compatible client from `configuration.serverURL`. Prefer the
-  /// `init(client:...)` overloads for embedded use.
+  /// OpenAI-compatible client from `configuration.serverURL` and an
+  /// in-memory ``SessionDocument``. Prefer the
+  /// `init(configuration:document:logger:)` overload when sharing state
+  /// with a host.
   public init(
     configuration: ScribeConfig,
     systemPrompt: String,
@@ -169,26 +184,29 @@ public struct ScribeAgent: Sendable {
 
   // MARK: - State accessors
 
-  var state: AgentStateSnapshot {
-    get async { await storage.snapshot() }
-  }
-
   /// The full conversation history as ``ScribeMessage`` values — the
   /// public, transport-agnostic message type.
   public var messages: [ScribeMessage] {
-    get async { await storage.messages.toScribeMessages() }
+    get async { await document.snapshot() }
   }
 
   public func messages(since start: Int) async -> [ScribeMessage] {
-    await storage.messages(since: start).toScribeMessages()
+    let all = await document.snapshot()
+    guard start < all.count else { return [] }
+    let clamped = max(0, start)
+    return Array(all[clamped...])
   }
 
   public func messages(in range: Range<Int>) async -> [ScribeMessage] {
-    await storage.messages(in: range).toScribeMessages()
+    let all = await document.snapshot()
+    let lower = max(0, range.lowerBound)
+    let upper = min(all.count, range.upperBound)
+    guard lower < upper else { return [] }
+    return Array(all[lower..<upper])
   }
 
   public var isStreaming: Bool {
-    get async { await storage.isStreaming }
+    get async { await streamingFlag.get() }
   }
 
   // MARK: - stream
@@ -210,32 +228,32 @@ public struct ScribeAgent: Sendable {
     let wireMessages = promptMessages.toChatMessages()
     let (stream, continuation) = AsyncStream<AgentEvent>.makeStream()
 
-    let snapshot = await storage.snapshot()
-    await storage.setStreaming(true)
+    let preTurnSnapshot = await document.snapshotChatMessages()
+    await streamingFlag.set(true)
     abortNotifier.clear()
 
     let agentLogger = logger
     let task = Task {
       [
-        storage, toolExecutor, chatTools, client, wireMessages, options, agentLogger,
-        abortNotifier
+        document, streamingFlag, toolExecutor, chatTools, client, wireMessages, options,
+        agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory
       ] in
       defer {
         continuation.finish()
-        Task { await storage.setStreaming(false) }
+        Task { await streamingFlag.set(false) }
       }
 
-      let ctx = AgentContext(messages: snapshot.messages)
+      let ctx = AgentContext(messages: preTurnSnapshot)
 
       let config = AgentLoopConfig(
-        model: snapshot.model,
+        model: model,
         client: client,
         toolExecutor: toolExecutor,
         chatTools: chatTools,
         temperature: options.temperature,
         maxToolRounds: options.maxToolRounds,
         workingDirectory: workingDirectory,
-        reasoningEnabled: snapshot.reasoningEnabled
+        reasoningEnabled: reasoningEnabled
       )
 
       do {
@@ -247,33 +265,27 @@ public struct ScribeAgent: Sendable {
           logger: agentLogger,
           abortObserver: abortNotifier
         )
+        let newScribeMessages = result.messages.toScribeMessages()
         switch result.termination {
         case .completed:
-          await storage.appendMessages(result.messages)
-          let finalMessages = await storage.messages
-          return TurnResult(
-            messages: finalMessages.toScribeMessages(),
-            outcome: .completed)
+          try await document.apply(.append(newScribeMessages))
+          let finalMessages = await document.snapshot()
+          return TurnResult(messages: finalMessages, outcome: .completed)
         case .interrupted:
           continuation.yield(.lifecycle(.interrupted))
-          await storage.appendMessages(result.messages)
-          let finalMessages = await storage.messages
-          return TurnResult(
-            messages: finalMessages.toScribeMessages(),
-            outcome: .interrupted)
+          try await document.apply(.append(newScribeMessages))
+          let finalMessages = await document.snapshot()
+          return TurnResult(messages: finalMessages, outcome: .interrupted)
         case .toolRoundLimit(let rounds):
-          await storage.appendMessages(result.messages)
-          let finalMessages = await storage.messages
+          try await document.apply(.append(newScribeMessages))
+          let finalMessages = await document.snapshot()
           return TurnResult(
-            messages: finalMessages.toScribeMessages(),
-            outcome: .toolRoundLimit(rounds: rounds))
+            messages: finalMessages, outcome: .toolRoundLimit(rounds: rounds))
         }
       } catch is AgentTurnInterruptedError {
         continuation.yield(.lifecycle(.interrupted))
-        let current = await storage.messages
-        return TurnResult(
-          messages: current.toScribeMessages(),
-          outcome: .interrupted)
+        let current = await document.snapshot()
+        return TurnResult(messages: current, outcome: .interrupted)
       }
     }
 
@@ -292,12 +304,12 @@ public struct ScribeAgent: Sendable {
   /// working unchanged.
   private static func applySystemPrompt(
     systemPrompt: String,
-    initialMessages: [Components.Schemas.ChatMessage]
-  ) -> [Components.Schemas.ChatMessage] {
+    initialMessages: [ScribeMessage]
+  ) -> [ScribeMessage] {
     guard !systemPrompt.isEmpty else { return initialMessages }
     if initialMessages.first?.role == .system { return initialMessages }
     var result = initialMessages
-    result.insert(.init(role: .system, content: .case1(systemPrompt)), at: 0)
+    result.insert(ScribeMessage(role: .system, content: systemPrompt), at: 0)
     return result
   }
 }

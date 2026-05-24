@@ -1,0 +1,217 @@
+import ScribeLLM
+import _RopeModule
+
+// MARK: - MessageRope
+
+/// A `Rope<Message>` specialised for chat history.
+///
+/// Wraps swift-collections `Rope<Message>` and exposes a chat-friendly API:
+/// append single messages, extract viewport windows, truncate, splice, iterate.
+///
+/// The rope is the in-memory truth held by ``SessionDocument``; this type
+/// concerns itself only with data-structure semantics. Persistence,
+/// notifications, and session identity live one level up.
+public struct MessageRope: Sendable {
+  public typealias _Rope = Rope<Message>
+
+  private var _rope: _Rope
+
+  // MARK: - Init
+
+  public init() {
+    self._rope = Rope()
+  }
+
+  /// Bulk-load from an array of messages, chunked into leaves of up to 32.
+  public init(_ messages: [Components.Schemas.ChatMessage]) {
+    var elements: [Message] = []
+    var chunk: [Components.Schemas.ChatMessage] = []
+    chunk.reserveCapacity(MessageSummary.maxNodeSize)
+    for msg in messages {
+      chunk.append(msg)
+      if chunk.count >= MessageSummary.maxNodeSize {
+        elements.append(Message(messages: chunk))
+        chunk = []
+      }
+    }
+    if !chunk.isEmpty {
+      elements.append(Message(messages: chunk))
+    }
+    self._rope = Rope()
+    for el in elements {
+      _rope.append(el)
+    }
+  }
+
+  internal init(_rope: _Rope) {
+    self._rope = _rope
+  }
+
+  // MARK: - Properties
+
+  public var count: Int {
+    _rope.count(in: MessageMetric())
+  }
+
+  public var isEmpty: Bool {
+    _rope.isEmpty
+  }
+
+  public var first: Components.Schemas.ChatMessage? {
+    guard !isEmpty, let leaf = _rope.first else { return nil }
+    return leaf.messages.first
+  }
+
+  public var last: Components.Schemas.ChatMessage? {
+    guard !isEmpty, let leaf = _rope.last else { return nil }
+    return leaf.messages.last
+  }
+
+  // MARK: - Subscript
+
+  /// O(log n) random access. `precondition`s on bounds.
+  public subscript(index: Int) -> Components.Schemas.ChatMessage {
+    precondition(index >= 0 && index < count, "MessageRope index out of bounds")
+    return window(from: index, count: 1)[0]
+  }
+
+  // MARK: - Append
+
+  public mutating func append(_ message: Components.Schemas.ChatMessage) {
+    _rope.append(Message(messages: [message]))
+  }
+
+  public mutating func append(contentsOf messages: [Components.Schemas.ChatMessage]) {
+    for m in messages { append(m) }
+  }
+
+  // MARK: - Window
+
+  /// Return `requestedCount` messages starting at `start` (0-indexed).
+  public func window(from start: Int, count requestedCount: Int) -> [Components.Schemas.ChatMessage] {
+    guard start >= 0, requestedCount > 0, !isEmpty else { return [] }
+    let metric = MessageMetric()
+    let total = _rope.count(in: metric)
+    guard start < total else { return [] }
+    let end = min(start + requestedCount, total)
+    var result: [Components.Schemas.ChatMessage] = []
+    result.reserveCapacity(end - start)
+
+    // Find the start index and walk forward collecting messages.
+    var idx = _rope.startIndex
+    var offset = 0
+    // Advance idx past leaves that end before `start`.
+    while idx < _rope.endIndex {
+      let leaf = _rope[idx]
+      let leafCount = leaf.messages.count
+      if offset + leafCount > start { break }
+      offset += leafCount
+      _rope.formIndex(after: &idx)
+    }
+
+    // Collect from the first overlapping leaf.
+    if idx < _rope.endIndex {
+      let leaf = _rope[idx]
+      let localStart = start - offset
+      let take = min(leaf.messages.count - localStart, end - start)
+      result.append(contentsOf: leaf.messages[localStart..<localStart + take])
+      _rope.formIndex(after: &idx)
+    }
+
+    // Collect remaining full leaves.
+    while result.count < end - start, idx < _rope.endIndex {
+      let leaf = _rope[idx]
+      let take = min(leaf.messages.count, end - start - result.count)
+      result.append(contentsOf: leaf.messages.prefix(take))
+      _rope.formIndex(after: &idx)
+    }
+
+    return result
+  }
+
+  /// Materialise the whole rope as an array. O(n).
+  public func toArray() -> [Components.Schemas.ChatMessage] {
+    var out: [Components.Schemas.ChatMessage] = []
+    out.reserveCapacity(count)
+    forEach { out.append($0) }
+    return out
+  }
+
+  // MARK: - Truncate
+
+  public mutating func truncate(to newCount: Int) {
+    precondition(newCount >= 0, "truncate count must be >= 0")
+    let current = count
+    guard newCount < current else { return }
+    if newCount == 0 {
+      self._rope = Rope()
+      return
+    }
+
+    let metric = MessageMetric()
+    _rope.removeSubrange(newCount..<current, in: metric)
+  }
+
+  // MARK: - Splice
+
+  /// Replace `range` of messages with `replacement`.
+  ///
+  /// This is the primitive `/tldr` relies on: the picker's two cursors define
+  /// a `Range<Int>` and the summarizer's output becomes the replacement.
+  /// Out-of-bounds ranges are precondition failures (callers should clamp).
+  public mutating func splice(_ range: Range<Int>, with replacement: [Components.Schemas.ChatMessage]) {
+    let total = count
+    precondition(range.lowerBound >= 0, "splice lowerBound < 0")
+    precondition(range.upperBound <= total, "splice upperBound > count")
+    precondition(range.lowerBound <= range.upperBound, "splice range inverted")
+
+    // Materialise as array, splice, rebuild. With 1M-token sessions in mind
+    // we'd want an in-place rope splice; for now correctness over speed for
+    // an op that runs once per /tldr.
+    var arr = toArray()
+    arr.replaceSubrange(range, with: replacement)
+    self = MessageRope(arr)
+  }
+
+  // MARK: - forEach
+
+  public func forEach(_ body: (Components.Schemas.ChatMessage) throws -> Void) rethrows {
+    for leaf in _rope {
+      for msg in leaf.messages {
+        try body(msg)
+      }
+    }
+  }
+
+  // MARK: - Fork boundaries
+
+  /// Indices `i` at which the prefix `self[0..i)` forms a self-contained
+  /// conversation — every assistant `tool_calls` has its matching `tool`
+  /// results already present. See ``Array/safeForkBoundaries()`` for the
+  /// rationale; this is the rope-native equivalent that walks leaves
+  /// without materialising the array.
+  public func safeForkBoundaries() -> [Int] {
+    var openToolCalls = Set<String>()
+    var boundaries: [Int] = []
+    var index = 0
+    forEach { message in
+      switch message.role {
+      case .assistant:
+        if let calls = message.toolCalls {
+          for call in calls {
+            if let id = call.id { openToolCalls.insert(id) }
+          }
+        }
+      case .tool:
+        if let id = message.toolCallId { openToolCalls.remove(id) }
+      case .system, .user:
+        break
+      }
+      index += 1
+      if openToolCalls.isEmpty {
+        boundaries.append(index)
+      }
+    }
+    return boundaries
+  }
+}

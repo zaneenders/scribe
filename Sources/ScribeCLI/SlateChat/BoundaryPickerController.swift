@@ -1,6 +1,5 @@
 import Foundation
 import Logging
-import _NIOFileSystem
 import ScribeCore
 import SlateCore
 import SystemPackage
@@ -50,7 +49,11 @@ internal final class BoundaryPickerController {
 
   // MARK: - Dependencies (set by host after init)
 
-  var sessionDirectory: FilePath = FilePath("")
+  /// The shared session document. Picker reads its snapshot for boundary
+  /// computation and applies `/fork` / `/tldr` via ``SessionDocument/apply(_:)``.
+  /// The doc emits a `.identityChanged` event back to the host so transcript
+  /// state catches up — the picker doesn't notify the host directly.
+  var document: SessionDocument?
   var configuration: ScribeConfig = ScribeConfig(
     agentModel: "", contextWindow: 0, contextWindowThreshold: 0,
     serverURL: "", apiKey: nil, workingDirectory: ".", reasoningEnabled: false)
@@ -59,9 +62,6 @@ internal final class BoundaryPickerController {
   var markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
   // MARK: - Host callbacks
-
-  /// Called on confirm: the host should call `hotSwapToSession(directory:sessionId:)`.
-  var onHotSwap: ((_ directory: FilePath, _ sessionId: UUID) -> Void)?
 
   /// Set the model-busy flag on the host.
   var setModelBusy: ((Bool) -> Void)?
@@ -113,27 +113,24 @@ internal final class BoundaryPickerController {
   // MARK: - Open
 
   /// Open the boundary picker.  Returns `true` when the picker is now active.
+  ///
+  /// The caller is responsible for fetching the current document snapshot
+  /// (the doc is an actor; the picker stays sync). Without the doc the
+  /// picker can't run; with `modelBusy == true` the snapshot would be
+  /// stale (mid-turn) so we refuse to open.
   func open(
     kind: PickerSnapshot.Kind,
+    messages: [ScribeMessage],
     modelBusy: Bool,
     transcriptState: inout TranscriptState,
     viewport: inout TranscriptViewport,
     flattenCache: inout TranscriptLayout.FlattenCache
   ) -> Bool {
-    // Disk-persisted messages lag the live coordinator while a turn is streaming.
+    // Snapshot lags the live coordinator while a turn is streaming.
     if modelBusy {
       logger.notice(
         "chat.picker.open.skip",
         metadata: ["kind": "\(kind)", "reason": "model-busy"])
-      return false
-    }
-    let messages: [ScribeMessage]
-    do {
-      messages = try ChatSessionStore.loadMessages(from: sessionDirectory)
-    } catch {
-      logger.warning(
-        "chat.picker.open.fail",
-        metadata: ["err": "\(String(describing: error))"])
       return false
     }
     let boundaries = messages.safeForkBoundaries()
@@ -276,11 +273,16 @@ internal final class BoundaryPickerController {
     let kind = snap.kind
     let startCut = snap.startBoundary
     let endCut = snap.endBoundary
-    let persistDirectory = sessionDirectory
     let configuration = self.configuration
     let logger = self.logger
     let parentSessionId = currentSessionId?() ?? UUID()
     let enqueue = enqueueHostEvent
+    guard let document = self.document else {
+      logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-document"])
+      setModelBusy?(false)
+      requestRender?()
+      return
+    }
 
     logger.notice(
       "chat.picker.confirm",
@@ -300,48 +302,34 @@ internal final class BoundaryPickerController {
         guard await MainActor.run(body: { self.isHostActive?() ?? false }) else { return }
 
         let newId = UUID()
-        let result: ChatSessionStore.ForkResult
         switch kind {
         case .fork:
-          result = try await ChatSessionStore.forkSession(
-            from: persistDirectory, cutAt: startCut, newSessionId: newId,
-            scribeVersion: GitVersion.hash)
+          try await document.apply(.fork(cutAt: startCut, newSessionId: newId))
           logger.notice(
             "chat.fork.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
-              "child": "\(result.sessionId.uuidString)",
-              "cut_at": "\(result.cutAt)",
+              "child": "\(newId.uuidString)",
+              "cut_at": "\(startCut)",
             ])
         case .tldr:
-          let messages = try ChatSessionStore.loadMessages(from: persistDirectory)
+          let messages = await document.snapshot()
           let slice = Array(messages[startCut..<endCut])
           let summary = try await SessionSummarizer.summarize(
             slice: slice, configuration: configuration, logger: logger)
-          result = try await ChatSessionStore.forkSession(
-            from: persistDirectory, cutAt: startCut, newSessionId: newId,
-            scribeVersion: GitVersion.hash)
-          do {
-            try ChatSessionStore.appendMessages(
-              [ScribeMessage(role: .assistant, content: summary)],
-              to: result.sessionDirectory)
-            if endCut < messages.count {
-              let tail = Array(messages[endCut..<messages.count])
-              try ChatSessionStore.appendMessages(tail, to: result.sessionDirectory)
-            }
-          } catch {
-            _ = try? await FileSystem.shared.removeItem(
-              at: result.sessionDirectory,
-              strategy: .platformDefault,
-              recursively: true)
-            throw error
-          }
+          let replacement = [ScribeMessage(role: .assistant, content: summary)]
+          try await document.apply(
+            .forkSplice(
+              startCut: startCut,
+              endCut: endCut,
+              replacement: replacement,
+              newSessionId: newId))
           let tailCount = max(0, messages.count - endCut)
           logger.notice(
             "chat.tldr.create",
             metadata: [
               "parent": "\(parentSessionId.uuidString)",
-              "child": "\(result.sessionId.uuidString)",
+              "child": "\(newId.uuidString)",
               "start_cut": "\(startCut)",
               "end_cut": "\(endCut)",
               "slice_messages": "\(slice.count)",
@@ -349,9 +337,13 @@ internal final class BoundaryPickerController {
               "summary_chars": "\(summary.count)",
             ])
         }
+        // Identity-change observer on the host picks up the doc event and
+        // refreshes transcript / banner / exit hint; the picker only needs
+        // to release model-busy after the doc has accepted the edit.
         await MainActor.run { [weak self] in
           guard let self, self.isHostActive?() ?? false else { return }
-          self.onHotSwap?(result.sessionDirectory, result.sessionId)
+          self.setModelBusy?(false)
+          self.requestRender?()
         }
       } catch {
         if Task.isCancelled { return }

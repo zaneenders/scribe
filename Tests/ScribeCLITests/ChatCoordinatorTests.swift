@@ -9,35 +9,44 @@ import Testing
 
 // MARK: - ChatCoordinator tests
 
-/// Tests for the `ChatCoordinator` actor — verifies initialization, event
-/// emission patterns, and lifecycle without needing a real ScribeAgent.
+/// Tests for the `ChatCoordinator` actor — verifies initialization and the
+/// `interrupt()` surface without needing a real ScribeAgent. Persistence and
+/// session-level concerns moved to ``SessionDocument`` / ``FileSessionPersister``
+/// and are covered by ``SessionDocumentTests`` and host-level integration
+/// tests.
 @Suite
 struct ChatCoordinatorTests {
 
   private let logger = Logger(label: "test.chat-coordinator")
+
+  private func makeDocument(
+    initial: [ScribeMessage] = [ScribeMessage(role: .system, content: "sys")]
+  ) -> SessionDocument {
+    SessionDocument(
+      sessionId: UUID(),
+      directory: FilePath("/in-memory"),
+      initialMessages: initial,
+      persister: InMemorySessionPersister(),
+      logger: logger
+    )
+  }
 
   // MARK: - Initialization
 
   @Test func coordinatorInitialization() async throws {
     let (lines, _) = AsyncStream<String>.makeStream()
     let events: Mutex<[HostEvent]> = Mutex([])
+    let document = makeDocument()
 
     let coordinator = try ChatCoordinator(
       configuration: .testValue,
-      systemPrompt: "test prompt",
-      resumeSnapshot: [],
       logger: logger,
-      enqueue: { event in
-        events.withLock { $0.append(event) }
-      },
-      persistDirectory: FilePath("/tmp/test"),
-      sessionId: UUID(),
-      sessionCreatedAt: Date(),
+      enqueue: { event in events.withLock { $0.append(event) } },
+      document: document,
       lines: lines
     )
     // Coordinator should initialize without crashing.
-    #expect(true)
-    _ = coordinator  // silence unused warning
+    _ = coordinator
   }
 
   /// `interrupt()` is a `nonisolated` no-op when no turn is in flight —
@@ -49,59 +58,18 @@ struct ChatCoordinatorTests {
   @Test func interruptBeforeRunIsNoOp() async throws {
     let (lines, _) = AsyncStream<String>.makeStream()
     let events: Mutex<[HostEvent]> = Mutex([])
+    let document = makeDocument()
     let coordinator = try ChatCoordinator(
       configuration: .testValue,
-      systemPrompt: "test prompt",
-      resumeSnapshot: [],
       logger: logger,
       enqueue: { event in events.withLock { $0.append(event) } },
-      persistDirectory: FilePath("/tmp/test"),
-      sessionId: UUID(),
-      sessionCreatedAt: Date(),
+      document: document,
       lines: lines
     )
     // Should not crash, throw, or block.
     coordinator.interrupt()
     #expect(events.withLock { $0.isEmpty })
   }
-
-  /// A resume snapshot that doesn't lead with a system message is malformed;
-  /// `init` should reject it rather than letting the bad state reach the
-  /// agent loop.
-  @Test func coordinatorRejectsCorruptResumeSnapshot() async {
-    let (lines, _) = AsyncStream<String>.makeStream()
-    let events: Mutex<[HostEvent]> = Mutex([])
-    let badSnapshot: [ScribeMessage] = [
-      ScribeMessage(role: .user, content: "no system message in front")
-    ]
-    do {
-      _ = try ChatCoordinator(
-        configuration: .testValue,
-        systemPrompt: "test prompt",
-        resumeSnapshot: badSnapshot,
-        logger: logger,
-        enqueue: { event in events.withLock { $0.append(event) } },
-        persistDirectory: FilePath("/tmp/test"),
-        sessionId: UUID(),
-        sessionCreatedAt: Date(),
-        lines: lines
-      )
-      Issue.record("Expected ScribeError.sessionCorrupted")
-    } catch let error as ScribeError {
-      if case .sessionCorrupted = error {
-        // expected
-      } else {
-        Issue.record("Wrong ScribeError variant: \(error)")
-      }
-    } catch {
-      Issue.record("Wrong error type: \(error)")
-    }
-  }
-
-  // (`AbortNotifier` itself is tested directly in
-  // `ScribeCoreTests/AbortNotifierTests` — fresh state, set, clear,
-  // late subscribers, and multi-subscriber broadcast all live there.
-  // Coordinator-level tests focus on the `interrupt()` API surface.)
 }
 
 // MARK: - Test helpers
@@ -114,5 +82,6 @@ extension ScribeConfig {
     serverURL: "https://test.example.com",
     apiKey: "test-token",
     workingDirectory: "/tmp",
-reasoningEnabled: nil  )
+    reasoningEnabled: nil
+  )
 }
