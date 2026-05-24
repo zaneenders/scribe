@@ -114,7 +114,7 @@ final class ChatCoordinator: Sendable {
 
     do {
       if resumeSnapshot.isEmpty {
-        let cwd = FileManager.default.currentDirectoryPath
+        let cwd = FilePath.currentDirectory.string
         let meta = ChatSessionMetadata(
           id: sessionId,
           createdAt: sessionCreatedAt,
@@ -123,7 +123,7 @@ final class ChatCoordinator: Sendable {
           baseURL: configuration.serverURL,
           scribeVersion: GitVersion.hash
         )
-        try? ChatSessionStore.saveMetadata(meta, to: persistDirectory)
+        try? await ChatSessionStore.saveMetadata(meta, to: persistDirectory)
         try messagesAppender.append(initialMessages)
       }
       var persistedCount = initialMessages.count

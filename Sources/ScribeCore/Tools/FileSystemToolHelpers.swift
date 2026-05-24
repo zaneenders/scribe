@@ -4,9 +4,9 @@ import SystemPackage
 enum FileSystemToolHelpers {
   static func requireParentDirectoryForWrite(filesystemPath: String, userPath: String) throws {
     let parent = URL(fileURLWithPath: filesystemPath).deletingLastPathComponent()
-    var isDir: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDir), isDir.boolValue
-    else {
+    let parentFP = FilePath(parent.path)
+    let st = FileStat.stat(parentFP)
+    guard st.exists, st.isDirectory else {
       throw PathResolution.PathError(
         description: "parent directory does not exist for write: \(userPath)")
     }
