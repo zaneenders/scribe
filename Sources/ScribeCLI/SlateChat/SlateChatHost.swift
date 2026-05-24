@@ -327,13 +327,17 @@ internal final class SlateChatHost {
                 let text = self.inputBuffer
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed == "/fork" || trimmed == "/tldr" {
-                  self.inputBuffer = ""
-                  _ = self.pickerController.open(
-                    kind: trimmed == "/fork" ? .fork : .tldr,
+                  let kind: PickerSnapshot.Kind =
+                    trimmed == "/fork" ? .fork : .tldr
+                  if self.pickerController.open(
+                    kind: kind,
                     modelBusy: self.modelBusy,
                     transcriptState: &self.transcriptState,
                     viewport: &self.viewport,
                     flattenCache: &self.flattenCache)
+                  {
+                    self.inputBuffer = ""
+                  }
                 } else {
                   self.inputBuffer = ""
                   self.submitCoordinator.setModelBusy(self.modelBusy)
