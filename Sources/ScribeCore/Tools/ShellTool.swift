@@ -1,6 +1,7 @@
 import SystemPackage
 import Foundation
 import Logging
+import RegexBuilder
 
 struct ShellToolResult: Encodable, Sendable {
   let ok = true
@@ -65,12 +66,17 @@ public struct ShellTool: ScribeTool {
   /// Returns true when `command` asks for elevated privileges via `sudo`,
   /// `su`, `doas`, or `pkexec` as standalone words (word-boundary match).
   private static func containsPrivilegeEscalation(_ command: String) -> Bool {
-    let pattern = #"\b(sudo|su|doas|pkexec)\b"#
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-      return false
+    let regex = Regex {
+      Anchor.wordBoundary
+      ChoiceOf {
+        "sudo"
+        "su"
+        "doas"
+        "pkexec"
+      }
+      Anchor.wordBoundary
     }
-    let range = NSRange(command.startIndex..., in: command)
-    return regex.firstMatch(in: command, options: [], range: range) != nil
+    return command.contains(regex)
   }
 
   public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
