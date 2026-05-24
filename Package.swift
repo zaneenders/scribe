@@ -24,6 +24,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
     .package(url: "https://github.com/apple/swift-collections.git", from: "1.4.1"),
     .package(url: "https://github.com/apple/swift-profile-recorder.git", .upToNextMinor(from: "0.3.13")),
+    .package(url: "https://github.com/apple/swift-nio.git", from: "2.100.0"),
   ],
   targets: [
     .target(
@@ -50,6 +51,7 @@ let package = Package(
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "_RopeModule", package: "swift-collections"),
+        .product(name: "_NIOFileSystem", package: "swift-nio"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -66,6 +68,7 @@ let package = Package(
         .product(name: "Markdown", package: "swift-markdown"),
         .product(name: "_RopeModule", package: "swift-collections"),
         .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
+        .product(name: "_NIOFileSystem", package: "swift-nio"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

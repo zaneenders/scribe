@@ -237,7 +237,7 @@ internal final class SlateChatHost {
         // installCoordinator step against the new session.
         self.refreshTranscriptFromSeed()
 
-        let cwd = FileManager.default.currentDirectoryPath
+        let cwd = FilePath.currentDirectory.string
         self.banner = BannerSnapshot(
           baseURL: self.configuration.serverURL,
           model: self.configuration.agentModel,

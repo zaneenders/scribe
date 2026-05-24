@@ -37,20 +37,21 @@ enum PathResolution {
     }
 
     let resolvedPath = combinedURL.resolvingSymlinksInPath().path
+    let fp = FilePath(resolvedPath)
 
     if mustExist {
-      var isDir: ObjCBool = false
-      guard FileManager.default.fileExists(atPath: resolvedPath, isDirectory: &isDir) else {
+      let st = FileStat.stat(fp)
+      guard st.exists else {
         throw PathError(description: "path does not exist: \(trimmed)")
       }
       if let isDirectory {
-        guard isDir.boolValue == isDirectory else {
+        guard st.isDirectory == isDirectory else {
           throw PathError(
             description: "expected \(isDirectory ? "directory" : "file") at \(trimmed)")
         }
       }
     }
 
-    return FilePath(resolvedPath)
+    return fp
   }
 }

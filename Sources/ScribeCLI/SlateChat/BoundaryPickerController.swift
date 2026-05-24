@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import _NIOFileSystem
 import ScribeCore
 import SlateCore
 import SystemPackage
@@ -302,7 +303,7 @@ internal final class BoundaryPickerController {
         let result: ChatSessionStore.ForkResult
         switch kind {
         case .fork:
-          result = try ChatSessionStore.forkSession(
+          result = try await ChatSessionStore.forkSession(
             from: persistDirectory, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
           logger.notice(
@@ -317,7 +318,7 @@ internal final class BoundaryPickerController {
           let slice = Array(messages[startCut..<endCut])
           let summary = try await SessionSummarizer.summarize(
             slice: slice, configuration: configuration, logger: logger)
-          result = try ChatSessionStore.forkSession(
+          result = try await ChatSessionStore.forkSession(
             from: persistDirectory, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
           do {
@@ -329,8 +330,10 @@ internal final class BoundaryPickerController {
               try ChatSessionStore.appendMessages(tail, to: result.sessionDirectory)
             }
           } catch {
-            try? FileManager.default.removeItem(
-              atPath: result.sessionDirectory.string)
+            _ = try? await FileSystem.shared.removeItem(
+              at: result.sessionDirectory,
+              strategy: .platformDefault,
+              recursively: true)
             throw error
           }
           let tailCount = max(0, messages.count - endCut)
