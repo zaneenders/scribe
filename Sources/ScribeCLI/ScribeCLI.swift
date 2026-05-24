@@ -50,13 +50,13 @@ import SystemPackage
       return
     }
 
-    let cwd = FileManager.default.currentDirectoryPath
+    let cwd = FilePath.currentDirectory.string
 
     if listSessions {
       let root = loaded.paths.sessionsDirectory
-      try ChatSessionStore.ensureSessionsDirectory(root)
+      try await ChatSessionStore.ensureSessionsDirectory(root)
       let cwdFilter: String? = all ? nil : cwd
-      let files = try ChatSessionStore.listSessionDirectories(
+      let files = try await ChatSessionStore.listSessionDirectories(
         sessionsRoot: root,
         cwdFilter: cwdFilter)
       guard !files.isEmpty else {
@@ -67,13 +67,12 @@ import SystemPackage
         }
         return
       }
-      let home = FileManager.default.homeDirectoryForCurrentUser.path
+      let home = NSHomeDirectory()
       for directory in files {
         guard let meta = try? ChatSessionStore.loadMetadata(from: directory) else { continue }
         let shortId = String(meta.id.uuidString.prefix(8))
-        let updatedAt =
-          (try? FileManager.default.attributesOfItem(atPath: directory.string)[.modificationDate]
-            as? Date) ?? meta.createdAt
+        let st = FileStat.stat(directory)
+        let updatedAt = st.exists ? st.modificationDate : meta.createdAt
         let when = relativeTime(from: updatedAt)
         let displayCwd = meta.cwd.replacingOccurrences(of: home, with: "~")
 
@@ -133,7 +132,7 @@ import SystemPackage
 
     if resumeLatest {
       let spec = "latest"
-      sessionDirectory = try ChatSessionStore.resolveResumeDirectory(
+      sessionDirectory = try await ChatSessionStore.resolveResumeDirectory(
         specifier: spec,
         sessionsRoot: loaded.paths.sessionsDirectory,
         preferCWD: cwd)
@@ -141,7 +140,7 @@ import SystemPackage
       resumeMessages = try ChatSessionStore.loadMessages(from: sessionDirectory)
       sessionId = resumeMetadata!.id
     } else if let spec = resume?.trimmingCharacters(in: .whitespacesAndNewlines), !spec.isEmpty {
-      sessionDirectory = try ChatSessionStore.resolveResumeDirectory(
+      sessionDirectory = try await ChatSessionStore.resolveResumeDirectory(
         specifier: spec,
         sessionsRoot: loaded.paths.sessionsDirectory,
         preferCWD: cwd)
@@ -150,7 +149,7 @@ import SystemPackage
       sessionId = resumeMetadata!.id
     } else {
       sessionId = UUID()
-      sessionDirectory = try ChatSessionStore.sessionDirectory(
+      sessionDirectory = try await ChatSessionStore.sessionDirectory(
         sessionId: sessionId, sessionsRoot: loaded.paths.sessionsDirectory)
       resumeMetadata = nil
       resumeMessages = []
@@ -212,7 +211,7 @@ import SystemPackage
 
   private func printInfo(loaded: LoadedConfig) {
     let p = loaded.paths
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    let home = NSHomeDirectory()
 
     func abbreviate(_ path: String) -> String {
       if path.hasPrefix(home) {

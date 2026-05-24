@@ -98,15 +98,15 @@ public enum ConfigLoader {
     }
 
     // 2. Check {dataHome}/scribe-config.json.
-    if FileManager.default.fileExists(atPath: paths.defaultConfigPath.string) {
+    if FileStat.stat(paths.defaultConfigPath).exists {
       return try await loadConfig(at: paths.defaultConfigPath, paths: paths)
     }
 
     // 3. Check cwd/scribe-config.json.
-    let cwd = FileManager.default.currentDirectoryPath
+    let cwd = FilePath.currentDirectory.string
     let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
       .appendingPathComponent(configFileName).path
-    if FileManager.default.fileExists(atPath: cwdCandidate) {
+    if FileStat.stat(FilePath(cwdCandidate)).exists {
       return try await loadConfig(at: FilePath(cwdCandidate), paths: paths)
     }
 
@@ -255,10 +255,7 @@ public enum ConfigLoader {
     let data = try encoder.encode(template)
     let url = URL(fileURLWithPath: path)
     let dir = url.deletingLastPathComponent()
-    if !FileManager.default.fileExists(atPath: dir.path) {
-      try FileManager.default.createDirectory(
-        at: dir, withIntermediateDirectories: true)
-    }
+    try createDirectoryWithIntermediates(FilePath(dir.path))
     try data.write(to: url, options: .atomic)
   }
 }

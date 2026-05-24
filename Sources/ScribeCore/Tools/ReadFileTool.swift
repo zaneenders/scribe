@@ -1,6 +1,7 @@
 import SystemPackage
 import Foundation
 import Logging
+import _NIOFileSystem
 
 struct ReadFileToolResult: Encodable, Sendable {
   let ok = true
@@ -91,15 +92,14 @@ public struct ReadFileTool: ScribeTool {
     // Detect image files by magic bytes and return base64-encoded data.
     if ImageSupport.isImageFile(path: s) {
       let maxImageBytes = 5 * 1024 * 1024
-      if let attrs = try? FileManager.default.attributesOfItem(atPath: s),
-        let fileSize = attrs[FileAttributeKey.size] as? Int,
-        fileSize > maxImageBytes
+      if let info = try? await FileSystem.shared.info(forFileAt: fp),
+        info.size > maxImageBytes
       {
         let name = URL(fileURLWithPath: s).lastPathComponent
-        let msg = "\(name) is too large to attach (\(fileSize / (1024 * 1024)) MB, limit 5 MB)"
+        let msg = "\(name) is too large to attach (\(info.size / (1024 * 1024)) MB, limit 5 MB)"
         logger.warning(
           "agent.tool.read_file.image.too-large",
-          metadata: ["path": "\(s)", "bytes": "\(fileSize)", "limit_bytes": "\(maxImageBytes)"])
+          metadata: ["path": "\(s)", "bytes": "\(info.size)", "limit_bytes": "\(maxImageBytes)"])
         return ReadFileImageTooLargeResult(path: s, error: msg)
       }
       let result = try await Self.readImage(path: s)

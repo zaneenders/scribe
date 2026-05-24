@@ -1,6 +1,13 @@
 import Foundation
+import _NIOFileSystem
 import ScribeCore
 import SystemPackage
+
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 struct ChatSessionMetadata: Codable, Sendable {
   var schemaVersion: Int
@@ -10,8 +17,10 @@ struct ChatSessionMetadata: Codable, Sendable {
   var cwd: String
   var baseURL: String?
   var scribeVersion: String?
+
   /// Session this one was forked from. `nil` for top-level (non-forked) sessions.
   var parentSessionId: UUID?
+
   /// Number of messages copied from the parent at fork time — i.e. the cut
   /// index in the parent's log. `nil` for non-forked sessions.
   var forkedAtIndex: Int?
@@ -62,34 +71,29 @@ enum ChatSessionStore {
     directory.appendingPathComponent("messages.jsonl")
   }
 
-  static func ensureSessionsDirectory(_ sessionsRoot: FilePath) throws {
-    try FileManager.default.createDirectory(
-      atPath: sessionsRoot.string,
-      withIntermediateDirectories: true
-    )
+  static func ensureSessionsDirectory(_ sessionsRoot: FilePath) async throws {
+    try await FileSystem.shared.createDirectory(
+      at: sessionsRoot,
+      withIntermediateDirectories: true)
   }
 
   static func listSessionDirectories(
     sessionsRoot: FilePath,
     cwdFilter: String? = nil
-  ) throws -> [FilePath] {
-    try ensureSessionsDirectory(sessionsRoot)
-    guard FileManager.default.fileExists(atPath: sessionsRoot.string) else {
+  ) async throws -> [FilePath] {
+    try await ensureSessionsDirectory(sessionsRoot)
+    let fs = FileSystem.shared
+    guard (try? await fs.info(forFileAt: sessionsRoot)) != nil else {
       return []
     }
-    let contents = try FileManager.default.contentsOfDirectory(
-      atPath: sessionsRoot.string
-    )
     var sessionDirs: [FilePath] = []
-    for name in contents where !name.hasPrefix(".") {
+    let names = try listDirectoryContents(sessionsRoot)
+    for name in names where !name.hasPrefix(".") {
       let dir = sessionsRoot.appendingPathComponent(name)
-      var isDir: ObjCBool = false
-      guard FileManager.default.fileExists(atPath: dir.string, isDirectory: &isDir), isDir.boolValue
-      else {
-        continue
-      }
+      let st = FileStat.stat(dir)
+      guard st.exists, st.isDirectory else { continue }
       let meta = metadataFile(in: dir)
-      guard FileManager.default.fileExists(atPath: meta.string) else { continue }
+      guard FileStat.stat(meta).exists else { continue }
       sessionDirs.append(dir)
     }
     if let cwd = cwdFilter {
@@ -105,16 +109,15 @@ enum ChatSessionStore {
   static func sessionDirectory(
     sessionId: UUID,
     sessionsRoot: FilePath
-  ) throws -> FilePath {
-    try ensureSessionsDirectory(sessionsRoot)
+  ) async throws -> FilePath {
+    try await ensureSessionsDirectory(sessionsRoot)
     return sessionsRoot.appendingPathComponent(sessionId.uuidString)
   }
 
-  static func saveMetadata(_ metadata: ChatSessionMetadata, to directory: FilePath) throws {
-    try FileManager.default.createDirectory(
-      atPath: directory.string,
-      withIntermediateDirectories: true
-    )
+  static func saveMetadata(_ metadata: ChatSessionMetadata, to directory: FilePath) async throws {
+    try await FileSystem.shared.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true)
     let metaData = try enc.encode(metadata)
     try metaData.write(to: URL(fileURLWithPath: metadataFile(in: directory).string), options: [.atomic])
   }
@@ -126,7 +129,7 @@ enum ChatSessionStore {
 
   static func loadMessages(from directory: FilePath) throws -> [ScribeMessage] {
     let path = messagesFile(in: directory)
-    guard FileManager.default.fileExists(atPath: path.string) else {
+    guard FileStat.stat(path).exists else {
       return []
     }
     let data = try Data(contentsOf: URL(fileURLWithPath: path.string))
@@ -143,17 +146,14 @@ enum ChatSessionStore {
 
     init(directory: FilePath) throws {
       self.directory = directory
-      try FileManager.default.createDirectory(
-        atPath: directory.string,
-        withIntermediateDirectories: true
-      )
+      try createDirectoryWithIntermediates(directory)
       self.writer = try AppendOnlyFileWriter(filePath: messagesFile(in: directory))
     }
 
     func append(_ messages: [ScribeMessage]) throws {
       guard !messages.isEmpty else { return }
       for message in messages {
-        var data = try enc.encode(message)
+        var data = try ChatSessionStore.enc.encode(message)
         data.append(UInt8(ascii: "\n"))
         try writer.append(data)
       }
@@ -171,10 +171,14 @@ enum ChatSessionStore {
   }
 
   private static func touchModificationDate(of directory: FilePath) throws {
-    try FileManager.default.setAttributes(
-      [.modificationDate: Date()],
-      ofItemAtPath: directory.string
-    )
+    let now = Date().timeIntervalSince1970
+    let times = timeval(
+      tv_sec: Int(now),
+      tv_usec: Int32((now - Double(Int(now))) * 1_000_000))
+    var timevals = [times, times]
+    if utimes(directory.string, &timevals) != 0 {
+      throw ScribeError.generic("utimes failed for \(directory.string): errno \(errno)")
+    }
   }
 
   /// Result of a successful fork.
@@ -189,7 +193,7 @@ enum ChatSessionStore {
     cutAt: Int,
     newSessionId: UUID,
     scribeVersion: String? = nil
-  ) throws -> ForkResult {
+  ) async throws -> ForkResult {
     let parentMeta = try loadMetadata(from: parentDirectory)
     let allMessages = try loadMessages(from: parentDirectory)
     let boundaries = allMessages.safeForkBoundaries()
@@ -202,10 +206,9 @@ enum ChatSessionStore {
 
     let sessionsRoot = parentDirectory.removingLastComponent()
     let newDir = sessionsRoot.appendingPathComponent(newSessionId.uuidString)
-    try FileManager.default.createDirectory(
-      atPath: newDir.string,
-      withIntermediateDirectories: true
-    )
+    try await FileSystem.shared.createDirectory(
+      at: newDir,
+      withIntermediateDirectories: true)
 
     let newMeta = ChatSessionMetadata(
       id: newSessionId,
@@ -217,7 +220,7 @@ enum ChatSessionStore {
       parentSessionId: parentMeta.id,
       forkedAtIndex: cutAt
     )
-    try saveMetadata(newMeta, to: newDir)
+    try await saveMetadata(newMeta, to: newDir)
     try appendMessages(prefix, to: newDir)
     return ForkResult(sessionId: newSessionId, sessionDirectory: newDir, cutAt: cutAt)
   }
@@ -226,18 +229,18 @@ enum ChatSessionStore {
     specifier: String,
     sessionsRoot: FilePath,
     preferCWD: String? = nil
-  ) throws -> FilePath {
+  ) async throws -> FilePath {
     let trimmed = specifier.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
       throw ScribeError.invalidInput(message: "Empty --resume value.")
     }
 
     if trimmed.lowercased() == "latest" {
-      let files = try listSessionDirectories(sessionsRoot: sessionsRoot, cwdFilter: preferCWD)
+      let files = try await listSessionDirectories(sessionsRoot: sessionsRoot, cwdFilter: preferCWD)
       if let first = files.first {
         return first
       }
-      let allFiles = try listSessionDirectories(sessionsRoot: sessionsRoot)
+      let allFiles = try await listSessionDirectories(sessionsRoot: sessionsRoot)
       guard let first = allFiles.first else {
         throw ScribeError.resumeNotFound(specifier: "latest")
       }
@@ -245,9 +248,9 @@ enum ChatSessionStore {
     }
 
     let path = FilePath(NSString(string: trimmed).expandingTildeInPath)
-    var isDir: ObjCBool = false
-    if FileManager.default.fileExists(atPath: path.string, isDirectory: &isDir) {
-      if isDir.boolValue {
+    let st = FileStat.stat(path)
+    if st.exists {
+      if st.isDirectory {
         return path
       }
       let parent = path.removingLastComponent()
@@ -256,17 +259,16 @@ enum ChatSessionStore {
       }
     }
 
-    try ensureSessionsDirectory(sessionsRoot)
+    try await ensureSessionsDirectory(sessionsRoot)
     let lower = trimmed.lowercased()
     if let u = UUID(uuidString: lower) {
       let candidate = sessionsRoot.appendingPathComponent(u.uuidString)
-      if FileManager.default.fileExists(atPath: candidate.string) {
+      if (try? await FileSystem.shared.info(forFileAt: candidate)) != nil {
         return candidate
       }
     }
 
-    let names =
-      (try? FileManager.default.contentsOfDirectory(atPath: sessionsRoot.string)) ?? []
+    let names = try listDirectoryContents(sessionsRoot)
     let matches = names.filter { $0.lowercased().hasPrefix(lower) }
     guard matches.count == 1, let only = matches.first else {
       if matches.isEmpty {
@@ -278,7 +280,6 @@ enum ChatSessionStore {
   }
 
   private static func modificationDate(of directory: FilePath) -> Date {
-    (try? FileManager.default.attributesOfItem(atPath: directory.string)[.modificationDate]
-      as? Date) ?? .distantPast
+    FileStat.stat(directory).modificationDate
   }
 }

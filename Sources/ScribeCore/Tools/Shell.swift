@@ -79,7 +79,7 @@ enum Shell {
     }
 
     let capture = try OutputCapture.create(
-      id: id, in: FileManager.default.temporaryDirectory)
+      id: id, in: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true))
 
     logger.trace(
       "shell-tempfiles-ready",

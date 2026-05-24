@@ -290,7 +290,7 @@ struct OutputCapture: Sendable {
   }
 
   private static func fileSize(url: URL) -> Int64 {
-    (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? -1
+    FileStat.fileSize(FilePath(url.path))
   }
 }
 

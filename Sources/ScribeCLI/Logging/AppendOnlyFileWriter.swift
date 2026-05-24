@@ -1,4 +1,5 @@
 import Foundation
+import ScribeCore
 import SystemPackage
 import Synchronization
 
@@ -44,10 +45,7 @@ final class AppendOnlyFileWriter: Sendable {
   private static func ensureParentDirectory(for path: FilePath) throws {
     let parent = path.removingLastComponent()
     guard !parent.string.isEmpty else { return }
-    try FileManager.default.createDirectory(
-      atPath: parent.string,
-      withIntermediateDirectories: true
-    )
+    try createDirectoryWithIntermediates(parent)
   }
 }
 
