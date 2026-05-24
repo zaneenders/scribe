@@ -320,14 +320,20 @@ internal final class BoundaryPickerController {
           result = try ChatSessionStore.forkSession(
             from: persistDirectory, cutAt: startCut, newSessionId: newId,
             scribeVersion: GitVersion.hash)
-          try ChatSessionStore.appendMessages(
-            [ScribeMessage(role: .assistant, content: summary)],
-            to: result.sessionDirectory)
-          let tailCount = max(0, messages.count - endCut)
-          if endCut < messages.count {
-            let tail = Array(messages[endCut..<messages.count])
-            try ChatSessionStore.appendMessages(tail, to: result.sessionDirectory)
+          do {
+            try ChatSessionStore.appendMessages(
+              [ScribeMessage(role: .assistant, content: summary)],
+              to: result.sessionDirectory)
+            if endCut < messages.count {
+              let tail = Array(messages[endCut..<messages.count])
+              try ChatSessionStore.appendMessages(tail, to: result.sessionDirectory)
+            }
+          } catch {
+            try? FileManager.default.removeItem(
+              atPath: result.sessionDirectory.string)
+            throw error
           }
+          let tailCount = max(0, messages.count - endCut)
           logger.notice(
             "chat.tldr.create",
             metadata: [
