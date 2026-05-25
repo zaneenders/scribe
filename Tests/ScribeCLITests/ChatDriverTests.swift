@@ -33,11 +33,12 @@ struct ChatDriverTests {
     driver.handle(AgentEvent.output(.text(.answer, "Let me check")))
     driver.handle(AgentEvent.output(.finalized))
     driver.handle(
-      AgentEvent.tool(.invocation(
-        name: "shell",
-        arguments: #"{"command":"ls"}"#,
-        output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#
-      )))
+      AgentEvent.tool(
+        .invocation(
+          name: "shell",
+          arguments: #"{"command":"ls"}"#,
+          output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#
+        )))
 
     let allText = driver.state.lines.flatMap { $0.spans.map(\.text) }.joined()
     #expect(allText.contains("shell"))

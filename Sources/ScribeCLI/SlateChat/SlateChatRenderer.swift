@@ -30,7 +30,8 @@ internal enum SlateChatRenderer {
   private nonisolated static let queuedTrayMaxRows = 4
 
   nonisolated static func queuedMessagePreview(_ raw: String, maxWidth: Int) -> String {
-    let normalized = raw
+    let normalized =
+      raw
       .replacingOccurrences(of: "\r\n", with: "\n")
       .replacingOccurrences(of: "\n", with: " ")
       .trimmingCharacters(in: .whitespacesAndNewlines)

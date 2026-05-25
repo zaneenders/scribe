@@ -1,7 +1,7 @@
 import Foundation
-import _NIOFileSystem
 import ScribeCore
 import SystemPackage
+import _NIOFileSystem
 
 #if canImport(Darwin)
 import Darwin
@@ -171,11 +171,11 @@ enum ChatSessionStore {
   private static func touchModificationDate(of directory: FilePath) throws {
     let now = Date().timeIntervalSince1970
     let frac = (now - Double(Int(now))) * 1_000_000
-#if canImport(Darwin)
+    #if canImport(Darwin)
     let times = timeval(tv_sec: Int(now), tv_usec: Int32(frac))
-#else
+    #else
     let times = timeval(tv_sec: Int(now), tv_usec: Int(frac))
-#endif
+    #endif
     var timevals = [times, times]
     if utimes(directory.string, &timevals) != 0 {
       throw ScribeError.generic("utimes failed for \(directory.string): errno \(errno)")

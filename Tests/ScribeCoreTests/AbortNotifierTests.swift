@@ -1,6 +1,6 @@
-import SystemPackage
 import Foundation
 import Logging
+import SystemPackage
 import Testing
 
 @testable import ScribeCore

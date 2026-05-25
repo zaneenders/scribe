@@ -1,5 +1,3 @@
-
-
 enum EditMode {
 
   case read

@@ -1,7 +1,7 @@
-import SystemPackage
 import Foundation
 import Logging
 import ScribeLLM
+import SystemPackage
 
 public struct ScribeAgent: Sendable {
 
@@ -104,7 +104,7 @@ public struct ScribeAgent: Sendable {
         maxToolRounds: options.maxToolRounds,
         workingDirectory: workingDirectory,
         reasoningEnabled: reasoningEnabled,
-        hooks: options.hooks
+        hooks: .default
       )
 
       do {
