@@ -1,11 +1,6 @@
 import Markdown
 import SlateCore
 
-/// A ``MarkdownRenderer`` backed by Apple's `swift-markdown` (CommonMark/GFM).
-///
-/// Parses the complete markdown buffer on every call and produces styled
-/// ``TLine``s.  Designed to be stateless so it can be invoked on every SSE
-/// chunk without accumulating internal state.
 public struct SwiftMarkdownRenderer: MarkdownRenderer {
   public var codeBlockHighlighter: CodeBlockHighlighter
 
@@ -25,9 +20,6 @@ public struct SwiftMarkdownRenderer: MarkdownRenderer {
     return walker.lines.map { styleRemainingMarkdown(in: $0, baseFG: baseFG, baseBold: baseBold, theme: theme) }
   }
 
-  /// Fast streaming path: inline-only styling without block-level parsing.
-  /// Splits on newlines and applies the safety-net inline pattern styler
-  /// (`**bold**`, `*italic*`, `` `code` ``) to each line.
   public func renderStreaming(text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> [TLine] {
     text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
       let spans = splitMarkdownPatterns(
@@ -37,11 +29,6 @@ public struct SwiftMarkdownRenderer: MarkdownRenderer {
   }
 }
 
-/// Scans a rendered line for any `**text**`, `*text*`, or `` `text` `` patterns
-/// that `swift-markdown` left unparsed and styles them inline.
-///
-/// Processes *contiguous runs* of base-styled spans together so patterns that
-/// the parser split across multiple Text nodes are still caught.
 private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> TLine
 {
   guard !line.spans.isEmpty else { return line }
@@ -49,7 +36,7 @@ private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBol
   var newSpans: [StyledSpan] = []
   var i = 0
   while i < line.spans.count {
-    // Find the next run of contiguous base-styled spans.
+
     var runStart = i
     while runStart < line.spans.count {
       let s = line.spans[runStart]
@@ -58,7 +45,7 @@ private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBol
       }
       runStart += 1
     }
-    // Copy over any non-base spans before the run.
+
     while i < runStart {
       newSpans.append(line.spans[i])
       i += 1
@@ -74,7 +61,6 @@ private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBol
       runEnd += 1
     }
 
-    // Run the safety net on the concatenated text.
     let styled = splitMarkdownPatterns(in: concatenated, baseFG: baseFG, baseBold: baseBold, theme: theme)
     newSpans.append(contentsOf: styled)
     i = runEnd
@@ -83,7 +69,6 @@ private func styleRemainingMarkdown(in line: TLine, baseFG: TerminalRGB, baseBol
   return TLine(spans: newSpans)
 }
 
-/// Splits plain text into spans, styling any inline markdown delimiters found.
 private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme)
   -> [StyledSpan]
 {
@@ -91,7 +76,7 @@ private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBol
   var remaining = text
 
   while !remaining.isEmpty {
-    // Find the earliest delimiter among **, *, and ` (but not ```)
+
     let doubleIdx = remaining.range(of: "**")
     let singleIdx = remaining.range(of: "*")
     let backtickIdx = remaining.range(of: "`")
@@ -100,7 +85,7 @@ private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBol
     if let r = doubleIdx { earliest = (r, .strong) }
     if let r = singleIdx {
       if earliest == nil || r.lowerBound < earliest!.range.lowerBound {
-        // Skip `*` that is part of `**` — we already handled `**` above
+
         if doubleIdx == nil || r.lowerBound != doubleIdx!.lowerBound {
           earliest = (r, .emphasis)
         }
@@ -108,10 +93,10 @@ private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBol
     }
     if let r = backtickIdx {
       if earliest == nil || r.lowerBound < earliest!.range.lowerBound {
-        // Skip `` ` `` at the start of a code-block fence (```)
+
         let after = remaining.index(after: r.lowerBound)
         if after < remaining.endIndex, remaining[after] == "`" {
-          // Could be ``` — skip this backtick
+
         } else {
           earliest = (r, .code)
         }
@@ -119,28 +104,25 @@ private func splitMarkdownPatterns(in text: String, baseFG: TerminalRGB, baseBol
     }
 
     guard let open = earliest else {
-      // No more delimiters — append rest as plain text.
+
       spans.append(StyledSpan(fg: baseFG, bg: theme.background, bold: baseBold, text: remaining))
       break
     }
 
-    // Append plain text before the opener.
     if open.range.lowerBound > remaining.startIndex {
       let prefix = String(remaining[..<open.range.lowerBound])
       spans.append(StyledSpan(fg: baseFG, bg: theme.background, bold: baseBold, text: prefix))
     }
 
-    // Look for the matching closer after the opener.
     let afterOpen = open.range.upperBound
     guard let closeRange = remaining[afterOpen...].range(of: delimiterText(for: open.kind)) else {
-      // No closer — treat the opener as literal text and continue after it.
+
       spans.append(StyledSpan(fg: baseFG, bg: theme.background, bold: baseBold, text: delimiterText(for: open.kind)))
       remaining = String(remaining[afterOpen...])
       continue
     }
     let content = String(remaining[afterOpen..<closeRange.lowerBound])
 
-    // Style the content.
     switch open.kind {
     case .strong:
       spans.append(StyledSpan(fg: theme.bold, bg: theme.background, bold: true, text: content))
@@ -170,7 +152,6 @@ private func delimiterText(for kind: DelimiterKind) -> String {
   }
 }
 
-
 private struct TerminalMarkdownWalker: MarkupWalker {
   var lines: [TLine] = []
   var currentLine = TLine(spans: [])
@@ -189,7 +170,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     self.codeBlockHighlighter = codeBlockHighlighter
     self.theme = theme
   }
-
 
   mutating func flushLine() {
     lines.append(currentLine)
@@ -210,7 +190,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
       currentLine.spans.append(StyledSpan(fg: spanFG, bg: bg, bold: spanBold, text: text))
     }
   }
-
 
   mutating func visitParagraph(_ paragraph: Paragraph) {
     for child in paragraph.inlineChildren {
@@ -247,8 +226,7 @@ private struct TerminalMarkdownWalker: MarkupWalker {
           StyledSpan(fg: cbFG, bg: bg, bold: false, text: fence)
         ]))
     var highlighted = codeBlockHighlighter.highlight(code: codeBlock.code, language: codeBlock.language)
-    // Remap highlighted lines to the theme's code-block color so themes
-    // like grayscale can override the highlighter's default palette.
+
     highlighted = highlighted.map { line in
       TLine(
         spans: line.spans.map { s in
@@ -272,13 +250,12 @@ private struct TerminalMarkdownWalker: MarkupWalker {
   }
 
   mutating func visitTable(_ table: Table) {
-    // Snapshot state so cell visits don't pollute the outer line buffer.
+
     let savedLines = lines
     let savedCurrent = currentLine
 
     var allRows: [[TLine]] = []
 
-    // Header cells (Table.Head is a TableCellContainer — no intermediate Row)
     var headerCells: [TLine] = []
     for cell in table.head.cells {
       lines = []
@@ -290,7 +267,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
       allRows.append(headerCells)
     }
 
-    // Body rows
     for tableRow in table.body.rows {
       var bodyCells: [TLine] = []
       for cell in tableRow.cells {
@@ -309,7 +285,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     let columnCount = allRows.map { $0.count }.max() ?? 0
     guard columnCount > 0 else { return }
 
-    // Compute natural column widths from visible text.
     var colWidths: [Int] = Array(repeating: 0, count: columnCount)
     for row in allRows {
       for (c, cell) in row.enumerated() {
@@ -319,9 +294,8 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     }
 
     let borderFG = theme.muted
-    let pad = 1  // one space on each side of content
+    let pad = 1
 
-    // Top border
     var top = ""
     top += "┌"
     for c in 0..<columnCount {
@@ -331,7 +305,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     top += "┐"
     lines.append(TLine(spans: [StyledSpan(fg: borderFG, bg: bg, bold: false, text: top)]))
 
-    // Rows
     for (rowIdx, row) in allRows.enumerated() {
       var rowSpans: [StyledSpan] = []
       rowSpans.append(StyledSpan(fg: borderFG, bg: bg, bold: false, text: "│ "))
@@ -343,26 +316,25 @@ private struct TerminalMarkdownWalker: MarkupWalker {
         let isHeader = (rowIdx == 0)
 
         if isHeader {
-          // Header: bold everything, use heading color
+
           for s in cell.spans {
             rowSpans.append(StyledSpan(fg: theme.heading, bg: bg, bold: true, text: s.text))
           }
         } else {
           rowSpans.append(contentsOf: cell.spans)
         }
-        // Pad with spaces
+
         if padding > 0 {
           rowSpans.append(StyledSpan(fg: fg, bg: bg, bold: false, text: String(repeating: " ", count: padding)))
         }
         rowSpans.append(StyledSpan(fg: borderFG, bg: bg, bold: false, text: " │ "))
       }
-      // Replace last " │ " with " │"
+
       if !rowSpans.isEmpty {
         rowSpans[rowSpans.count - 1] = StyledSpan(fg: borderFG, bg: bg, bold: false, text: " │")
       }
       lines.append(TLine(spans: rowSpans))
 
-      // Separator after header
       if rowIdx == 0 {
         var sep = ""
         sep += "├"
@@ -375,7 +347,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
       }
     }
 
-    // Bottom border
     var bottom = ""
     bottom += "└"
     for c in 0..<columnCount {
@@ -475,10 +446,8 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     }
   }
 
-
   mutating func visitText(_ text: Text) {
-    // Safety-net: if the parser left `**`, `*`, or `` ` `` unparsed in a
-    // plain Text node, style them now before they reach the span buffer.
+
     let spans = splitMarkdownPatterns(in: text.string, baseFG: fg, baseBold: bold, theme: theme)
     for sp in spans {
       appendText(sp.text, fg: sp.fg, bold: sp.bold)

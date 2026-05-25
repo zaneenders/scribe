@@ -5,15 +5,7 @@ import ScribeCore
 import Synchronization
 import SystemPackage
 
-
-/// Disk-backed ``SessionPersister`` for the CLI: appends to `messages.jsonl`
-/// and writes `metadata.json` under `sessions/{uuid}/`.
-///
-/// Holds an open `MessagesAppender` for the active session and swaps it on
-/// fork. All mutation happens under a `Mutex` so the doc can call from any
-/// task without coordinating itself.
 final class FileSessionPersister: SessionPersister {
-
 
   private struct State {
     var sessionId: UUID
@@ -28,12 +20,6 @@ final class FileSessionPersister: SessionPersister {
   private let scribeVersion: String?
   private let logger: Logger
 
-
-  /// Open a persister for a fresh or resumed session.
-  ///
-  /// For a fresh session (`isNewSession == true`), writes the initial
-  /// `metadata.json`. For a resumed session, assumes metadata + jsonl
-  /// already exist; the doc seeds itself from caller-provided messages.
   static func open(
     sessionId: UUID,
     directory: FilePath,
@@ -83,15 +69,12 @@ final class FileSessionPersister: SessionPersister {
     self.logger = logger
   }
 
-
   func append(_ messages: [ScribeMessage]) async throws {
     guard !messages.isEmpty else { return }
     do {
       try state.withLock { try $0.appender.append(messages) }
     } catch {
-      // Persistence is best-effort from the user's perspective — log the
-      // failure but don't throw; tearing down the chat for a disk hiccup
-      // would be worse than continuing without that turn on disk.
+
       logger.error(
         "session.persister.append.fail",
         metadata: ["err": "\(String(describing: error))"])
@@ -111,9 +94,6 @@ final class FileSessionPersister: SessionPersister {
     let newSessionId = snapshot.sessionId
     let newDir = snapshot.directory
 
-    // Create the new directory + write metadata + write content. The
-    // caller commits to its in-memory doc only after this returns, so a
-    // failure here leaves the in-memory rope untouched.
     try await FileSystem.shared.createDirectory(
       at: newDir, withIntermediateDirectories: true)
 
@@ -134,9 +114,6 @@ final class FileSessionPersister: SessionPersister {
       try newAppender.append(snapshot.messages)
     }
 
-    // Swap appender + identity atomically. The old appender's file handle
-    // drops with its last reference; nothing further writes to the parent
-    // session's JSONL.
     state.withLock { s in
       s.sessionId = newSessionId
       s.directory = newDir

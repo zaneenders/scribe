@@ -1,7 +1,6 @@
 import Foundation
 import SystemPackage
 
-/// Resolves agent/tool path strings into `FilePath` instances with consistent rules.
 enum PathResolution {
   struct PathError: Error, CustomStringConvertible {
     let description: String

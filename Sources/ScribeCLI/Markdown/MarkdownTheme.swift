@@ -1,9 +1,5 @@
 import SlateCore
 
-/// A set of colors for styling markdown elements.
-///
-/// Two built-in themes are provided: ``vibrant`` (Easter pastels on dark) for
-/// the main answer stream, and ``grayscale`` for de-emphasized reasoning output.
 public struct MarkdownTheme: Sendable, Equatable {
   public var heading: TerminalRGB
   public var headingPrefix: TerminalRGB
@@ -16,9 +12,8 @@ public struct MarkdownTheme: Sendable, Equatable {
   public var link: TerminalRGB
   public var hr: TerminalRGB
 
-  /// Background for all markdown spans (typically the terminal background).
   public var background: TerminalRGB
-  /// Muted color for strikethrough, inline HTML, and table borders.
+
   public var muted: TerminalRGB
 
   public init(
@@ -49,7 +44,6 @@ public struct MarkdownTheme: Sendable, Equatable {
     self.muted = muted
   }
 
-  /// Vibrant Easter-pastel theme for the main answer stream.
   public static let vibrant = MarkdownTheme(
     heading: ScribePalette.markdownHeading,
     headingPrefix: ScribePalette.markdownHeadingPrefix,
@@ -65,7 +59,6 @@ public struct MarkdownTheme: Sendable, Equatable {
     muted: ScribePalette.gray
   )
 
-  /// Grayscale theme for reasoning output — readable but not distracting.
   public static let grayscale = MarkdownTheme(
     heading: ScribePalette.grayHeading,
     headingPrefix: ScribePalette.grayHeadingPrefix,

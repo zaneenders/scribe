@@ -1,12 +1,10 @@
 import _RopeModule
 
-
 public struct Message: RopeElement, Sendable {
   public typealias Summary = MessageSummary
   public typealias Index = Int
 
   public var messages: [ScribeMessage]
-
 
   public var summary: MessageSummary { MessageSummary(count: messages.count) }
 
@@ -22,10 +20,8 @@ public struct Message: RopeElement, Sendable {
       "Message leaf exceeds maxNodeSize")
   }
 
-  /// Move content from `right` into `self` (or vice versa) so neither is
-  /// undersized.  Returns `true` if `right` became empty.
   public mutating func rebalance(nextNeighbor right: inout Message) -> Bool {
-    // If we're undersized, pull from right.
+
     if isUndersized, !right.isEmpty {
       let need = MessageSummary.maxNodeSize / 2 - messages.count
       let take = min(need, right.messages.count)
@@ -34,7 +30,7 @@ public struct Message: RopeElement, Sendable {
         right.messages = Array(right.messages.dropFirst(take))
       }
     }
-    // If right is now undersized, push into it.
+
     if right.isUndersized, !messages.isEmpty {
       let give = min(messages.count - MessageSummary.maxNodeSize / 2, messages.count)
       if give > 0 {
@@ -46,7 +42,7 @@ public struct Message: RopeElement, Sendable {
   }
 
   public mutating func rebalance(prevNeighbor left: inout Message) -> Bool {
-    // Default implementation swaps and calls rebalance(nextNeighbor:).
+
     guard left.rebalance(nextNeighbor: &self) else { return false }
     swap(&self, &left)
     return true
@@ -59,7 +55,6 @@ public struct Message: RopeElement, Sendable {
     return Message(messages: tail)
   }
 
-
   public init(messages: [ScribeMessage]) {
     self.messages = messages
   }
@@ -68,7 +63,6 @@ public struct Message: RopeElement, Sendable {
     self.messages = []
   }
 }
-
 
 extension Message: Equatable {
   public static func == (lhs: Message, rhs: Message) -> Bool {

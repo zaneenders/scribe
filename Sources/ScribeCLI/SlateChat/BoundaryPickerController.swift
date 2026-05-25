@@ -4,47 +4,28 @@ import ScribeCore
 import SlateCore
 import SystemPackage
 
-
-/// Owns all boundary-picker state and logic for `/fork` and `/tldr` commands.
-///
-/// The host (`SlateChatHost`) creates one instance at init and delegates all picker
-/// input handling and lifecycle to it.  The controller reaches back to the host
-/// through a small set of closures so the host remains the single source of truth
-/// for session identity, model-busy flag, render wake, and hot-swap.
 @MainActor
 internal final class BoundaryPickerController {
 
-
-  /// Active picker snapshot; `nil` when the picker is closed.
   private(set) var picker: PickerSnapshot?
 
-  /// Running async work for a confirmed picker (e.g. summarize LLM call).
   private var pickerActionTask: Task<Void, Never>?
 
-  /// Pre-picker transcript + viewport state so cancel can restore.
   private var pickerBackup: (lines: [TLine], generation: Int, viewport: TranscriptViewport)?
 
-  /// Disk messages displayed by the active picker — cached to avoid re-read on cursor moves.
   private var pickerMessages: [ScribeMessage] = []
 
-  /// Base (un-styled) transcript lines for `pickerMessages`, rebuilt on open.
   private var pickerBaseLines: [TLine] = []
 
-  /// `messageStartLines` for `pickerBaseLines` (length `pickerMessages.count + 1`).
   private var pickerBaseStarts: [Int] = []
 
-  /// Logical line index of the divider inside the *styled* picker transcript.
   private(set) var dividerLogicalLine: Int = 0
 
-  /// Set on open and on every cursor move; the render closure consumes it then clears.
   var scrollDirty: Bool = false
 
-  /// Exposed so the host can restore transcript/viewport state from the controller's backup
-  /// inside a callback (where inout params are unavailable).
   var backupForRestore: (lines: [TLine], generation: Int, viewport: TranscriptViewport)? {
     pickerBackup
   }
-
 
   var applyEdit: (@MainActor (EditOp) async throws -> Void)?
   var configuration: ScribeConfig = ScribeConfig(
@@ -54,30 +35,18 @@ internal final class BoundaryPickerController {
   var theme: CLITheme = .default
   var markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
-
-  /// Set the model-busy flag on the host.
   var setModelBusy: ((Bool) -> Void)?
 
-  /// Request a render frame.
   var requestRender: (() -> Void)?
 
-  /// Whether the host is still active (not winding down).
   var isHostActive: (() -> Bool)?
 
-  /// The current parent session id (for fork/tldr logging).
   var currentSessionId: (() -> UUID)?
 
-  /// Enqueue a host event (for error reporting after failed picker action).
   var enqueueHostEvent: ((HostEvent) -> Void)?
 
-  /// Restore host transcript/viewport/flattenCache from the controller's backup.
-  /// Called from the error path of confirm (inside a Task, where inout params
-  /// cannot be captured).
   var restoreHostFromBackup: (() -> Void)?
 
-
-  /// Returns `true` when the picker consumed the action; the host should skip
-  /// normal input processing for that action.
   func handleInput(
     _ action: TerminalInputAction,
     transcriptState: inout TranscriptState,
@@ -101,7 +70,6 @@ internal final class BoundaryPickerController {
     return true
   }
 
-
   func open(
     kind: PickerSnapshot.Kind,
     snapshot: SessionDocumentSnapshot,
@@ -110,7 +78,7 @@ internal final class BoundaryPickerController {
     viewport: inout TranscriptViewport,
     flattenCache: inout TranscriptLayout.FlattenCache
   ) -> Bool {
-    // Document lags the live coordinator while a turn is streaming.
+
     if modelBusy {
       logger.notice(
         "chat.picker.open.skip",
@@ -145,7 +113,6 @@ internal final class BoundaryPickerController {
       messageCount: snapshot.count,
       previewText: Self.pickerPreview(for: snapshot.messages, at: boundaries[startC]))
 
-    // Render disk-persisted history once so cursor moves only restyle.
     let rendered = renderMessagesToTranscriptWithStarts(
       snapshot.messages, theme: theme, renderer: markdownRenderer)
     self.pickerMessages = snapshot.messages
@@ -165,7 +132,6 @@ internal final class BoundaryPickerController {
     return true
   }
 
-
   func cancel(
     transcriptState: inout TranscriptState,
     viewport: inout TranscriptViewport,
@@ -179,14 +145,11 @@ internal final class BoundaryPickerController {
     requestRender?()
   }
 
-  /// Cancel any running picker action task (called on host teardown).
   func cancelTask() {
     pickerActionTask?.cancel()
     pickerActionTask = nil
   }
 
-  /// Clear all picker state without restoring from backup.
-  /// Used during hot-swap when the transcript is about to be replaced entirely.
   func clear() {
     picker = nil
     pickerActionTask?.cancel()
@@ -198,7 +161,6 @@ internal final class BoundaryPickerController {
     dividerLogicalLine = 0
     scrollDirty = false
   }
-
 
   private func moveCursor(
     by delta: Int,
@@ -228,7 +190,6 @@ internal final class BoundaryPickerController {
     applyPickerView(snapshot: snap, transcriptState: &transcriptState, flattenCache: &flattenCache)
   }
 
-  /// Tab handler for `.tldr`: swap which cursor the arrow keys address.
   private func toggleActive(
     transcriptState: inout TranscriptState,
     flattenCache: inout TranscriptLayout.FlattenCache
@@ -241,7 +202,6 @@ internal final class BoundaryPickerController {
       for: pickerMessages, at: snap.boundaries[activeCursor])
     applyPickerView(snapshot: snap, transcriptState: &transcriptState, flattenCache: &flattenCache)
   }
-
 
   private func confirm(
     transcriptState: inout TranscriptState,
@@ -319,8 +279,7 @@ internal final class BoundaryPickerController {
               "summary_chars": "\(summary.count)",
             ])
         }
-        // `applyEdit` inside the host already updates transcript / banner /
-        // exit hint inline. The picker only needs to release model-busy here.
+
         await MainActor.run { [weak self] in
           guard let self, self.isHostActive?() ?? false else { return }
           self.setModelBusy?(false)
@@ -348,7 +307,6 @@ internal final class BoundaryPickerController {
       }
     }
   }
-
 
   private func applyPickerView(
     snapshot: PickerSnapshot,
@@ -402,8 +360,6 @@ internal final class BoundaryPickerController {
     scrollDirty = false
   }
 
-
-  /// Build the picker-styled transcript lines and divider index.
   static func buildStyledLines(
     base: [TLine],
     startCutBase: Int,
@@ -503,7 +459,6 @@ internal final class BoundaryPickerController {
     return "\(m.role.rawValue): \(snippet)"
   }
 
-  /// Compute the picker's default cursor positions.
   static func defaultCursor(
     kind: PickerSnapshot.Kind, messages: [ScribeMessage], boundaries: [Int]
   ) -> (start: Int, end: Int?) {

@@ -19,9 +19,6 @@ enum ToolArgumentParsing {
     (v as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  /// Accepts JSON numbers (`Int` / `Double` after `JSONSerialization`) and decimal strings
-  /// (`"100"`); returns `nil` for missing, empty, or unparseable values so the caller can
-  /// fall back to a default.
   static func optionalInt(_ v: Any?) -> Int? {
     if let n = v as? Int { return n }
     if let n = v as? Double { return Int(n) }

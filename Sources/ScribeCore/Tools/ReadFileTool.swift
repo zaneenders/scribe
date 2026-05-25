@@ -75,9 +75,6 @@ public struct ReadFileTool: ScribeTool {
 
   public init() {}
 
-  /// Default cap when the model omits `limit` — picked to keep tool messages bounded so a
-  /// single read on a multi-megabyte file does not balloon the conversation history (every
-  /// subsequent model turn re-uploads the full transcript).
   static let defaultLineLimit = 2000
 
   public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
@@ -89,7 +86,6 @@ public struct ReadFileTool: ScribeTool {
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
     let s = fp.string
 
-    // Detect image files by magic bytes and return base64-encoded data.
     if ImageSupport.isImageFile(path: s) {
       let maxImageBytes = 5 * 1024 * 1024
       if let info = try? await FileSystem.shared.info(forFileAt: fp),
@@ -150,16 +146,6 @@ public struct ReadFileTool: ScribeTool {
     let truncated: Bool
   }
 
-  /// Reads a UTF-8 file with optional **line-based** pagination.
-  ///
-  /// - `offset`: 1-indexed start line. Values `nil`, `0`, or `1` start from the top. Values
-  ///   greater than `total_lines` produce an empty `content` slice (still `ok=true`) so the
-  ///   model can detect end-of-file without erroring out.
-  /// - `limit`: maximum number of lines to return; defaults to ``defaultLineLimit``.
-  ///   Pass `0` (or any non-positive value) to mean "no cap" and read to end of file.
-  ///
-  /// `start_line` and `end_line` in the returned result are inclusive 1-indexed line numbers
-  /// within the original file; `end_line == start_line - 1` indicates an empty slice.
   private static func readFile(
     path: String,
     offset: Int?,
@@ -171,8 +157,6 @@ public struct ReadFileTool: ScribeTool {
     let text = try String(contentsOfFile: s, encoding: .utf8)
     let totalBytes = text.utf8.count
 
-    // `omittingEmptySubsequences: false` preserves trailing empty line for `"foo\n"` so
-    // counts match what a user sees in `wc -l + 1`.
     let parts = text.split(separator: "\n", omittingEmptySubsequences: false)
     let totalLines = parts.count
 
@@ -183,7 +167,7 @@ public struct ReadFileTool: ScribeTool {
     } else if limit == nil {
       resolvedLimit = defaultLineLimit
     } else {
-      // Explicit `0` (or negative) — treat as "no cap".
+
       resolvedLimit = totalLines
     }
 

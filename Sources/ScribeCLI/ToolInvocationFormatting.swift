@@ -2,7 +2,6 @@ import Foundation
 import ScribeCore
 import SystemPackage
 
-/// Human-readable transcript lines for tool JSON (conversation history still receives raw JSON).
 public enum ToolInvocationFormatting {
 
   private static let toolJSONDecoder: JSONDecoder = {
@@ -70,9 +69,7 @@ public enum ToolInvocationFormatting {
 
     switch name {
     case "shell":
-      // Output is streamed to temp files on disk — the transcript just shows
-      // the file paths so the human knows where results landed.  The LLM can
-      // use `read_file` to fetch the contents when it needs them.
+
       var lines: [String] = []
       if let code = decoded.exitCode {
         lines.append("exit \(code)")
@@ -88,10 +85,7 @@ public enum ToolInvocationFormatting {
       return lines.isEmpty ? ["(no output)"] : lines
 
     case "read_file":
-      // Show only a single summary line in the transcript — the full content lives in the
-      // conversation history (visible to the model). Avoiding the (potentially thousands of)
-      // wrapped content rows here keeps the transcript flatten/render path cheap right after
-      // a big read.
+
       return [readFileSummaryLine(decoded: decoded)]
 
     case "edit_file":
@@ -105,9 +99,6 @@ public enum ToolInvocationFormatting {
     }
   }
 
-  /// Compact one-line summary for a `read_file` result: total file size, full line count, the
-  /// inclusive line range actually returned, and a `truncated` hint when the slice was capped
-  /// by `limit`. Falls back to "(no content)" when the structured fields are absent.
   private static func readFileSummaryLine(decoded: ToolResultBody) -> String {
     var parts: [String] = []
     if let bytes = decoded.bytes {
@@ -133,7 +124,6 @@ public enum ToolInvocationFormatting {
     return parts.joined(separator: "  ")
   }
 
-  /// Returns a human-readable file size like " (1.2 KB)" or "" if the file can't be stat'd.
   private static func fileSizeString(_ path: String) -> String {
     let size = FileStat.fileSize(FilePath(path))
     guard size >= 0 else { return "" }

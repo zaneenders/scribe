@@ -34,11 +34,8 @@ enum HostEvent: Sendable {
   case coordinatorFinished
 }
 
-/// Information conveyed back to the CLI after the chat host returns.
 struct ChatExitInfo: Sendable {
-  /// When the user forked or summarized at least once during the session,
-  /// this carries the most recent post-swap session. The CLI uses it to
-  /// point the resume hint at the session the user actually ended on.
+
   var forkedFromSessionId: UUID?
   var forkedToSessionId: UUID?
   var forkedToDirectory: FilePath?
@@ -65,11 +62,11 @@ extension TranscriptLayout {
         cache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
         cache.completedLogicalLines = completed.count
       } else if completed.count < cache.completedLogicalLines {
-        // Lines were removed (truncation) — full recompute.
+
         cache.completedFlat = TranscriptLayout.flattenedRows(from: completed, width: width)
         cache.completedLogicalLines = completed.count
       } else if completed.count > cache.completedLogicalLines {
-        // New lines appended — only wrap the new ones.
+
         let start = cache.completedLogicalLines
         if start < completed.count {
           let newSlice = completed[start...]
@@ -100,7 +97,7 @@ internal final class SlateChatHost {
 
   private var inputHandler = TerminalInputHandler()
   private var viewport = TranscriptViewport()
-  /// Current input mode: `.edit` for typing, `.read` for navigation/ladder.
+
   private var editMode: EditMode = .edit
 
   private var transcriptState = TranscriptState()
@@ -113,11 +110,10 @@ internal final class SlateChatHost {
   private var queueBatchTotal: Int = 0
   private var steeringLineOutstanding: Bool = false
   private var coordinatorFinished: Bool = false
-  /// False once `run()` begins teardown — picker side-effects must not
-  /// mutate UI after the host is winding down.
+
   private var hostActive: Bool = true
   private var exitInfo: ChatExitInfo = ChatExitInfo()
-  /// Boundary picker controller (driven by `/fork` and `/tldr`).
+
   private var pickerController = BoundaryPickerController()
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
@@ -166,7 +162,6 @@ internal final class SlateChatHost {
     self.sessionCreatedAt = sessionCreatedAt
     self.logger = logger
 
-    // Wire picker controller callbacks back to the host.
     pickerController.logger = logger
     pickerController.theme = theme
     pickerController.markdownRenderer = markdownRenderer
@@ -228,7 +223,6 @@ internal final class SlateChatHost {
             gitBranch: nil,
             sessionId: self.sessionId.uuidString)
 
-          // Detect git branch asynchronously.
           let baseURL = self.configuration.serverURL
           let model = self.configuration.agentModel
           let version = GitVersion.hash
@@ -282,8 +276,7 @@ internal final class SlateChatHost {
           let actions = self.inputHandler.handle(chunk)
 
           for action in actions {
-            // When the boundary picker is open it owns all input — only its
-            // navigation keys are honored; everything else is ignored.
+
             if self.pickerController.picker != nil {
               if self.pickerController.handleInput(
                 action, transcriptState: &self.transcriptState,
@@ -424,10 +417,6 @@ internal final class SlateChatHost {
           let scrCols = grid.cols
           let scrRows = grid.rows
 
-          // Picker just opened or moved: snap the viewport so the divider
-          // sits roughly a third of the way down the transcript pane.
-          // Needs scrCols (only known at frame time) to convert the
-          // divider's logical-line index into a flattened-row target.
           if self.pickerController.picker != nil, self.pickerController.scrollDirty, scrCols > 0 {
             let prefixEnd = min(
               self.transcriptState.lines.count,
@@ -482,7 +471,7 @@ internal final class SlateChatHost {
             queuedTraySnapshot: queuedTraySnapshot,
             picker: self.pickerController.picker,
             theme: .default)
-          // Paint semantic spans into the terminal grid
+
           for (row, spanRow) in spanGrid.enumerated() {
             for (col, span) in spanRow.enumerated() {
               let ch = span.text.first ?? " "
@@ -567,8 +556,7 @@ internal final class SlateChatHost {
       logger.notice("chat.identity.skip", metadata: ["reason": "host-inactive"])
       return
     }
-    // Picker backup holds the *parent* session's pre-styled lines; once
-    // identity changes they're meaningless.
+
     pickerController.clear()
     logger.notice(
       "chat.identity.swap",
@@ -590,7 +578,6 @@ internal final class SlateChatHost {
     steeringLineOutstanding = false
     messageQueues.clearAll()
 
-    // Refresh banner with the new session id (other fields unchanged).
     if let banner = self.banner {
       self.banner = BannerSnapshot(
         baseURL: banner.baseURL,
@@ -601,7 +588,6 @@ internal final class SlateChatHost {
         sessionId: newId.uuidString)
     }
 
-    // Re-render transcript from the post-swap content.
     Task { @MainActor in
       await self.refreshTranscriptFromDocument()
       self.renderWake?.requestRender()
@@ -762,7 +748,7 @@ internal final class SlateChatHost {
   }
 
   private nonisolated static func detectGitBranch(cwd: String) -> String? {
-    // TODO: Do something else here
+
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
     process.arguments = ["branch", "--show-current"]

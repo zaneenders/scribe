@@ -23,7 +23,6 @@ struct ToolRunnerReadImageTests {
         abortObserver: AbortNotifier()
       )
 
-      // Attachments carry the image data.
       #expect(result.attachments.count == 1)
       let attachment = result.attachments[0]
       #expect(attachment.mimeType == "image/png")
@@ -31,7 +30,6 @@ struct ToolRunnerReadImageTests {
       #expect(Data(base64Encoded: attachment.base64) == data)
       #expect(attachment.sourcePath == imageURL.path)
 
-      // The text payload still has the JSON metadata.
       guard let jsonData = result.text.data(using: .utf8) else {
         Issue.record("JSON is not valid UTF-8")
         return
@@ -59,7 +57,7 @@ struct ToolRunnerReadImageTests {
         logger: toolRunnerTestLogger,
         abortObserver: AbortNotifier()
       )
-      // Text files have no attachments.
+
       #expect(result.attachments.isEmpty)
       let payload = try decodeRead(result.text)
       #expect(payload.ok == true)

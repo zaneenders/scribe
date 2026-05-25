@@ -4,13 +4,9 @@ import Testing
 
 @testable import ScribeCLI
 
-
-/// Simulates the host's render loop: transcript → flatten → viewport → render.
-/// Focused on catching any gap in the first-message scenario.
 @Suite
 @MainActor
 struct TranscriptRenderIntegrationTests {
-
 
   @Test func firstMessageFromEmptyTranscriptPaintsCorrectly() {
     let cols = 80
@@ -29,7 +25,6 @@ struct TranscriptRenderIntegrationTests {
       sessionId: "test-sid"
     )
 
-    // ── Frame 1: Empty transcript (before coordinator runs) ──
     let flat1 = TranscriptLayout.FlattenCache.flatten(
       cache: &flattenCache,
       completed: transcriptLines,
@@ -53,15 +48,12 @@ struct TranscriptRenderIntegrationTests {
       queuedTraySnapshot: QueuedTraySnapshot(),
       theme: theme)
 
-    // Verify: transcript area is blank (only background fill)
     let headerRows = 3
     let rowBelowHeader = headerRows
     #expect(
       grid1[rowBelowHeader][0].text == " ",
       "Frame 1: transcript area should be blank")
 
-    // ── Frame 2: User message arrives (after coordinator runs) ──
-    // Simulate handleAgentEvent(.userSubmitted("hello"))
     transcriptLines.append(
       TLine(spans: [StyledSpan(fg: theme.userPrefix, bg: theme.background, bold: false, text: "you:")]))
     transcriptLines.append(
@@ -72,7 +64,7 @@ struct TranscriptRenderIntegrationTests {
       completed: transcriptLines,
       open: nil,
       width: cols,
-      generation: 0)  // userSubmitted doesn't increment generation
+      generation: 0)
 
     let contentRows2 = SlateChatRenderer.transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: nil,
@@ -91,9 +83,7 @@ struct TranscriptRenderIntegrationTests {
       queuedTraySnapshot: QueuedTraySnapshot(),
       theme: theme)
 
-    // The transcript area should now contain "you:" and "  hello"
-    // contentRows = 20, flatCount = 2, topPad = 18, first content row = 3 + 18 = 21
-    let expectedFirstContentRow = 3 + (contentRows2 - flat2.count)  // headerRows + topPad
+    let expectedFirstContentRow = 3 + (contentRows2 - flat2.count)
     #expect(expectedFirstContentRow == 21)
 
     let youCell = grid2[expectedFirstContentRow][0]
@@ -107,39 +97,32 @@ struct TranscriptRenderIntegrationTests {
       "Frame 2: Expected 'h' from 'hello' at row \(expectedFirstContentRow + 1) col 2, got '\(helloCell.text)'")
   }
 
-
   @Test func viewportFollowsLiveThroughFirstMessage() {
     var viewport = TranscriptViewport()
 
-    // Empty transcript
     #expect(viewport.followingLive == true)
     let pos0 = viewport.resolve(flatCount: 0, contentRows: 20)
     #expect(pos0 == 0)
     #expect(viewport.followingLive == true)
 
-    // User message arrives (2 lines, still fits in 20 content rows)
     let pos1 = viewport.resolve(flatCount: 2, contentRows: 20)
-    #expect(pos1 == 0)  // max(0, 2-20) = 0
+    #expect(pos1 == 0)
     #expect(
       viewport.followingLive == true,
       "Viewport should still be following live after first message")
 
-    // Large transcript growth (model responds)
     let pos2 = viewport.resolve(flatCount: 100, contentRows: 20)
-    #expect(pos2 == 80)  // 100 - 20
+    #expect(pos2 == 80)
     #expect(viewport.followingLive == true)
   }
-
 
   @Test func flattenCacheAppendsNewLines() {
     var cache = TranscriptLayout.FlattenCache()
 
-    // First call: empty transcript
     let flat0 = TranscriptLayout.FlattenCache.flatten(
       cache: &cache, completed: [], open: nil, width: 80, generation: 0)
     #expect(flat0.isEmpty)
 
-    // Second call: 2 lines added, same generation
     let lines: [TLine] = [
       TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "you:")]),
       TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "  hello")]),
@@ -151,18 +134,15 @@ struct TranscriptRenderIntegrationTests {
     #expect(flat1[1].spans.first?.text == "  hello")
   }
 
-
   @Test func generationChangeResetsFlattenCache() {
     var cache = TranscriptLayout.FlattenCache()
 
-    // Build up some cached content
     let lines1: [TLine] = [
       TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")])
     ]
     _ = TranscriptLayout.FlattenCache.flatten(
       cache: &cache, completed: lines1, open: nil, width: 80, generation: 0)
 
-    // Now generation changes (like when streaming re-renders happen)
     let lines2: [TLine] = [
       TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "line1")]),
       TLine(spans: [StyledSpan(fg: .white, bg: .black, bold: false, text: "line2")]),
@@ -170,7 +150,6 @@ struct TranscriptRenderIntegrationTests {
     let flat = TranscriptLayout.FlattenCache.flatten(
       cache: &cache, completed: lines2, open: nil, width: 80, generation: 1)
 
-    // Cache should have been reset, then recomputed with the new lines
     #expect(flat.count == 2)
     #expect(flat[0].spans.first?.text == "line1")
     #expect(flat[1].spans.first?.text == "line2")

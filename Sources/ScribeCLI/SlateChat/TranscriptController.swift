@@ -2,22 +2,17 @@ import Foundation
 import ScribeCore
 import ScribeLLM
 
-
-/// Pure-value container for all transcript state the host manages.
-/// Owned by `TranscriptController`; the host holds a copy and passes
-/// it to `TranscriptController.apply()` on every event.
 struct TranscriptState: Equatable {
-  /// Completed transcript lines (user messages, finalized assistant turns, tool output).
+
   var lines: [TLine] = []
-  /// Open line being built during streaming (nil when idle).
+
   var streamingOpenLine: TLine? = nil
   var streamingOpenLineRaw: String = ""
   var streamingSectionStartLineIndex: Int? = nil
   var currentStreamingSection: AssistantStreamSection = .answer
-  /// Bumped when transcript structure changes (for FlattenCache invalidation).
+
   var generation: Int = 0
 
-  // Usage tracking
   var usageTurnPrompt: Int = 0
   var usageTurnCompletion: Int = 0
   var usageTurnTotal: Int = 0
@@ -27,29 +22,12 @@ struct TranscriptState: Equatable {
   var usageHUD: UsageHUDSnapshot? = nil
 }
 
-
-/// Pure state machine for transcript events.
-///
-/// All state mutations happen here. Side effects (render requests) are
-/// returned as `Effects` for the host to execute. The controller holds
-/// no references to `SlateCore`, `@MainActor`, or any async machinery —
-/// it is unit-testable with no TUI infrastructure.
 struct TranscriptController {
 
-  /// Side effects the host must perform after applying an event.
   struct Effects: Equatable {
     var needsRender: Bool = false
   }
 
-  /// Apply a transcript event to the given state, returning effects.
-  /// - Parameters:
-  ///   - state: Mutable transcript state (inout).
-  ///   - event: The transcript event to process.
-  ///   - theme: CLI color theme for span construction.
-  ///   - renderer: Markdown renderer for streaming/batch rendering.
-  ///   - followingLive: Whether the viewport is tail-following live output.
-  ///   - contextWindow: Optional context window size for usage percentage.
-  /// - Returns: Side effects the host must execute.
   static func apply(
     _ event: AgentEvent,
     to state: inout TranscriptState,
@@ -116,14 +94,13 @@ struct TranscriptController {
     }
   }
 
-
   private static func applyEnterAssistantSection(
     _ section: AssistantStreamSection,
     previous: AssistantStreamSection?,
     state: inout TranscriptState,
     theme: CLITheme
   ) -> Effects {
-    // Finalize previous open line if any.
+
     if let open = state.streamingOpenLine {
       state.lines.append(open)
       state.streamingOpenLine = nil
@@ -175,12 +152,10 @@ struct TranscriptController {
     state.streamingOpenLineRaw += text
     state.currentStreamingSection = section
 
-    // When the user has scrolled up, skip per-chunk rendering.
     guard followingLive else { return Effects(needsRender: false) }
 
     let st = theme.style(for: section)
 
-    // Only render the visible tail during streaming.
     let maxVisibleLogicalLines = 200
     let tailText: String = {
       let allLines = state.streamingOpenLineRaw.split(separator: "\n", omittingEmptySubsequences: false)
@@ -217,7 +192,7 @@ struct TranscriptController {
     theme: CLITheme,
     renderer: MarkdownRenderer
   ) -> Effects {
-    // Re-render accumulated text with full block-level markdown.
+
     if state.streamingSectionStartLineIndex != nil {
       let section = state.currentStreamingSection
       let st = theme.style(for: section)
@@ -353,11 +328,10 @@ struct TranscriptController {
     return Effects(needsRender: true)
   }
 
-
   private static func isUserSubmissionLine(_ line: TLine, theme: CLITheme) -> Bool {
     guard !line.spans.isEmpty else { return false }
     let s = line.spans[0]
-    // Match "you:" prefix OR user body text (for blank-line insertion)
+
     if !s.bold && s.bg == theme.background {
       if s.fg == theme.userPrefix && s.text == "you:" { return true }
       if s.fg == theme.userBody { return true }

@@ -6,7 +6,6 @@ import Testing
 @Suite
 struct ImageSupportTests {
 
-
   @Test func detectsPNGByMagicBytes() {
     let data = Data([0x89, 0x50, 0x4E, 0x47])
     #expect(ImageSupport.detectImageType(data: data) == "image/png")
@@ -38,18 +37,18 @@ struct ImageSupportTests {
   }
 
   @Test func detectsWebPByMagicBytes() {
-    // RIFF....WEBP
+
     var data = Data([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00])
     data.append(contentsOf: [0x57, 0x45, 0x42, 0x50])
     #expect(ImageSupport.detectImageType(data: data) == "image/webp")
   }
 
   @Test func detectsHEICByMagicBytes() {
-    // ftyp box: size(4) + "ftyp"(4) + "heic"(4)
-    var data = Data([0x00, 0x00, 0x00, 0x14]) // 20 bytes
-    data.append(contentsOf: [0x66, 0x74, 0x79, 0x70]) // "ftyp"
-    data.append(contentsOf: [0x68, 0x65, 0x69, 0x63]) // "heic"
-    data.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // padding
+
+    var data = Data([0x00, 0x00, 0x00, 0x14])
+    data.append(contentsOf: [0x66, 0x74, 0x79, 0x70])
+    data.append(contentsOf: [0x68, 0x65, 0x69, 0x63])
+    data.append(contentsOf: [0x00, 0x00, 0x00, 0x00])
     #expect(ImageSupport.detectImageType(data: data) == "image/heic")
   }
 
@@ -62,7 +61,6 @@ struct ImageSupportTests {
     let data = Data([0x89, 0x50])
     #expect(ImageSupport.detectImageType(data: data) == nil)
   }
-
 
   @Test func detectsImageFileByMagicBytes() throws {
     let dir = FileManager.default.temporaryDirectory
@@ -79,14 +77,12 @@ struct ImageSupportTests {
     #expect(ImageSupport.isImageFile(path: txtPath) == false)
   }
 
-
   @Test func detectImageTypeUsesMagicBytesNotExtension() throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: dir) }
 
-    // A PNG file with a .jpg extension — magic bytes should win
     let path = dir.appendingPathComponent("tricky.jpg").path
     try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: path))
     #expect(ImageSupport.detectImageType(path: path) == "image/png")

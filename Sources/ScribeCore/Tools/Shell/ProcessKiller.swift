@@ -10,37 +10,8 @@ import Glibc
 import Musl
 #endif
 
-
-/// Strategy that terminates the process tree spawned by a single shell
-/// invocation. Different platforms need different approaches:
-///
-/// - **macOS / *BSD**: `kill(-pgid, SIGKILL)` via subprocess. This catches
-///   anything that stayed in the original process group, but **misses
-///   `setsid` grandchildren** that escaped into a new session. macOS
-///   doesn't expose a process-children syscall in the same convenient way
-///   `/proc/<pid>/children` does on Linux, so this is the best we have
-///   short of pulling in a libproc dependency.
-/// - **Linux**: walks the process tree via `/proc` and SIGKILLs leaves
-///   first. Catches `setsid` escapees that the simple pgroup kill would
-///   miss — see `ProcfsTreeReader`.
-/// - **Windows**: delegates to `subprocess.terminate(...)`.
-///
-/// The protocol exists primarily to let tests on macOS exercise the
-/// Linux-style tree-walk logic against a stub reader. Production code
-/// gets the right strategy via `ProcessKiller.platformDefault`.
 package protocol ProcessKiller: Sendable {
-  /// Synchronously kill the process tree rooted at `rootPid`. Implementations
-  /// MUST be safe to call from a `withTaskCancellationHandler`'s
-  /// `onCancel:` block, which means: no `await`, no allocations of
-  /// async resources, and idempotency on repeated invocation.
-  ///
-  /// `execution` is provided so platform-specific strategies that delegate
-  /// to swift-subprocess (macOS pgroup kill, Windows terminate) can do so
-  /// without re-deriving the handle from `rootPid`.
-  ///
-  /// Returns the number of processes that were successfully signalled
-  /// (root included). Mostly informational — used in trace logs to spot
-  /// missed grandchildren.
+
   func killTree(
     rootPid: pid_t,
     execution: Subprocess.Execution,
@@ -50,15 +21,10 @@ package protocol ProcessKiller: Sendable {
 }
 
 extension ProcessKiller where Self == DefaultProcessKiller {
-  /// The platform-appropriate default strategy. Wraps either pgroup kill
-  /// (macOS / Windows) or the `/proc`-walking tree kill (Linux).
+
   package static var platformDefault: DefaultProcessKiller { DefaultProcessKiller() }
 }
 
-
-/// Resolves to the right platform strategy at compile time.  Kept as a
-/// concrete type rather than a typealias so callers can always say
-/// `ProcessKiller.platformDefault` without importing the underlying type.
 package struct DefaultProcessKiller: ProcessKiller {
   package init() {}
 
@@ -94,11 +60,6 @@ package struct DefaultProcessKiller: ProcessKiller {
   }
 }
 
-
-/// `kill(-pgid, SIGKILL)` via swift-subprocess. Catches the foreground
-/// process group; misses `setsid` grandchildren — but the process-group
-/// strategy is what swift-subprocess offers natively, and `setsid`
-/// escapees are rare enough on macOS that going to libproc isn't worth it.
 package struct PgroupKiller: ProcessKiller {
   package init() {}
 
@@ -125,24 +86,12 @@ package struct PgroupKiller: ProcessKiller {
       return 0
     }
     #else
-    // On Windows the protocol shouldn't be reaching this branch (DefaultProcessKiller
-    // routes to terminate), but the file compiles on every platform so keep
-    // a no-op fallback rather than failing the build.
+
     return 0
     #endif
   }
 }
 
-
-/// Walks the process tree via a `ProcessTreeReader` and SIGKILLs from the
-/// leaves toward the root. Catches `setsid` grandchildren that the
-/// pgroup-kill strategy would miss.
-///
-/// The walker logic is a pure function (`collectProcessTree`) and the
-/// reader is injectable, so this strategy is fully unit-testable on any
-/// platform — feed it a stub tree and verify the right pids are signalled
-/// in the right order. The actual `kill(2)` syscall on real pids still
-/// requires Linux for end-to-end coverage.
 package struct ProcTreeKiller: ProcessKiller {
   let reader: any ProcessTreeReader
 
@@ -185,8 +134,6 @@ package struct ProcTreeKiller: ProcessKiller {
   }
 }
 
-// `kill` from libc collides with `Subprocess.send(signal:)` if both are in
-// scope unqualified, so re-export under a name nobody else uses.
 #if canImport(Darwin)
 @inline(__always)
 private func Foundation_kill(_ pid: pid_t, _ sig: Int32) -> Int32 {

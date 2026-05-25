@@ -8,7 +8,6 @@ import ScribeLLM
 import Synchronization
 import Testing
 
-
 private final class FakeClientTransport: ClientTransport, Sendable {
   let statusCode: Int
   private let chunksForCall: [[HTTPBody.ByteChunk]]
@@ -50,7 +49,6 @@ private final class FakeClientTransport: ClientTransport, Sendable {
   }
 }
 
-
 private struct FakeTool: ScribeTool {
   static var name: String { "fake_tool" }
   static var description: String { "A fake tool for testing." }
@@ -63,10 +61,6 @@ private struct FakeTool: ScribeTool {
   }
 }
 
-/// Sleeps until cancelled — used by `promptAbortReturnsInterrupted` to keep
-/// the agent loop parked in its tool watch task while the test fires
-/// `agent.abort()`. The 60-second sleep is throwing so the watch task's
-/// cancellation surfaces as a clean abort rather than a hang.
 private struct SleepyAgentTool: ScribeTool {
   static var name: String { "sleepy" }
   static var description: String { "Sleeps until cancelled." }
@@ -80,7 +74,6 @@ private struct SleepyAgentTool: ScribeTool {
   }
 }
 
-
 private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
   ArraySlice("data: \(json)\n\n".utf8)
 }
@@ -91,12 +84,8 @@ private func errorBody(_ message: String) -> HTTPBody.ByteChunk {
   ArraySlice(#"{"error":{"message":"\#(message)"}}"#.utf8)
 }
 
-
 private let testLogger = Logger(label: "test")
 
-/// Default history every agent test runs against: just a system message.
-/// Mirrors the typical embedder shape — caller owns the conversation
-/// store, the agent is a pure verb.
 private let defaultHistory: [ScribeMessage] = [
   ScribeMessage(role: .system, content: "You are a test agent.")
 ]
@@ -138,10 +127,8 @@ private func makeAgent(
   )
 }
 
-
 @Suite
 struct ScribeAgentTests {
-
 
   @Test func runCompletesWithAnswerText() async throws {
     let chunks = [
@@ -169,7 +156,6 @@ struct ScribeAgentTests {
     let result = try await ts.result.value
     #expect(result.outcome == .toolRoundLimit(rounds: 1))
   }
-
 
   @Test func runYieldsAssistantTextEvents() async throws {
     let chunks = [
@@ -230,7 +216,6 @@ struct ScribeAgentTests {
     #expect(hasUsage)
   }
 
-
   @Test func runResultNewMessagesContainsPromptAndAssistant() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
@@ -240,8 +225,7 @@ struct ScribeAgentTests {
     let ts = agent.run("hello", history: defaultHistory)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
-    // newMessages excludes pre-turn history (system) and contains only
-    // the prompt user message + the assistant reply produced by the turn.
+
     #expect(result.newMessages.count == 2)
     #expect(result.newMessages[0].role == .user)
     #expect(result.newMessages[0].content == "hello")
@@ -265,8 +249,7 @@ struct ScribeAgentTests {
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
-    // newMessages = user(prompt) + assistant(tool-calling) + tool(result) + assistant(done).
-    // The pre-turn system message is NOT included.
+
     #expect(result.newMessages.count == 4)
     #expect(result.newMessages[0].role == .user)
     #expect(result.newMessages[1].role == .assistant)
@@ -275,7 +258,6 @@ struct ScribeAgentTests {
     #expect(result.newMessages[3].role == .assistant)
     #expect(result.newMessages[3].content == "done")
   }
-
 
   @Test func runPropagatesHTTPError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
@@ -314,13 +296,6 @@ struct ScribeAgentTests {
       }))
   }
 
-
-  /// Verify `agent.abort()` interrupts an in-flight turn. We can't pre-set
-  /// abort before `run()` because the agent clears its private notifier
-  /// at the top of each turn (so a stray Ctrl+C between turns can't
-  /// bleed into the next one). Instead we start a tool call against a
-  /// long-sleeping tool so the loop is stuck in the watch task, then call
-  /// `abort()` to wake it.
   @Test func runAbortReturnsInterrupted() async throws {
     let toolCallChunks = [
       sseChunk(
@@ -331,7 +306,7 @@ struct ScribeAgentTests {
     let agent = makeAgent(chunks: toolCallChunks, tools: [SleepyAgentTool()])
     let ts = agent.run("test", history: defaultHistory)
     let drain = Task { for await _ in ts.events {} }
-    // Give the loop a beat to enter the tool watch task before aborting.
+
     try await Task.sleep(for: .milliseconds(50))
     agent.abort()
     let result = try await ts.result.value
@@ -339,21 +314,18 @@ struct ScribeAgentTests {
     #expect(result.outcome == .interrupted)
   }
 
-  /// Aborting between turns is intentionally a no-op. The next `run()`
-  /// clears the notifier and runs to completion.
   @Test func abortBetweenRunsDoesNotLeak() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    agent.abort()  // fired with no in-flight turn
+    agent.abort()
     let ts = agent.run("test", history: defaultHistory)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
   }
-
 
   @Test func runAcceptsScribeMessageArray() async throws {
     let chunks = [
@@ -370,10 +342,6 @@ struct ScribeAgentTests {
     #expect(result.newMessages.last?.content == "ack")
   }
 
-
-  /// A fake tool that records calls — `ToolExecutor` should never be
-  /// invoked for it because the test installs a custom executor that
-  /// short-circuits all tool calls.
   private struct UnreachableTool: ScribeTool {
     static var name: String { "unreachable" }
     static var description: String { "Built-in tool that should never run." }
@@ -387,9 +355,6 @@ struct ScribeAgentTests {
     }
   }
 
-  /// Custom `ToolExecutor` that records every invocation and returns a
-  /// canned JSON string. Demonstrates the HITL / sandbox-forwarder use
-  /// case described in §1 issue 3 of the review.
   private final class RecordingExecutor: ToolExecutor {
     let invocations = Mutex<[ToolInvocation]>([])
     let canned: String
@@ -446,9 +411,7 @@ struct ScribeAgentTests {
     #expect(recorded.first?.name == "unreachable")
     #expect(recorded.first?.id == "c1")
     #expect(recorded.first?.arguments == #"{"k":1}"#)
-    // The tool message in newMessages should carry the canned output,
-    // confirming the assistant saw the executor's response (not the
-    // unreachable built-in).
+
     let toolMessage = result.newMessages.first { $0.role == .tool }
     #expect(stringContent(toolMessage) == recorder.canned)
   }

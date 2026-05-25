@@ -4,15 +4,11 @@ import Testing
 
 @testable import ScribeCLI
 
-
-/// Golden tests that compare the streaming transcript render path against
-/// the batch render path (`renderMessagesToTranscript`) to detect drift.
 @Suite
 struct TranscriptGoldenTests {
 
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
-
 
   @Test func simpleUserAssistantGolden() {
     let messages: [ScribeMessage] = [
@@ -20,10 +16,8 @@ struct TranscriptGoldenTests {
       ScribeMessage(role: .assistant, content: "Hi there!"),
     ]
 
-    // Batch path
     let batchLines = renderMessagesToTranscript(messages, theme: theme, renderer: renderer)
 
-    // Streaming path
     var driver = ChatDriver(renderer: renderer, theme: theme)
     driver.handleUserSubmitted("hello")
     driver.handle(AgentEvent.output(.sectionStarted(.answer, previous: nil)))
@@ -39,7 +33,6 @@ struct TranscriptGoldenTests {
     #expect(streamingText.contains("Hi there!") == batchText.contains("Hi there!"))
     #expect(streamingText.contains("hello") == batchText.contains("hello"))
   }
-
 
   @Test func multiTurnGolden() {
     let messages: [ScribeMessage] = [
@@ -62,7 +55,6 @@ struct TranscriptGoldenTests {
     #expect(scribeCount == 2)
   }
 
-
   @Test func toolCallGolden() {
     let messages: [ScribeMessage] = [
       ScribeMessage(role: .user, content: "list files"),
@@ -84,7 +76,6 @@ struct TranscriptGoldenTests {
     #expect(batchText.contains("shell"))
     #expect(batchText.contains("Done!"))
   }
-
 
   @Test func reasoningGolden() {
     let messages: [ScribeMessage] = [

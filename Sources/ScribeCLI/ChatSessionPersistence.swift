@@ -20,11 +20,8 @@ struct ChatSessionMetadata: Codable, Sendable {
   var baseURL: String?
   var scribeVersion: String?
 
-  /// Session this one was forked from. `nil` for top-level (non-forked) sessions.
   var parentSessionId: UUID?
 
-  /// Number of messages copied from the parent at fork time — i.e. the cut
-  /// index in the parent's log. `nil` for non-forked sessions.
   var forkedAtIndex: Int?
 
   init(
@@ -141,7 +138,6 @@ enum ChatSessionStore {
     }
   }
 
-  /// Keeps `messages.jsonl` open for repeated appends (e.g. one chat coordinator).
   final class MessagesAppender: Sendable {
     private let writer: AppendOnlyFileWriter
     private let directory: FilePath
@@ -186,7 +182,6 @@ enum ChatSessionStore {
     }
   }
 
-  /// Result of a successful fork.
   struct ForkResult: Sendable {
     let sessionId: UUID
     let sessionDirectory: FilePath

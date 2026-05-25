@@ -2,9 +2,6 @@ import Foundation
 import ScribeCLI
 import Testing
 
-/// Behaviour tests for the *transcript-display* formatting layer. The agent's conversation
-/// history with the model still receives raw JSON tool output verbatim — these tests cover
-/// only what the human-facing UI sees.
 @Suite
 struct ToolInvocationFormattingTests {
 
@@ -19,7 +16,7 @@ struct ToolInvocationFormattingTests {
   }
 
   @Test func shellFilePathsReplaceInlineContent() {
-    // Even with stdout_file present, no inline content is shown — just the path.
+
     let json = """
       {"ok":true,"exit_code":1,"stdout_file":"/tmp/scribe-shell-out.txt","stderr_file":"/tmp/scribe-shell-err.txt"}
       """
@@ -27,7 +24,7 @@ struct ToolInvocationFormattingTests {
     #expect(lines.contains("exit 1"))
     #expect(lines.contains { $0.hasPrefix("stdout → ") })
     #expect(lines.contains { $0.hasPrefix("stderr → ") })
-    // No raw content lines leaking through.
+
     #expect(lines.allSatisfy { !$0.hasPrefix("hello") && !$0.hasPrefix("world") })
   }
 
@@ -51,7 +48,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines.allSatisfy { !$0.hasPrefix("stdout → ") })
   }
 
-
   @Test func readFileReturnsSingleSummaryLine() {
     let json = """
       {"ok":true,"path":"/tmp/foo.txt","content":"abc","bytes":3,"total_lines":1,"start_line":1,"end_line":1,"truncated":false}
@@ -62,9 +58,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines[0].contains("returned 1–1"))
   }
 
-  /// Hand-rolled JSON string escape so the test does not pull in `JSONEncoder` plumbing
-  /// just to embed a multi-line literal. Only the cases we use here (`\` and `"` and `\n`)
-  /// are handled.
   private func stringJSON(_ s: String) -> String {
     var escaped = ""
     escaped.reserveCapacity(s.count + 2)
@@ -82,7 +75,6 @@ struct ToolInvocationFormattingTests {
     escaped.append("\"")
     return escaped
   }
-
 
   @Test func argumentSummaryShellWithCwdIncludesDirectory() {
     let summary = ToolInvocationFormatting.argumentSummary(
@@ -148,7 +140,6 @@ struct ToolInvocationFormattingTests {
     #expect(summary == nil)
   }
 
-
   @Test func outputLinesEditFileReturnsReplaced() {
     let json = """
       {"ok":true,"replaced":true,"content":"new content"}
@@ -164,7 +155,6 @@ struct ToolInvocationFormattingTests {
     let lines = ToolInvocationFormatting.outputLines(name: "write_file", jsonOutput: json)
     #expect(lines == ["written"])
   }
-
 
   @Test func outputLinesErrorShowsErrorMessage() {
     let json = """
@@ -182,16 +172,14 @@ struct ToolInvocationFormattingTests {
     #expect(lines == ["error: unknown error"])
   }
 
-
   @Test func outputLinesInvalidJSONReturnsRawOutput() {
     let raw = "garbage"
     let lines = ToolInvocationFormatting.outputLines(name: "shell", jsonOutput: raw)
     #expect(lines == [raw])
   }
 
-
   @Test func shellEmptyStreamsWithExitCodeShowsExitOnly() {
-    // When both file paths are present but files are empty, we still show them.
+
     let json = """
       {"ok":true,"exit_code":0,"stdout_file":"/tmp/out.txt","stderr_file":"/tmp/err.txt"}
       """
@@ -202,7 +190,7 @@ struct ToolInvocationFormattingTests {
   }
 
   @Test func shellEmptyStreamsWithoutExitCodeShowsPlaceholder() {
-    // No exit_code and no file paths → nothing to show.
+
     let json = """
       {"ok":true}
       """
@@ -218,7 +206,6 @@ struct ToolInvocationFormattingTests {
     #expect(!lines.contains { $0.starts(with: "exit ") })
     #expect(lines.contains { $0.hasPrefix("stdout → /tmp/f.txt") })
   }
-
 
   @Test func readFileSummaryOffsetPastEndShowsZeroLines() {
     let json = """
@@ -247,14 +234,13 @@ struct ToolInvocationFormattingTests {
     #expect(lines[0] == "(no content)")
   }
 
-
   @Test func outputLinesUnknownToolPrettyPrintsJSON() {
     let json = """
       {"ok":true,"extra":"value"}
       """
     let lines = ToolInvocationFormatting.outputLines(name: "unknown_tool", jsonOutput: json)
-    // Should pretty-print if JSON is valid and small enough
-    #expect(lines.count > 1)  // multi-line pretty-printed output
+
+    #expect(lines.count > 1)
     #expect(lines.contains { $0.contains("\"extra\"") })
   }
 }

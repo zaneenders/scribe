@@ -1,7 +1,6 @@
 import Foundation
 import ScribeLLM
 
-
 public enum ScribeContentPart: Sendable, Codable, Hashable {
   case text(String)
   case image(url: String, detail: String?)
@@ -52,7 +51,6 @@ public enum ScribeContentPart: Sendable, Codable, Hashable {
     }
   }
 }
-
 
 public struct ScribeMessage: Sendable, Codable, Hashable {
 
@@ -112,7 +110,6 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
     self.toolCallId = try c.decodeIfPresent(String.self, forKey: .toolCallId)
     self.reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning)
 
-    // Try content as array of parts first, then fall back to string.
     if let parts = try? c.decode([ScribeContentPart].self, forKey: .content) {
       self.contentParts = parts
     } else if let text = try c.decodeIfPresent(String.self, forKey: .content), !text.isEmpty {
@@ -148,7 +145,6 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   }
 }
 
-
 public struct ScribeToolCall: Sendable, Codable, Hashable {
   public var id: String
   public var name: String
@@ -159,7 +155,6 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
     self.name = name
     self.arguments = arguments
   }
-
 
   fileprivate struct Wire: Codable, Hashable {
     var id: String?
@@ -199,7 +194,6 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
     try toWire().encode(to: encoder)
   }
 }
-
 
 extension ScribeMessage {
 

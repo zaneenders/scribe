@@ -3,11 +3,8 @@ import Testing
 
 @testable import ScribeCLI
 
-/// Tests for `--list-sessions` output formatting: relative time strings and
-/// the column-aligned session line format.
 @Suite
 struct SessionListFormattingTests {
-
 
   @Test func relativeTimeJustNow() {
     let now = Date()
@@ -99,8 +96,6 @@ struct SessionListFormattingTests {
     #expect(result == "1h ago")
   }
 
-
-  /// Strips ANSI SGR escape sequences so column positions can be verified.
   private func stripANSI(_ s: String) -> String {
     s.replacingOccurrences(
       of: "\u{001B}\\[[0-9;]*[a-zA-Z]",
@@ -110,7 +105,7 @@ struct SessionListFormattingTests {
   }
 
   @Test func formatSessionLineColumnAlignment() {
-    // Rows with varying time widths — columns must stay aligned.
+
     let rows: [(id: String, when: String, cwd: String)] = [
       ("8FFC6215", "2m ago", "~/.scribe/Code/scribe"),
       ("ECAAB88F", "20m ago", "~/.config/scribe"),
@@ -129,7 +124,6 @@ struct SessionListFormattingTests {
       )
     }
 
-    // Every row's shortId must start at the same column.
     var idStarts = [Int]()
     for (i, line) in stripped.enumerated() {
       guard let r = line.range(of: rows[i].id) else {
@@ -143,7 +137,6 @@ struct SessionListFormattingTests {
       #expect(start == expectedId, "Line \(i) id at \(start), expected \(expectedId): \(stripped[i])")
     }
 
-    // Every row's cwd must start at the same column.
     var cwdStarts = [Int]()
     for (i, line) in stripped.enumerated() {
       let cwd = rows[i].cwd
@@ -169,8 +162,7 @@ struct SessionListFormattingTests {
   }
 
   @Test func formatSessionLineTimeColAlwaysNineChars() {
-    // The time column should always occupy exactly 9 visible characters
-    // regardless of the input string length (≤ 8 chars input).
+
     let cases = ["just now", "5s ago", "59s ago", "1m ago", "59m ago", "1h ago", "23h ago", "1d ago"]
 
     for when in cases {
@@ -180,8 +172,6 @@ struct SessionListFormattingTests {
         version: "test")
       let stripped = stripANSI(line)
 
-      // The time column is the first 9 chars. After stripping ANSI,
-      // the shortId "BBBBBBBB" should start at index 11 (9 time + 2 spaces).
       guard let idRange = stripped.range(of: "BBBBBBBB") else {
         #expect(Bool(false), "Missing UUID in: \(stripped)")
         continue
@@ -195,7 +185,7 @@ struct SessionListFormattingTests {
   }
 
   @Test func formatSessionLineCwdAlwaysSameColumn() {
-    // The cwd should start at the same column regardless of time width.
+
     let cases = ["just now", "5s ago", "1m ago", "1h ago"]
 
     for when in cases {
@@ -205,7 +195,6 @@ struct SessionListFormattingTests {
         version: "test")
       let stripped = stripANSI(line)
 
-      // After 9 (time) + 2 (gap) + 8 (uuid) + 2 (gap) = 21 chars, cwd starts.
       guard let cwdRange = stripped.range(of: "~") else {
         #expect(Bool(false), "Missing cwd in: \(stripped)")
         continue

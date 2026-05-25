@@ -66,7 +66,7 @@ struct ToolRunnerShellTests {
 
   @Test func emptyCwdIsTreatedAsNil() async throws {
     let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
-    // Passing cwd as empty string exercises the if-let-empty-to-nil conversion.
+
     let args = try jsonArguments(["command": "/bin/echo ok", "cwd": ""])
     let json = try! await registry.run(
       name: "shell", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger, abortObserver: AbortNotifier()).text
@@ -91,7 +91,7 @@ struct ToolRunnerShellTests {
 
   @Test func interruptKillsLongRunningCommand() async throws {
     let registry = ToolRegistry(tools: [ShellTool()], logger: toolRunnerTestLogger)
-    // Pure shell loop — no external binaries, no output on stdout/stderr.
+
     let args = try jsonArguments([
       "command": "i=0; while [ $i -lt 1000000000 ]; do i=$((i+1)); done"
     ])

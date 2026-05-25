@@ -2,7 +2,6 @@ import Foundation
 import Logging
 import ScribeCore
 
-/// Drives a ``SessionHarness`` from a line stream. UI lives in ``SlateChatHost``.
 final class ChatCoordinator: Sendable {
 
   private let harness: SessionHarness

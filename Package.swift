@@ -72,7 +72,7 @@ let package = Package(
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
-        .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),  // Needed to support release mode profiling.
+        .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
       ],
       plugins: [
         "GitVersionPlugin"
