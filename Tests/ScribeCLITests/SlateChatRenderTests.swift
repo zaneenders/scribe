@@ -48,7 +48,7 @@ struct SlateChatRenderTests {
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
       waitingForLLM: true,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       theme: .default
     )
 
@@ -107,7 +107,7 @@ struct SlateChatRenderTests {
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
       waitingForLLM: true,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       theme: .default
     )
 
@@ -139,7 +139,7 @@ struct SlateChatRenderTests {
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
       waitingForLLM: true,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       theme: .default
     )
 
@@ -176,7 +176,7 @@ struct SlateChatRenderTests {
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
       waitingForLLM: false,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       theme: .default
     )
 

@@ -22,7 +22,7 @@ struct RenderLoopTests {
       usageHUD: nil,
       inputBuffer: "",
       modelBusy: false,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       llmWaitAnimationFrame: 0,
       viewport: TranscriptViewport(),
       cols: 80,
@@ -48,7 +48,7 @@ struct RenderLoopTests {
       usageHUD: nil,
       inputBuffer: "",
       modelBusy: true,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       llmWaitAnimationFrame: 0,
       viewport: TranscriptViewport(),
       cols: 80,
@@ -75,7 +75,7 @@ struct RenderLoopTests {
       usageHUD: nil,
       inputBuffer: "",
       modelBusy: true,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       llmWaitAnimationFrame: 0,
       viewport: TranscriptViewport(),
       cols: 80,
@@ -105,7 +105,7 @@ struct RenderLoopTests {
       usageHUD: nil,
       inputBuffer: "",
       modelBusy: false,
-      queuedTrayText: nil,
+      queuedTrayMessages: [],
       llmWaitAnimationFrame: 0,
       viewport: viewport,
       cols: 80,
@@ -126,7 +126,7 @@ struct RenderLoopTests {
     var state1 = RenderState(
       transcriptLines: lines, streamingOpenLine: nil, generation: 1,
       flattenCache: cache, banner: nil, usageHUD: nil, inputBuffer: "",
-      modelBusy: false, queuedTrayText: nil, llmWaitAnimationFrame: 0,
+      modelBusy: false, queuedTrayMessages: [], llmWaitAnimationFrame: 0,
       viewport: TranscriptViewport(), cols: 80, rows: 24
     )
     let output1 = RenderLoop.buildFrame(state: &state1)
@@ -134,7 +134,7 @@ struct RenderLoopTests {
     var state2 = RenderState(
       transcriptLines: lines, streamingOpenLine: nil, generation: 1,  // same generation
       flattenCache: output1.flattenCache, banner: nil, usageHUD: nil, inputBuffer: "",
-      modelBusy: false, queuedTrayText: nil, llmWaitAnimationFrame: 0,
+      modelBusy: false, queuedTrayMessages: [], llmWaitAnimationFrame: 0,
       viewport: TranscriptViewport(), cols: 80, rows: 24
     )
     let output2 = RenderLoop.buildFrame(state: &state2)
@@ -153,7 +153,7 @@ struct RenderLoopTests {
     var state = RenderState(
       transcriptLines: lines, streamingOpenLine: nil, generation: 2,
       flattenCache: cache, banner: nil, usageHUD: nil, inputBuffer: "",
-      modelBusy: false, queuedTrayText: nil, llmWaitAnimationFrame: 0,
+      modelBusy: false, queuedTrayMessages: [], llmWaitAnimationFrame: 0,
       viewport: TranscriptViewport(), cols: 80, rows: 24
     )
     let output = RenderLoop.buildFrame(state: &state)

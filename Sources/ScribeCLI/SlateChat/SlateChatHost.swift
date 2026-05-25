@@ -104,7 +104,6 @@ internal final class SlateChatHost {
   private var gate: UserLineGate = UserLineGate()
 
   private var inputHandler = TerminalInputHandler()
-  private var submitCoordinator = SubmitCoordinator()
   private var viewport = TranscriptViewport()
   /// Current input mode: `.edit` for typing, `.read` for navigation/ladder.
   private var editMode: EditMode = .edit
@@ -122,7 +121,6 @@ internal final class SlateChatHost {
   private var exitInfo: ChatExitInfo = ChatExitInfo()
   /// Boundary picker controller (driven by `/fork` and `/tldr`).
   private var pickerController = BoundaryPickerController()
-  private var queuedTrayTexts: [String] = []
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
 
@@ -329,8 +327,10 @@ internal final class SlateChatHost {
                   }
                 } else {
                   self.inputBuffer = ""
-                  self.submitCoordinator.setModelBusy(self.modelBusy)
-                  let effect = self.submitCoordinator.handleEnter(text: text)
+                  let effect = SubmitCoordinator.handleEnter(
+                    text: text,
+                    modelBusy: self.modelBusy,
+                    steeringQueueCount: self.harness.steeringQueueCount)
                   shouldStop = self.applySubmitEffect(effect)
                 }
               }
@@ -342,13 +342,21 @@ internal final class SlateChatHost {
                   metadata: ["source": "ctrl-c"])
                 self.editMode = .read
               } else {
-                let (effect, recallText) = self.submitCoordinator.handleCtrlC()
-                if let recall = recallText {
-                  self.inputBuffer = recall
-                  self.editMode = .edit
-                  self.renderWake?.requestRender()
-                }
+                let effect = SubmitCoordinator.handleCtrlC(
+                  steeringQueueCount: self.harness.steeringQueueCount,
+                  modelBusy: self.modelBusy)
                 shouldStop = self.applySubmitEffect(effect)
+                if case .recallSteeringToInput = effect {
+                  if let recall = self.harness.popSteeringForRecall() {
+                    self.inputBuffer = recall
+                    self.editMode = .edit
+                    self.renderWake?.requestRender()
+                  } else {
+                    self.logger.warning(
+                      "chat.queue.recall-missed",
+                      metadata: ["reason": "steering-empty"])
+                  }
+                }
               }
 
             case .escape:
@@ -383,7 +391,8 @@ internal final class SlateChatHost {
                 metadata: [
                   "source": "shift-enter",
                   "buffer_chars": "\(self.inputBuffer.count)",
-                  "has_queue": "\(!self.submitCoordinator.queuedTexts.isEmpty)",
+                  "steering_queue": "\(self.harness.steeringQueueCount)",
+                  "follow_up_queue": "\(self.harness.followUpQueueCount)",
                 ])
 
             case .character(let ch):
@@ -406,20 +415,7 @@ internal final class SlateChatHost {
         }
 
         let nowBusy = self.modelBusy
-        self.submitCoordinator.setModelBusy(nowBusy)
-        // TODO: allow a plugin/hook to decide drain-all vs drain-one here.
-        let drained = self.submitCoordinator.handleModelTurnEnd()
-        if !drained.isEmpty {
-          for text in drained {
-            self.logger.debug(
-              "chat.queue.auto-flush",
-              metadata: ["trigger": "busy-to-idle", "chars": "\(text.count)"])
-          }
-          self.queuedTrayTexts = self.submitCoordinator.queuedTexts
-          for text in drained {
-            self.gate.complete(text)
-          }
-        }
+        let queuedTrayMessages = self.harness.steeringQueuePreview()
 
         self.drainIncomingEvents()
 
@@ -443,7 +439,7 @@ internal final class SlateChatHost {
               cols: scrCols, rows: scrRows,
               banner: self.banner, usage: self.transcriptState.usageHUD,
               inputLine: self.inputBuffer, waitingForLLM: self.modelBusy,
-              queuedTrayText: self.queuedTrayTexts.first)
+              queuedTrayMessages: queuedTrayMessages)
             let topOffset = max(0, contentRows / 3)
             self.viewport.queueScrollToRow(max(0, dividerFlatRow &- topOffset))
             self.pickerController.scrollDirty = false
@@ -459,7 +455,7 @@ internal final class SlateChatHost {
             usageHUD: self.transcriptState.usageHUD,
             inputBuffer: self.inputBuffer,
             modelBusy: self.modelBusy,
-            queuedTrayText: self.queuedTrayTexts.first,
+            queuedTrayMessages: queuedTrayMessages,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             viewport: self.viewport,
             cols: scrCols,
@@ -482,7 +478,7 @@ internal final class SlateChatHost {
             inputMode: self.editMode,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
-            queuedTrayText: self.queuedTrayTexts.first,
+            queuedTrayMessages: queuedTrayMessages,
             picker: self.pickerController.picker,
             theme: .default)
           // Paint semantic spans into the terminal grid
@@ -509,7 +505,8 @@ internal final class SlateChatHost {
                 "cols": "\(scrCols)",
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
-                "queue_chars": "\(self.submitCoordinator.queuedTexts.first?.count ?? 0)",
+                "queue_depth": "\(queuedTrayMessages.count)",
+                "queue_chars": "\(queuedTrayMessages.first?.count ?? 0)",
                 "buffer_chars": "\(self.inputBuffer.count)",
               ])
           }
@@ -586,8 +583,7 @@ internal final class SlateChatHost {
     self.sessionId = newId
     self.sessionCreatedAt = Date()
     self.modelBusy = false
-    self.queuedTrayTexts = []
-    self.submitCoordinator = SubmitCoordinator()
+    Task { await self.harness.clearAllQueues() }
 
     // Refresh banner with the new session id (other fields unchanged).
     if let banner = self.banner {
@@ -664,9 +660,30 @@ internal final class SlateChatHost {
   private func applySubmitEffect(
     _ effect: SubmitEffect
   ) -> Bool {
-    var state = HostSubmitState(queuedTrayTexts: queuedTrayTexts)
-    let fx = HostSubmitState.apply(effect, to: &state)
-    queuedTrayTexts = submitCoordinator.queuedTexts
+    let fx = HostSubmitSideEffects.from(effect)
+
+    if let text = fx.enqueueSteering {
+      if harness.enqueueSteering(text) {
+        logger.debug(
+          "chat.queue.steer",
+          metadata: ["chars": "\(text.count)", "depth": "\(harness.steeringQueueCount)"])
+      } else {
+        logger.debug(
+          "chat.queue.steer-skipped",
+          metadata: ["reason": "blank-after-trim"])
+      }
+    }
+    if let text = fx.enqueueFollowUp {
+      if harness.enqueueFollowUp(text) {
+        logger.debug(
+          "chat.queue.follow-up",
+          metadata: ["chars": "\(text.count)", "depth": "\(harness.followUpQueueCount)"])
+      } else {
+        logger.debug(
+          "chat.queue.follow-up-skipped",
+          metadata: ["reason": "blank-after-trim"])
+      }
+    }
 
     if let tag = fx.interruptLogTag {
       coordinator?.interrupt()
@@ -674,9 +691,19 @@ internal final class SlateChatHost {
         "chat.interrupt-flag.\(tag)",
         metadata: ["coordinator": coordinator == nil ? "nil" : "live"])
     }
-    if let text = fx.gateText {
-      self.gate.complete(text)
+
+    if fx.popSteeringToGate {
+      if let text = harness.popSteeringForRecall(), !text.isEmpty {
+        gate.complete(text)
+      } else {
+        logger.warning(
+          "chat.queue.pop-missed",
+          metadata: ["reason": "steering-empty", "effect": "\(effect)"])
+      }
+    } else if let text = fx.gateText, !text.isEmpty {
+      gate.complete(text)
     }
+
     if fx.needsDelayedRenderWake {
       scheduleDelayedRenderWake()
     }

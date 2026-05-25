@@ -11,6 +11,7 @@ public actor SessionHarness {
   private let logger: Logger
   private let agent: ScribeAgent
   private let tokenTracker: TokenTracker
+  private nonisolated let messageQueues = SessionMessageQueues()
 
   public init(
     configuration: ScribeConfig,
@@ -74,6 +75,59 @@ public actor SessionHarness {
 
   public var lastPromptTokens: Int { tokenTracker.lastPromptTokens }
 
+  public var steeringMode: QueueMode { messageQueues.steeringMode }
+
+  public var followUpMode: QueueMode { messageQueues.followUpMode }
+
+  public nonisolated var steeringQueueCount: Int { messageQueues.steeringCount() }
+
+  public nonisolated var followUpQueueCount: Int { messageQueues.followUpCount() }
+
+  public nonisolated func steeringQueuePreview() -> [String] {
+    messageQueues.steeringPreviewTexts()
+  }
+
+  public nonisolated func followUpQueuePreview() -> [String] {
+    messageQueues.followUpPreviewTexts()
+  }
+
+  public func setSteeringMode(_ mode: QueueMode) {
+    messageQueues.setSteeringMode(mode)
+  }
+
+  public func setFollowUpMode(_ mode: QueueMode) {
+    messageQueues.setFollowUpMode(mode)
+  }
+
+  /// Queue a user message to inject after the current turn's tool batch finishes.
+  @discardableResult
+  public nonisolated func enqueueSteering(_ text: String) -> Bool {
+    messageQueues.enqueueSteering(text: text)
+  }
+
+  /// Queue a user message to run only after the agent would otherwise stop.
+  @discardableResult
+  public nonisolated func enqueueFollowUp(_ text: String) -> Bool {
+    messageQueues.enqueueFollowUp(text: text)
+  }
+
+  public func clearSteeringQueue() {
+    messageQueues.clearSteering()
+  }
+
+  public func clearFollowUpQueue() {
+    messageQueues.clearFollowUp()
+  }
+
+  public func clearAllQueues() {
+    messageQueues.clearAll()
+  }
+
+  /// Remove the oldest steering message (for Ctrl+C recall in the TUI).
+  public nonisolated func popSteeringForRecall() -> String? {
+    messageQueues.popSteeringFirst()?.content
+  }
+
   @discardableResult
   public func applyEdit(_ op: EditOp) async throws -> SessionIdentityChange? {
     switch op {
@@ -134,11 +188,57 @@ public actor SessionHarness {
       return .completed
     }
 
-    logger.debug(
-      "session.harness.submit",
-      metadata: ["chars": "\(trimmed.count)"])
+    var outcome = try await runTurn(
+      promptMessages: [ScribeMessage(role: .user, content: trimmed)],
+      options: options,
+      onEvent: onEvent
+    )
 
-    let promptMessages = [ScribeMessage(role: .user, content: trimmed)]
+    while true {
+      let steering = messageQueues.drainSteering()
+      if !steering.isEmpty {
+        outcome = try await runTurn(
+          promptMessages: steering,
+          options: options,
+          onEvent: onEvent,
+          queueKind: .steering
+        )
+        continue
+      }
+
+      guard outcome == .completed else {
+        return outcome
+      }
+
+      let followUp = messageQueues.drainFollowUp()
+      if followUp.isEmpty {
+        return outcome
+      }
+
+      outcome = try await runTurn(
+        promptMessages: followUp,
+        options: options,
+        onEvent: onEvent,
+        queueKind: .followUp
+      )
+    }
+  }
+
+  private func runTurn(
+    promptMessages: [ScribeMessage],
+    options: AgentRunOptions,
+    onEvent: @Sendable (AgentEvent) -> Void,
+    queueKind: MessageQueueKind? = nil
+  ) async throws -> TurnOutcome {
+    guard !promptMessages.isEmpty else { return .completed }
+
+    let charCount = promptMessages.reduce(0) { $0 + $1.content.count }
+    var metadata: Logger.Metadata = ["chars": "\(charCount)", "messages": "\(promptMessages.count)"]
+    if let queueKind {
+      metadata["queue"] = "\(queueKind)"
+    }
+    logger.debug("session.harness.submit", metadata: metadata)
+
     let history = document.agentHistory()
     let turnStream = agent.run(promptMessages, history: history, options: options)
 
