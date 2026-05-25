@@ -239,65 +239,71 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
 }
 
 
-/// Tests for `SlateChatRenderer.queuedTrayVisualLines` and `queuedTrayRowCount`
-/// — tray wrapping, capping, and row counting with the `String?` API.
+/// Tests for `SlateChatRenderer.queuedTrayVisualLines` and `queuedTrayRowCount`.
 @Suite
 struct SlateChatRendererQueuedTrayTests {
 
-
-  @Test func nilTextReturnsNoVisualLines() {
-    let lines = SlateChatRenderer.queuedTrayVisualLines(queuedTrayText: nil, textWidth: 40)
-    #expect(lines.isEmpty)
-  }
-
-  @Test func emptyTextReturnsNoVisualLines() {
-    let lines = SlateChatRenderer.queuedTrayVisualLines(queuedTrayText: "", textWidth: 40)
+  @Test func emptyMessagesReturnsNoVisualLines() {
+    let lines = SlateChatRenderer.queuedTrayVisualLines(queuedMessages: [], textWidth: 40)
     #expect(lines.isEmpty)
   }
 
   @Test func singleMessageWrapsToVisualLines() {
-    // "abcde\nfghij" with width 5 → two logical lines
     let lines = SlateChatRenderer.queuedTrayVisualLines(
-      queuedTrayText: "abcde\nfghij", textWidth: 5)
+      queuedMessages: ["abcde\nfghij"], textWidth: 5)
     #expect(lines.count == 2)
-    #expect(lines[0] == "abcde")
-    #expect(lines[1] == "fghij")
+    #expect(lines[0].text == "abcde")
+    #expect(lines[1].text == "fghij")
   }
 
-  @Test func capsAtMaxTrayRows() {
-    // 26 chars with width 2 → many visual lines, but capped at 4
+  @Test func singleMessageCapsAtMaxTrayRows() {
     let lines = SlateChatRenderer.queuedTrayVisualLines(
-      queuedTrayText: "abcdefghijklmnopqrstuvwxyz", textWidth: 2)
-    #expect(lines.count <= 4)
+      queuedMessages: ["abcdefghijklmnopqrstuvwxyz"], textWidth: 2)
     #expect(lines.count == 4)
-    // Last line should have "…" truncation
-    #expect(lines[3].hasSuffix("…"))
+    #expect(lines[3].text.hasSuffix("…"))
+  }
+
+  @Test func multipleMessagesShowIndexedPreviews() {
+    let lines = SlateChatRenderer.queuedTrayVisualLines(
+      queuedMessages: ["first task", "second task", "third task"],
+      textWidth: 40)
+    #expect(lines.count == 3)
+    #expect(lines[0].kind == .firstMessage)
+    #expect(lines[0].text == "[1/3] first task")
+    #expect(lines[1].text == "[2/3] second task")
+    #expect(lines[2].text == "[3/3] third task")
+  }
+
+  @Test func multipleMessagesOverflowRowWhenTruncated() {
+    let messages = (1...6).map { "message \($0)" }
+    let lines = SlateChatRenderer.queuedTrayVisualLines(
+      queuedMessages: messages, textWidth: 40)
+    #expect(lines.count == 4)
+    #expect(lines[3].kind == .overflowRemaining(3))
   }
 
   @Test func zeroTextWidthReturnsEmpty() {
     let lines = SlateChatRenderer.queuedTrayVisualLines(
-      queuedTrayText: "hello", textWidth: 0)
+      queuedMessages: ["hello"], textWidth: 0)
     #expect(lines.isEmpty)
   }
 
-
-  @Test func nilTextReturnsZeroRows() {
-    let count = SlateChatRenderer.queuedTrayRowCount(queuedTrayText: nil, cols: 80)
+  @Test func emptyMessagesReturnsZeroRows() {
+    let count = SlateChatRenderer.queuedTrayRowCount(queuedMessages: [], cols: 80)
     #expect(count == 0)
   }
 
   @Test func singleMessageReturnsCorrectRowCount() {
     let count = SlateChatRenderer.queuedTrayRowCount(
-      queuedTrayText: "hello world", cols: 80)
+      queuedMessages: ["hello world"], cols: 80)
     #expect(count == 1)
   }
 
   @Test func multiLineMessageReturnsCorrectRowCount() {
     let count = SlateChatRenderer.queuedTrayRowCount(
-      queuedTrayText: "line1\nline2\nline3", cols: 80)
+      queuedMessages: ["line1\nline2\nline3"], cols: 80)
     #expect(count == 3)
   }
-
 
   @Test func buildSemanticQueuedTrayShowsQueuedPrefix() {
     let theme = CLITheme.default
@@ -309,7 +315,7 @@ struct SlateChatRendererQueuedTrayTests {
     )
 
     let paintLines = SlateChatRenderer.queuedTrayVisualLines(
-      queuedTrayText: "hello", textWidth: 34)
+      queuedMessages: ["hello"], textWidth: 34)
     SlateChatRenderer.buildSemanticQueuedTrayRows(
       &grid,
       startRow: 0,
@@ -318,13 +324,11 @@ struct SlateChatRendererQueuedTrayTests {
       visualLines: paintLines,
       theme: theme)
 
-    // "queued: " prefix in queuedPrefix color
     let prefix = "queued: "
     for (i, ch) in prefix.enumerated() {
       #expect(grid[0][i].text == String(ch))
       #expect(grid[0][i].fg == theme.queuedPrefix)
     }
-    // Message text in queuedText color
     #expect(grid[0][prefix.count].text == "h")
     #expect(grid[0][prefix.count].fg == theme.queuedText)
   }
@@ -339,7 +343,7 @@ struct SlateChatRendererQueuedTrayTests {
     )
 
     let paintLines = SlateChatRenderer.queuedTrayVisualLines(
-      queuedTrayText: "line one\nline two", textWidth: 34)
+      queuedMessages: ["line one\nline two"], textWidth: 34)
     SlateChatRenderer.buildSemanticQueuedTrayRows(
       &grid,
       startRow: 0,
@@ -348,9 +352,7 @@ struct SlateChatRendererQueuedTrayTests {
       visualLines: paintLines,
       theme: theme)
 
-    // Row 0: "queued: " + "line one"
     #expect(grid[0][0].text == "q")
-    // Row 1: gutter spaces in queuedGutter color
     #expect(grid[1][0].text == " ")
     #expect(grid[1][0].fg == theme.queuedGutter)
   }
@@ -372,7 +374,6 @@ struct SlateChatRendererQueuedTrayTests {
       visualLines: [],
       theme: theme)
 
-    // Grid should be unchanged
     #expect(grid[0][0].text == " ")
   }
 
@@ -386,7 +387,7 @@ struct SlateChatRendererQueuedTrayTests {
     )
 
     let paintLines = SlateChatRenderer.queuedTrayVisualLines(
-      queuedTrayText: "test", textWidth: 34)
+      queuedMessages: ["test"], textWidth: 34)
     SlateChatRenderer.buildSemanticQueuedTrayRows(
       &grid,
       startRow: 0,
@@ -395,27 +396,48 @@ struct SlateChatRendererQueuedTrayTests {
       visualLines: paintLines,
       theme: theme)
 
-    // "queued: " (8 chars) + "test" (4 chars) = 12 chars of content
-    // The spans written by buildSemanticQueuedTrayRows use inputAreaBg background
     #expect(grid[0][0].bg == theme.inputAreaBg)
-    // Position 8 is the start of "test"
     #expect(grid[0][8].bg == theme.inputAreaBg)
   }
 
+  @Test func dispatchSnapshotShowsSendingAndWaitingRows() {
+    let snapshot = QueuedTraySnapshot(
+      pending: ["second", "third"],
+      activeDispatch: .init(index: 1, text: "first"),
+      batchTotal: 3,
+      modelBusy: true)
+    let lines = SlateChatRenderer.queuedTrayVisualLines(snapshot: snapshot, textWidth: 40)
+    #expect(lines.count == 3)
+    #expect(lines[0].kind == .sending)
+    #expect(lines[0].text == "[1/3] first")
+    #expect(lines[1].kind == .waiting)
+    #expect(lines[1].text == "[2/3] second")
+    #expect(lines[2].text == "[3/3] third")
+  }
+
+  @Test func autoDrainSnapshotMarksNextUp() {
+    let snapshot = QueuedTraySnapshot(
+      pending: ["second", "third"],
+      batchTotal: 3,
+      modelBusy: true)
+    let lines = SlateChatRenderer.queuedTrayVisualLines(snapshot: snapshot, textWidth: 40)
+    #expect(lines[0].kind == .nextUp)
+    #expect(lines[0].text == "[2/3] second")
+    #expect(lines[1].kind == .waiting)
+    #expect(lines[1].text == "[3/3] third")
+  }
 
   @Test func transcriptContentRowsAccountsForTrayRows() {
-    // With nil tray text, content rows = full available space
     let withoutTray = SlateChatRenderer.transcriptContentRows(
       cols: 80, rows: 24,
       banner: nil, usage: nil,
       inputLine: "", waitingForLLM: false,
-      queuedTrayText: nil)
-    // With tray text that takes 2 visual rows, content rows should be 2 less
+      queuedTraySnapshot: QueuedTraySnapshot())
     let withTray = SlateChatRenderer.transcriptContentRows(
       cols: 80, rows: 24,
       banner: nil, usage: nil,
       inputLine: "", waitingForLLM: false,
-      queuedTrayText: "line1\nline2")
+      queuedTraySnapshot: QueuedTraySnapshot(pending: ["line1\nline2"]))
     #expect(withTray == withoutTray - 2)
   }
 }

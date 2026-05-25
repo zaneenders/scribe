@@ -38,7 +38,7 @@ struct TranscriptRenderIntegrationTests {
       generation: 0)
     let contentRows1 = SlateChatRenderer.transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: nil,
-      inputLine: "typing...", waitingForLLM: false, queuedTrayText: nil)
+      inputLine: "typing...", waitingForLLM: false, queuedTraySnapshot: QueuedTraySnapshot())
     _ = viewport.resolve(flatCount: flat1.count, contentRows: contentRows1)
 
     let grid1 = SlateChatRenderer.buildGrid(
@@ -50,7 +50,7 @@ struct TranscriptRenderIntegrationTests {
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
       waitingForLLM: false,
-      queuedTrayText: nil,
+      queuedTraySnapshot: QueuedTraySnapshot(),
       theme: theme)
 
     // Verify: transcript area is blank (only background fill)
@@ -76,7 +76,7 @@ struct TranscriptRenderIntegrationTests {
 
     let contentRows2 = SlateChatRenderer.transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: nil,
-      inputLine: "", waitingForLLM: true, queuedTrayText: nil)
+      inputLine: "", waitingForLLM: true, queuedTraySnapshot: QueuedTraySnapshot())
     _ = viewport.resolve(flatCount: flat2.count, contentRows: contentRows2)
 
     let grid2 = SlateChatRenderer.buildGrid(
@@ -88,7 +88,7 @@ struct TranscriptRenderIntegrationTests {
       inputMode: .edit,
       llmWaitAnimationFrame: 0,
       waitingForLLM: true,
-      queuedTrayText: nil,
+      queuedTraySnapshot: QueuedTraySnapshot(),
       theme: theme)
 
     // The transcript area should now contain "you:" and "  hello"

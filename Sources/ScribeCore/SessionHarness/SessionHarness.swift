@@ -11,12 +11,14 @@ public actor SessionHarness {
   private let logger: Logger
   private let agent: ScribeAgent
   private let tokenTracker: TokenTracker
+  private let messageQueues: SessionMessageQueues
 
   public init(
     configuration: ScribeConfig,
     document: consuming SessionDocument,
     persister: any SessionPersister,
-    logger: Logger
+    logger: Logger,
+    messageQueues: SessionMessageQueues = SessionMessageQueues()
   ) throws {
     self.document = document
     self.persister = persister
@@ -27,6 +29,7 @@ public actor SessionHarness {
       contextWindow: configuration.contextWindow,
       threshold: configuration.contextWindowThreshold
     )
+    self.messageQueues = messageQueues
   }
 
   init(
@@ -34,7 +37,8 @@ public actor SessionHarness {
     document: consuming SessionDocument,
     persister: any SessionPersister,
     agent: ScribeAgent,
-    logger: Logger
+    logger: Logger,
+    messageQueues: SessionMessageQueues = SessionMessageQueues()
   ) {
     self.document = document
     self.persister = persister
@@ -45,6 +49,7 @@ public actor SessionHarness {
       contextWindow: configuration.contextWindow,
       threshold: configuration.contextWindowThreshold
     )
+    self.messageQueues = messageQueues
   }
 
   public var sessionId: UUID { document.sessionId }
@@ -127,6 +132,7 @@ public actor SessionHarness {
   public func submit(
     _ text: String,
     options: AgentRunOptions = AgentRunOptions(),
+    onUserPrompt: @Sendable (String) -> Void = { _ in },
     onEvent: @Sendable (AgentEvent) -> Void
   ) async throws -> TurnOutcome {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -134,11 +140,65 @@ public actor SessionHarness {
       return .completed
     }
 
-    logger.debug(
-      "session.harness.submit",
-      metadata: ["chars": "\(trimmed.count)"])
+    var outcome = try await runTurn(
+      promptMessages: [ScribeMessage(role: .user, content: trimmed)],
+      options: options,
+      onUserPrompt: onUserPrompt,
+      onEvent: onEvent
+    )
 
-    let promptMessages = [ScribeMessage(role: .user, content: trimmed)]
+    while true {
+      let steering = messageQueues.drainSteering()
+      if !steering.isEmpty {
+        outcome = try await runTurn(
+          promptMessages: steering,
+          options: options,
+          onUserPrompt: onUserPrompt,
+          onEvent: onEvent,
+          queueKind: .steering
+        )
+        continue
+      }
+
+      guard outcome == .completed else {
+        return outcome
+      }
+
+      let followUp = messageQueues.drainFollowUp()
+      if followUp.isEmpty {
+        return outcome
+      }
+
+      outcome = try await runTurn(
+        promptMessages: followUp,
+        options: options,
+        onUserPrompt: onUserPrompt,
+        onEvent: onEvent,
+        queueKind: .followUp
+      )
+    }
+  }
+
+  private func runTurn(
+    promptMessages: [ScribeMessage],
+    options: AgentRunOptions,
+    onUserPrompt: @Sendable (String) -> Void,
+    onEvent: @Sendable (AgentEvent) -> Void,
+    queueKind: MessageQueueKind? = nil
+  ) async throws -> TurnOutcome {
+    guard !promptMessages.isEmpty else { return .completed }
+
+    for msg in promptMessages where msg.role == .user {
+      onUserPrompt(msg.content)
+    }
+
+    let charCount = promptMessages.reduce(0) { $0 + $1.content.count }
+    var metadata: Logger.Metadata = ["chars": "\(charCount)", "messages": "\(promptMessages.count)"]
+    if let queueKind {
+      metadata["queue"] = "\(queueKind)"
+    }
+    logger.debug("session.harness.submit", metadata: metadata)
+
     let history = document.agentHistory()
     let turnStream = agent.run(promptMessages, history: history, options: options)
 

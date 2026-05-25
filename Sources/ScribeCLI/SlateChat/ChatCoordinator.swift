@@ -43,7 +43,6 @@ final class ChatCoordinator: Sendable {
         continue
       }
 
-      enqueue(.userSubmitted(trimmed))
       logger.debug(
         "agent.turn.dispatch",
         metadata: ["chars": "\(trimmed.count)"])
@@ -52,7 +51,12 @@ final class ChatCoordinator: Sendable {
       defer { enqueue(.modelTurnRunning(false)) }
 
       do {
-        _ = try await harness.submit(trimmed) { [enqueue] event in
+        _ = try await harness.submit(
+          trimmed,
+          onUserPrompt: { [enqueue] text in
+            enqueue(.userSubmitted(text))
+          }
+        ) { [enqueue] event in
           enqueue(.transcript(event))
         }
       } catch {

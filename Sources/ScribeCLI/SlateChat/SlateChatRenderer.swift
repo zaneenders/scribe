@@ -3,6 +3,21 @@ import ScribeCore
 import SlateCore
 
 
+struct QueuedTrayLine: Equatable, Sendable {
+  enum Kind: Equatable, Sendable {
+    case firstMessage
+    case additionalMessage
+    case sending
+    case waiting
+    case nextUp
+    case overflowRemaining(Int)
+    case hint
+  }
+
+  var kind: Kind
+  var text: String
+}
+
 /// Builds the semantic chat grid: transcript, queued tray, input strip, banner, and usage HUD.
 ///
 /// ## Render pipeline & input responsiveness
@@ -62,37 +77,205 @@ internal enum SlateChatRenderer {
   /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
   private nonisolated static let queuedTrayMaxRows = 4
 
-  /// Wrapped tray rows for an optional queued submission, capped by ``queuedTrayMaxRows``.
-  /// Returns an empty array when ``queuedTrayText`` is nil/empty.
+  nonisolated static func queuedMessagePreview(_ raw: String, maxWidth: Int) -> String {
+    let normalized = raw
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\n", with: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard maxWidth > 0 else { return normalized }
+    guard normalized.count > maxWidth else { return normalized }
+    if maxWidth == 1 { return "…" }
+    return String(normalized.prefix(maxWidth - 1)) + "…"
+  }
+
   nonisolated static func queuedTrayVisualLines(
-    queuedTrayText: String?,
+    snapshot: QueuedTraySnapshot,
     textWidth: Int
-  ) -> [String] {
-    guard let raw = queuedTrayText, !raw.isEmpty, textWidth > 0 else { return [] }
-    let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
-    let lines = TranscriptLayout.inputVisualLines(from: normalized, textWidth: textWidth)
-    if lines.count <= queuedTrayMaxRows { return lines }
-    var capped = Array(lines.prefix(queuedTrayMaxRows))
-    if !capped.isEmpty {
-      var last = capped[capped.count - 1]
-      if last.count > 1 {
-        last = String(last.prefix(max(1, last.count - 1))) + "…"
-      } else {
-        last = "…"
-      }
-      capped[capped.count - 1] = last
+  ) -> [QueuedTrayLine] {
+    guard textWidth > 0 else { return [] }
+
+    if let active = snapshot.activeDispatch {
+      return buildDispatchTrayLines(snapshot: snapshot, active: active, textWidth: textWidth)
     }
-    return capped
+
+    if snapshot.modelBusy, !snapshot.pending.isEmpty, snapshot.batchTotal > 0 {
+      return buildAutoDrainTrayLines(snapshot: snapshot, textWidth: textWidth)
+    }
+
+    let pending = snapshot.pending
+    guard !pending.isEmpty else { return [] }
+
+    if pending.count == 1 {
+      return singleMessageTrayLines(pending[0], textWidth: textWidth)
+    }
+
+    return multiMessageTrayLines(
+      pending, textWidth: textWidth, modelBusy: snapshot.modelBusy)
+  }
+
+  private nonisolated static func buildDispatchTrayLines(
+    snapshot: QueuedTraySnapshot,
+    active: QueuedTraySnapshot.ActiveDispatch,
+    textWidth: Int
+  ) -> [QueuedTrayLine] {
+    var lines: [QueuedTrayLine] = []
+    let total = max(snapshot.batchTotal, active.index + snapshot.pending.count)
+    let sendLabel = "[\(active.index)/\(total)] "
+    let sendPreview = queuedMessagePreview(
+      active.text, maxWidth: max(1, textWidth - sendLabel.count))
+    lines.append(QueuedTrayLine(kind: .sending, text: sendLabel + sendPreview))
+
+    var hidden = 0
+    for (offset, raw) in snapshot.pending.enumerated() {
+      let index = active.index + 1 + offset
+      if lines.count >= queuedTrayMaxRows {
+        hidden = total - index + 1
+        break
+      }
+      if lines.count == queuedTrayMaxRows - 1, index < total {
+        hidden = total - index
+        break
+      }
+      let label = "[\(index)/\(total)] "
+      let preview = queuedMessagePreview(raw, maxWidth: max(1, textWidth - label.count))
+      lines.append(QueuedTrayLine(kind: .waiting, text: label + preview))
+    }
+
+    if hidden > 0, lines.count < queuedTrayMaxRows {
+      lines.append(QueuedTrayLine(kind: .overflowRemaining(hidden), text: ""))
+    }
+    return lines
+  }
+
+  private nonisolated static func buildAutoDrainTrayLines(
+    snapshot: QueuedTraySnapshot,
+    textWidth: Int
+  ) -> [QueuedTrayLine] {
+    let total = snapshot.batchTotal
+    let dispatched = total - snapshot.pending.count
+    var lines: [QueuedTrayLine] = []
+    var hidden = 0
+
+    for (offset, raw) in snapshot.pending.enumerated() {
+      let index = dispatched + 1 + offset
+      if lines.count >= queuedTrayMaxRows {
+        hidden = total - index + 1
+        break
+      }
+      if lines.count == queuedTrayMaxRows - 1, index < total {
+        hidden = total - index
+        break
+      }
+      let label = "[\(index)/\(total)] "
+      let preview = queuedMessagePreview(raw, maxWidth: max(1, textWidth - label.count))
+      let kind: QueuedTrayLine.Kind = offset == 0 ? .nextUp : .waiting
+      lines.append(QueuedTrayLine(kind: kind, text: label + preview))
+    }
+
+    if hidden > 0, lines.count < queuedTrayMaxRows {
+      lines.append(QueuedTrayLine(kind: .overflowRemaining(hidden), text: ""))
+    } else if lines.count < queuedTrayMaxRows, snapshot.pending.count > 1 {
+      lines.append(
+        QueuedTrayLine(
+          kind: .hint,
+          text: "after each turn · Ctrl+C recalls oldest"))
+    }
+    return lines
+  }
+
+  private nonisolated static func singleMessageTrayLines(
+    _ raw: String,
+    textWidth: Int
+  ) -> [QueuedTrayLine] {
+    let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
+    let wrapped = TranscriptLayout.inputVisualLines(from: normalized, textWidth: textWidth)
+    let capped: [String]
+    if wrapped.count <= queuedTrayMaxRows {
+      capped = wrapped
+    } else {
+      var lines = Array(wrapped.prefix(queuedTrayMaxRows))
+      if !lines.isEmpty {
+        var last = lines[lines.count - 1]
+        if last.count > 1 {
+          last = String(last.prefix(max(1, last.count - 1))) + "…"
+        } else {
+          last = "…"
+        }
+        lines[lines.count - 1] = last
+      }
+      capped = lines
+    }
+    return capped.enumerated().map { index, line in
+      QueuedTrayLine(
+        kind: index == 0 ? .firstMessage : .additionalMessage,
+        text: line)
+    }
+  }
+
+  private nonisolated static func multiMessageTrayLines(
+    _ pending: [String],
+    textWidth: Int,
+    modelBusy: Bool
+  ) -> [QueuedTrayLine] {
+    var lines: [QueuedTrayLine] = []
+    let total = pending.count
+    var hidden = 0
+
+    for (index, raw) in pending.enumerated() {
+      let label = "[\(index + 1)/\(total)] "
+      let labelWidth = label.count
+      let preview = queuedMessagePreview(raw, maxWidth: max(1, textWidth - labelWidth))
+      let rowText = label + preview
+
+      if lines.count >= queuedTrayMaxRows {
+        hidden = total - index
+        break
+      }
+      if lines.count == queuedTrayMaxRows - 1, index < total - 1 {
+        hidden = total - index
+        break
+      }
+
+      lines.append(
+        QueuedTrayLine(
+          kind: index == 0 ? .firstMessage : .additionalMessage,
+          text: rowText))
+    }
+
+    if hidden > 0, lines.count < queuedTrayMaxRows {
+      lines.append(QueuedTrayLine(kind: .overflowRemaining(hidden), text: ""))
+    } else if lines.count < queuedTrayMaxRows, modelBusy {
+      lines.append(
+        QueuedTrayLine(kind: .hint, text: "Enter → interrupt · flush queue"))
+    }
+    return lines
+  }
+
+  nonisolated static func queuedTrayVisualLines(
+    queuedMessages: [String],
+    textWidth: Int
+  ) -> [QueuedTrayLine] {
+    queuedTrayVisualLines(
+      snapshot: QueuedTraySnapshot(pending: queuedMessages),
+      textWidth: textWidth)
   }
 
   /// Number of rows to reserve for the queued tray strip (0 when no queued message).
   nonisolated static func queuedTrayRowCount(
-    queuedTrayText: String?,
+    snapshot: QueuedTraySnapshot,
     cols: Int
   ) -> Int {
     let textWidth = max(0, cols &- queuedTrayGutterColumns)
-    let lines = queuedTrayVisualLines(queuedTrayText: queuedTrayText, textWidth: textWidth)
-    return lines.count
+    return queuedTrayVisualLines(snapshot: snapshot, textWidth: textWidth).count
+  }
+
+  nonisolated static func queuedTrayRowCount(
+    queuedMessages: [String],
+    cols: Int
+  ) -> Int {
+    queuedTrayRowCount(
+      snapshot: QueuedTraySnapshot(pending: queuedMessages),
+      cols: cols)
   }
 
   /// Rows available for transcript text between the fixed header and the input stack (matches ``makeGrid``).
@@ -103,7 +286,7 @@ internal enum SlateChatRenderer {
     usage: UsageHUDSnapshot?,
     inputLine: String,
     waitingForLLM: Bool,
-    queuedTrayText: String?
+    queuedTraySnapshot: QueuedTraySnapshot
   ) -> Int {
     let headerRows: Int = {
       if banner != nil {
@@ -132,7 +315,7 @@ internal enum SlateChatRenderer {
       inputRowCount = capped
     }
 
-    let trayRowCount = queuedTrayRowCount(queuedTrayText: queuedTrayText, cols: cols)
+    let trayRowCount = queuedTrayRowCount(snapshot: queuedTraySnapshot, cols: cols)
     let firstInputRow = rows &- inputRowCount
     let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
     return max(0, firstTrayRow &- headerRows)
@@ -152,7 +335,7 @@ internal enum SlateChatRenderer {
     inputMode: EditMode = .edit,
     llmWaitAnimationFrame: Int,
     waitingForLLM: Bool,
-    queuedTrayText: String?,
+    queuedTraySnapshot: QueuedTraySnapshot,
     picker: PickerSnapshot? = nil,
     theme: CLITheme
   ) -> [[StyledSpan]] {
@@ -174,7 +357,7 @@ internal enum SlateChatRenderer {
     let contentRows = transcriptContentRows(
       cols: cols, rows: rows, banner: banner, usage: usage,
       inputLine: inputLine, waitingForLLM: waitingForLLM,
-      queuedTrayText: queuedTrayText)
+      queuedTraySnapshot: queuedTraySnapshot)
 
     let showSpinner = waitingForLLM && inputLine.isEmpty
     let textWidth = max(0, cols &- inputGutterColumns)
@@ -199,7 +382,7 @@ internal enum SlateChatRenderer {
     let firstInputRow = rows &- inputRowCount
     let trayTextWidth = max(0, cols &- queuedTrayGutterColumns)
     let rawTrayLines = queuedTrayVisualLines(
-      queuedTrayText: queuedTrayText, textWidth: trayTextWidth)
+      snapshot: queuedTraySnapshot, textWidth: trayTextWidth)
     let availableTrayRows = max(0, firstInputRow &- headerRows)
     let trayVisualLines = Array(rawTrayLines.prefix(availableTrayRows))
     let trayRowCount = trayVisualLines.count
@@ -550,7 +733,7 @@ internal enum SlateChatRenderer {
   nonisolated static func buildSemanticQueuedTrayRows(
     _ grid: inout [[StyledSpan]],
     startRow: Int, cols: Int, textWidth: Int,
-    visualLines: [String],
+    visualLines: [QueuedTrayLine],
     theme: CLITheme
   ) {
     guard !visualLines.isEmpty else { return }
@@ -561,17 +744,57 @@ internal enum SlateChatRenderer {
       let row = startRow &+ lineIdx
       guard row >= 0, row < grid.count else { break }
 
+      let trayLine = visualLines[lineIdx]
       var spans: [StyledSpan] = []
-      if lineIdx == 0 {
+      switch trayLine.kind {
+      case .firstMessage:
         spans.append(StyledSpan(fg: theme.queuedPrefix, bg: bg, bold: false, text: "queued: "))
-      } else {
+        if textWidth > 0 {
+          spans.append(
+            StyledSpan(
+              fg: theme.queuedText, bg: bg, bold: false,
+              text: String(trayLine.text.prefix(textWidth))))
+        }
+      case .sending:
+        spans.append(StyledSpan(fg: theme.queuedPrefix, bg: bg, bold: false, text: "send:   "))
+        if textWidth > 0 {
+          spans.append(
+            StyledSpan(
+              fg: theme.userPrefix, bg: bg, bold: false,
+              text: String(trayLine.text.prefix(textWidth))))
+        }
+      case .nextUp:
+        spans.append(StyledSpan(fg: theme.queuedPrefix, bg: bg, bold: false, text: "next:   "))
+        if textWidth > 0 {
+          spans.append(
+            StyledSpan(
+              fg: theme.queuedText, bg: bg, bold: false,
+              text: String(trayLine.text.prefix(textWidth))))
+        }
+      case .additionalMessage, .waiting:
         spans.append(StyledSpan(fg: theme.queuedGutter, bg: bg, bold: false, text: gutterText))
-      }
-      if textWidth > 0 {
-        spans.append(
-          StyledSpan(
-            fg: theme.queuedText, bg: bg, bold: false,
-            text: String(visualLines[lineIdx].prefix(textWidth))))
+        if textWidth > 0 {
+          spans.append(
+            StyledSpan(
+              fg: theme.queuedText, bg: bg, bold: false,
+              text: String(trayLine.text.prefix(textWidth))))
+        }
+      case .hint:
+        spans.append(StyledSpan(fg: theme.queuedGutter, bg: bg, bold: false, text: gutterText))
+        if textWidth > 0 {
+          spans.append(
+            StyledSpan(
+              fg: theme.queuedGutter, bg: bg, bold: false,
+              text: String(trayLine.text.prefix(textWidth))))
+        }
+      case .overflowRemaining(let count):
+        spans.append(StyledSpan(fg: theme.queuedGutter, bg: bg, bold: false, text: gutterText))
+        if textWidth > 0 {
+          spans.append(
+            StyledSpan(
+              fg: theme.queuedPrefix, bg: bg, bold: false,
+              text: String("+\(count) more queued".prefix(textWidth))))
+        }
       }
       writeSemanticSpans(&grid, col: 0, row: row, maxWidth: cols, spans: spans)
       lineIdx &+= 1
