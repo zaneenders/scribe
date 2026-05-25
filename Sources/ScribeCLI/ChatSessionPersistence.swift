@@ -7,6 +7,8 @@ import SystemPackage
 import Darwin
 #elseif canImport(Glibc)
 import Glibc
+#elseif canImport(Musl)
+import Musl
 #endif
 
 struct ChatSessionMetadata: Codable, Sendable {
@@ -172,9 +174,12 @@ enum ChatSessionStore {
 
   private static func touchModificationDate(of directory: FilePath) throws {
     let now = Date().timeIntervalSince1970
-    let times = timeval(
-      tv_sec: Int(now),
-      tv_usec: Int32((now - Double(Int(now))) * 1_000_000))
+    let frac = (now - Double(Int(now))) * 1_000_000
+#if canImport(Darwin)
+    let times = timeval(tv_sec: Int(now), tv_usec: Int32(frac))
+#else
+    let times = timeval(tv_sec: Int(now), tv_usec: Int(frac))
+#endif
     var timevals = [times, times]
     if utimes(directory.string, &timevals) != 0 {
       throw ScribeError.generic("utimes failed for \(directory.string): errno \(errno)")
