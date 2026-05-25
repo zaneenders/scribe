@@ -168,7 +168,7 @@ private func runLoop(
   context: AgentContext = AgentContext(messages: []),
   config: AgentLoopConfig,
   abortNotifier: AbortNotifier = AbortNotifier()
-) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
+) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
   return try await runAgentLoop(
     promptMessages: [userMsg],
@@ -185,7 +185,7 @@ private func runLoop(
   context: AgentContext = AgentContext(messages: []),
   config: AgentLoopConfig,
   countingAbortObserver: CountingAbortObserver = CountingAbortObserver(triggerAt: 1)
-) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
+) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
   return try await runAgentLoop(
     promptMessages: [userMsg],
@@ -205,7 +205,7 @@ private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
   }
 }
 
-private func expectTermination(_ actual: LoopTermination, _ expected: LoopTermination) {
+private func expectTermination(_ actual: TurnOutcome, _ expected: TurnOutcome) {
   switch (actual, expected) {
   case (.completed, .completed): return
   case (.interrupted, .interrupted): return
@@ -946,51 +946,6 @@ struct AgentLoopTests {
     #expect(stringContent(messages[2])?.contains("stopped") == true)
   }
 
-  @Test func transformContextRunsBeforeEachLLMRound() async throws {
-    let chunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
-      doneChunk(),
-    ]
-    let transport = FakeClientTransport(statusCode: 200, responseBodyChunks: chunks)
-    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [], logger: testLogger)
-    let seen = Mutex<[Int]>([])
-    let hooks = AgentLoopHooks(
-      transformContext: { messages in
-        seen.withLock { $0.append(messages.count) }
-        return messages
-      }
-    )
-    let config = AgentLoopConfig(
-      model: "test-model",
-      client: client,
-      toolExecutor: registry,
-      chatTools: registry.chatTools,
-      temperature: 0,
-      maxToolRounds: .max,
-      workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil,
-      hooks: hooks
-    )
-    _ = try await runLoop(prompt: "hi", config: config, abortNotifier: AbortNotifier())
-    #expect(seen.withLock { $0 } == [1])
-  }
-
-  @Test func shouldStopAfterTurnEndsLoopEarly() async throws {
-    let chunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
-      doneChunk(),
-    ]
-    let hooks = AgentLoopHooks(shouldStopAfterTurn: { _ in true })
-    let config = makeConfig(chunks: chunks, hooks: hooks)
-    let (messages, termination) = try await runLoop(
-      prompt: "stop",
-      config: config,
-      abortNotifier: AbortNotifier()
-    )
-    expectTermination(termination, .completed)
-    #expect(messages.count == 2)
-  }
 }
 
 private func errorBody(_ message: String) -> HTTPBody.ByteChunk {

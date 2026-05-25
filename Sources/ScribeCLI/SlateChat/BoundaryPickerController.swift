@@ -27,26 +27,13 @@ internal final class BoundaryPickerController {
     pickerBackup
   }
 
-  var harness: SessionHarness?
-  var onIdentityChange: ((SessionIdentityChange) -> Void)?
+  weak var host: (any BoundaryPickerHost)?
   var configuration: ScribeConfig = ScribeConfig(
     agentModel: "", contextWindow: 0, contextWindowThreshold: 0,
     serverURL: "", apiKey: nil, workingDirectory: ".", reasoningEnabled: false)
   var logger: Logger = Logger(label: "scribe.picker.unset")
   var theme: CLITheme = .default
   var markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()
-
-  var setModelBusy: ((Bool) -> Void)?
-
-  var requestRender: (() -> Void)?
-
-  var isHostActive: (() -> Bool)?
-
-  var currentSessionId: (() -> UUID)?
-
-  var enqueueHostEvent: ((HostEvent) -> Void)?
-
-  var restoreHostFromBackup: (() -> Void)?
 
   func handleInput(
     _ action: TerminalInputAction,
@@ -143,7 +130,7 @@ internal final class BoundaryPickerController {
     restoreFromBackup(
       transcriptState: &transcriptState, viewport: &viewport, flattenCache: &flattenCache)
     logger.debug("chat.picker.cancel")
-    requestRender?()
+    host?.requestRender()
   }
 
   func cancelTask() {
@@ -217,12 +204,11 @@ internal final class BoundaryPickerController {
     let endCut = snap.endBoundary
     let configuration = self.configuration
     let logger = self.logger
-    let parentSessionId = currentSessionId?() ?? UUID()
-    let enqueue = enqueueHostEvent
-    guard let harness = self.harness else {
+    let parentSessionId = host?.sessionId ?? UUID()
+    guard let harness = host?.harness else {
       logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-harness"])
-      setModelBusy?(false)
-      requestRender?()
+      host?.setModelBusy(false)
+      host?.requestRender()
       return
     }
 
@@ -234,20 +220,20 @@ internal final class BoundaryPickerController {
         "end_cut": kind == .tldr ? "\(endCut)" : "n/a",
       ])
 
-    setModelBusy?(true)
-    requestRender?()
+    host?.setModelBusy(true)
+    host?.requestRender()
 
     pickerActionTask?.cancel()
     pickerActionTask = Task { [weak self] in
       guard let self else { return }
       do {
-        guard await MainActor.run(body: { self.isHostActive?() ?? false }) else { return }
+        guard await MainActor.run(body: { self.host?.isHostActive ?? false }) else { return }
 
         let newId = UUID()
         switch kind {
         case .fork:
           if let change = try await harness.applyEdit(.fork(cutAt: startCut, newSessionId: newId)) {
-            await MainActor.run { self.onIdentityChange?(change) }
+            await MainActor.run { self.host?.handleIdentityChange(change) }
           }
           logger.notice(
             "chat.fork.create",
@@ -270,7 +256,7 @@ internal final class BoundaryPickerController {
               replacement: replacement,
               newSessionId: newId))
           {
-            await MainActor.run { self.onIdentityChange?(change) }
+            await MainActor.run { self.host?.handleIdentityChange(change) }
           }
           let tailCount = max(0, pickerMessages.count - endCut)
           logger.notice(
@@ -287,9 +273,9 @@ internal final class BoundaryPickerController {
         }
 
         await MainActor.run { [weak self] in
-          guard let self, self.isHostActive?() ?? false else { return }
-          self.setModelBusy?(false)
-          self.requestRender?()
+          guard let self, self.host?.isHostActive ?? false else { return }
+          self.host?.setModelBusy(false)
+          self.host?.requestRender()
         }
       } catch {
         if Task.isCancelled { return }
@@ -297,18 +283,18 @@ internal final class BoundaryPickerController {
         logger.error(
           "chat.picker.action.fail",
           metadata: ["err": "\(se.errorDescription ?? String(describing: se))"])
-        enqueue?(.transcript(.lifecycle(.error(se))))
         await MainActor.run { [weak self] in
-          guard let self, self.isHostActive?() ?? false else { return }
-          self.restoreHostFromBackup?()
+          guard let self, let host = self.host, host.isHostActive else { return }
+          host.enqueueTranscriptEvent(.lifecycle(.error(se)))
+          host.restoreTranscriptFromPickerBackup()
           self.picker = nil
           self.pickerBackup = nil
           self.pickerMessages = []
           self.pickerBaseLines = []
           self.pickerBaseStarts = []
           self.scrollDirty = false
-          self.setModelBusy?(false)
-          self.requestRender?()
+          host.setModelBusy(false)
+          host.requestRender()
         }
       }
     }
@@ -346,7 +332,7 @@ internal final class BoundaryPickerController {
     dividerLogicalLine = styled.dividerLine
     scrollDirty = true
     flattenCache = TranscriptLayout.FlattenCache()
-    requestRender?()
+    host?.requestRender()
   }
 
   private func restoreFromBackup(

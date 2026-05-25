@@ -49,7 +49,6 @@ let package = Package(
         .product(name: "Configuration", package: "swift-configuration"),
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "Logging", package: "swift-log"),
-        .product(name: "_RopeModule", package: "swift-collections"),
         .product(name: "_NIOFileSystem", package: "swift-nio"),
       ],
       swiftSettings: [

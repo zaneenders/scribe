@@ -118,30 +118,17 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
       self.contentParts = []
     }
 
-    if let wires = try c.decodeIfPresent([ScribeToolCall.Wire].self, forKey: .toolCalls) {
-      self.toolCalls = wires.compactMap(ScribeToolCall.init(wire:))
-    } else {
-      self.toolCalls = nil
-    }
+    self.toolCalls = try c.decodeIfPresent([ScribeToolCall].self, forKey: .toolCalls)
   }
 
   public func encode(to encoder: any Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(role, forKey: .role)
-    if contentParts.count == 1, case .text(let t) = contentParts[0] {
-      try c.encode(t, forKey: .content)
-    } else if contentParts.isEmpty {
-      try c.encode("", forKey: .content)
-    } else {
-      try c.encode(contentParts, forKey: .content)
-    }
+    try c.encode(contentParts, forKey: .content)
     try c.encodeIfPresent(name, forKey: .name)
     try c.encodeIfPresent(toolCallId, forKey: .toolCallId)
     try c.encodeIfPresent(reasoning, forKey: .reasoning)
-    if let calls = toolCalls {
-      let wires = calls.map { $0.toWire() }
-      try c.encode(wires, forKey: .toolCalls)
-    }
+    try c.encodeIfPresent(toolCalls, forKey: .toolCalls)
   }
 }
 
@@ -156,42 +143,28 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
     self.arguments = arguments
   }
 
-  fileprivate struct Wire: Codable, Hashable {
-    var id: String?
-    var _type: String?
-    var function: Function?
-    struct Function: Codable, Hashable {
-      var name: String?
-      var arguments: String?
-    }
-    enum CodingKeys: String, CodingKey {
-      case id
-      case _type = "type"
-      case function
-    }
+  private struct Function: Codable, Hashable {
+    var name: String
+    var arguments: String
   }
 
-  fileprivate init?(wire: Wire) {
-    guard let id = wire.id, let fn = wire.function, let name = fn.name else { return nil }
-    self.init(id: id, name: name, arguments: fn.arguments ?? "")
-  }
-
-  fileprivate func toWire() -> Wire {
-    Wire(id: id, _type: "function", function: .init(name: name, arguments: arguments))
+  private enum CodingKeys: String, CodingKey {
+    case id, type, function
   }
 
   public init(from decoder: any Decoder) throws {
-    let wire = try Wire(from: decoder)
-    guard let bridged = ScribeToolCall(wire: wire) else {
-      throw DecodingError.dataCorruptedError(
-        in: try decoder.singleValueContainer(),
-        debugDescription: "Tool call missing id/function.name")
-    }
-    self = bridged
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    self.id = try c.decode(String.self, forKey: .id)
+    let fn = try c.decode(Function.self, forKey: .function)
+    self.name = fn.name
+    self.arguments = fn.arguments
   }
 
   public func encode(to encoder: any Encoder) throws {
-    try toWire().encode(to: encoder)
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(id, forKey: .id)
+    try c.encode("function", forKey: .type)
+    try c.encode(Function(name: name, arguments: arguments), forKey: .function)
   }
 }
 

@@ -31,7 +31,7 @@ struct SessionDocumentTests {
     #expect(doc[1].content == "hi")
   }
 
-  @Test func appendGrowsRope() {
+  @Test func appendGrows() {
     var doc = Self.makeDoc(seed: [ScribeMessage(role: .system, content: "sys")])
     let range = doc.append([ScribeMessage(role: .user, content: "hi")])
     #expect(doc.count == 2)
@@ -126,7 +126,7 @@ struct SessionDocumentTests {
     }
   }
 
-  @Test func safeForkBoundariesDelegatesToRope() {
+  @Test func safeForkBoundariesComputed() {
     let doc = Self.makeDoc(seed: [
       ScribeMessage(role: .system, content: "sys"),
       ScribeMessage(role: .user, content: "q"),

@@ -22,38 +22,6 @@ struct AgentLoopConfig: Sendable {
   let hooks: AgentLoopHooks
 }
 
-private struct RoundSettings: Sendable {
-  var model: String
-  var temperature: Double
-  var reasoningEnabled: Bool?
-
-  init(config: AgentLoopConfig) {
-    model = config.model
-    temperature = config.temperature
-    reasoningEnabled = config.reasoningEnabled
-  }
-
-  mutating func apply(_ overrides: NextTurnOverrides) {
-    if let model = overrides.model { self.model = model }
-    if let temperature = overrides.temperature { self.temperature = temperature }
-    if let reasoningEnabled = overrides.reasoningEnabled { self.reasoningEnabled = reasoningEnabled }
-  }
-}
-
-enum LoopTermination: Sendable {
-  case completed
-  case interrupted
-  case toolRoundLimit(rounds: Int)
-}
-
-private func turnOutcome(from termination: LoopTermination) -> TurnOutcome {
-  switch termination {
-  case .completed: return .completed
-  case .interrupted: return .interrupted
-  case .toolRoundLimit(let rounds): return .toolRoundLimit(rounds: rounds)
-  }
-}
-
 func runAgentLoop(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
@@ -61,17 +29,13 @@ func runAgentLoop(
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   abortObserver: some AbortObserver
-) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
+) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
-  var roundSettings = RoundSettings(config: config)
-  var termination: LoopTermination = .completed
+  var outcome: TurnOutcome = .completed
 
   emit(.boundary(.agentStart))
-
-  defer {
-    emit(.boundary(.agentEnd(turnOutcome(from: termination))))
-  }
+  defer { emit(.boundary(.agentEnd(outcome))) }
 
   for msg in promptMessages {
     emit(.boundary(.messageStart(role: .user, round: 0)))
@@ -88,48 +52,32 @@ func runAgentLoop(
     round += 1
     if abortObserver.isAborted() {
       logger.debug("agent.abort", metadata: ["where": "before-http", "round": "\(round)"])
-      termination = .interrupted
-      return (newMessages, termination)
+      outcome = .interrupted
+      return (newMessages, outcome)
     }
 
     emit(.boundary(.turnStart(round: round)))
 
-    let overrides = await config.hooks.prepareNextTurn(round, currentContext.messages)
-    roundSettings.apply(overrides)
-    currentContext.messages = await config.hooks.transformContext(currentContext.messages)
-
-    let messagesCountBeforeRound = currentContext.messages.count
-    let roundResult: RoundOutcome
+    let roundResult: RoundResult
     do {
-
-      let outcome = try await abortObserver.race {
-        [currentContext, config, emit, logger, round, roundSettings, abortObserver] in
-        var localCtx = currentContext
-        let result = try await runSingleRound(
-          context: &localCtx,
+      roundResult = try await abortObserver.race {
+        [currentContext, config, emit, logger, round, abortObserver] in
+        try await runSingleRound(
+          contextMessages: currentContext.messages,
           config: config,
-          roundSettings: roundSettings,
           emit: emit,
           logger: logger,
           clock: clock,
           round: round,
           abortObserver: abortObserver
         )
-        return RoundExecutionResult(context: localCtx, outcome: result)
       }
-      currentContext = outcome.context
-      roundResult = outcome.outcome
     } catch is AgentTurnInterruptedError {
-      logger.notice(
-        "agent.abort",
-        metadata: [
-          "where": "mid-stream", "round": "\(round)",
-        ])
+      logger.notice("agent.abort", metadata: ["where": "mid-stream", "round": "\(round)"])
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
-      termination = .interrupted
-      return (newMessages, termination)
+      outcome = .interrupted
+      return (newMessages, outcome)
     } catch let scribeError as ScribeError where !attemptedRecovery && isContextLengthError(scribeError) {
-
       guard case .apiHTTPError(_, let detail, _) = scribeError else {
         throw scribeError
       }
@@ -139,7 +87,6 @@ func runAgentLoop(
           newMessages: &newMessages,
           providerDetail: detail)
       else {
-
         throw scribeError
       }
       attemptedRecovery = true
@@ -149,39 +96,28 @@ func runAgentLoop(
       continue
     }
 
-    let roundMessages = Array(currentContext.messages[messagesCountBeforeRound...])
-    newMessages.append(contentsOf: roundMessages)
+    var roundBuffer: [Components.Schemas.ChatMessage] = [roundResult.assistantMessage]
 
     if abortObserver.isAborted() {
       logger.debug("agent.abort", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
-
-      currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
-      newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
-      termination = .interrupted
-      return (newMessages, termination)
+      outcome = .interrupted
+      return (newMessages, outcome)
     }
 
-    switch roundResult {
+    switch roundResult.kind {
     case .completed:
       emit(.boundary(.turnEnd(round: round, outcome: .completed)))
-      if await config.hooks.shouldStopAfterTurn(round) {
-        termination = .completed
-        return (newMessages, termination)
-      }
-      termination = .completed
-      return (newMessages, termination)
+      commit(&currentContext.messages, &newMessages, roundBuffer)
+      outcome = .completed
+      return (newMessages, outcome)
 
     case .toolCalls(let invocations):
       emit(.boundary(.turnEnd(round: round, outcome: .toolCalls(count: invocations.count))))
       if round >= config.maxToolRounds {
-        logger.notice(
-          "agent.turn.tool-round-limit",
-          metadata: ["max": "\(config.maxToolRounds)"])
-        currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
-        newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
-        termination = .toolRoundLimit(rounds: config.maxToolRounds)
-        return (newMessages, termination)
+        logger.notice("agent.turn.tool-round-limit", metadata: ["max": "\(config.maxToolRounds)"])
+        outcome = .toolRoundLimit(rounds: config.maxToolRounds)
+        return (newMessages, outcome)
       }
 
       logger.info(
@@ -195,13 +131,9 @@ func runAgentLoop(
         if abortObserver.isAborted() {
           logger.notice(
             "agent.abort",
-            metadata: [
-              "where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)",
-            ])
-          currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
-          newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
-          termination = .interrupted
-          return (newMessages, termination)
+            metadata: ["where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)"])
+          outcome = .interrupted
+          return (newMessages, outcome)
         }
 
         let beforeDecision = await config.hooks.beforeToolCall(inv)
@@ -229,15 +161,12 @@ func runAgentLoop(
               logger: logger,
               abort: abortObserver)
           } catch is AgentTurnInterruptedError {
-            currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
-            newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
-            termination = .interrupted
-            return (newMessages, termination)
+            outcome = .interrupted
+            return (newMessages, outcome)
           } catch let ScribeError.toolUnknown(name) {
             logger.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
             result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
           } catch {
-
             logger.warning(
               "agent.tool.executor.error",
               metadata: [
@@ -257,21 +186,20 @@ func runAgentLoop(
         }
 
         emit(.boundary(.messageStart(role: .tool, round: round)))
-        let toolMsg = Components.Schemas.ChatMessage(
-          role: .tool, content: .case1(finalResult.text), name: nil, toolCalls: nil, toolCallId: resolvedInv.id)
-        currentContext.messages.append(toolMsg)
-        newMessages.append(toolMsg)
+        roundBuffer.append(
+          Components.Schemas.ChatMessage(
+            role: .tool, content: .case1(finalResult.text),
+            name: nil, toolCalls: nil, toolCallId: resolvedInv.id))
         emit(.boundary(.messageEnd(role: .tool, round: round)))
 
         for attachment in finalResult.attachments {
-          let b64chars = attachment.base64.count
           logger.info(
             "agent.tool.attachment.inject",
             metadata: [
               "round": "\(round)",
               "tool": "\(resolvedInv.name)",
               "mime_type": "\(attachment.mimeType)",
-              "base64_chars": "\(b64chars)",
+              "base64_chars": "\(attachment.base64.count)",
               "source_path": "\(attachment.sourcePath ?? "nil")",
             ])
           let parts: [ScribeContentPart] = [
@@ -279,19 +207,34 @@ func runAgentLoop(
             .image(url: attachment.dataUri, detail: nil),
           ]
           emit(.boundary(.messageStart(role: .user, round: round)))
-          let imageMsg = ScribeMessage(role: .user, contentParts: parts).toChatMessage()
-          currentContext.messages.append(imageMsg)
-          newMessages.append(imageMsg)
+          roundBuffer.append(ScribeMessage(role: .user, contentParts: parts).toChatMessage())
           emit(.boundary(.messageEnd(role: .user, round: round)))
         }
 
         if afterDecision.terminate {
-          termination = .completed
-          return (newMessages, termination)
+          commit(&currentContext.messages, &newMessages, roundBuffer)
+          outcome = .completed
+          return (newMessages, outcome)
         }
       }
+
+      commit(&currentContext.messages, &newMessages, roundBuffer)
     }
   }
+}
+
+private func commit(
+  _ context: inout [Components.Schemas.ChatMessage],
+  _ newMessages: inout [Components.Schemas.ChatMessage],
+  _ buffer: [Components.Schemas.ChatMessage]
+) {
+  context.append(contentsOf: buffer)
+  newMessages.append(contentsOf: buffer)
+}
+
+private struct RoundResult: Sendable {
+  let assistantMessage: Components.Schemas.ChatMessage
+  let kind: RoundOutcome
 }
 
 private enum RoundOutcome: Sendable, Equatable {
@@ -299,35 +242,29 @@ private enum RoundOutcome: Sendable, Equatable {
   case toolCalls([ToolInvocation])
 }
 
-private struct RoundExecutionResult: Sendable {
-  let context: AgentContext
-  let outcome: RoundOutcome
-}
-
 private func runSingleRound(
-  context: inout AgentContext,
+  contextMessages: [Components.Schemas.ChatMessage],
   config: AgentLoopConfig,
-  roundSettings: RoundSettings,
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   clock: ContinuousClock,
   round: Int,
   abortObserver: some AbortObserver
-) async throws -> RoundOutcome {
+) async throws -> RoundResult {
 
   emit(.boundary(.messageStart(role: .assistant, round: round)))
 
   let requestBody = Components.Schemas.CreateChatCompletionRequest(
-    model: roundSettings.model,
-    messages: context.messages,
+    model: config.model,
+    messages: contextMessages,
     stream: true,
-    temperature: Float(roundSettings.temperature),
+    temperature: Float(config.temperature),
     maxTokens: nil,
     tools: config.chatTools,
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
-    reasoning: roundSettings.reasoningEnabled == nil
-      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: roundSettings.reasoningEnabled)
+    reasoning: config.reasoningEnabled == nil
+      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled)
   )
 
   let httpStart = clock.now
@@ -410,7 +347,6 @@ private func runSingleRound(
     toolCallId: nil,
     reasoningContent: assistantReasoning
   )
-  context.messages.append(assistantMessage)
   emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
   if let u = processor.lastUsage {
@@ -439,10 +375,10 @@ private func runSingleRound(
         "answer_chars": "\(turn.text.count)",
         "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
       ])
-    return .completed
+    return RoundResult(assistantMessage: assistantMessage, kind: .completed)
   }
 
-  return .toolCalls(toolInvocations)
+  return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
 }
 
 func isContextLengthError(_ error: ScribeError) -> Bool {

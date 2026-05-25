@@ -8,7 +8,7 @@ public struct SessionDocument: ~Copyable {
   public private(set) var sessionId: UUID
   public private(set) var directory: FilePath
 
-  private var rope: MessageRope
+  private var messages: [ScribeMessage]
   private let logger: Logger
 
   public init(
@@ -18,55 +18,55 @@ public struct SessionDocument: ~Copyable {
   ) {
     self.sessionId = sessionId
     self.directory = directory
-    self.rope = MessageRope()
+    self.messages = []
     self.logger = logger
   }
 
   private init(
     sessionId: UUID,
     directory: FilePath,
-    rope: MessageRope,
+    messages: [ScribeMessage],
     logger: Logger
   ) {
     self.sessionId = sessionId
     self.directory = directory
-    self.rope = rope
+    self.messages = messages
     self.logger = logger
   }
 
-  public var count: Int { rope.count }
+  public var count: Int { messages.count }
 
-  public var isEmpty: Bool { rope.isEmpty }
+  public var isEmpty: Bool { messages.isEmpty }
 
   public subscript(index: Int) -> ScribeMessage {
-    rope[index]
+    messages[index]
   }
 
   public borrowing func safeForkBoundaries() -> [Int] {
-    rope.safeForkBoundaries()
+    messages.safeForkBoundaries()
   }
 
   package borrowing func agentHistory() -> [ScribeMessage] {
-    rope.toArray()
+    messages
   }
 
   package borrowing func chatMessages() -> [Components.Schemas.ChatMessage] {
-    rope.toArray().toWireMessages()
+    messages.toWireMessages()
   }
 
   @discardableResult
   public mutating func append(_ messages: [ScribeMessage]) -> Range<Int> {
     guard !messages.isEmpty else {
-      return rope.count..<rope.count
+      return self.messages.count..<self.messages.count
     }
-    let startIndex = rope.count
-    rope.append(contentsOf: messages)
-    let range = startIndex..<rope.count
+    let startIndex = self.messages.count
+    self.messages.append(contentsOf: messages)
+    let range = startIndex..<self.messages.count
     logger.trace(
       "session.doc.append",
       metadata: [
         "added": "\(messages.count)",
-        "total": "\(rope.count)",
+        "total": "\(self.messages.count)",
       ])
     return range
   }
@@ -78,20 +78,20 @@ public struct SessionDocument: ~Copyable {
     newDirectory: FilePath
   ) -> SessionDocument {
     precondition(range.lowerBound >= 0 && range.upperBound <= count, "successor splice out of bounds")
-    var newRope = rope
-    newRope.splice(range, with: replacement)
+    var newMessages = messages
+    newMessages.replaceSubrange(range, with: replacement)
     logger.notice(
       "session.doc.successor",
       metadata: [
         "splice": "\(range.lowerBound)..<\(range.upperBound)",
         "replacement_messages": "\(replacement.count)",
         "child": "\(newSessionId.uuidString)",
-        "new_count": "\(newRope.count)",
+        "new_count": "\(newMessages.count)",
       ])
     return SessionDocument(
       sessionId: newSessionId,
       directory: newDirectory,
-      rope: newRope,
+      messages: newMessages,
       logger: logger
     )
   }

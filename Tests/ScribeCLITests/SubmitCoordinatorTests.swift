@@ -54,8 +54,4 @@ struct SubmitCoordinatorTests {
     #expect(effect == .recallSteeringToInput)
   }
 
-  @Test func hostSideEffectsPopAndSendToGate() {
-    let fx = HostSubmitSideEffects.from(.popAndSendToGate)
-    #expect(fx.popSteeringToGate)
-  }
 }
