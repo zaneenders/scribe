@@ -148,7 +148,8 @@ public struct ScribeAgent: Sendable {
         temperature: options.temperature,
         maxToolRounds: options.maxToolRounds,
         workingDirectory: workingDirectory,
-        reasoningEnabled: reasoningEnabled
+        reasoningEnabled: reasoningEnabled,
+        hooks: options.hooks
       )
 
       do {

@@ -298,15 +298,20 @@ struct ScribeAgentTests {
   @Test func runStreamFinishesOnError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
     let ts = agent.run("test", history: defaultHistory)
-    var eventCount = 0
-    for await _ in ts.events { eventCount += 1 }
+    var events: [AgentEvent] = []
+    for await event in ts.events { events.append(event) }
     let didThrow: Bool
     do {
       _ = try await ts.result.value
       didThrow = false
     } catch { didThrow = true }
     #expect(didThrow)
-    #expect(eventCount == 0)
+    #expect(events.contains(where: { if case .boundary(.agentStart) = $0 { return true }; return false }))
+    #expect(
+      events.contains(where: {
+        if case .boundary(.agentEnd) = $0 { return true }
+        return false
+      }))
   }
 
 
