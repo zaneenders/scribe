@@ -60,27 +60,19 @@ public struct SessionDocument: ~Copyable {
 
   /// O(log n) random access to a single message.
   public subscript(index: Int) -> ScribeMessage {
-    ScribeMessage(rope[index])
+    rope[index]
   }
 
   public borrowing func safeForkBoundaries() -> [Int] {
     rope.safeForkBoundaries()
   }
 
-  /// Materialise the transcript for the agent loop. Package-internal —
-  /// embedders pass the result to ``ScribeAgent/run(_:history:)``.
   package borrowing func agentHistory() -> [ScribeMessage] {
-    var out: [ScribeMessage] = []
-    out.reserveCapacity(count)
-    for i in 0..<count {
-      out.append(self[i])
-    }
-    return out
+    rope.toArray()
   }
 
-  /// Wire-type snapshot for transports that speak OpenAI chat messages.
   package borrowing func chatMessages() -> [Components.Schemas.ChatMessage] {
-    rope.toArray()
+    rope.toArray().toWireMessages()
   }
 
   /// Append incoming messages to the rope and return the index range they occupy.
@@ -94,9 +86,7 @@ public struct SessionDocument: ~Copyable {
       return rope.count..<rope.count
     }
     let startIndex = rope.count
-    for m in messages.toChatMessages() {
-      rope.append(m)
-    }
+    rope.append(contentsOf: messages)
     let range = startIndex..<rope.count
     logger.trace(
       "session.doc.append",
@@ -120,7 +110,7 @@ public struct SessionDocument: ~Copyable {
   ) -> SessionDocument {
     precondition(range.lowerBound >= 0 && range.upperBound <= count, "successor splice out of bounds")
     var newRope = rope
-    newRope.splice(range, with: replacement.toChatMessages())
+    newRope.splice(range, with: replacement)
     logger.notice(
       "session.doc.successor",
       metadata: [

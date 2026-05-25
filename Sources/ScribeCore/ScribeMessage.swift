@@ -2,9 +2,6 @@ import Foundation
 import ScribeLLM
 
 
-/// A single part of a message's content — either plain text or an image.
-///
-/// Maps to OpenAI's `ChatContentPart` on the wire (text / image_url).
 public enum ScribeContentPart: Sendable, Codable, Hashable {
   case text(String)
   case image(url: String, detail: String?)
@@ -57,23 +54,8 @@ public enum ScribeContentPart: Sendable, Codable, Hashable {
 }
 
 
-/// Transport-agnostic chat message used by Scribe's public agent API.
-///
-/// `ScribeMessage` is the lingua franca for embedders: it carries the same
-/// shape as the OpenAI chat-completion `ChatMessage` (so on-disk JSONL and
-/// HTTP request bodies round-trip cleanly), but it is **not** the generated
-/// `Components.Schemas.ChatMessage` — that type belongs to the OpenAI wire
-/// transport and is an implementation detail of ``ScribeLLM``. Defining a
-/// thin in-Core message type lets us add Anthropic / Gemini transports
-/// later (and gives session JSONL a stable schema that is forward-compatible
-/// with non-OpenAI providers).
-///
-/// The Codable conformance uses snake_case keys (`tool_calls`,
-/// `tool_call_id`, `reasoning_content`) so historic session files written
-/// from the generated type continue to decode unchanged.
 public struct ScribeMessage: Sendable, Codable, Hashable {
 
-  /// Role of a chat message participant.
   public enum Role: String, Sendable, Codable, Hashable, CaseIterable {
     case system
     case user
@@ -82,20 +64,13 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   }
 
   public var role: Role
-  /// Content parts. Text-only messages have a single `.text(_)` part.
-  /// Multimodal messages mix `.text` and `.image` parts.
-  /// Empty means no content (e.g. tool-calling assistant messages).
   public var contentParts: [ScribeContentPart]
-  /// Convenience accessor: concatenated text from all `.text(_)` parts.
   public var content: String {
     contentParts.compactMap { if case .text(let t) = $0 { t } else { nil } }.joined()
   }
   public var name: String?
   public var toolCalls: [ScribeToolCall]?
   public var toolCallId: String?
-  /// Chain-of-thought from a prior assistant turn; some providers (e.g. DeepSeek
-  /// thinking mode) require this to be echoed on follow-up requests unchanged.
-  /// Maps to `reasoning_content` on the wire.
   public var reasoning: String?
 
   public init(
@@ -174,17 +149,9 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
 }
 
 
-/// A resolved tool call attached to an assistant message.
-///
-/// The on-wire OpenAI shape is `{ id, type: "function", function: { name, arguments } }`,
-/// but Scribe's loop only ever produces `function` calls, so the public
-/// surface flattens it to `(id, name, arguments)`. Conversion happens in
-/// the Codable bridge below.
 public struct ScribeToolCall: Sendable, Codable, Hashable {
   public var id: String
   public var name: String
-  /// JSON-encoded arguments string (matches OpenAI's wire format — providers
-  /// hand back the raw JSON the model generated).
   public var arguments: String
 
   public init(id: String, name: String, arguments: String) {
@@ -234,10 +201,6 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
 }
 
 
-/// Internal conversions between ``ScribeMessage`` and the generated
-/// OpenAI-compatible `Components.Schemas.ChatMessage` type. Kept
-/// `package`-internal so embedders never have to know about the
-/// transport type to use the public agent surface.
 extension ScribeMessage {
 
   package init(_ chatMessage: Components.Schemas.ChatMessage) {
@@ -336,8 +299,12 @@ extension ScribeMessage {
 }
 
 extension Array where Element == ScribeMessage {
-  package func toChatMessages() -> [Components.Schemas.ChatMessage] {
+  package func toWireMessages() -> [Components.Schemas.ChatMessage] {
     map { $0.toChatMessage() }
+  }
+
+  package func toChatMessages() -> [Components.Schemas.ChatMessage] {
+    toWireMessages()
   }
 }
 

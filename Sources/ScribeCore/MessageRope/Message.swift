@@ -1,15 +1,11 @@
-import ScribeLLM
 import _RopeModule
 
 
-/// A leaf buffer holding zero or more `ChatMessage` values.
-///
-/// Each leaf holds at most `MessageSummary.maxNodeSize` (32) messages.
 public struct Message: RopeElement, Sendable {
   public typealias Summary = MessageSummary
   public typealias Index = Int
 
-  public var messages: [Components.Schemas.ChatMessage]
+  public var messages: [ScribeMessage]
 
 
   public var summary: MessageSummary { MessageSummary(count: messages.count) }
@@ -64,7 +60,7 @@ public struct Message: RopeElement, Sendable {
   }
 
 
-  public init(messages: [Components.Schemas.ChatMessage]) {
+  public init(messages: [ScribeMessage]) {
     self.messages = messages
   }
 
@@ -76,11 +72,6 @@ public struct Message: RopeElement, Sendable {
 
 extension Message: Equatable {
   public static func == (lhs: Message, rhs: Message) -> Bool {
-    guard lhs.messages.count == rhs.messages.count else { return false }
-    for (a, b) in zip(lhs.messages, rhs.messages) {
-      if a.role != b.role { return false }
-      if a.content != b.content { return false }
-    }
-    return true
+    lhs.messages == rhs.messages
   }
 }
