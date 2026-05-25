@@ -7,7 +7,6 @@ import Testing
 @Suite
 struct SessionDocumentTests {
 
-
   private static func makeDoc(
     seed: [ScribeMessage] = []
   ) -> SessionDocument {
@@ -22,7 +21,6 @@ struct SessionDocumentTests {
     return doc
   }
 
-
   @Test func subscriptReadsMessages() {
     let doc = Self.makeDoc(seed: [
       ScribeMessage(role: .system, content: "sys"),
@@ -32,7 +30,6 @@ struct SessionDocumentTests {
     #expect(doc[0].content == "sys")
     #expect(doc[1].content == "hi")
   }
-
 
   @Test func appendGrowsRope() {
     var doc = Self.makeDoc(seed: [ScribeMessage(role: .system, content: "sys")])
@@ -60,7 +57,6 @@ struct SessionDocumentTests {
     #expect(doc.count == 1)
   }
 
-
   @Test func successorForkBecomesNewSession() {
     let initial: [ScribeMessage] = [
       ScribeMessage(role: .system, content: "sys"),
@@ -86,7 +82,6 @@ struct SessionDocumentTests {
     #expect(doc.directory == newDir)
     #expect(doc.sessionId != originalId)
   }
-
 
   @Test func successorSplicesReplacement() {
     let initial: [ScribeMessage] = [
@@ -115,7 +110,6 @@ struct SessionDocumentTests {
     #expect(doc[3].content == "a2")
   }
 
-
   @Test func chatMessagesConvertsToWire() {
     let doc = Self.makeDoc(seed: [
       ScribeMessage(role: .system, content: "sys"),
@@ -131,7 +125,6 @@ struct SessionDocumentTests {
       Issue.record("Expected string content on wire message")
     }
   }
-
 
   @Test func safeForkBoundariesDelegatesToRope() {
     let doc = Self.makeDoc(seed: [

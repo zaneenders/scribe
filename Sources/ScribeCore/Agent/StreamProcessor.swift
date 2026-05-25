@@ -3,21 +3,11 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
-
-/// Processes a streaming SSE response from the LLM: decodes chunks, tracks
-/// progress, emits transcript events, and delegates **all** text/reasoning
-/// accumulation to `StreamedAssistantTurn.apply(chunk:)`.
-///
-/// This ensures `turn.apply` is the sole owner of accumulation — the
-/// `StreamProcessor` only inspects deltas read-only to decide which events
-/// to emit, eliminating the double-processing that previously existed when
-/// both `processStreamChunks` and `turn.apply` iterated the same fields.
 struct StreamProcessor<AO: AbortObserver> {
   private let onEvent: (AgentEvent) -> Void
   private let logger: Logger
   private let abortObserver: AO
   private let clock = ContinuousClock()
-
 
   private(set) var lastUsage: Components.Schemas.CompletionUsage?
   private(set) var streamStarted = false
@@ -39,9 +29,6 @@ struct StreamProcessor<AO: AbortObserver> {
     self.streamWallStart = streamWallStart
   }
 
-  /// Drives the SSE stream to completion (or abort).  Accumulation is
-  /// delegated to `turn.apply(chunk:)`; this method only reads delta
-  /// fields to decide which transcript events to fire.
   mutating func process(
     httpBody: HTTPBody,
     httpStart: ContinuousClock.Instant,
@@ -93,22 +80,19 @@ struct StreamProcessor<AO: AbortObserver> {
       }
       decodedChunkCount += 1
 
-      // --- accumulation (sole owner) ---
       turn.apply(chunk: chunk)
 
-      // --- read-only delta inspection for event emission ---
       if let u = chunk.usage {
         lastUsage = u
       }
       for choice in chunk.choices ?? [] {
         guard let delta = choice.delta else { continue }
 
-        // Reasoning text events
         for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
           if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
           streamStarted = true
           if case .some(.reasoning) = streamSection {
-            // already in reasoning section
+
           } else {
             onEvent(.output(.sectionStarted(.reasoning, previous: streamSection)))
             streamSection = .reasoning
@@ -116,12 +100,11 @@ struct StreamProcessor<AO: AbortObserver> {
           onEvent(.output(.text(.reasoning, r)))
         }
 
-        // Answer text events
         if let t = delta.content, !t.isEmpty {
           if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
           streamStarted = true
           if case .some(.answer) = streamSection {
-            // already in answer section
+
           } else {
             onEvent(.output(.sectionStarted(.answer, previous: streamSection)))
             streamSection = .answer
@@ -130,7 +113,6 @@ struct StreamProcessor<AO: AbortObserver> {
         }
       }
 
-      // --- progress tracking ---
       if !loggedFirstChunk {
         loggedFirstChunk = true
         logger.debug(
@@ -153,11 +135,7 @@ struct StreamProcessor<AO: AbortObserver> {
     } catch is AgentTurnInterruptedError {
       throw AgentTurnInterruptedError()
     } catch {
-      // The SSE iterator throws when its parent task is cancelled — which is
-      // how the abort race in ``runWithAbortRace`` interrupts a stalled
-      // network read. Treat any stream error that coincides with an abort
-      // request as an interrupt so the loop unwinds cleanly and the UI
-      // finalizes any partial output.
+
       if abortObserver.isAborted() {
         logger.notice(
           "agent.stream.abort",
@@ -175,7 +153,6 @@ struct StreamProcessor<AO: AbortObserver> {
       throw error
     }
 
-    // --- end-of-stream events ---
     if streamStarted {
       onEvent(.output(.finalized))
     } else if turn.text.isEmpty, turn.resolvedToolCalls().isEmpty {

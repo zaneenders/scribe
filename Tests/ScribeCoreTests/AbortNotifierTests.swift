@@ -8,7 +8,6 @@ import Testing
 @Suite
 struct AbortNotifierTests {
 
-
   @Test func freshNotifierIsNotAborted() {
     let n = AbortNotifier()
     #expect(n.isAborted() == false)
@@ -33,10 +32,10 @@ struct AbortNotifierTests {
 
     let waiter = Task<Bool, Never> {
       var iter = stream.makeAsyncIterator()
-      _ = await iter.next()  // suspends until request()
+      _ = await iter.next()
       return true
     }
-    // Give the consumer a moment to start iterating.
+
     try await Task.sleep(for: .milliseconds(20))
     n.request()
     let woke = await waiter.value
@@ -46,11 +45,11 @@ struct AbortNotifierTests {
 
   @Test func lateSubscriberSeesAlreadyRequestedAbort() async {
     let n = AbortNotifier()
-    n.request()  // signal first…
-    let stream = n.signals()  // …then subscribe
+    n.request()
+    let stream = n.signals()
 
     var iter = stream.makeAsyncIterator()
-    let value: Void? = await iter.next()  // must not hang
+    let value: Void? = await iter.next()
     #expect(value != nil)
   }
 
@@ -85,11 +84,6 @@ struct AbortNotifierTests {
     #expect(results.2 == true)
   }
 
-
-  /// Confirms the event-driven abort path in `ToolRegistry.run` wakes the
-  /// watch task essentially immediately. We use a tool that sleeps for a
-  /// long time inside its run() body so the only way out is the watch task
-  /// firing.
   @Test func toolRegistryWakesPromptlyOnNotifierRequest() async throws {
     let registry = ToolRegistry(tools: [SleepyTool()], logger: toolRunnerTestLogger)
     let notifier = AbortNotifier()
@@ -106,7 +100,7 @@ struct AbortNotifierTests {
             abortObserver: notifier)
         }
         group.addTask {
-          // Let the tool start, then signal abort.
+
           try await Task.sleep(for: .milliseconds(50))
           notifier.request()
           try await Task.sleep(for: .seconds(2))
@@ -118,7 +112,7 @@ struct AbortNotifierTests {
       Issue.record("Expected AgentTurnInterruptedError")
     } catch is AgentTurnInterruptedError {
       let elapsed = start.duration(to: .now)
-      // Generous bound: even on slow CI the wake should land in <100 ms.
+
       #expect(
         elapsed < .milliseconds(150),
         "event-driven abort should land well under 150 ms; took \(elapsed)")
@@ -128,8 +122,6 @@ struct AbortNotifierTests {
 
 private struct NotifierWakeTimeoutError: Error {}
 
-/// Test tool that sleeps for a long time. Used to verify abort wakes happen
-/// via the watch task (the tool itself never returns under the test timeout).
 private struct SleepyTool: ScribeTool {
   static let name = "sleepy"
   static let description = "Sleeps until cancelled."

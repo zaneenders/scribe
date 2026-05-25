@@ -1,10 +1,6 @@
 import Foundation
 import Logging
 
-/// Severity-ordered levels for `logging.level` in `scribe-config.json`.
-///
-/// A configured minimum level emits that level and all *more severe* levels (e.g. `info`
-/// also allows `notice`, `warning`, and `error`).
 public enum ScribeLogLevel: String, Sendable, CaseIterable {
   case trace
   case debug
@@ -24,7 +20,6 @@ public enum ScribeLogLevel: String, Sendable, CaseIterable {
     }
   }
 
-  /// Corresponding `Logger.Level` for swift-log (same raw strings).
   public var swiftLogLevel: Logger.Level {
     Logger.Level(rawValue: rawValue) ?? .info
   }

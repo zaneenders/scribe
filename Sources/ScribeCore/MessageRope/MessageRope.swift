@@ -1,25 +1,14 @@
 import _RopeModule
 
-
-/// A `Rope<Message>` specialised for chat history.
-///
-/// Wraps swift-collections `Rope<Message>` and exposes a chat-friendly API:
-/// append single messages, extract viewport windows, truncate, splice, iterate.
-///
-/// The rope is the in-memory truth held by ``SessionDocument``; this type
-/// concerns itself only with data-structure semantics. Persistence,
-/// notifications, and session identity live one level up.
 public struct MessageRope: Sendable {
   public typealias _Rope = Rope<Message>
 
   private var _rope: _Rope
 
-
   public init() {
     self._rope = Rope()
   }
 
-  /// Bulk-load from an array of messages, chunked into leaves of up to 32.
   public init(_ messages: [ScribeMessage]) {
     var elements: [Message] = []
     var chunk: [ScribeMessage] = []
@@ -44,7 +33,6 @@ public struct MessageRope: Sendable {
     self._rope = _rope
   }
 
-
   public var count: Int {
     _rope.count(in: MessageMetric())
   }
@@ -63,13 +51,10 @@ public struct MessageRope: Sendable {
     return leaf.messages.last
   }
 
-
-  /// O(log n) random access. `precondition`s on bounds.
   public subscript(index: Int) -> ScribeMessage {
     precondition(index >= 0 && index < count, "MessageRope index out of bounds")
     return window(from: index, count: 1)[0]
   }
-
 
   public mutating func append(_ message: ScribeMessage) {
     _rope.append(Message(messages: [message]))
@@ -79,8 +64,6 @@ public struct MessageRope: Sendable {
     for m in messages { append(m) }
   }
 
-
-  /// Return `requestedCount` messages starting at `start` (0-indexed).
   public func window(from start: Int, count requestedCount: Int) -> [ScribeMessage] {
     guard start >= 0, requestedCount > 0, !isEmpty else { return [] }
     let metric = MessageMetric()
@@ -90,10 +73,9 @@ public struct MessageRope: Sendable {
     var result: [ScribeMessage] = []
     result.reserveCapacity(end - start)
 
-    // Find the start index and walk forward collecting messages.
     var idx = _rope.startIndex
     var offset = 0
-    // Advance idx past leaves that end before `start`.
+
     while idx < _rope.endIndex {
       let leaf = _rope[idx]
       let leafCount = leaf.messages.count
@@ -102,7 +84,6 @@ public struct MessageRope: Sendable {
       _rope.formIndex(after: &idx)
     }
 
-    // Collect from the first overlapping leaf.
     if idx < _rope.endIndex {
       let leaf = _rope[idx]
       let localStart = start - offset
@@ -111,7 +92,6 @@ public struct MessageRope: Sendable {
       _rope.formIndex(after: &idx)
     }
 
-    // Collect remaining full leaves.
     while result.count < end - start, idx < _rope.endIndex {
       let leaf = _rope[idx]
       let take = min(leaf.messages.count, end - start - result.count)
@@ -122,14 +102,12 @@ public struct MessageRope: Sendable {
     return result
   }
 
-  /// Materialise the whole rope as an array. O(n).
   public func toArray() -> [ScribeMessage] {
     var out: [ScribeMessage] = []
     out.reserveCapacity(count)
     forEach { out.append($0) }
     return out
   }
-
 
   public mutating func truncate(to newCount: Int) {
     precondition(newCount >= 0, "truncate count must be >= 0")
@@ -144,26 +122,16 @@ public struct MessageRope: Sendable {
     _rope.removeSubrange(newCount..<current, in: metric)
   }
 
-
-  /// Replace `range` of messages with `replacement`.
-  ///
-  /// This is the primitive `/tldr` relies on: the picker's two cursors define
-  /// a `Range<Int>` and the summarizer's output becomes the replacement.
-  /// Out-of-bounds ranges are precondition failures (callers should clamp).
   public mutating func splice(_ range: Range<Int>, with replacement: [ScribeMessage]) {
     let total = count
     precondition(range.lowerBound >= 0, "splice lowerBound < 0")
     precondition(range.upperBound <= total, "splice upperBound > count")
     precondition(range.lowerBound <= range.upperBound, "splice range inverted")
 
-    // Materialise as array, splice, rebuild. With 1M-token sessions in mind
-    // we'd want an in-place rope splice; for now correctness over speed for
-    // an op that runs once per /tldr.
     var arr = toArray()
     arr.replaceSubrange(range, with: replacement)
     self = MessageRope(arr)
   }
-
 
   public func forEach(_ body: (ScribeMessage) throws -> Void) rethrows {
     for leaf in _rope {
@@ -173,12 +141,6 @@ public struct MessageRope: Sendable {
     }
   }
 
-
-  /// Indices `i` at which the prefix `self[0..i)` forms a self-contained
-  /// conversation — every assistant `tool_calls` has its matching `tool`
-  /// results already present. See ``Array/safeForkBoundaries()`` for the
-  /// rationale; this is the rope-native equivalent that walks leaves
-  /// without materialising the array.
   public func safeForkBoundaries() -> [Int] {
     var openToolCalls = Set<String>()
     var boundaries: [Int] = []

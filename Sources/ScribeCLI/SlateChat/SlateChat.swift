@@ -13,9 +13,9 @@ import Musl
 #endif
 
 internal enum ChatTerminalError: Error, LocalizedError {
-  /// Stdin is not a TTY (pipes, redirection, CI, etc.).
+
   case notATerminal
-  /// Slate declined or could not use the alternate-screen UI.
+
   case slateNotInteractive
 
   var errorDescription: String? {
@@ -29,23 +29,7 @@ internal enum ChatTerminalError: Error, LocalizedError {
 }
 
 enum SlateChat {
-  /// Runs the chat session using the Slate alternate-screen UI; fails if stdin is not a TTY or Slate cannot attach.
-  ///
-  /// - Parameters:
-  ///   - resumeMessages: Prior transcript restored from `sessions/{sessionId}/messages.jsonl`.
-  ///   - sessionDirectory: Directory `sessions/{sessionId}/` for metadata and JSONL.
-  ///   - sessionId: UUID shared with `sessions/{sessionId}/scribe.log`.
-  ///   - logger: Session logger from ``LoadedConfig/makeSessionLogger(sessionId:)`` (also passed
-  ///     into ``ScribeAgent`` inside ``ChatCoordinator``).
-  ///
-  /// ## Logs
-  ///
-  /// One append-only file per session id under `{dataHome}/sessions/{sessionId}/scribe.log`. Lines look like:
-  /// `<iso8601-ms> [<level>] <domain.action> key=value …` — message is the event name;
-  /// fields live in swift-log metadata (see `Sources/ScribeCLI/Logging/`).
-  ///
-  /// Chat UI events are documented on ``SlateChatHost`` and ``ChatCoordinator``; agent/tool
-  /// events use the `agent.*` prefix from ScribeCore.
+
   static func runFullscreen(
     configuration: ScribeConfig,
     systemPrompt: String,
@@ -63,10 +47,7 @@ enum SlateChat {
     logger.debug(
       "chat.fullscreen.attach",
       metadata: ["session_file": "\(sessionDirectory.lastComponent?.string ?? sessionDirectory.string)"])
-    // Build the persister + session document up front so the host can
-    // own a fully-formed `~Copyable` doc from init. Doing this here (in
-    // the caller, before slate attaches) keeps the host's stored
-    // property non-optional.
+
     let sessionCreatedAt = Date()
     let isNewSession = resumeMessages.isEmpty
     if !isNewSession, resumeMessages.first?.role != .system {

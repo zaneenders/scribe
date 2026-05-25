@@ -232,7 +232,7 @@ struct SessionHarnessTests {
     _ = try await harness.submit("hello") { _ in }
 
     #expect(queues.steeringCount() == 0)
-    // Initial turn + one steering turn (both steer messages batched).
+
     #expect(transport.callCount == 2)
 
     let snap = await harness.snapshot()
@@ -278,7 +278,7 @@ struct SessionHarnessTests {
     _ = try await harness.submit("hello") { _ in }
 
     #expect(queues.steeringCount() == 0)
-    // Initial + two steering turns (one message each).
+
     #expect(transport.callCount == 3)
   }
 }

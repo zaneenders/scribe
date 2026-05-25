@@ -24,8 +24,7 @@ struct SessionSummarizerTests {
   }
 
   @Test func renderSliceSkipsEmptyAssistantText() {
-    // An assistant message whose only content is tool calls should render
-    // the tool calls but no empty "Assistant: " line.
+
     let slice: [ScribeMessage] = [
       ScribeMessage(
         role: .assistant, content: "",

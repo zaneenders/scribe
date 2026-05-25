@@ -1,6 +1,5 @@
 import Foundation
 
-
 public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
   case configuration(key: String?, reason: String)
   case apiHTTPError(statusCode: Int, detail: String, hint: String?)

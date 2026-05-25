@@ -6,7 +6,6 @@ import Testing
 @Suite
 struct ScribeMessageTests {
 
-
   @Test func roundTripsUserMessage() throws {
     let msg = ScribeMessage(role: .user, content: "hello world")
     let data = try JSONEncoder().encode(msg)
@@ -26,7 +25,7 @@ struct ScribeMessageTests {
     )
     let data = try JSONEncoder().encode(msg)
     let json = String(data: data, encoding: .utf8) ?? ""
-    // Wire keys must remain snake_case (matches the OpenAI shape on disk).
+
     #expect(json.contains("\"tool_calls\""))
     #expect(json.contains("\"reasoning_content\""))
     #expect(json.contains("\"function\""))
@@ -85,12 +84,6 @@ struct ScribeMessageTests {
     #expect(decoded.contentParts == [.text("hello")])
   }
 
-
-  /// Sessions saved before ``ScribeMessage`` existed encoded
-  /// `Components.Schemas.ChatMessage` directly; the on-disk shape uses
-  /// snake_case keys, possibly-null `content`, and nested
-  /// `{id, type, function:{name, arguments}}` tool calls. Decoding that
-  /// shape must continue to work.
   @Test func decodesOpenAIWireFormat() throws {
     let json = #"""
       {
@@ -104,7 +97,7 @@ struct ScribeMessageTests {
       """#
     let decoded = try JSONDecoder().decode(ScribeMessage.self, from: Data(json.utf8))
     #expect(decoded.role == .assistant)
-    #expect(decoded.content == "")  // null collapses to empty
+    #expect(decoded.content == "")
     #expect(decoded.toolCalls?.count == 1)
     #expect(decoded.toolCalls?.first?.id == "c1")
     #expect(decoded.toolCalls?.first?.name == "shell")

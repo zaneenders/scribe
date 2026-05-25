@@ -3,16 +3,6 @@ import Logging
 import Subprocess
 import SystemPackage
 
-/// Thin orchestrator for "run a shell command, capture its output, kill
-/// the whole tree on cancellation."
-///
-/// Delegates the meaty bits to focused collaborators:
-/// - `OutputCapture` — temp files, drain task, post-cancel deadline.
-/// - `ProcessKiller` — platform-specific tree kill (`/proc` walk on Linux,
-///   pgroup signal on macOS, `terminate` on Windows).
-///
-/// Public API (`Shell.run(command:cwd:workingDirectory:logger:)`) takes the
-/// caller's logger for all shell diagnostics.
 enum Shell {
   struct Result: Sendable {
     let exitCode: TerminationStatus
@@ -36,19 +26,6 @@ enum Shell {
     let description: String
   }
 
-  /// Run a shell command, supporting cooperative cancellation.
-  ///
-  /// When the calling `Task` is cancelled, the configured `ProcessKiller`
-  /// terminates the process tree so long-running commands (builds,
-  /// servers, etc.) and all of their child processes go away.
-  ///
-  /// Stdout and stderr are streamed to temp files (one per stream) so the
-  /// LLM can read them with the `read_file` tool when it needs the
-  /// contents.
-  ///
-  /// `killer` is injectable for tests — pass `.platformDefault` (the
-  /// default) in production, a stub in tests that want to inspect what
-  /// would have been killed without invoking real `kill(2)` syscalls.
   static func run(
     command: String,
     cwd: String?,
@@ -147,11 +124,7 @@ enum Shell {
                 "cancelled": "\(Task.isCancelled)",
               ])
           } catch is CancellationError {
-            // Parent cancelled mid-drain. Race the (still-running) detached
-            // drain against a hard deadline so a setsid grandchild that
-            // keeps the pipe open can't hang us indefinitely. See
-            // OutputCapture.awaitDrainWithDeadline for the cancellation
-            // gymnastics.
+
             if let drained = await OutputCapture.awaitDrainWithDeadline(
               drainTask: drainTask, deadlineMs: 2_000,
               shellID: id, logger: logger)
@@ -202,12 +175,6 @@ enum Shell {
               "elapsed_since_entry_us": "\(t0.duration(to: tCancel).microseconds)",
             ])
 
-          // Kill the process tree first so the async sequences hit EOF.
-          // writeStream will drain any remaining buffered output and
-          // return naturally — do NOT close handles here or we lose
-          // partial output that hasn't been delivered yet. The body's
-          // `catch is CancellationError` path closes handles once drain
-          // returns and reads partial sizes from disk.
           let killed = killer.killTree(
             rootPid: pid,
             execution: execution,

@@ -4,15 +4,11 @@ import Testing
 
 @testable import ScribeCLI
 
-
-/// Tests for the `TranscriptController` pure state machine — every event arm
-/// is exercised without a running TUI, Slate, or async machinery.
 @Suite
 struct TranscriptControllerTests {
 
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
-
 
   @Test func userSubmittedProducesYouPrefix() {
     var state = TranscriptState()
@@ -34,12 +30,11 @@ struct TranscriptControllerTests {
     var state = TranscriptState()
     let effects = TranscriptController.applyUserSubmitted("hello\nworld", state: &state, theme: theme)
     #expect(effects.needsRender)
-    #expect(state.lines.count == 3)  // "you:" + "  hello" + "  world"
+    #expect(state.lines.count == 3)
     #expect(state.lines[0].spans[0].text == "you:")
     #expect(state.lines[1].spans[0].text.contains("hello"))
     #expect(state.lines[2].spans[0].text.contains("world"))
   }
-
 
   @Test func toolInvocationAppendsTrailingBlankLine() {
     var state = TranscriptState()
@@ -51,12 +46,11 @@ struct TranscriptControllerTests {
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
     #expect(state.lines.count >= 2)
-    // Last line should be the blank separator appended by the controller.
+
     #expect(state.lines.last?.spans.isEmpty == true)
     let firstLine = state.lines[0].spans.map(\.text).joined()
     #expect(firstLine.contains("shell"))
   }
-
 
   @Test func harnessError() {
     var state = TranscriptState()
@@ -68,7 +62,6 @@ struct TranscriptControllerTests {
     #expect(state.lines.count == 1)
     #expect(state.lines[0].spans.map(\.text).joined().contains("test error"))
   }
-
 
   @Test func turnInterrupted() {
     var state = TranscriptState()
@@ -86,7 +79,6 @@ struct TranscriptControllerTests {
     #expect(state.lines.last?.spans.map(\.text).joined() == "(interrupted)")
   }
 
-
   @Test func emptyAssistantTurn() {
     var state = TranscriptState()
     let effects = TranscriptController.apply(
@@ -98,7 +90,6 @@ struct TranscriptControllerTests {
     #expect(state.lines[1].spans[0].text == "(empty turn)")
   }
 
-
   @Test func enterAssistantSectionAnswer() {
     var state = TranscriptState()
     _ = TranscriptController.applyUserSubmitted("test", state: &state, theme: theme)
@@ -108,7 +99,7 @@ struct TranscriptControllerTests {
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)
-    // Should have: "you:", "  test", blank, "scribe:", "  · answer"
+
     #expect(state.lines.count >= 5)
     let scribeLine = state.lines[state.lines.count - 2].spans[0].text
     #expect(scribeLine == "scribe:")
@@ -129,7 +120,6 @@ struct TranscriptControllerTests {
     #expect(labelLine == "  · reasoning")
   }
 
-
   @Test func finalizeAssistantStreamAppendsTrailingBlankLine() {
     var state = TranscriptState()
     _ = TranscriptController.apply(
@@ -141,10 +131,9 @@ struct TranscriptControllerTests {
     _ = TranscriptController.apply(
       .output(.finalized),
       to: &state, theme: theme, renderer: renderer, followingLive: true, contextWindow: nil)
-    // Last line should be the blank separator.
+
     #expect(state.lines.last?.spans.isEmpty == true)
   }
-
 
   @Test func usageUpdatesHUD() {
     var state = TranscriptState()
@@ -187,7 +176,6 @@ struct TranscriptControllerTests {
       followingLive: true, contextWindow: 4000)
     #expect(state.usageHUD?.contextWindowUsedPercent == 50)
   }
-
 
   @Test func appendAssistantTextSkipsRenderWhenScrolledUp() {
     var state = TranscriptState()

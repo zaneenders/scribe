@@ -1,14 +1,8 @@
 import ScribeCore
 import SlateCore
 
-
-/// Converts between semantic `MarkdownLine`/`MarkdownSpan` types (ScribeCore, no Slate deps)
-/// and Slate `TLine`/`StyledSpan` types (ScribeCLI, Slate deps).
-///
-/// This is the bridge between the semantic markdown output and the terminal rendering layer.
 struct MarkdownToSlateAdapter {
 
-  /// Convert a `MarkdownLine` to a `TLine` using the given styles.
   static func convert(
     _ line: MarkdownLine,
     baseFG: TerminalRGB,
@@ -18,7 +12,6 @@ struct MarkdownToSlateAdapter {
     TLine(spans: line.spans.map { convert($0, baseFG: baseFG, baseBold: baseBold, theme: theme) })
   }
 
-  /// Convert an array of `MarkdownLine` to `[TLine]`.
   static func convert(
     _ lines: [MarkdownLine],
     baseFG: TerminalRGB,
@@ -28,18 +21,14 @@ struct MarkdownToSlateAdapter {
     lines.map { convert($0, baseFG: baseFG, baseBold: baseBold, theme: theme) }
   }
 
-  /// Convert a `StyledSpan` back to a `MarkdownSpan` by inspecting its colors/bold.
-  /// This is used when adapting existing Slate-producing renderers to the semantic path.
   static func convert(_ span: StyledSpan, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> MarkdownSpan {
     let kind = inferKind(fg: span.fg, bold: span.bold, baseFG: baseFG, baseBold: baseBold, theme: theme)
     return MarkdownSpan(text: span.text, kind: kind)
   }
 
-  /// Convert a `TLine` to a `MarkdownLine`.
   static func convert(_ line: TLine, baseFG: TerminalRGB, baseBold: Bool, theme: MarkdownTheme) -> MarkdownLine {
     MarkdownLine(spans: line.spans.map { convert($0, baseFG: baseFG, baseBold: baseBold, theme: theme) })
   }
-
 
   private static func convert(
     _ span: MarkdownSpan,

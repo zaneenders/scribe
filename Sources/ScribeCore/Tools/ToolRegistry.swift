@@ -6,7 +6,6 @@ import ScribeLLM
 public struct ToolRegistry: Sendable, ToolExecutor {
   private let tools: [String: any ScribeTool]
 
-  // The ChatTool schemas sent to the LLM, derived from the same tools.
   let chatTools: [Components.Schemas.ChatTool]
 
   public init(tools: [any ScribeTool], logger: Logger) {
@@ -19,8 +18,6 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
   }
 
-  /// ``ToolExecutor`` conformance: route a resolved invocation through the
-  /// registry's abort-aware `run(name:arguments:...)` helper.
   public func execute(
     _ invocation: ToolInvocation,
     workingDirectory: FilePath,
@@ -36,23 +33,6 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     )
   }
 
-  /// Execute a tool by name with cooperative abort support.
-  ///
-  /// A task group runs the tool while a watch task sleeps inside
-  /// `abortObserver.signals()`. When the upstream notifier fires, the
-  /// watch task wakes, re-checks `abortObserver.isAborted()` (cheap
-  /// defence against spurious yields from late subscribers catching a
-  /// residual signal), and throws `AgentTurnInterruptedError` — which
-  /// cancels the tool task. Tools that use `withTaskCancellationHandler`
-  /// (e.g. Shell sends SIGKILL) respond promptly.
-  ///
-  /// Pass `abortObserver: AbortNotifier()` when abort support isn't
-  /// needed — that notifier never fires and the watch task simply
-  /// suspends until the tool finishes and the group is cancelled.
-  ///
-  /// - Throws: `AgentTurnInterruptedError` if abort fires.
-  /// - Throws: `ScribeError.toolUnknown` if the tool `name` is not in the registry.
-  /// - Returns: `ToolResult` with JSON-encoded tool output and any attachments.
   internal func run(
     name: String,
     arguments: String,
@@ -78,9 +58,6 @@ public struct ToolRegistry: Sendable, ToolExecutor {
         "args": "\(arguments.logSafe())",
       ])
 
-    // Abort before starting the tool if the flag is already set — avoids
-    // a race where the tool completes but the watch task wakes before we
-    // dequeue.
     if abortObserver.isAborted() {
       logger.debug(
         "agent.tool.aborted-before-start",
@@ -144,11 +121,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
             return ToolResult.text(Self.jsonError(String(describing: error)))
           }
         } catch {
-          // Convert any tool error (including AgentTurnInterruptedError thrown
-          // by the tool itself) to a JSON error result. This keeps tool-level
-          // failures as recoverable tool messages rather than loop aborts.
-          // CancellationError from abort-race cancellation is also caught here
-          // but its result is discarded — the watcher task already won the race.
+
           let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
           logger.trace(
             "agent.tool.task.exited",
@@ -162,8 +135,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
         }
       }
     } catch is AgentTurnInterruptedError {
-      // Only the watcher task throws AgentTurnInterruptedError out of `race`
-      // (tool errors are converted above). Re-throw to unwind the agent loop.
+
       let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
       logger.debug(
         "agent.tool.errored",
@@ -179,7 +151,6 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     return result
   }
 
-
   private static func encode<T: Encodable>(_ value: T, using encoder: JSONEncoder) throws -> String {
     let data = try encoder.encode(value)
     return String(data: data, encoding: .utf8) ?? jsonSerializationFallback
@@ -188,10 +159,6 @@ public struct ToolRegistry: Sendable, ToolExecutor {
   private static let jsonSerializationFallback =
     "{\"ok\":false,\"error\":\"tool result could not be encoded as JSON\"}"
 
-  /// Convenience builder for the `{"ok": false, "error": "..."}` JSON
-  /// shape that the agent loop and built-in tools use to surface tool
-  /// failures to the assistant. Exposed so custom ``ToolExecutor``s can
-  /// produce matching error payloads.
   public static func jsonError(_ text: String) -> String {
     let payload: [String: Any] = ["ok": false, "error": text]
     do {
@@ -204,7 +171,7 @@ public struct ToolRegistry: Sendable, ToolExecutor {
 }
 
 extension String {
-  /// Escape quotes and truncate to a reasonable length for structured log lines.
+
   func logSafe(maxLength: Int = 500) -> String {
     let escaped = replacingOccurrences(of: "\"", with: "\\\"")
     if escaped.count <= maxLength {

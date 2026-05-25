@@ -5,10 +5,6 @@ import ScribeCore
 import ScribeLLM
 import SystemPackage
 
-
-/// Dotted keys in `scribe-config.json` for `ConfigReader` (matches nested JSON paths).
-/// All application settings are read from that file; there are no separate secret lookup
-/// paths and keys are not marked `isSecret`.
 public enum ScribeConfigBinding {
   public static let apiBaseURL: ConfigKey = "api.baseUrl"
   public static let apiKey: ConfigKey = "api.apiKey"
@@ -19,8 +15,6 @@ public enum ScribeConfigBinding {
   public static let loggingLevel: ConfigKey = "logging.level"
 }
 
-
-/// Mirror of `scribe-config.json` used only when a default must be written to disk.
 private struct ConfigTemplate: Codable {
   struct APISection: Codable {
     var baseUrl: String
@@ -46,8 +40,6 @@ private struct ConfigTemplate: Codable {
   }
 }
 
-
-/// Loaded configuration bundle returned by `ConfigLoader.load()`.
 public struct LoadedConfig: Sendable {
   public var scribeConfig: ScribeConfig
   public var apiBaseURL: String
@@ -68,7 +60,6 @@ public struct LoadedConfig: Sendable {
     return OpenAICompatibleClient.make(serverURL: serverURL, apiKey: apiKey)
   }
 
-  /// Per-chat logger writing to `sessions/{sessionId}/scribe.log` under the data home.
   public func makeSessionLogger(sessionId: UUID) -> Logger {
     SessionLoggerFactory.makeSessionLogger(
       sessionId: sessionId,
@@ -78,14 +69,12 @@ public struct LoadedConfig: Sendable {
   }
 }
 
-
 public enum ConfigLoader {
   private static let configFileName = "scribe-config.json"
 
   public static func load() async throws -> LoadedConfig {
     let paths = ScribePaths.resolve()
 
-    // 1. SCRIBE_CONFIG_PATH override — use exactly as given, error if missing.
     if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
       let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
       if !t.isEmpty {
@@ -93,12 +82,10 @@ public enum ConfigLoader {
       }
     }
 
-    // 2. Check {dataHome}/scribe-config.json.
     if FileStat.stat(paths.defaultConfigPath).exists {
       return try await loadConfig(at: paths.defaultConfigPath, paths: paths)
     }
 
-    // 3. Check cwd/scribe-config.json.
     let cwd = FilePath.currentDirectory.string
     let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
       .appendingPathComponent(configFileName).path
@@ -106,7 +93,6 @@ public enum ConfigLoader {
       return try await loadConfig(at: FilePath(cwdCandidate), paths: paths)
     }
 
-    // 4. Not found — write a default config to {dataHome}/, then load it.
     let defaultCandidate = paths.defaultConfigPath
     try writeDefaultConfig(to: defaultCandidate.string)
     if let data = "scribe: no config found — wrote default \(configFileName) to \(defaultCandidate.string)\n"
@@ -227,7 +213,6 @@ public enum ConfigLoader {
       paths: paths
     )
   }
-
 
   private static func writeDefaultConfig(to path: String) throws {
     let template = ConfigTemplate(

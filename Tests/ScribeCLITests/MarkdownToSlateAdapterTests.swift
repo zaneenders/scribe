@@ -5,14 +5,12 @@ import Testing
 
 @testable import ScribeCLI
 
-
 @Suite
 struct MarkdownToSlateAdapterTests {
 
   private let theme = MarkdownTheme.vibrant
   private let baseFG: TerminalRGB = ScribePalette.cyan
   private let baseBold = false
-
 
   @Test func convertPlainSpan() {
     let line = MarkdownLine(spans: [MarkdownSpan(text: "hello", kind: .plain)])
@@ -81,7 +79,6 @@ struct MarkdownToSlateAdapterTests {
     #expect(result.spans[0].fg == theme.muted)
   }
 
-
   @Test func convertMultipleLines() {
     let lines = [
       MarkdownLine(spans: [MarkdownSpan(text: "one", kind: .plain)]),
@@ -91,7 +88,6 @@ struct MarkdownToSlateAdapterTests {
     #expect(result.count == 2)
     #expect(result[1].spans[0].bold)
   }
-
 
   @Test func reverseConvertPlain() {
     let span = StyledSpan(fg: baseFG, bg: theme.background, bold: false, text: "plain")

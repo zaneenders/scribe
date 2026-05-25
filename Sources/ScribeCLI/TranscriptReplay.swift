@@ -2,9 +2,6 @@ import Foundation
 import ScribeCore
 import SlateCore
 
-
-/// Render a ``SessionDocument`` into styled transcript lines by walking
-/// message indices — no public snapshot API on the doc itself.
 public func renderDocumentToTranscript(
   _ document: borrowing SessionDocument,
   theme: CLITheme,
@@ -13,7 +10,6 @@ public func renderDocumentToTranscript(
   renderDocumentToTranscriptWithStarts(document, theme: theme, renderer: renderer).lines
 }
 
-/// Like ``renderDocumentToTranscript`` but also returns `messageStartLines`.
 public func renderDocumentToTranscriptWithStarts(
   _ document: borrowing SessionDocument,
   theme: CLITheme,
@@ -27,8 +23,6 @@ public func renderDocumentToTranscriptWithStarts(
   return renderMessagesToTranscriptWithStarts(messages, theme: theme, renderer: renderer)
 }
 
-/// Render a list of `ScribeMessage`s into styled transcript lines.
-/// Pure function — no side effects, no state.
 public func renderMessagesToTranscript(
   _ messages: [ScribeMessage],
   theme: CLITheme,
@@ -37,25 +31,16 @@ public func renderMessagesToTranscript(
   renderMessagesToTranscriptWithStarts(messages, theme: theme, renderer: renderer).lines
 }
 
-/// Like `renderMessagesToTranscript` but also returns `messageStartLines` —
-/// a parallel array of length `messages.count + 1` mapping a slice cut
-/// index to the resulting line index. `messageStartLines[i]` is the line
-/// index at which the rendering of `messages[i..<count]` begins; the
-/// trailing entry equals `lines.count`. Indices that don't produce their
-/// own output (system, tool absorbed into an assistant round) inherit the
-/// next produced line so a "cut here" lookup always lands on a sensible
-/// row. Used by the `/fork` and `/tldr` boundary picker to position
-/// the viewport and draw a divider at the cut.
 public func renderMessagesToTranscriptWithStarts(
   _ messages: [ScribeMessage],
   theme: CLITheme,
   renderer: MarkdownRenderer
 ) -> (lines: [TLine], messageStartLines: [Int]) {
   var lines: [TLine] = []
-  // -1 = unset; filled in a backward pass after the main loop.
+
   var starts: [Int] = Array(repeating: -1, count: messages.count + 1)
   var i = 0
-  // Skip leading system message(s).
+
   while i < messages.count, messages[i].role == .system {
     i += 1
   }
@@ -95,7 +80,6 @@ public func renderMessagesToTranscriptWithStarts(
       let calls = msg.toolCalls ?? []
       let reasoning = msg.reasoning ?? ""
 
-      // Add blank line separator between user and assistant sections.
       if let last = lines.last, !last.spans.isEmpty {
         let fg = last.spans.first?.fg
         let text = last.spans.first?.text
@@ -214,9 +198,7 @@ public func renderMessagesToTranscriptWithStarts(
       i += 1
     }
   }
-  // Trailing sentinel + backward fill: any message that produced no output
-  // of its own inherits the line index of whatever comes after it. This way
-  // a cut at an unsafe index still maps somewhere sensible.
+
   starts[messages.count] = lines.count
   var next = lines.count
   for j in stride(from: messages.count - 1, through: 0, by: -1) {

@@ -4,15 +4,11 @@ import Testing
 
 @testable import ScribeCLI
 
-
-/// Tests for the headless `ChatDriver` — verifies the full event→transcript
-/// pipeline without Slate or a terminal.
 @Suite
 struct ChatDriverTests {
 
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
-
 
   @Test func fullStreamingTurn() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
@@ -28,7 +24,6 @@ struct ChatDriverTests {
     #expect(allText.contains("hello"))
     #expect(allText.contains("Hello! How can I help?"))
   }
-
 
   @Test func toolInvocationTurn() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
@@ -49,7 +44,6 @@ struct ChatDriverTests {
     #expect(allText.contains("list files"))
   }
 
-
   @Test func reasoningThenAnswer() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
@@ -68,7 +62,6 @@ struct ChatDriverTests {
     #expect(allText.contains("The answer is 42"))
   }
 
-
   @Test func turnInterruptedClearsStreaming() {
     var driver = ChatDriver(renderer: renderer, theme: theme)
 
@@ -83,7 +76,6 @@ struct ChatDriverTests {
     #expect(allText.contains("(interrupted)"))
   }
 
-
   @Test func usageAccumulatesAcrossMultipleRounds() {
     var driver = ChatDriver(renderer: renderer, theme: theme, contextWindow: 8000)
 
@@ -97,7 +89,6 @@ struct ChatDriverTests {
     #expect(driver.state.usageTurnTotal == 425)
     #expect(driver.state.usageSessionPrompt == 300)
   }
-
 
   @Test func emptyAssistantTurn() {
     var driver = ChatDriver(renderer: renderer, theme: theme)

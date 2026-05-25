@@ -1,34 +1,19 @@
-import SystemPackage
 import Foundation
 import Logging
 import OpenAPIRuntime
 import ScribeLLM
+import SystemPackage
 
-
-/// Immutable snapshot of agent state taken before a run starts.
-///
-/// The system prompt is no longer carried separately — callers are expected
-/// to bake it into the head of `messages` (the agent's public constructors
-/// do this automatically for embedders that don't pre-include one).
 struct AgentContext: Sendable {
   var messages: [Components.Schemas.ChatMessage]
 }
 
-/// Bundled configuration for a single agent run — everything derived from
-/// agent setup + per-call options.
 struct AgentLoopConfig: Sendable {
   let model: String
   let client: Client
-  /// Pluggable execution backend. The default ``ToolRegistry`` runs tools
-  /// in-process; embedders can swap in an approval / sandbox / forwarding
-  /// executor without subclassing.
+
   let toolExecutor: any ToolExecutor
-  /// Tool schemas advertised to the model.  Derived from the same
-  /// `[any ScribeTool]` that backs the default ``ToolRegistry`` so
-  /// schema and execution surface stay in sync.  When a custom
-  /// ``ToolExecutor`` is supplied, schemas are derived from the `tools`
-  /// parameter of ``ScribeAgent`` and the caller is responsible for
-  /// consistency (mismatches are surfaced as recoverable JSON errors).
+
   let chatTools: [Components.Schemas.ChatTool]
   let temperature: Double
   let maxToolRounds: Int
@@ -37,7 +22,6 @@ struct AgentLoopConfig: Sendable {
   let hooks: AgentLoopHooks
 }
 
-/// Per-round LLM settings that ``prepareNextTurn`` may override.
 private struct RoundSettings: Sendable {
   var model: String
   var temperature: Double
@@ -56,7 +40,6 @@ private struct RoundSettings: Sendable {
   }
 }
 
-/// Why the agent loop stopped.
 enum LoopTermination: Sendable {
   case completed
   case interrupted
@@ -71,12 +54,6 @@ private func turnOutcome(from termination: LoopTermination) -> TurnOutcome {
   }
 }
 
-
-/// Execute the agent loop for a set of prompt messages.
-///
-/// Pure — no `self`, no side effects except through `emit`. The caller
-/// owns `context` (snapshot) and `config` (derived from agent + per-call
-/// options). Returns the new messages and the reason the loop stopped.
 func runAgentLoop(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
@@ -96,7 +73,6 @@ func runAgentLoop(
     emit(.boundary(.agentEnd(turnOutcome(from: termination))))
   }
 
-  // Append prompt messages to context
   for msg in promptMessages {
     emit(.boundary(.messageStart(role: .user, round: 0)))
     currentContext.messages.append(msg)
@@ -125,12 +101,7 @@ func runAgentLoop(
     let messagesCountBeforeRound = currentContext.messages.count
     let roundResult: RoundOutcome
     do {
-      // Race the round against the abort observer. The HTTP request and SSE
-      // stream consumption inside `runSingleRound` suspend indefinitely when
-      // the network is down or the connection stalls; polling `isAborted()`
-      // alone never reaches those `await`s. Running the round as a child task
-      // lets the watcher task cancel it on abort, which propagates down to
-      // AsyncHTTPClient and tears down the connection.
+
       let outcome = try await abortObserver.race {
         [currentContext, config, emit, logger, round, roundSettings, abortObserver] in
         var localCtx = currentContext
@@ -158,10 +129,7 @@ func runAgentLoop(
       termination = .interrupted
       return (newMessages, termination)
     } catch let scribeError as ScribeError where !attemptedRecovery && isContextLengthError(scribeError) {
-      // Attachment-overflow recovery: the previous round's tool likely
-      // injected a too-large synthetic-attachment user message. Drop the
-      // attachments, replace the tool result with an error so the model
-      // sees the failure, and retry once.
+
       guard case .apiHTTPError(_, let detail, _) = scribeError else {
         throw scribeError
       }
@@ -171,7 +139,7 @@ func runAgentLoop(
           newMessages: &newMessages,
           providerDetail: detail)
       else {
-        // No recoverable shape at the tail — propagate the original error.
+
         throw scribeError
       }
       attemptedRecovery = true
@@ -181,13 +149,12 @@ func runAgentLoop(
       continue
     }
 
-    // Collect new messages from this round
     let roundMessages = Array(currentContext.messages[messagesCountBeforeRound...])
     newMessages.append(contentsOf: roundMessages)
 
     if abortObserver.isAborted() {
       logger.debug("agent.abort", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
-      // Remove uncommitted round messages
+
       currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
       newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
@@ -270,9 +237,7 @@ func runAgentLoop(
             logger.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
             result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
           } catch {
-            // Defensive: a custom ToolExecutor may throw arbitrary errors.
-            // Surface them to the model as a JSON-encoded tool failure so the
-            // assistant can self-correct, rather than aborting the turn.
+
             logger.warning(
               "agent.tool.executor.error",
               metadata: [
@@ -298,10 +263,6 @@ func runAgentLoop(
         newMessages.append(toolMsg)
         emit(.boundary(.messageEnd(role: .tool, round: round)))
 
-        // If the tool returned attachments (images, PDFs, etc.), inject a
-        // follow-up user message so the model can view them on the next
-        // turn.  OpenAI-compatible APIs only accept string content in
-        // tool results, so media must flow through synthetic user messages.
         for attachment in finalResult.attachments {
           let b64chars = attachment.base64.count
           logger.info(
@@ -333,24 +294,16 @@ func runAgentLoop(
   }
 }
 
-
 private enum RoundOutcome: Sendable, Equatable {
   case completed
   case toolCalls([ToolInvocation])
 }
 
-/// Carries the post-round context snapshot back across the abort-race task
-/// group. `runSingleRound` mutates its `inout context`; the child task owns a
-/// local copy and returns the new state so the parent can commit it after the
-/// race resolves.
 private struct RoundExecutionResult: Sendable {
   let context: AgentContext
   let outcome: RoundOutcome
 }
 
-
-/// Execute one LLM round: stream an assistant response, accumulate it, and
-/// return the outcome (completed or tool calls).
 private func runSingleRound(
   context: inout AgentContext,
   config: AgentLoopConfig,
@@ -364,7 +317,6 @@ private func runSingleRound(
 
   emit(.boundary(.messageStart(role: .assistant, round: round)))
 
-  // ── Build request ────────────────────────────────────
   let requestBody = Components.Schemas.CreateChatCompletionRequest(
     model: roundSettings.model,
     messages: context.messages,
@@ -378,7 +330,6 @@ private func runSingleRound(
       ? nil : Components.Schemas.ChatCompletionReasoning(enabled: roundSettings.reasoningEnabled)
   )
 
-  // ── Send HTTP request ────────────────────────────────
   let httpStart = clock.now
   logger.info(
     "agent.http.request",
@@ -430,7 +381,6 @@ private func runSingleRound(
     throw ScribeError.apiHTTPError(statusCode: code, detail: detail, hint: hint.isEmpty ? nil : hint)
   }
 
-  // ── Stream processor ─────────────────────────────────
   var turn = StreamedAssistantTurn()
   var processor = StreamProcessor(
     onEvent: emit,
@@ -440,14 +390,14 @@ private func runSingleRound(
   )
   try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
 
-  // ── Finalize ─────────────────────────────────────────
   let toolInvocations = turn.resolvedToolCalls()
-  let assistantText = turn.text.isEmpty ? "" : turn.text
+  let assistantContent: Components.Schemas.ChatMessage.ContentPayload? =
+    turn.text.isEmpty ? nil : .case1(turn.text)
   let assistantReasoning = turn.reasoningText.isEmpty ? nil : turn.reasoningText
 
   let assistantMessage = Components.Schemas.ChatMessage(
     role: .assistant,
-    content: .case1(assistantText),
+    content: assistantContent,
     name: nil,
     toolCalls: toolInvocations.isEmpty
       ? nil
@@ -463,7 +413,6 @@ private func runSingleRound(
   context.messages.append(assistantMessage)
   emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
-  // Emit usage if available
   if let u = processor.lastUsage {
     let genStart = processor.firstStreamContentAt ?? processor.streamWallStart
     let genSec = (clock.now - genStart) / .seconds(1)
@@ -487,7 +436,7 @@ private func runSingleRound(
     logger.info(
       "agent.assistant.final",
       metadata: [
-        "answer_chars": "\(assistantText.count)",
+        "answer_chars": "\(turn.text.count)",
         "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
       ])
     return .completed
@@ -496,14 +445,6 @@ private func runSingleRound(
   return .toolCalls(toolInvocations)
 }
 
-
-/// Heuristic: does this HTTP error look like a context-length / prompt-too-long
-/// failure that we can recover from by dropping over-sized tool attachments?
-///
-/// Provider phrasing varies — match a few common substrings rather than parse
-/// the JSON. We intentionally only recover from this specific failure shape;
-/// other 400s (bad tool args, schema mismatches) bubble up so the user sees
-/// the real cause.
 func isContextLengthError(_ error: ScribeError) -> Bool {
   guard case .apiHTTPError(let statusCode, let detail, _) = error, statusCode == 400 else {
     return false
@@ -515,24 +456,12 @@ func isContextLengthError(_ error: ScribeError) -> Bool {
     || lower.contains("maximum context")
 }
 
-/// Roll back the trailing synthetic-attachment user messages and replace the
-/// preceding `.tool` result with an error JSON so the model can react.
-///
-/// The shape we're rolling back is the one produced by the tool-loop in this
-/// file: a `.tool` message followed by zero or more `.user` messages whose
-/// content is multi-part (`.case2`, i.e. image/text parts). When the next LLM
-/// round explodes with a context-length error, the attachment we injected is
-/// the most likely culprit.
-///
-/// Returns the reason string suitable for the `.lifecycle(.recovered)` event,
-/// or `nil` if no recoverable shape was found at the tail (in which case the
-/// caller must propagate the original error).
 func rollbackAttachmentOverflow(
   messages: inout [Components.Schemas.ChatMessage],
   newMessages: inout [Components.Schemas.ChatMessage],
   providerDetail: String
 ) -> String? {
-  // Walk back past synthetic-attachment user messages (multi-part content).
+
   var droppedAttachments = 0
   while let last = messages.last,
     last.role == .user,
@@ -548,9 +477,6 @@ func rollbackAttachmentOverflow(
   }
   guard droppedAttachments > 0 else { return nil }
 
-  // The tool result immediately before the attachments is what overflowed.
-  // Replace its content with a synthetic error so the model sees the
-  // cause-and-effect and can self-correct on the next round.
   guard let toolMsgIdx = messages.lastIndex(where: { $0.role == .tool }),
     toolMsgIdx == messages.count - 1
   else { return nil }
@@ -567,8 +493,7 @@ func rollbackAttachmentOverflow(
     toolCallId: original.toolCallId
   )
   messages[toolMsgIdx] = replacement
-  if let newIdx = newMessages.lastIndex(where: { $0.role == .tool && $0.toolCallId == original.toolCallId })
-  {
+  if let newIdx = newMessages.lastIndex(where: { $0.role == .tool && $0.toolCallId == original.toolCallId }) {
     newMessages[newIdx] = replacement
   }
   return "tool output exceeded model context — dropped \(droppedAttachments) attachment(s)"

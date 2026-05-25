@@ -2,7 +2,6 @@ import Foundation
 import Logging
 import SystemPackage
 
-/// Owns session state and coordinates ``ScribeAgent`` turns.
 public actor SessionHarness {
 
   private var document: SessionDocument

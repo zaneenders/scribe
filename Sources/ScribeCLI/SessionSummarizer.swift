@@ -2,9 +2,6 @@ import Foundation
 import Logging
 import ScribeCore
 
-/// One-shot agent that condenses a slice of a session's transcript into a
-/// short prose summary, used by `/tldr` when the user wants to collapse
-/// a long agent loop before continuing.
 enum SessionSummarizer {
 
   private static let summarizerSystemPrompt = """
@@ -36,11 +33,6 @@ enum SessionSummarizer {
     paths and command shapes beat adjectives.
     """
 
-  /// Render a slice of session messages into a transcript-like string that
-  /// the summarizer reads as a single user message. System and user roles in
-  /// the slice are included for context (helps when the slice straddles a
-  /// user turn), but tool calls and tool results are formatted inline so the
-  /// summarizer sees the full action sequence.
   static func renderSlice(_ messages: [ScribeMessage]) -> String {
     var lines: [String] = []
     for msg in messages {
@@ -68,9 +60,6 @@ enum SessionSummarizer {
     return lines.joined(separator: "\n\n")
   }
 
-  /// Summarize the given slice of session messages using a one-shot agent
-  /// with no tools. The current `configuration`'s model and server are
-  /// reused; only the tool list is cleared.
   static func summarize(
     slice: [ScribeMessage],
     configuration: ScribeConfig,
@@ -100,15 +89,13 @@ enum SessionSummarizer {
         "transcript_chars": "\(rendered.count)",
       ])
 
-    // No persistence needed — the summarizer is a one-shot. Give the
-    // agent a synthetic history made of just the system prompt.
     let history: [ScribeMessage] = [
       ScribeMessage(role: .system, content: summarizerSystemPrompt)
     ]
     let turn = agent.run(userPrompt, history: history)
-    for await _ in turn.events { /* drain — we only need the result */ }
+    for await _ in turn.events {  }
     let result = try await turn.result.value
-    // newMessages = [user(prompt), assistant(summary)] on a clean run.
+
     guard
       let summary = result.newMessages.last(where: { $0.role == .assistant })?.content,
       !summary.isEmpty

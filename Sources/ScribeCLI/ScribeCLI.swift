@@ -207,7 +207,6 @@ import SystemPackage
     }
   }
 
-
   private func printInfo(loaded: LoadedConfig) {
     let p = loaded.paths
     let home = NSHomeDirectory()
@@ -236,7 +235,7 @@ import SystemPackage
 }
 
 extension ScribeCLI {
-  /// Printed after a normal chat exit regardless of configured `logging.level` (stdout hint only — structured logs stay in log files).
+
   fileprivate func printExitResumeHint(
     sessionId: UUID,
     sessionDirectory: FilePath
@@ -267,9 +266,8 @@ extension ScribeCLI {
     path.replacingOccurrences(of: "'", with: "'\"'\"'")
   }
 
-
   func relativeTime(from date: Date) -> String {
-    let delta = date.timeIntervalSinceNow * -1  // seconds ago
+    let delta = date.timeIntervalSinceNow * -1
     switch delta {
     case ..<1: return "just now"
     case ..<60: return "\(Int(delta))s ago"
@@ -280,8 +278,6 @@ extension ScribeCLI {
     }
   }
 
-  /// Formats a single session line for `--list-sessions`.  Internal so tests can
-  /// verify alignment and content without capturing real stdout.
   func formatSessionLine(
     shortId: String,
     when: String,

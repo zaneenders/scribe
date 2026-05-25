@@ -2,16 +2,12 @@ import Foundation
 import Logging
 import Synchronization
 
-/// Lock-protected `ISO8601DateFormatter` reused from concurrent log calls.
 private let scribeLogTimestampFormatter: Mutex<ISO8601DateFormatter> = {
   let formatter = ISO8601DateFormatter()
   formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
   return Mutex(formatter)
 }()
 
-/// Formats each log line as
-/// `<iso8601-ms> [<level>] <message> key=value …`
-/// using swift-log metadata (logger-level + per-call), sorted for stable grep.
 struct ScribeLineLogHandler: LogHandler {
   var logLevel: Logger.Level = .info
   var metadata: Logger.Metadata = [:]

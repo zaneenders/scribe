@@ -3,12 +3,6 @@ import ScribeCore
 import SystemPackage
 import Synchronization
 
-/// Mutex-protected append-only file writer for log files and `messages.jsonl`.
-///
-/// Opens with `O_APPEND` via ``FileDescriptor`` so resumes do not need a separate
-/// seek. Does not fsync on every ``append`` (trace-level shell logging can emit
-/// hundreds of lines per second; per-line fsync was a major CPU hotspot).
-/// Durability is bounded by ``close()`` or `deinit`, which closes the descriptor.
 final class AppendOnlyFileWriter: Sendable {
   private let fd: Mutex<FileDescriptor?>
 

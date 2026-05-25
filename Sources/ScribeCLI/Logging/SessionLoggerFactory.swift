@@ -3,7 +3,6 @@ import Logging
 import Synchronization
 import SystemPackage
 
-/// Serializes session log writes to a file, degrading to stderr on open or I/O failure.
 private final class SessionLogWriteBackend: Sendable {
   private let fileWriter = Mutex<AppendOnlyFileWriter?>(nil)
   private let warned = Mutex(false)
@@ -45,12 +44,8 @@ private final class SessionLogWriteBackend: Sendable {
   }
 }
 
-/// Builds per-invocation loggers for the CLI (append-only file under the session directory).
 enum SessionLoggerFactory {
 
-  /// Appends to the given log file (creates parent directories and file if needed).
-  /// Falls back to stderr when the file cannot be opened or after the first write failure.
-  /// Sets `session_id` on the returned logger for all subsequent lines.
   static func makeSessionLogger(
     sessionId: UUID,
     minimumLevel: Logger.Level,

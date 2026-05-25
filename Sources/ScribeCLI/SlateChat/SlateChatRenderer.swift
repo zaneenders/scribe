@@ -2,7 +2,6 @@ import Foundation
 import ScribeCore
 import SlateCore
 
-
 struct QueuedTrayLine: Equatable, Sendable {
   enum Kind: Equatable, Sendable {
     case firstMessage
@@ -18,63 +17,16 @@ struct QueuedTrayLine: Equatable, Sendable {
   var text: String
 }
 
-/// Builds the semantic chat grid: transcript, queued tray, input strip, banner, and usage HUD.
-///
-/// ## Render pipeline & input responsiveness
-///
-/// The host's `onEvent` closure captures a `RenderState` snapshot and passes it to the
-/// pure `buildFrame(state:theme:)` function, which produces a `RenderOutput` containing
-/// a `[[StyledSpan]]` grid.  The host then writes each span into Slate's `TerminalCellGrid`
-/// via a thin `TerminalCell(span:)` bridge.  All rendering is pure and nonisolated.
-///
-/// To keep keystrokes responsive while the model is busy:
-///
-/// 1. **Slate ships frames through an async writer.** `Slate.enscribe` builds the
-///    grid synchronously on the main actor, copies the encoded bytes into an
-///    owned `[UInt8]`, and submits them to a detached writer task that performs
-///    the actual blocking `write(2)` call(s). The main actor never waits on tty
-///    drain. See `Sources/SlateCore/AsyncFrameWriter.swift`.
-/// 2. **Frames coalesce on the writer side.** The writer's input stream uses
-///    `bufferingPolicy: .bufferingNewest(1)`: while a frame is being written, an
-///    incoming frame replaces any older pending frame (latest wins). During a
-///    typing burst or fast SSE stream the user always converges to the latest
-///    visible state with bounded memory.
-/// 3. **External wakes are throttled.** `SlateChat.runFullscreen` configures the
-///    pump with `externalCoalesceMaxFramesPerSecond: 60`, so SSE chunks /
-///    persistence saves / usage updates produce at most ~60 main-actor renders
-///    per second regardless of how busy the producer is.
-/// 4. **Slow-frame log line.** `chat.render.slow` with `elapsed_ms`, `flat_rows`, etc. in metadata.
-///    fires when the on-actor portion of a render exceeds 50 ms.  `frame_ms`
-///    covers the pure `buildFrame` call plus the grid-to-Slate copy
-///    (the actual tty drain is off-actor and **not** included).
-/// 5. **Tool output truncation in the transcript.** `read_file` results render as
-///    a single summary line, and shell results show the temp file paths
-///    instead of inline content — the LLM reads files with `read_file`.
-///
-/// ## Queued tray
-///
-/// The tray sits between the transcript and the input strip, shares the input
-/// strip background, indents continuation rows under an 8-space gutter (matching
-/// the width of `queued: `), and is hard-capped at 4 rows with trailing `…`
-/// truncation so a long queued paste cannot push the transcript off screen.
-///
-/// - ``queuedTrayRowCount(queuedTrayText:cols:)`` returns the number of rows to
-///   reserve for the queued tray strip (0 when no queued message).
-/// - ``buildSemanticQueuedTrayRows(_:startRow:cols:textWidth:visualLines:theme:)``
-///   paints the tray rows: first row prefixed with `queued: ` (orange) plus the
-///   message in dimmed white; continuation rows align under the message with an
-///   8-space gutter.
 internal enum SlateChatRenderer {
-  /// Braille spinner (common in TUIs); one cell, advances while waiting for the first token.
+
   private nonisolated static let llmWaitSpinner: [Character] = [
     "⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷",
   ]
 
-  /// Gutter wide enough for mode labels: "EDIT: " / "READ: " (6 chars).
   private nonisolated static let inputGutterColumns = 6
-  /// Width of `queued: ` prefix; continuation rows under the queued tray indent to align under text.
+
   private nonisolated static let queuedTrayGutterColumns = 8
-  /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
+
   private nonisolated static let queuedTrayMaxRows = 4
 
   nonisolated static func queuedMessagePreview(_ raw: String, maxWidth: Int) -> String {
@@ -260,7 +212,6 @@ internal enum SlateChatRenderer {
       textWidth: textWidth)
   }
 
-  /// Number of rows to reserve for the queued tray strip (0 when no queued message).
   nonisolated static func queuedTrayRowCount(
     snapshot: QueuedTraySnapshot,
     cols: Int
@@ -278,7 +229,6 @@ internal enum SlateChatRenderer {
       cols: cols)
   }
 
-  /// Rows available for transcript text between the fixed header and the input stack (matches ``makeGrid``).
   nonisolated static func transcriptContentRows(
     cols: Int,
     rows: Int,
@@ -321,9 +271,6 @@ internal enum SlateChatRenderer {
     return max(0, firstTrayRow &- headerRows)
   }
 
-
-  /// Builds a semantic grid — a `rows × cols` matrix of single-character `StyledSpan` cells.
-  /// Pure function: no Slate dependency, no side effects.
   nonisolated static func buildGrid(
     cols: Int,
     rows: Int,
@@ -342,7 +289,6 @@ internal enum SlateChatRenderer {
     let transcriptFill = StyledSpan(fg: theme.inputText, bg: theme.background, bold: false, text: " ")
     let inputFill = StyledSpan(fg: theme.inputText, bg: theme.inputAreaBg, bold: false, text: " ")
 
-    // Initialize grid with transcript background
     var grid = [[StyledSpan]](
       repeating: [StyledSpan](repeating: transcriptFill, count: cols),
       count: rows
@@ -388,7 +334,6 @@ internal enum SlateChatRenderer {
     let trayRowCount = trayVisualLines.count
     let firstTrayRow = max(headerRows, firstInputRow &- trayRowCount)
 
-    // Fill input/tray background
     let inputBgRowCount = trayRowCount &+ inputRowCount
     if inputBgRowCount > 0 {
       fillSemanticRect(
@@ -396,7 +341,6 @@ internal enum SlateChatRenderer {
         width: cols, height: inputBgRowCount, with: inputFill)
     }
 
-    // Banner and usage HUD
     let usageReserve: Int = {
       guard let u = usage else { return 0 }
       let w = usageHUDSemanticCharCount(u, maxRows: headerRows, theme: theme)
@@ -449,7 +393,6 @@ internal enum SlateChatRenderer {
         label: "CWD: ", valueSpans: cwdSpans, theme: theme)
     }
 
-    // Transcript content
     if contentRows > 0 {
       let flat = flattenedTranscript
       let maxTailStart = max(0, flat.count &- contentRows)
@@ -467,15 +410,12 @@ internal enum SlateChatRenderer {
       }
     }
 
-    // Queued tray
     if trayRowCount > 0 {
       buildSemanticQueuedTrayRows(
         &grid, startRow: firstTrayRow, cols: cols,
         textWidth: trayTextWidth, visualLines: trayVisualLines, theme: theme)
     }
 
-    // Input rows (or picker rows when a /fork or /tldr boundary picker
-    // is open — picker fully replaces the input box for the duration).
     if let picker {
       buildSemanticPickerRows(
         &grid, startRow: firstInputRow, cols: cols,
@@ -492,20 +432,6 @@ internal enum SlateChatRenderer {
     return grid
   }
 
-  /// Render the boundary-picker overlay in place of the input rows. Two
-  /// logical lines are produced and clipped to the available `rowCount`:
-  ///
-  ///   ```
-  ///   [FORK] msg 14 / 21               ↑↓ change · Enter confirm · Esc cancel
-  ///   next: <preview>
-  ///
-  ///   [TLDR] start 14 · end 21 of 21   ↑↓ move · Tab switch · Enter confirm · Esc cancel
-  ///   first to collapse: <preview>      (or "first preserved:" when end is active)
-  ///   ```
-  ///
-  /// For `.tldr` the active cursor's number is rendered in the warning
-  /// colour + bold so the user can see at a glance which one Tab has
-  /// landed on.
   nonisolated static func buildSemanticPickerRows(
     _ grid: inout [[StyledSpan]],
     startRow: Int, cols: Int, rowCount: Int,
@@ -570,8 +496,6 @@ internal enum SlateChatRenderer {
     }
   }
 
-
-  /// Fill a rectangular region of the semantic grid.
   private nonisolated static func fillSemanticRect(
     _ grid: inout [[StyledSpan]],
     col col0: Int, row row0: Int,
@@ -590,7 +514,6 @@ internal enum SlateChatRenderer {
     }
   }
 
-  /// Write spans as a horizontal run into the semantic grid.
   private nonisolated static func writeSemanticSpans(
     _ grid: inout [[StyledSpan]],
     col col0: Int, row: Int, maxWidth: Int,
@@ -608,7 +531,6 @@ internal enum SlateChatRenderer {
       }
     }
   }
-
 
   private nonisolated static func buildSemanticBannerKV(
     _ grid: inout [[StyledSpan]],
@@ -678,7 +600,7 @@ internal enum SlateChatRenderer {
   ) {
     let bg = theme.inputAreaBg
     let gutter = String(repeating: " ", count: min(inputGutterColumns, cols))
-    // Mode label: "EDIT: " in userPrefix (orange), "READ: " in scribePrefix (white)
+
     let modeLabel = inputMode == .edit ? "EDIT: " : "READ: "
     let modeColor = inputMode == .edit ? theme.userPrefix : theme.scribePrefix
     let showSpinner = waitingForLLM && visualLines.isEmpty
@@ -801,7 +723,6 @@ internal enum SlateChatRenderer {
     }
   }
 
-
   private nonisolated static func semanticHudSpan(
     _ fg: TerminalRGB, _ text: String, bg: TerminalRGB, bold: Bool = false
   ) -> StyledSpan {
@@ -892,9 +813,8 @@ internal enum SlateChatRenderer {
 
 }
 
-
 extension TerminalCell {
-  /// Create a `TerminalCell` from a `StyledSpan` whose text is a single character.
+
   init(span: StyledSpan) {
     self.init(
       glyph: span.text.first ?? " ",

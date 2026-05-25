@@ -2,14 +2,12 @@ import Foundation
 import ScribeCore
 import SlateCore
 
-
 public struct StyledSpan: Equatable, Sendable, TerminalSpanProtocol {
   public var fg: TerminalRGB
   public var bg: TerminalRGB
   public var bold: Bool
   public var text: String
 
-  // TerminalSpanProtocol conformance — bridges naming conventions.
   public var foreground: TerminalRGB { fg }
   public var background: TerminalRGB { bg }
   public var flags: TerminalCellFlags { bold ? .bold : [] }
@@ -30,34 +28,24 @@ public struct TLine: Equatable, Sendable {
   }
 }
 
-
-/// Snapshot of token-usage counters rendered in the upper‑right HUD strip.
-///
-/// Two scopes are tracked:
-/// - **Round** – the single most recent API response (one HTTP request/response pair).
-/// - **Turn** – the sum of every API round triggered by the current user message
-///   (including tool‑call loops). Reset to zero when a new user turn starts
-///   (signaled via `HostEvent.modelTurnRunning(true)`).
-/// - **Session** – the cumulative total across all turns since `scribe chat` began.
-///   Never reset during a session.
 internal struct UsageHUDSnapshot: Equatable {
-  /// Prompt tokens in the most recent API round.
+
   var roundPrompt: Int?
-  /// Completion tokens in the most recent API round.
+
   var roundCompletion: Int?
-  /// Total tokens in the most recent API round.
+
   var roundTotal: Int?
-  /// Prompt tokens summed across all API rounds in the current user turn.
+
   var turnPrompt: Int
-  /// Completion tokens summed across all API rounds in the current user turn.
+
   var turnCompletion: Int
-  /// Total tokens summed across all API rounds in the current user turn.
+
   var turnTotal: Int
-  /// Prompt tokens summed across every turn in the current chat session.
+
   var sessionPrompt: Int
-  /// Completion tokens summed across every turn in the current chat session.
+
   var sessionCompletion: Int
-  /// Total tokens summed across every turn in the current chat session.
+
   var sessionTotal: Int
   var reasoningTokens: Int?
   var cachedPromptTokens: Int?
@@ -75,14 +63,12 @@ internal struct BannerSnapshot: Equatable {
   var sessionId: String
 }
 
-
 internal enum TranscriptLayout {
 
   private static func wrappedPlainLines(_ text: String, width: Int) -> [String] {
     guard width > 0 else { return [] }
     if text.isEmpty { return [""] }
 
-    // Tokenize into Substring ranges (no per-token String allocation).
     var tokenRanges: [Range<String.Index>] = []
     var i = text.startIndex
     while i < text.endIndex {
@@ -97,7 +83,7 @@ internal enum TranscriptLayout {
     }
 
     var lines: [String] = []
-    var lineStart = 0  // index into tokenRanges
+    var lineStart = 0
     var lineCharCount = 0
 
     for idx in tokenRanges.indices {
@@ -109,7 +95,6 @@ internal enum TranscriptLayout {
         continue
       }
 
-      // Token doesn't fit — flush current line if non-empty.
       if lineCharCount > 0 {
         let lineTokens = tokenRanges[lineStart..<idx].map { text[$0] }
         lines.append(lineTokens.joined())
@@ -121,7 +106,7 @@ internal enum TranscriptLayout {
         lineStart = idx
         lineCharCount = tokenLen
       } else {
-        // Token longer than width — split it.
+
         var pos = range.lowerBound
         let end = range.upperBound
         while text.distance(from: pos, to: end) > width {
@@ -140,7 +125,6 @@ internal enum TranscriptLayout {
       }
     }
 
-    // Flush remaining tokens.
     if lineStart < tokenRanges.count {
       let lineTokens = tokenRanges[lineStart...].map { text[$0] }
       lines.append(lineTokens.joined())
@@ -181,9 +165,8 @@ internal enum TranscriptLayout {
         continue
       }
 
-      // Concatenate all span text and track which span each character came from.
       var plain = ""
-      var charSpan: [Int] = []  // charSpan[i] = index into line.spans
+      var charSpan: [Int] = []
       for (si, sp) in line.spans.enumerated() {
         plain += sp.text
         charSpan.append(contentsOf: Array(repeating: si, count: sp.text.count))
@@ -194,7 +177,6 @@ internal enum TranscriptLayout {
         continue
       }
 
-      // Split on logical newlines within the concatenated text.
       let chars = Array(plain)
       var i = 0
       while i < chars.count {
