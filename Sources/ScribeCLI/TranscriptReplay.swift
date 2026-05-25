@@ -2,7 +2,30 @@ import Foundation
 import ScribeCore
 import SlateCore
 
-// MARK: - Rendering messages to transcript lines
+
+/// Render a ``SessionDocument`` into styled transcript lines by walking
+/// message indices — no public snapshot API on the doc itself.
+public func renderDocumentToTranscript(
+  _ document: borrowing SessionDocument,
+  theme: CLITheme,
+  renderer: MarkdownRenderer
+) -> [TLine] {
+  renderDocumentToTranscriptWithStarts(document, theme: theme, renderer: renderer).lines
+}
+
+/// Like ``renderDocumentToTranscript`` but also returns `messageStartLines`.
+public func renderDocumentToTranscriptWithStarts(
+  _ document: borrowing SessionDocument,
+  theme: CLITheme,
+  renderer: MarkdownRenderer
+) -> (lines: [TLine], messageStartLines: [Int]) {
+  var messages: [ScribeMessage] = []
+  messages.reserveCapacity(document.count)
+  for i in 0..<document.count {
+    messages.append(document[i])
+  }
+  return renderMessagesToTranscriptWithStarts(messages, theme: theme, renderer: renderer)
+}
 
 /// Render a list of `ScribeMessage`s into styled transcript lines.
 /// Pure function — no side effects, no state.

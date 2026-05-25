@@ -8,7 +8,6 @@ import ScribeLLM
 import Synchronization
 import Testing
 
-// MARK: - Fake Client Transport
 
 private final class FakeClientTransport: ClientTransport, Sendable {
   let statusCode: Int
@@ -51,7 +50,6 @@ private final class FakeClientTransport: ClientTransport, Sendable {
   }
 }
 
-// MARK: - Fake tool
 
 private struct FakeTool: ScribeTool {
   static var name: String { "fake_tool" }
@@ -82,7 +80,6 @@ private struct SleepyAgentTool: ScribeTool {
   }
 }
 
-// MARK: - SSE chunk helpers
 
 private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
   ArraySlice("data: \(json)\n\n".utf8)
@@ -94,9 +91,15 @@ private func errorBody(_ message: String) -> HTTPBody.ByteChunk {
   ArraySlice(#"{"error":{"message":"\#(message)"}}"#.utf8)
 }
 
-// MARK: - Convenience
 
 private let testLogger = Logger(label: "test")
+
+/// Default history every agent test runs against: just a system message.
+/// Mirrors the typical embedder shape — caller owns the conversation
+/// store, the agent is a pure verb.
+private let defaultHistory: [ScribeMessage] = [
+  ScribeMessage(role: .system, content: "You are a test agent.")
+]
 
 private func makeAgent(
   statusCode: Int = 200,
@@ -109,9 +112,7 @@ private func makeAgent(
   return ScribeAgent(
     client: client,
     model: model,
-    systemPrompt: "You are a test agent.",
     tools: tools,
-    initialMessages: [],
     workingDirectory: FilePath("/tmp"),
     reasoningEnabled: nil,
     logger: testLogger
@@ -130,35 +131,31 @@ private func makeAgent(
   return ScribeAgent(
     client: client,
     model: model,
-    systemPrompt: "You are a test agent.",
     tools: tools,
-    initialMessages: [],
     workingDirectory: FilePath("/tmp"),
     reasoningEnabled: nil,
     logger: testLogger
   )
 }
 
-// MARK: - Tests
 
 @Suite
 struct ScribeAgentTests {
 
-  // MARK: - prompt: outcome
 
-  @Test func promptCompletesWithAnswerText() async throws {
+  @Test func runCompletesWithAnswerText() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.stream("hello")
+    let ts = agent.run("hello", history: defaultHistory)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
   }
 
-  @Test func promptRespectsMaxToolRounds() async throws {
+  @Test func runRespectsMaxToolRounds() async throws {
     let chunks = [
       sseChunk(
         #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
@@ -167,22 +164,21 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks, tools: [FakeTool()])
     let options = AgentRunOptions(maxToolRounds: 1)
-    let ts = await agent.stream("test", options: options)
+    let ts = agent.run("test", history: defaultHistory, options: options)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .toolRoundLimit(rounds: 1))
   }
 
-  // MARK: - prompt: events
 
-  @Test func promptYieldsAssistantTextEvents() async throws {
+  @Test func runYieldsAssistantTextEvents() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hello"}}]}"#),
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":" world"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     var texts: [String] = []
     for await event in ts.events {
       if case .output(.text(_, let text)) = event { texts.append(text) }
@@ -192,7 +188,7 @@ struct ScribeAgentTests {
     #expect(result.outcome == .completed)
   }
 
-  @Test func promptYieldsToolInvocationEvents() async throws {
+  @Test func runYieldsToolInvocationEvents() async throws {
     let toolChunks = [
       sseChunk(
         #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
@@ -204,7 +200,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     var events: [AgentEvent] = []
     for await event in ts.events { events.append(event) }
     let result = try await ts.result.value
@@ -216,14 +212,14 @@ struct ScribeAgentTests {
     #expect(hasInvocation)
   }
 
-  @Test func promptYieldsUsageEvent() async throws {
+  @Test func runYieldsUsageEvent() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"x"}}]}"#),
       sseChunk(#"{"id":"1","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     var events: [AgentEvent] = []
     for await event in ts.events { events.append(event) }
     _ = try await ts.result.value
@@ -234,28 +230,26 @@ struct ScribeAgentTests {
     #expect(hasUsage)
   }
 
-  // MARK: - prompt: result.messages
 
-  @Test func promptResultMessagesContainsAssistantMessage() async throws {
+  @Test func runResultNewMessagesContainsPromptAndAssistant() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
-    let ts = await agent.stream("hello")
+    let ts = agent.run("hello", history: defaultHistory)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
-    // The agent auto-injects the system message at construction time when
-    // `initialMessages` doesn't already contain one — see ScribeAgent.swift.
-    #expect(result.messages.count == 3)  // system + user + assistant
-    #expect(result.messages[0].role == .system)
-    #expect(result.messages[1].role == .user)
-    #expect(result.messages[1].content == "hello")
-    #expect(result.messages[2].role == .assistant)
-    #expect(result.messages[2].content == "reply")
+    // newMessages excludes pre-turn history (system) and contains only
+    // the prompt user message + the assistant reply produced by the turn.
+    #expect(result.newMessages.count == 2)
+    #expect(result.newMessages[0].role == .user)
+    #expect(result.newMessages[0].content == "hello")
+    #expect(result.newMessages[1].role == .assistant)
+    #expect(result.newMessages[1].content == "reply")
   }
 
-  @Test func promptResultMessagesAfterToolRound() async throws {
+  @Test func runResultNewMessagesAfterToolRound() async throws {
     let toolChunks = [
       sseChunk(
         #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
@@ -267,26 +261,25 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunksForCall: [toolChunks, replyChunks], tools: [FakeTool()])
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
-    // Messages: system + user(prompt) + assistant(tool-calling) + tool(result) + assistant(done)
-    #expect(result.messages.count == 5)
-    #expect(result.messages[0].role == .system)
-    #expect(result.messages[1].role == .user)
-    #expect(result.messages[2].role == .assistant)
-    #expect(result.messages[3].role == .tool)
-    #expect(result.messages[3].toolCallId == "c1")
-    #expect(result.messages[4].role == .assistant)
-    #expect(result.messages[4].content == "done")
+    // newMessages = user(prompt) + assistant(tool-calling) + tool(result) + assistant(done).
+    // The pre-turn system message is NOT included.
+    #expect(result.newMessages.count == 4)
+    #expect(result.newMessages[0].role == .user)
+    #expect(result.newMessages[1].role == .assistant)
+    #expect(result.newMessages[2].role == .tool)
+    #expect(result.newMessages[2].toolCallId == "c1")
+    #expect(result.newMessages[3].role == .assistant)
+    #expect(result.newMessages[3].content == "done")
   }
 
-  // MARK: - prompt: error propagation
 
-  @Test func promptPropagatesHTTPError() async {
+  @Test func runPropagatesHTTPError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     Task { for await _ in ts.events {} }
     do {
       _ = try await ts.result.value
@@ -302,9 +295,9 @@ struct ScribeAgentTests {
     }
   }
 
-  @Test func promptStreamFinishesOnError() async {
+  @Test func runStreamFinishesOnError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     var eventCount = 0
     for await _ in ts.events { eventCount += 1 }
     let didThrow: Bool
@@ -316,15 +309,14 @@ struct ScribeAgentTests {
     #expect(eventCount == 0)
   }
 
-  // MARK: - prompt: abort
 
   /// Verify `agent.abort()` interrupts an in-flight turn. We can't pre-set
-  /// abort before `prompt()` because the agent clears its private notifier
-  /// at the top of each turn (so a stray Ctrl+C between prompts can't
+  /// abort before `run()` because the agent clears its private notifier
+  /// at the top of each turn (so a stray Ctrl+C between turns can't
   /// bleed into the next one). Instead we start a tool call against a
   /// long-sleeping tool so the loop is stuck in the watch task, then call
   /// `abort()` to wake it.
-  @Test func promptAbortReturnsInterrupted() async throws {
+  @Test func runAbortReturnsInterrupted() async throws {
     let toolCallChunks = [
       sseChunk(
         #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"sleepy","arguments":"{}"}}]}}]}"#
@@ -332,7 +324,7 @@ struct ScribeAgentTests {
       doneChunk(),
     ]
     let agent = makeAgent(chunks: toolCallChunks, tools: [SleepyAgentTool()])
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     let drain = Task { for await _ in ts.events {} }
     // Give the loop a beat to enter the tool watch task before aborting.
     try await Task.sleep(for: .milliseconds(50))
@@ -342,134 +334,37 @@ struct ScribeAgentTests {
     #expect(result.outcome == .interrupted)
   }
 
-  /// Aborting between prompts is intentionally a no-op. The next `prompt()`
+  /// Aborting between turns is intentionally a no-op. The next `run()`
   /// clears the notifier and runs to completion.
-  @Test func abortBetweenPromptsDoesNotLeak() async throws {
+  @Test func abortBetweenRunsDoesNotLeak() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
     agent.abort()  // fired with no in-flight turn
-    let ts = await agent.stream("test")
+    let ts = agent.run("test", history: defaultHistory)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
   }
 
-  // MARK: - messages(since:)
 
-  @Test func messagesSinceReturnsTailSlice() async throws {
-    let chunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
-      doneChunk(),
-    ]
-    let agent = makeAgent(chunks: chunks)
-    let ts = await agent.stream("one")
-    Task { for await _ in ts.events {} }
-    _ = try await ts.result.value
-    let ts2 = await agent.stream("two")
-    Task { for await _ in ts2.events {} }
-    _ = try await ts2.result.value
-
-    // messages: system, user:"one", assistant:"ok", user:"two", assistant:"ok"
-    let tail = await agent.messages(since: 3)
-    #expect(tail.count == 2)
-    #expect(tail.first?.role == .user)
-    #expect(tail.first?.content == "two")
-  }
-
-  @Test func messagesSinceAtCountReturnsEmpty() async throws {
-    let chunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
-      doneChunk(),
-    ]
-    let agent = makeAgent(chunks: chunks)
-    let ts = await agent.stream("hello")
-    Task { for await _ in ts.events {} }
-    _ = try await ts.result.value
-
-    let total = await agent.messages.count
-    let empty = await agent.messages(since: total)
-    #expect(empty.isEmpty)
-  }
-
-  @Test func messagesSinceZeroReturnsAll() async throws {
-    let agent = makeAgent(chunks: [])
-    let total = await agent.messages.count  // just system
-    let all = await agent.messages(since: 0)
-    #expect(all.count == total)
-  }
-
-  @Test func messagesSinceNegativeClampedToZero() async throws {
-    let agent = makeAgent(chunks: [])
-    let total = await agent.messages.count
-    let all = await agent.messages(since: -5)
-    #expect(all.count == total)
-  }
-
-  // MARK: - System prompt auto-injection
-
-  /// When the caller provides a non-empty `systemPrompt` but no system
-  /// message in `initialMessages`, the agent injects one at construction
-  /// time so embedders don't have to know about the wire shape.
-  @Test func autoInjectsSystemPromptAtHead() async throws {
-    let chunks = [
-      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hi"}}]}"#),
-      doneChunk(),
-    ]
-    let agent = makeAgent(chunks: chunks)  // systemPrompt = "You are a test agent."
-    let messages = await agent.messages
-    #expect(messages.count == 1)
-    #expect(messages.first?.role == .system)
-    #expect(messages.first?.content == "You are a test agent.")
-  }
-
-  /// If the caller already supplied a system message in `initialMessages`,
-  /// the agent must not inject a second one — preserves backward
-  /// compatibility with callers (like the CLI) that bake the system
-  /// message in themselves.
-  @Test func doesNotDuplicateExistingSystemMessage() async throws {
-    let transport = FakeClientTransport(statusCode: 200, responseBodyChunks: [])
-    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let agent = ScribeAgent(
-      client: client,
-      model: "test",
-      systemPrompt: "ignored, already present",
-      tools: [],
-      initialMessages: [
-        ScribeMessage(role: .system, content: "pre-baked"),
-        ScribeMessage(role: .user, content: "first"),
-      ],
-      workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil,
-      logger: testLogger
-    )
-    let messages = await agent.messages
-    #expect(messages.count == 2)
-    #expect(messages[0].role == .system)
-    #expect(messages[0].content == "pre-baked")
-    #expect(messages[1].role == .user)
-  }
-
-  // MARK: - ScribeMessage prompt overload
-
-  @Test func promptAcceptsScribeMessageArray() async throws {
+  @Test func runAcceptsScribeMessageArray() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ack"}}]}"#),
       doneChunk(),
     ]
     let agent = makeAgent(chunks: chunks)
     let userMsg = ScribeMessage(role: .user, content: "hello")
-    let ts = await agent.stream([userMsg])
+    let ts = agent.run([userMsg], history: defaultHistory)
     Task { for await _ in ts.events {} }
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
-    #expect(result.messages.last?.role == .assistant)
-    #expect(result.messages.last?.content == "ack")
+    #expect(result.newMessages.last?.role == .assistant)
+    #expect(result.newMessages.last?.content == "ack")
   }
 
-  // MARK: - Custom ToolExecutor
 
   /// A fake tool that records calls — `ToolExecutor` should never be
   /// invoked for it because the test installs a custom executor that
@@ -529,15 +424,14 @@ struct ScribeAgentTests {
     let agent = ScribeAgent(
       client: client,
       model: "test",
-      systemPrompt: "system",
       tools: [UnreachableTool()],
       toolExecutor: recorder,
-      initialMessages: [],
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
       logger: testLogger
     )
-    let ts = await agent.stream("call the tool")
+    let history: [ScribeMessage] = [ScribeMessage(role: .system, content: "system")]
+    let ts = agent.run("call the tool", history: history)
     Task { for await _ in ts.events {} }
     let task = ts.result
     let result = try await task.value
@@ -547,10 +441,10 @@ struct ScribeAgentTests {
     #expect(recorded.first?.name == "unreachable")
     #expect(recorded.first?.id == "c1")
     #expect(recorded.first?.arguments == #"{"k":1}"#)
-    // The tool message in the conversation should carry the canned output,
+    // The tool message in newMessages should carry the canned output,
     // confirming the assistant saw the executor's response (not the
     // unreachable built-in).
-    let toolMessage = result.messages.first { $0.role == .tool }
+    let toolMessage = result.newMessages.first { $0.role == .tool }
     #expect(stringContent(toolMessage) == recorder.canned)
   }
 }

@@ -3,14 +3,12 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - SubmitCoordinator tests
 
 /// Tests for the `SubmitCoordinator` state machine — pure functions of
 /// `(state, event)` so they can be exercised without a running TUI.
 @Suite
 struct SubmitCoordinatorTests {
 
-  // MARK: - Enter: model idle, non-empty buffer
 
   @Test func enterWithTextWhenIdleSendsToGate() {
     var c = SubmitCoordinator()
@@ -26,7 +24,6 @@ struct SubmitCoordinatorTests {
     #expect(effect == .none)
   }
 
-  // MARK: - Enter: model busy, non-empty buffer
 
   @Test func enterWithTextWhenBusyAppendsToQueue() {
     var c = SubmitCoordinator()
@@ -36,7 +33,6 @@ struct SubmitCoordinatorTests {
     #expect(c.queuedTexts == ["do thing"])
   }
 
-  // MARK: - Enter: empty buffer + queued tray
 
   @Test func enterEmptyWhenBusyWithQueuedInterruptsAndSends() {
     var c = SubmitCoordinator()
@@ -74,7 +70,6 @@ struct SubmitCoordinatorTests {
     #expect(c.queuedTexts == [])
   }
 
-  // MARK: - Ctrl+C ladder
 
   @Test func ctrlCWithQueuedRecallsFirstText() {
     var c = SubmitCoordinator()
@@ -107,7 +102,6 @@ struct SubmitCoordinatorTests {
     #expect(recall == nil)
   }
 
-  // MARK: - Model turn end (auto-flush)
 
   @Test func modelTurnEndFlushesAllQueuedMessages() {
     var c = SubmitCoordinator()
@@ -141,7 +135,6 @@ struct SubmitCoordinatorTests {
     #expect(drained == [])
   }
 
-  // MARK: - Queue FIFO append
 
   @Test func multipleQueuedMessagesAppendFIFO() {
     var c = SubmitCoordinator()
@@ -158,7 +151,6 @@ struct SubmitCoordinatorTests {
     #expect(c.queuedTexts == ["second", "third"])
   }
 
-  // MARK: - Enter: trim whitespace
 
   @Test func enterWhitespaceOnlyBusyNoQueueIsNoOp() {
     var c = SubmitCoordinator()

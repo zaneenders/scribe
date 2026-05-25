@@ -9,7 +9,6 @@ import Testing
 
 @testable import ScribeCore
 
-// MARK: - Fake Client Transport
 
 private final class FakeClientTransport: ClientTransport, Sendable {
   let statusCode: Int
@@ -98,7 +97,6 @@ private final class VariedStatusTransport: ClientTransport, Sendable {
   }
 }
 
-// MARK: - Fake tools
 
 private struct FakeTool: ScribeTool {
   static var name: String { "fake_tool" }
@@ -125,7 +123,6 @@ private struct InterruptedTool: ScribeTool {
   }
 }
 
-// MARK: - SSE chunk helpers
 
 private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
   ArraySlice("data: \(json)\n\n".utf8)
@@ -135,7 +132,6 @@ private func doneChunk() -> HTTPBody.ByteChunk {
   ArraySlice("data: [DONE]\n\n".utf8)
 }
 
-// MARK: - Convenience
 
 private let testLogger = Logger(label: "test.agentloop")
 
@@ -225,7 +221,6 @@ private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
   }
 }
 
-// MARK: - LoopTermination pattern helpers
 
 /// Lightweight match for `LoopTermination` since it can't synthesize Equatable.
 private func expectTermination(_ actual: LoopTermination, _ expected: LoopTermination) {
@@ -238,12 +233,10 @@ private func expectTermination(_ actual: LoopTermination, _ expected: LoopTermin
   }
 }
 
-// MARK: - Tests
 
 @Suite
 struct AgentLoopTests {
 
-  // MARK: - Basic completions
 
   @Test func completesWithAssistantReply() async throws {
     let chunks = [
@@ -274,7 +267,6 @@ struct AgentLoopTests {
     #expect(stringContent(messages[1]) == "")
   }
 
-  // MARK: - Tool round limit
 
   @Test func toolRoundLimit() async throws {
     let chunks = [
@@ -292,7 +284,6 @@ struct AgentLoopTests {
     #expect(messages[0].role == .user)
   }
 
-  // MARK: - Single tool round → completion
 
   @Test func toolRoundThenCompletion() async throws {
     let toolChunks = [
@@ -331,7 +322,6 @@ struct AgentLoopTests {
     #expect(stringContent(messages[3]) == "done")
   }
 
-  // MARK: - Abort: before-http
 
   @Test func abortBeforeHTTP() async throws {
     let chunks = [
@@ -351,7 +341,6 @@ struct AgentLoopTests {
     #expect(messages[0].role == .user)
   }
 
-  // MARK: - Abort: post-stream-pre-tools
 
   /// In a single-SSE-chunk stream the calls are:
   ///   0: before-http  1: mid-stream  2: post-stream-pre-tools
@@ -373,7 +362,6 @@ struct AgentLoopTests {
     #expect(messages[0].role == .user)
   }
 
-  // MARK: - Abort: pre-tool
 
   /// Calls: 0:before-http 1:mid-stream 2:post-stream-pre-tools 3:pre-tool(inv[0])
   @Test func abortPreTool() async throws {
@@ -393,7 +381,6 @@ struct AgentLoopTests {
     #expect(messages[0].role == .user)
   }
 
-  // MARK: - Abort: during tool execution (AgentTurnInterruptedError from registry)
 
   /// Calls: 0:before-http 1:mid-stream 2:post-stream-pre-tools 3:pre-tool
   ///        4:registry.before-start  5:registry.watch-loop
@@ -414,7 +401,6 @@ struct AgentLoopTests {
     #expect(messages.count == 1)
   }
 
-  // MARK: - Abort: interrupts a hung HTTP request
 
   /// Regression: when the network is down (HTTP request suspends forever),
   /// `abort()` must unwind the loop promptly. Before the abort-race fix this
@@ -453,7 +439,6 @@ struct AgentLoopTests {
     )
   }
 
-  // MARK: - Unknown tool
 
   @Test func unknownToolReturnsJSONError() async throws {
     try await withTimeout(seconds: 5) {
@@ -496,7 +481,6 @@ struct AgentLoopTests {
     }
   }
 
-  // MARK: - HTTP error paths
 
   @Test func http404Error() async throws {
     let config = makeConfig(statusCode: 404, chunks: [errorBody("not found")])
@@ -566,7 +550,6 @@ struct AgentLoopTests {
     }
   }
 
-  // MARK: - Usage without completion tokens
 
   @Test func usageWithoutCompletionTokens() async throws {
     let chunks = [
@@ -596,7 +579,6 @@ struct AgentLoopTests {
     #expect(usageEvents[0].1 == nil)  // tps nil because no completion tokens
   }
 
-  // MARK: - Reasoning content
 
   @Test func reasoningContentIncludedInAssistantMessage() async throws {
     let chunks = [
@@ -613,7 +595,6 @@ struct AgentLoopTests {
     #expect(messages[1].reasoningContent == "Let me think...")
   }
 
-  // MARK: - Empty prompt messages
 
   @Test func emptyPromptMessagesWithInitialContext() async throws {
     let chunks = [
@@ -641,7 +622,6 @@ struct AgentLoopTests {
     #expect(stringContent(messages[0]) == "reply")
   }
 
-  // MARK: - Multiple tool calls in one round
 
   @Test func multipleToolCallsInOneRound() async throws {
     let toolChunks = [
@@ -682,7 +662,6 @@ struct AgentLoopTests {
     #expect(stringContent(messages[4]) == "all done")
   }
 
-  // MARK: - Tool that throws (error is caught and converted to jsonError)
 
   @Test func toolThatThrowsIsConvertedToJSONError() async throws {
     let chunks = [
@@ -719,7 +698,6 @@ struct AgentLoopTests {
     #expect(stringContent(messages[2])?.contains("ok") == true)
   }
 
-  // MARK: - Attachment-overflow recovery
 
   /// A tool whose result conforms to `AttachableToolResult` so the agent
   /// loop appends a synthetic-attachment user message after the tool result.
@@ -862,7 +840,6 @@ struct AgentLoopTests {
     }
   }
 
-  // MARK: - AgentTurnInterruptedError mid-stream
 
   @Test func midStreamAbortThrowsInterrupted() async throws {
     try await withTimeout(seconds: 5) {
@@ -882,7 +859,6 @@ struct AgentLoopTests {
   }
 }
 
-// MARK: - Error body helper
 
 private func errorBody(_ message: String) -> HTTPBody.ByteChunk {
   // Escape double quotes in the message

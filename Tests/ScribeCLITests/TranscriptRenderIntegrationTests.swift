@@ -4,7 +4,6 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - Transcript layout + viewport + render integration tests
 
 /// Simulates the host's render loop: transcript → flatten → viewport → render.
 /// Focused on catching any gap in the first-message scenario.
@@ -12,7 +11,6 @@ import Testing
 @MainActor
 struct TranscriptRenderIntegrationTests {
 
-  // MARK: - First-message: empty → non-empty transcript transition
 
   @Test func firstMessageFromEmptyTranscriptPaintsCorrectly() {
     let cols = 80
@@ -109,7 +107,6 @@ struct TranscriptRenderIntegrationTests {
       "Frame 2: Expected 'h' from 'hello' at row \(expectedFirstContentRow + 1) col 2, got '\(helloCell.text)'")
   }
 
-  // MARK: - Viewport stays in follow mode through empty→content transition
 
   @Test func viewportFollowsLiveThroughFirstMessage() {
     var viewport = TranscriptViewport()
@@ -133,7 +130,6 @@ struct TranscriptRenderIntegrationTests {
     #expect(viewport.followingLive == true)
   }
 
-  // MARK: - FlattenCache handles empty→non-empty transition
 
   @Test func flattenCacheAppendsNewLines() {
     var cache = TranscriptLayout.FlattenCache()
@@ -155,7 +151,6 @@ struct TranscriptRenderIntegrationTests {
     #expect(flat1[1].spans.first?.text == "  hello")
   }
 
-  // MARK: - Generation change resets cache
 
   @Test func generationChangeResetsFlattenCache() {
     var cache = TranscriptLayout.FlattenCache()

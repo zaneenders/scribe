@@ -4,7 +4,6 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
-// MARK: - ToolAttachment / ToolResult
 
 /// Media content returned by a tool — images, PDFs, audio, etc.
 ///
@@ -68,7 +67,6 @@ public protocol WarnableToolResult {
   var toolWarnings: [String] { get }
 }
 
-// MARK: - Tool executor result helper
 
 extension ToolResult {
   /// Create a text-only `ToolResult` suitable for error / unknown-tool reporting.
@@ -77,7 +75,6 @@ extension ToolResult {
   }
 }
 
-// MARK: - Tool protocol
 
 /// A tool that can be registered and invoked by the agent.
 ///
@@ -105,7 +102,6 @@ public protocol ScribeTool: Sendable {
   func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable
 }
 
-// MARK: - ScribeTool → ChatTool conversion
 
 extension ScribeTool {
   /// Converts this tool's schema into the `ChatTool` form the LLM API
@@ -146,7 +142,6 @@ extension ScribeTool {
   }
 }
 
-// MARK: - Tool parameter
 
 /// JSON Schema type for a tool parameter.
 public enum ScribeToolParameterType: String, Sendable {

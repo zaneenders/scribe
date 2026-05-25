@@ -8,7 +8,6 @@ import Testing
 @Suite
 struct SlateChatRendererBuildSemanticInputRowsTests {
 
-  // MARK: - Mode label
 
   @Test func editModeShowsEDITLabelInUserPrefixColor() {
     let theme = CLITheme.default
@@ -72,7 +71,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
     #expect(grid[0][5].text == " ")
   }
 
-  // MARK: - Cursor
 
   @Test func cursorAppearsOnLastRow() {
     let theme = CLITheme.default
@@ -128,7 +126,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
     #expect(grid[0][11].text == " ")
   }
 
-  // MARK: - Gutter
 
   @Test func continuationRowsUseGutter() {
     let theme = CLITheme.default
@@ -160,7 +157,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
     #expect(grid[1][6].text == "l")
   }
 
-  // MARK: - Spinner
 
   @Test func spinnerShowsWhenWaitingForLLM() {
     let theme = CLITheme.default
@@ -189,7 +185,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
     // After mode label is spinner glyph, then cursor (no "thinking..." text)
   }
 
-  // MARK: - Clipping
 
   @Test func buildSemanticInputRowsClipsToGridBounds() {
     let theme = CLITheme.default
@@ -243,14 +238,12 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
   }
 }
 
-// MARK: - queuedTrayVisualLines / queuedTrayRowCount
 
 /// Tests for `SlateChatRenderer.queuedTrayVisualLines` and `queuedTrayRowCount`
 /// — tray wrapping, capping, and row counting with the `String?` API.
 @Suite
 struct SlateChatRendererQueuedTrayTests {
 
-  // MARK: - queuedTrayVisualLines
 
   @Test func nilTextReturnsNoVisualLines() {
     let lines = SlateChatRenderer.queuedTrayVisualLines(queuedTrayText: nil, textWidth: 40)
@@ -287,7 +280,6 @@ struct SlateChatRendererQueuedTrayTests {
     #expect(lines.isEmpty)
   }
 
-  // MARK: - queuedTrayRowCount
 
   @Test func nilTextReturnsZeroRows() {
     let count = SlateChatRenderer.queuedTrayRowCount(queuedTrayText: nil, cols: 80)
@@ -306,7 +298,6 @@ struct SlateChatRendererQueuedTrayTests {
     #expect(count == 3)
   }
 
-  // MARK: - buildSemanticQueuedTrayRows
 
   @Test func buildSemanticQueuedTrayShowsQueuedPrefix() {
     let theme = CLITheme.default
@@ -411,7 +402,6 @@ struct SlateChatRendererQueuedTrayTests {
     #expect(grid[0][8].bg == theme.inputAreaBg)
   }
 
-  // MARK: - transcriptContentRows
 
   @Test func transcriptContentRowsAccountsForTrayRows() {
     // With nil tray text, content rows = full available space

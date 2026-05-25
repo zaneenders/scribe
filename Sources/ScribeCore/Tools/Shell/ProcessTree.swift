@@ -8,7 +8,6 @@ import Glibc
 import Musl
 #endif
 
-// MARK: - ProcessTreeReader
 
 /// Reads the direct children of a process. Production implementations hit
 /// `/proc` on Linux; tests inject a deterministic in-memory tree so the
@@ -23,7 +22,6 @@ package protocol ProcessTreeReader: Sendable {
   func children(of pid: pid_t) -> [pid_t]
 }
 
-// MARK: - Tree walker
 
 /// BFS-collects the descendants of `rootPid` using `reader`, returning the
 /// root followed by every transitively-reachable child in discovery order.
@@ -56,7 +54,6 @@ package func collectProcessTree(
   return pids
 }
 
-// MARK: - Linux /proc reader
 
 #if os(Linux)
 /// Reads child PIDs from `/proc/[pid]/task/[pid]/children`. The kernel

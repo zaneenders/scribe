@@ -9,14 +9,12 @@ public struct CLITheme: Sendable {
   /// Markdown styling (headings, bold, code, etc.).
   public var markdown: MarkdownTheme
 
-  // MARK: - Backgrounds
 
   /// Main transcript / grid background.
   public var background: TerminalRGB
   /// Bottom input-strip background.
   public var inputAreaBg: TerminalRGB
 
-  // MARK: - Transcript chrome
 
   /// "you:" prefix in transcript scrollback.
   public var userPrefix: TerminalRGB
@@ -51,7 +49,6 @@ public struct CLITheme: Sendable {
   /// Base text color for answer sections.
   public var answerBaseFG: TerminalRGB
 
-  // MARK: - Grid chrome (input area, spinner, banner)
 
   /// Input line text.
   public var inputText: TerminalRGB
@@ -72,7 +69,6 @@ public struct CLITheme: Sendable {
   /// Banner value text.
   public var bannerValue: TerminalRGB
 
-  // MARK: - Usage HUD
 
   /// Labels ("in", "out", "rate", "ctx", "reasoning", "cache", "turn Σ", "all Σ").
   public var usageLabel: TerminalRGB
@@ -99,7 +95,6 @@ public struct CLITheme: Sendable {
   /// Context-window percentage at or above the danger threshold.
   public var usageCtxPctDanger: TerminalRGB
 
-  // MARK: - Derived helpers
 
   /// Foreground color and bold flag for a streaming section.
   public func style(for section: AssistantStreamSection) -> (fg: TerminalRGB, bold: Bool) {
@@ -109,7 +104,6 @@ public struct CLITheme: Sendable {
     }
   }
 
-  // MARK: - Built-in themes
 
   /// Vibrant Easter-pastel dark-mode theme.
   public static let `default` = CLITheme(

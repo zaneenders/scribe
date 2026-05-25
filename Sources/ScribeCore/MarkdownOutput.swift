@@ -1,4 +1,3 @@
-// MARK: - Semantic markdown output types
 
 /// A styled span of text with a semantic kind (no terminal color dependencies).
 /// These types live in `ScribeCore` so they can be used by any host (TUI, web, etc.)

@@ -9,7 +9,6 @@ import Testing
 @Suite
 struct StreamedAssistantTurnTests {
 
-  // MARK: - Helpers
 
   private func makeChunk(
     content: String? = nil,
@@ -56,7 +55,6 @@ struct StreamedAssistantTurnTests {
     )
   }
 
-  // MARK: - Text accumulation
 
   @Test func accumulatesTextAcrossMultipleChunks() {
     var turn = StreamedAssistantTurn()
@@ -79,7 +77,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.text == "real")
   }
 
-  // MARK: - Reasoning accumulation
 
   @Test func accumulatesReasoningContentField() {
     var turn = StreamedAssistantTurn()
@@ -110,7 +107,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.reasoningText == "valid")
   }
 
-  // MARK: - Finish reason
 
   @Test func capturesFinishReasonFromChunk() {
     var turn = StreamedAssistantTurn()
@@ -134,7 +130,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.finishReason == "stop")
   }
 
-  // MARK: - Tool calls: simple assembly
 
   @Test func assemblesSingleToolCallFromStreamedDeltas() {
     var turn = StreamedAssistantTurn()
@@ -174,7 +169,6 @@ struct StreamedAssistantTurnTests {
     #expect(resolved[1].name == "read_file")
   }
 
-  // MARK: - Tool calls: edge cases
 
   @Test func toolCallMissingIdIsNotResolved() {
     var turn = StreamedAssistantTurn()
@@ -241,7 +235,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.resolvedToolCalls().isEmpty)
   }
 
-  // MARK: - Interleaved content + tool calls
 
   @Test func interleavesTextAndToolCalls() {
     var turn = StreamedAssistantTurn()
@@ -255,7 +248,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.resolvedToolCalls().count == 1)
   }
 
-  // MARK: - Tool calls: sorted by index
 
   @Test func resolvedToolCallsAreSortedByIndex() {
     var turn = StreamedAssistantTurn()

@@ -5,7 +5,6 @@ import Testing
 @Suite
 struct ScribeErrorTests {
 
-  // MARK: - Configuration errors
 
   @Test func configurationErrorDescriptionIncludesReason() {
     let error = ScribeError.configuration(key: "api.baseUrl", reason: "Base URL must be non-empty.")
@@ -17,7 +16,6 @@ struct ScribeErrorTests {
     #expect(error.errorDescription == "Could not load configuration.")
   }
 
-  // MARK: - API HTTP errors
 
   @Test func apiHTTPErrorWithDetailAndHint() {
     let error = ScribeError.apiHTTPError(statusCode: 404, detail: "not found", hint: " Check your URL.")
@@ -34,14 +32,12 @@ struct ScribeErrorTests {
     #expect(error.errorDescription == "chat/completions returned HTTP 401 — unauthorized")
   }
 
-  // MARK: - Session errors
 
   @Test func sessionCorruptedDescription() {
     let error = ScribeError.sessionCorrupted(reason: "Missing system message.")
     #expect(error.errorDescription == "Missing system message.")
   }
 
-  // MARK: - Resume errors
 
   @Test func resumeNotFoundDescription() {
     let error = ScribeError.resumeNotFound(specifier: "abc123")
@@ -53,21 +49,18 @@ struct ScribeErrorTests {
     #expect(error.errorDescription == "Ambiguous session prefix \"abc\"; use a longer id or a full path.")
   }
 
-  // MARK: - Input errors
 
   @Test func invalidInputDescription() {
     let error = ScribeError.invalidInput(message: "Empty --resume value.")
     #expect(error.errorDescription == "Empty --resume value.")
   }
 
-  // MARK: - Generic errors
 
   @Test func genericErrorDescription() {
     let error = ScribeError.generic("Something unexpected happened.")
     #expect(error.errorDescription == "Something unexpected happened.")
   }
 
-  // MARK: - Sendable conformance
 
   @Test func scribeErrorIsSendable() {
     let error: ScribeError = .configuration(key: "k", reason: "r")
@@ -75,7 +68,6 @@ struct ScribeErrorTests {
     _ = box
   }
 
-  // MARK: - Equatable-like distinguishability
 
   @Test func differentCasesAreNotEqual() {
     let a: ScribeError = .generic("a")

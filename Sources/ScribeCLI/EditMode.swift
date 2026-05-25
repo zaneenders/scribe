@@ -1,4 +1,3 @@
-// MARK: - Edit mode
 
 /// The two modal states for the input box (used by the chat host).
 ///

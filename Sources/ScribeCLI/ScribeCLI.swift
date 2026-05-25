@@ -207,7 +207,6 @@ import SystemPackage
     }
   }
 
-  // MARK: - Info
 
   private func printInfo(loaded: LoadedConfig) {
     let p = loaded.paths
@@ -268,7 +267,6 @@ extension ScribeCLI {
     path.replacingOccurrences(of: "'", with: "'\"'\"'")
   }
 
-  // MARK: - Session listing helpers
 
   func relativeTime(from date: Date) -> String {
     let delta = date.timeIntervalSinceNow * -1  // seconds ago

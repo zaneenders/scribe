@@ -1,4 +1,3 @@
-// MARK: - Transcript viewport
 
 /// Owns scroll position and follow-mode state for the transcript area.
 ///
@@ -21,7 +20,6 @@ struct TranscriptViewport: Equatable, Sendable {
   /// Overrides delta-based scrolling when set.
   private var pendingScrollToRow: Int?
 
-  // MARK: - Queue operations (call during key processing)
 
   mutating func queueScroll(by delta: Int) {
     pendingScrollDelta &+= delta
@@ -58,7 +56,6 @@ struct TranscriptViewport: Equatable, Sendable {
     pendingGoToBottom = false
   }
 
-  // MARK: - Resolve (call once per render frame)
 
   /// Apply all queued scroll operations and update tail tracking.
   /// Returns the effective `firstVisibleRow` to use for this frame.
@@ -97,7 +94,6 @@ struct TranscriptViewport: Equatable, Sendable {
     return updateTail(flatCount: flatCount, contentRows: contentRows)
   }
 
-  // MARK: - Internal helpers
 
   private mutating func applyScroll(delta: Int, flatCount: Int, contentRows: Int) {
     let maxTailStart = max(0, flatCount &- contentRows)

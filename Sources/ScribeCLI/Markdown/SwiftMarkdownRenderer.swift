@@ -170,7 +170,6 @@ private func delimiterText(for kind: DelimiterKind) -> String {
   }
 }
 
-// MARK: - Walker
 
 private struct TerminalMarkdownWalker: MarkupWalker {
   var lines: [TLine] = []
@@ -191,7 +190,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     self.theme = theme
   }
 
-  // MARK: Helpers
 
   mutating func flushLine() {
     lines.append(currentLine)
@@ -213,7 +211,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     }
   }
 
-  // MARK: Block elements
 
   mutating func visitParagraph(_ paragraph: Paragraph) {
     for child in paragraph.inlineChildren {
@@ -478,7 +475,6 @@ private struct TerminalMarkdownWalker: MarkupWalker {
     }
   }
 
-  // MARK: Inline elements
 
   mutating func visitText(_ text: Text) {
     // Safety-net: if the parser left `**`, `*`, or `` ` `` unparsed in a

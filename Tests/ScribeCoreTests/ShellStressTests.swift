@@ -14,7 +14,6 @@ import Glibc
 import Musl
 #endif
 
-// MARK: - Stress test
 
 /// Stress harness for `Shell.run` + cancellation. The historical bug
 /// being guarded against was a 100% CPU spin under "user mashes Ctrl+C
@@ -109,7 +108,6 @@ struct ShellStressTests {
     )
   }
 
-  // MARK: - getrusage / FD helpers
 
   /// Returns total user + system CPU consumed by *this* process across
   /// all threads (seconds). Used for absolute "CPU per iteration"

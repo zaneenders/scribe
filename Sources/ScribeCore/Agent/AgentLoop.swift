@@ -4,7 +4,6 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
-// MARK: - AgentContext / AgentLoopConfig
 
 /// Immutable snapshot of agent state taken before a run starts.
 ///
@@ -44,7 +43,6 @@ enum LoopTermination: Sendable {
   case toolRoundLimit(rounds: Int)
 }
 
-// MARK: - runAgentLoop
 
 /// Execute the agent loop for a set of prompt messages.
 ///
@@ -241,7 +239,6 @@ func runAgentLoop(
   }
 }
 
-// MARK: - Round outcome
 
 private enum RoundOutcome: Sendable, Equatable {
   case completed
@@ -257,7 +254,6 @@ private struct RoundExecutionResult: Sendable {
   let outcome: RoundOutcome
 }
 
-// MARK: - Single round
 
 /// Execute one LLM round: stream an assistant response, accumulate it, and
 /// return the outcome (completed or tool calls).
@@ -402,7 +398,6 @@ private func runSingleRound(
   return .toolCalls(toolInvocations)
 }
 
-// MARK: - Attachment-overflow recovery
 
 /// Heuristic: does this HTTP error look like a context-length / prompt-too-long
 /// failure that we can recover from by dropping over-sized tool attachments?

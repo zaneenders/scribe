@@ -1,4 +1,3 @@
-// MARK: - SubmitCoordinator
 
 /// Effects the host must perform in response to a submit action.
 /// Each case maps to exactly one host-side operation — no ambiguity.
@@ -31,7 +30,6 @@ struct SubmitCoordinator {
   /// Queued submissions (FIFO) parked while the model is busy.
   private(set) var queuedTexts: [String] = []
 
-  // MARK: - Inputs from host
 
   /// Call before `handleEnter` / `handleCtrlC` so the coordinator knows
   /// whether the model is currently processing a turn.
@@ -39,7 +37,6 @@ struct SubmitCoordinator {
     modelBusy = busy
   }
 
-  // MARK: - Enter key
 
   /// User pressed Enter with `text` in the input buffer.
   mutating func handleEnter(text: String) -> SubmitEffect {
@@ -65,7 +62,6 @@ struct SubmitCoordinator {
     return .sendToGate(text)
   }
 
-  // MARK: - Ctrl+C ladder
 
   /// Three-step ladder, evaluated in order:
   /// 1. Queued message present → recall oldest to input buffer.
@@ -82,7 +78,6 @@ struct SubmitCoordinator {
     return (.exitChat, nil)
   }
 
-  // MARK: - Model turn end (auto-flush)
 
   /// Called by the host when the model transitions from busy → idle.
   ///
@@ -103,7 +98,6 @@ struct SubmitCoordinator {
   }
 }
 
-// MARK: - Host-side effect application (testable)
 
 /// Host-side mutable state affected by `SubmitEffect` application.
 /// Pure value type — testable without any TUI infrastructure.
