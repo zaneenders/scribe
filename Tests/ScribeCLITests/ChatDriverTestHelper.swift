@@ -1,6 +1,8 @@
 import Foundation
 import ScribeCore
 
+@testable import ScribeCLI
+
 struct ChatDriver {
   var state: TranscriptState
   let renderer: MarkdownRenderer

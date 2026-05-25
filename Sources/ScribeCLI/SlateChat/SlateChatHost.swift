@@ -85,13 +85,26 @@ extension TranscriptLayout {
 }
 
 @MainActor
+internal protocol BoundaryPickerHost: AnyObject {
+  var sessionId: UUID { get }
+  var harness: SessionHarness { get }
+  var isHostActive: Bool { get }
+
+  func setModelBusy(_ busy: Bool)
+  func requestRender()
+  func enqueueTranscriptEvent(_ event: AgentEvent)
+  func handleIdentityChange(_ change: SessionIdentityChange)
+  func restoreTranscriptFromPickerBackup()
+}
+
+@MainActor
 internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
-  private let harness: SessionHarness
+  let harness: SessionHarness
   private let messageQueues: SessionMessageQueues
   private var sessionDirectory: FilePath
-  private var sessionId: UUID
+  private(set) var sessionId: UUID
   private var sessionCreatedAt: Date
   private var gate: UserLineGate = UserLineGate()
 
@@ -118,7 +131,7 @@ internal final class SlateChatHost {
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
 
-  private final class EventQueue: Sendable {
+  fileprivate final class EventQueue: Sendable {
     private let events: Mutex<[HostEvent]> = Mutex([])
 
     func enqueue(_ event: HostEvent) {
@@ -142,7 +155,6 @@ internal final class SlateChatHost {
   private var llmWaitAnimationFrame: Int = 0
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
-  private var coordinator: ChatCoordinator?
   private let logger: Logger
 
   init(
@@ -162,31 +174,19 @@ internal final class SlateChatHost {
     self.sessionCreatedAt = sessionCreatedAt
     self.logger = logger
 
+    pickerController.host = self
     pickerController.logger = logger
     pickerController.theme = theme
     pickerController.markdownRenderer = markdownRenderer
-    pickerController.setModelBusy = { [weak self] busy in
-      self?.modelBusy = busy
-    }
-    pickerController.requestRender = { [weak self] in
-      self?.renderWake?.requestRender()
-    }
-    pickerController.isHostActive = { [weak self] in
-      self?.hostActive ?? false
-    }
-    pickerController.currentSessionId = { [weak self] in
-      self?.sessionId ?? UUID()
-    }
-    pickerController.enqueueHostEvent = { [weak self] event in
-      self?.eventQueue.enqueue(event)
-    }
-    pickerController.restoreHostFromBackup = { [weak self] in
-      guard let self, let backup = self.pickerController.backupForRestore else { return }
-      self.transcriptState.lines = backup.lines
-      self.transcriptState.generation = backup.generation &+ 1
-      self.viewport = backup.viewport
-      self.flattenCache = TranscriptLayout.FlattenCache()
-    }
+    pickerController.configuration = configuration
+  }
+
+  func restoreTranscriptFromPickerBackup() {
+    guard let backup = pickerController.backupForRestore else { return }
+    transcriptState.lines = backup.lines
+    transcriptState.generation = backup.generation &+ 1
+    viewport = backup.viewport
+    flattenCache = TranscriptLayout.FlattenCache()
   }
 
   deinit {
@@ -200,12 +200,6 @@ internal final class SlateChatHost {
       prepare: { [self] wake in
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
-
-        self.pickerController.harness = self.harness
-        self.pickerController.onIdentityChange = { [weak self] change in
-          self?.handleIdentityChange(change)
-        }
-        self.pickerController.configuration = self.configuration
 
         Task { @MainActor in
           await self.refreshTranscriptFromDocument()
@@ -432,32 +426,30 @@ internal final class SlateChatHost {
           }
 
           let prepareStart = Date()
-          var renderState = RenderState(
-            transcriptLines: self.transcriptState.lines,
-            streamingOpenLine: self.transcriptState.streamingOpenLine,
-            generation: self.transcriptState.generation,
-            flattenCache: self.flattenCache,
-            banner: self.banner,
-            usageHUD: self.transcriptState.usageHUD,
-            inputBuffer: self.inputBuffer,
-            modelBusy: self.modelBusy,
-            queuedTraySnapshot: queuedTraySnapshot,
-            llmWaitAnimationFrame: self.llmWaitAnimationFrame,
-            viewport: self.viewport,
+          let flatTranscript = TranscriptLayout.FlattenCache.flatten(
+            cache: &self.flattenCache,
+            completed: self.transcriptState.lines,
+            open: self.transcriptState.streamingOpenLine,
+            width: scrCols,
+            generation: self.transcriptState.generation)
+          let frameContentRows = SlateChatRenderer.transcriptContentRows(
             cols: scrCols,
-            rows: scrRows
-          )
-          let output = RenderLoop.buildFrame(state: &renderState)
-          self.flattenCache = output.flattenCache
-          self.viewport = output.viewport
+            rows: scrRows,
+            banner: self.banner,
+            usage: self.transcriptState.usageHUD,
+            inputLine: self.inputBuffer,
+            waitingForLLM: self.modelBusy,
+            queuedTraySnapshot: queuedTraySnapshot)
+          _ = self.viewport.resolve(flatCount: flatTranscript.count, contentRows: frameContentRows)
+          let transcriptTailStart = self.viewport.firstVisibleRow
           let prepareMs = Int(Date().timeIntervalSince(prepareStart) * 1000)
 
           let submitStart = Date()
           let spanGrid = SlateChatRenderer.buildGrid(
             cols: scrCols,
             rows: scrRows,
-            flattenedTranscript: output.flattenedTranscript,
-            transcriptTailStart: output.transcriptTailStart,
+            flattenedTranscript: flatTranscript,
+            transcriptTailStart: transcriptTailStart,
             banner: self.banner,
             usage: self.transcriptState.usageHUD,
             inputLine: self.inputBuffer,
@@ -487,7 +479,7 @@ internal final class SlateChatHost {
                 "elapsed_ms": "\(totalMs)",
                 "prepare_ms": "\(prepareMs)",
                 "submit_ms": "\(submitMs)",
-                "flat_rows": "\(output.flattenedTranscript.count)",
+                "flat_rows": "\(flatTranscript.count)",
                 "cols": "\(scrCols)",
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
@@ -516,17 +508,49 @@ internal final class SlateChatHost {
     let (lineStream, lineCont) = AsyncStream<String>.makeStream()
     self.gate.setStreamContinuation(lineCont)
 
-    let coordinator = ChatCoordinator(
-      harness: harness,
-      logger: self.logger,
-      enqueue: { [eventQueue] event in
-        eventQueue.enqueue(event)
-      },
-      lines: lineStream
-    )
-    self.coordinator = coordinator
+    let harness = self.harness
+    let logger = self.logger
+    let eventQueue = self.eventQueue
     self.coordinatorTask = Task {
-      await coordinator.run()
+      let initialCount = await harness.messageCount
+      logger.debug("chat.coordinator.start", metadata: ["messages": "\(initialCount)"])
+
+      for await line in lineStream {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "exit" {
+          logger.notice("chat.user.exit-command")
+          break
+        }
+        if trimmed.isEmpty {
+          logger.trace("chat.user.empty-skip")
+          continue
+        }
+
+        logger.debug("agent.turn.dispatch", metadata: ["chars": "\(trimmed.count)"])
+
+        eventQueue.enqueue(.modelTurnRunning(true))
+        defer { eventQueue.enqueue(.modelTurnRunning(false)) }
+
+        do {
+          _ = try await harness.submit(
+            trimmed,
+            onUserPrompt: { text in eventQueue.enqueue(.userSubmitted(text)) }
+          ) { event in eventQueue.enqueue(.transcript(event)) }
+        } catch {
+          let se = (error as? ScribeError) ?? .generic(String(describing: error))
+          logger.error(
+            "agent.turn.end",
+            metadata: [
+              "status": "error",
+              "err": "\(se.errorDescription ?? String(describing: se))",
+            ])
+          eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
+        }
+      }
+
+      let finalCount = await harness.messageCount
+      logger.debug("chat.coordinator.end", metadata: ["transcript_messages": "\(finalCount)"])
+      eventQueue.enqueue(.coordinatorFinished)
     }
   }
 
@@ -540,7 +564,7 @@ internal final class SlateChatHost {
     flattenCache = TranscriptLayout.FlattenCache()
   }
 
-  private func handleIdentityChange(_ change: SessionIdentityChange) {
+  func handleIdentityChange(_ change: SessionIdentityChange) {
     handleIdentityChange(
       previous: change.previousSessionId,
       sessionId: change.newSessionId,
@@ -675,64 +699,68 @@ internal final class SlateChatHost {
       text: poppedText)
   }
 
-  private func applySubmitEffect(
-    _ effect: SubmitEffect
-  ) -> Bool {
-    let fx = HostSubmitSideEffects.from(effect)
-
-    if let text = fx.enqueueSteering {
+  private func applySubmitEffect(_ effect: SubmitEffect) -> Bool {
+    switch effect {
+    case .sendToGate(let text):
+      if !text.isEmpty { gate.complete(text) }
+      scheduleDelayedRenderWake()
+    case .popAndSendToGate:
+      popSteeringToGate(effect: effect)
+      scheduleDelayedRenderWake()
+    case .interruptAndSend(let text):
+      requestInterrupt(tag: "interrupt-and-send")
+      if !text.isEmpty { gate.complete(text) }
+      scheduleDelayedRenderWake()
+    case .popAndInterruptAndSend:
+      requestInterrupt(tag: "interrupt-and-send")
+      popSteeringToGate(effect: effect)
+      scheduleDelayedRenderWake()
+    case .enqueueSteering(let text):
       if messageQueues.enqueueSteering(text: text) {
         queueBatchTotal = max(queueBatchTotal, messageQueues.steeringCount())
         logger.debug(
           "chat.queue.steer",
           metadata: ["chars": "\(text.count)", "depth": "\(messageQueues.steeringCount())"])
       } else {
-        logger.debug(
-          "chat.queue.steer-skipped",
-          metadata: ["reason": "blank-after-trim"])
+        logger.debug("chat.queue.steer-skipped", metadata: ["reason": "blank-after-trim"])
       }
-    }
-    if let text = fx.enqueueFollowUp {
+    case .enqueueFollowUp(let text):
       if messageQueues.enqueueFollowUp(text: text) {
         logger.debug(
           "chat.queue.follow-up",
           metadata: ["chars": "\(text.count)", "depth": "\(messageQueues.followUpCount())"])
       } else {
-        logger.debug(
-          "chat.queue.follow-up-skipped",
-          metadata: ["reason": "blank-after-trim"])
+        logger.debug("chat.queue.follow-up-skipped", metadata: ["reason": "blank-after-trim"])
       }
-    }
-
-    if let tag = fx.interruptLogTag {
-      coordinator?.interrupt()
-      logger.trace(
-        "chat.interrupt-flag.\(tag)",
-        metadata: ["coordinator": coordinator == nil ? "nil" : "live"])
-    }
-
-    if fx.popSteeringToGate {
-      if let text = messageQueues.popSteeringForRecall(), !text.isEmpty {
-        recordSteeringPopDispatch(poppedText: text)
-        steeringLineOutstanding = true
-        gate.complete(text)
-      } else {
-        logger.warning(
-          "chat.queue.pop-missed",
-          metadata: ["reason": "steering-empty", "effect": "\(effect)"])
-      }
-    } else if let text = fx.gateText, !text.isEmpty {
-      gate.complete(text)
-    }
-
-    if fx.needsDelayedRenderWake {
-      scheduleDelayedRenderWake()
-    }
-    if fx.shouldExit {
+    case .interruptModel:
+      requestInterrupt(tag: "requested-by-ctrl-c")
+    case .exitChat:
       return true
+    case .recallSteeringToInput, .none:
+      break
     }
     renderWake?.requestRender()
     return false
+  }
+
+  private func popSteeringToGate(effect: SubmitEffect) {
+    if let text = messageQueues.popSteeringForRecall(), !text.isEmpty {
+      recordSteeringPopDispatch(poppedText: text)
+      steeringLineOutstanding = true
+      gate.complete(text)
+    } else {
+      logger.warning(
+        "chat.queue.pop-missed",
+        metadata: ["reason": "steering-empty", "effect": "\(effect)"])
+    }
+  }
+
+  private func requestInterrupt(tag: String) {
+    let harness = self.harness
+    Task { await harness.interrupt() }
+    logger.trace(
+      "chat.interrupt-flag.\(tag)",
+      metadata: ["coordinator": coordinatorTask == nil ? "nil" : "live"])
   }
 
   private func scheduleDelayedRenderWake() {
@@ -763,5 +791,21 @@ internal final class SlateChatHost {
     } catch {
       return nil
     }
+  }
+}
+
+extension SlateChatHost: BoundaryPickerHost {
+  var isHostActive: Bool { hostActive }
+
+  func setModelBusy(_ busy: Bool) {
+    modelBusy = busy
+  }
+
+  func requestRender() {
+    renderWake?.requestRender()
+  }
+
+  func enqueueTranscriptEvent(_ event: AgentEvent) {
+    eventQueue.enqueue(.transcript(event))
   }
 }
