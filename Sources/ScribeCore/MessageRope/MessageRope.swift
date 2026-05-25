@@ -1,4 +1,3 @@
-import ScribeLLM
 import _RopeModule
 
 
@@ -21,9 +20,9 @@ public struct MessageRope: Sendable {
   }
 
   /// Bulk-load from an array of messages, chunked into leaves of up to 32.
-  public init(_ messages: [Components.Schemas.ChatMessage]) {
+  public init(_ messages: [ScribeMessage]) {
     var elements: [Message] = []
-    var chunk: [Components.Schemas.ChatMessage] = []
+    var chunk: [ScribeMessage] = []
     chunk.reserveCapacity(MessageSummary.maxNodeSize)
     for msg in messages {
       chunk.append(msg)
@@ -54,41 +53,41 @@ public struct MessageRope: Sendable {
     _rope.isEmpty
   }
 
-  public var first: Components.Schemas.ChatMessage? {
+  public var first: ScribeMessage? {
     guard !isEmpty, let leaf = _rope.first else { return nil }
     return leaf.messages.first
   }
 
-  public var last: Components.Schemas.ChatMessage? {
+  public var last: ScribeMessage? {
     guard !isEmpty, let leaf = _rope.last else { return nil }
     return leaf.messages.last
   }
 
 
   /// O(log n) random access. `precondition`s on bounds.
-  public subscript(index: Int) -> Components.Schemas.ChatMessage {
+  public subscript(index: Int) -> ScribeMessage {
     precondition(index >= 0 && index < count, "MessageRope index out of bounds")
     return window(from: index, count: 1)[0]
   }
 
 
-  public mutating func append(_ message: Components.Schemas.ChatMessage) {
+  public mutating func append(_ message: ScribeMessage) {
     _rope.append(Message(messages: [message]))
   }
 
-  public mutating func append(contentsOf messages: [Components.Schemas.ChatMessage]) {
+  public mutating func append(contentsOf messages: [ScribeMessage]) {
     for m in messages { append(m) }
   }
 
 
   /// Return `requestedCount` messages starting at `start` (0-indexed).
-  public func window(from start: Int, count requestedCount: Int) -> [Components.Schemas.ChatMessage] {
+  public func window(from start: Int, count requestedCount: Int) -> [ScribeMessage] {
     guard start >= 0, requestedCount > 0, !isEmpty else { return [] }
     let metric = MessageMetric()
     let total = _rope.count(in: metric)
     guard start < total else { return [] }
     let end = min(start + requestedCount, total)
-    var result: [Components.Schemas.ChatMessage] = []
+    var result: [ScribeMessage] = []
     result.reserveCapacity(end - start)
 
     // Find the start index and walk forward collecting messages.
@@ -124,8 +123,8 @@ public struct MessageRope: Sendable {
   }
 
   /// Materialise the whole rope as an array. O(n).
-  public func toArray() -> [Components.Schemas.ChatMessage] {
-    var out: [Components.Schemas.ChatMessage] = []
+  public func toArray() -> [ScribeMessage] {
+    var out: [ScribeMessage] = []
     out.reserveCapacity(count)
     forEach { out.append($0) }
     return out
@@ -151,7 +150,7 @@ public struct MessageRope: Sendable {
   /// This is the primitive `/tldr` relies on: the picker's two cursors define
   /// a `Range<Int>` and the summarizer's output becomes the replacement.
   /// Out-of-bounds ranges are precondition failures (callers should clamp).
-  public mutating func splice(_ range: Range<Int>, with replacement: [Components.Schemas.ChatMessage]) {
+  public mutating func splice(_ range: Range<Int>, with replacement: [ScribeMessage]) {
     let total = count
     precondition(range.lowerBound >= 0, "splice lowerBound < 0")
     precondition(range.upperBound <= total, "splice upperBound > count")
@@ -166,7 +165,7 @@ public struct MessageRope: Sendable {
   }
 
 
-  public func forEach(_ body: (Components.Schemas.ChatMessage) throws -> Void) rethrows {
+  public func forEach(_ body: (ScribeMessage) throws -> Void) rethrows {
     for leaf in _rope {
       for msg in leaf.messages {
         try body(msg)
@@ -189,7 +188,7 @@ public struct MessageRope: Sendable {
       case .assistant:
         if let calls = message.toolCalls {
           for call in calls {
-            if let id = call.id { openToolCalls.insert(id) }
+            openToolCalls.insert(call.id)
           }
         }
       case .tool:

@@ -116,6 +116,23 @@ struct SessionDocumentTests {
   }
 
 
+  @Test func chatMessagesConvertsToWire() {
+    let doc = Self.makeDoc(seed: [
+      ScribeMessage(role: .system, content: "sys"),
+      ScribeMessage(role: .user, content: "hi"),
+    ])
+    let wire = doc.chatMessages()
+    #expect(wire.count == 2)
+    #expect(wire[0].role == .system)
+    #expect(wire[1].role == .user)
+    if case .case1(let text) = wire[1].content {
+      #expect(text == "hi")
+    } else {
+      Issue.record("Expected string content on wire message")
+    }
+  }
+
+
   @Test func safeForkBoundariesDelegatesToRope() {
     let doc = Self.makeDoc(seed: [
       ScribeMessage(role: .system, content: "sys"),

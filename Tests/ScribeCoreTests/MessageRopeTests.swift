@@ -1,5 +1,4 @@
 import ScribeCore
-import ScribeLLM
 import Testing
 
 @Suite
@@ -26,7 +25,7 @@ struct MessageRopeTests {
     let rope = MessageRope(msgs)
     #expect(rope.count == 100)
     for i in 0..<100 {
-      #expect(rope.window(from: i, count: 1).first?.textContent == "msg-\(i)")
+      #expect(rope.window(from: i, count: 1).first?.content == "msg-\(i)")
     }
   }
 
@@ -35,7 +34,7 @@ struct MessageRopeTests {
     var rope = MessageRope()
     rope.append(msg(role: .system, content: "sys"))
     #expect(rope.count == 1)
-    #expect(rope.first?.textContent == "sys")
+    #expect(rope.first?.content == "sys")
   }
 
   @Test func appendManyRoundTrips() {
@@ -45,9 +44,9 @@ struct MessageRopeTests {
     }
     #expect(rope.count == 500)
     // Spot-check window extraction at various positions.
-    #expect(rope.window(from: 0, count: 1).first?.textContent == "m0")
-    #expect(rope.window(from: 250, count: 1).first?.textContent == "m250")
-    #expect(rope.window(from: 499, count: 1).first?.textContent == "m499")
+    #expect(rope.window(from: 0, count: 1).first?.content == "m0")
+    #expect(rope.window(from: 250, count: 1).first?.content == "m250")
+    #expect(rope.window(from: 499, count: 1).first?.content == "m499")
   }
 
   @Test func appendAfterBulkLoad() {
@@ -57,10 +56,10 @@ struct MessageRopeTests {
       rope.append(msg(role: .assistant, content: "post-\(i)"))
     }
     #expect(rope.count == 100)
-    #expect(rope.window(from: 0, count: 1).first?.textContent == "pre-0")
-    #expect(rope.window(from: 49, count: 1).first?.textContent == "pre-49")
-    #expect(rope.window(from: 50, count: 1).first?.textContent == "post-0")
-    #expect(rope.window(from: 99, count: 1).first?.textContent == "post-49")
+    #expect(rope.window(from: 0, count: 1).first?.content == "pre-0")
+    #expect(rope.window(from: 49, count: 1).first?.content == "pre-49")
+    #expect(rope.window(from: 50, count: 1).first?.content == "post-0")
+    #expect(rope.window(from: 99, count: 1).first?.content == "post-49")
   }
 
 
@@ -69,8 +68,8 @@ struct MessageRopeTests {
     rope.append(msg(role: .system, content: "first"))
     rope.append(msg(role: .user, content: "middle"))
     rope.append(msg(role: .assistant, content: "last"))
-    #expect(rope.first?.textContent == "first")
-    #expect(rope.last?.textContent == "last")
+    #expect(rope.first?.content == "first")
+    #expect(rope.last?.content == "last")
   }
 
 
@@ -79,8 +78,8 @@ struct MessageRopeTests {
     let rope = MessageRope(msgs)
     let slice = rope.window(from: 0, count: 10)
     #expect(slice.count == 10)
-    #expect(slice.first?.textContent == "msg-0")
-    #expect(slice.last?.textContent == "msg-9")
+    #expect(slice.first?.content == "msg-0")
+    #expect(slice.last?.content == "msg-9")
   }
 
   @Test func windowFromMiddle() {
@@ -88,8 +87,8 @@ struct MessageRopeTests {
     let rope = MessageRope(msgs)
     let slice = rope.window(from: 40, count: 20)
     #expect(slice.count == 20)
-    #expect(slice.first?.textContent == "msg-40")
-    #expect(slice.last?.textContent == "msg-59")
+    #expect(slice.first?.content == "msg-40")
+    #expect(slice.last?.content == "msg-59")
   }
 
   @Test func windowNearEndClamps() {
@@ -97,8 +96,8 @@ struct MessageRopeTests {
     let rope = MessageRope(msgs)
     let slice = rope.window(from: 90, count: 20)
     #expect(slice.count == 10)
-    #expect(slice.first?.textContent == "msg-90")
-    #expect(slice.last?.textContent == "msg-99")
+    #expect(slice.first?.content == "msg-90")
+    #expect(slice.last?.content == "msg-99")
   }
 
   @Test func windowSimulatedViewportBottom() {
@@ -113,8 +112,8 @@ struct MessageRopeTests {
     let start = max(0, rope.count - total)
     let slice = rope.window(from: start, count: total)
     #expect(slice.count == total)
-    #expect(slice.first?.textContent == "m\(200 - total)")
-    #expect(slice.last?.textContent == "m199")
+    #expect(slice.first?.content == "m\(200 - total)")
+    #expect(slice.last?.content == "m199")
   }
 
   @Test func windowSimulatedViewportMiddle() {
@@ -130,7 +129,7 @@ struct MessageRopeTests {
     let start = max(0, scrollPos - buffer)
     let slice = rope.window(from: start, count: total)
     #expect(slice.count == total)
-    #expect(slice.first?.textContent == "m\(scrollPos - buffer)")
+    #expect(slice.first?.content == "m\(scrollPos - buffer)")
   }
 
   @Test func windowSimulatedViewportTop() {
@@ -144,8 +143,8 @@ struct MessageRopeTests {
     let total = viewportMessages + bufferBelow  // 29
     let slice = rope.window(from: 0, count: total)
     #expect(slice.count == total)
-    #expect(slice.first?.textContent == "m0")
-    #expect(slice.last?.textContent == "m\(total - 1)")
+    #expect(slice.first?.content == "m0")
+    #expect(slice.last?.content == "m\(total - 1)")
   }
 
 
@@ -156,7 +155,7 @@ struct MessageRopeTests {
     }
     rope.truncate(to: 50)
     #expect(rope.count == 50)
-    #expect(rope.last?.textContent == "m49")
+    #expect(rope.last?.content == "m49")
   }
 
   @Test func truncateToZero() {
@@ -176,10 +175,10 @@ struct MessageRopeTests {
     let win = rope.window(from: 50, count: 30)
     rope.truncate(to: 80)
     #expect(rope.count == 80)
-    #expect(rope.last?.textContent == "m79")
+    #expect(rope.last?.content == "m79")
     // Window snapshot unaffected.
     #expect(win.count == 30)
-    #expect(win.first?.textContent == "m50")
+    #expect(win.first?.content == "m50")
   }
 
 
@@ -187,7 +186,7 @@ struct MessageRopeTests {
     let msgs = (0..<128).map { msg(role: .user, content: "m\($0)") }
     let rope = MessageRope(msgs)
     var seen: [String] = []
-    rope.forEach { seen.append($0.textContent ?? "") }
+    rope.forEach { seen.append($0.content) }
     #expect(seen.count == 128)
     #expect(seen.first == "m0")
     #expect(seen.last == "m127")
@@ -206,7 +205,7 @@ struct MessageRopeTests {
           msg(
             role: .assistant, content: "",
             toolCalls: [
-              .init(id: "t\(turn)", _type: "function", function: .init(name: "shell", arguments: "{}"))
+              ScribeToolCall(id: "t\(turn)", name: "shell", arguments: "{}")
             ]))
         rope.append(msg(role: .tool, content: "output \(turn)", toolCallId: "t\(turn)"))
         rope.append(msg(role: .assistant, content: "After tool \(turn)."))
@@ -250,8 +249,8 @@ struct MessageRopeTests {
     let rope = MessageRope((0..<50).map { msg(role: .user, content: "m\($0)") })
     let slice = rope.window(from: 0, count: 50)
     #expect(slice.count == 50)
-    #expect(slice.first?.textContent == "m0")
-    #expect(slice.last?.textContent == "m49")
+    #expect(slice.first?.content == "m0")
+    #expect(slice.last?.content == "m49")
   }
 
 
@@ -259,14 +258,14 @@ struct MessageRopeTests {
     var rope = MessageRope((0..<50).map { msg(role: .user, content: "m\($0)") })
     rope.truncate(to: 50)
     #expect(rope.count == 50)
-    #expect(rope.last?.textContent == "m49")
+    #expect(rope.last?.content == "m49")
   }
 
   @Test func truncateToGreaterCountIsNoOp() {
     var rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
     rope.truncate(to: 100)
     #expect(rope.count == 10)
-    #expect(rope.last?.textContent == "m9")
+    #expect(rope.last?.content == "m9")
   }
 
   @Test func truncateFromOneToZeroThenAppend() {
@@ -276,7 +275,7 @@ struct MessageRopeTests {
     #expect(rope.isEmpty)
     rope.append(msg(role: .assistant, content: "after"))
     #expect(rope.count == 1)
-    #expect(rope.first?.textContent == "after")
+    #expect(rope.first?.content == "after")
   }
 
 
@@ -290,18 +289,18 @@ struct MessageRopeTests {
     // Truncate
     rope.truncate(to: 150)
     #expect(rope.count == 150)
-    #expect(rope.last?.textContent == "m149")
+    #expect(rope.last?.content == "m149")
     // Append more
     for i in 0..<50 {
       rope.append(msg(role: .assistant, content: "a\(i)"))
     }
     #expect(rope.count == 200)
-    #expect(rope.last?.textContent == "a49")
+    #expect(rope.last?.content == "a49")
     // Window still works
     let slice = rope.window(from: 140, count: 20)
     #expect(slice.count == 20)
-    #expect(slice.first?.textContent == "m140")
-    #expect(slice.last?.textContent == "a9")
+    #expect(slice.first?.content == "m140")
+    #expect(slice.last?.content == "a9")
   }
 
   @Test func manyTruncationsTriggerInternalRebalance() {
@@ -338,19 +337,19 @@ struct MessageRopeTests {
 
   @Test func subscriptReturnsMessageAtIndex() {
     let rope = MessageRope((0..<50).map { msg(role: .user, content: "m\($0)") })
-    #expect(rope[0].textContent == "m0")
-    #expect(rope[25].textContent == "m25")
-    #expect(rope[49].textContent == "m49")
+    #expect(rope[0].content == "m0")
+    #expect(rope[25].content == "m25")
+    #expect(rope[49].content == "m49")
   }
 
   @Test func subscriptCrossesLeafBoundary() {
     // 100 messages spans multiple 32-msg leaves; index 31 and 32 sit on a
     // leaf boundary so this catches any off-by-one in window().
     let rope = MessageRope((0..<100).map { msg(role: .user, content: "m\($0)") })
-    #expect(rope[31].textContent == "m31")
-    #expect(rope[32].textContent == "m32")
-    #expect(rope[63].textContent == "m63")
-    #expect(rope[64].textContent == "m64")
+    #expect(rope[31].content == "m31")
+    #expect(rope[32].content == "m32")
+    #expect(rope[63].content == "m63")
+    #expect(rope[64].content == "m64")
   }
 
 
@@ -358,32 +357,32 @@ struct MessageRopeTests {
     var rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
     rope.splice(3..<7, with: [msg(role: .assistant, content: "summary")])
     #expect(rope.count == 7)  // 10 - 4 removed + 1 added
-    #expect(rope[2].textContent == "m2")
-    #expect(rope[3].textContent == "summary")
-    #expect(rope[4].textContent == "m7")
-    #expect(rope[6].textContent == "m9")
+    #expect(rope[2].content == "m2")
+    #expect(rope[3].content == "summary")
+    #expect(rope[4].content == "m7")
+    #expect(rope[6].content == "m9")
   }
 
   @Test func spliceEmptyReplacementDeletes() {
     var rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
     rope.splice(2..<5, with: [])
     #expect(rope.count == 7)
-    #expect(rope[1].textContent == "m1")
-    #expect(rope[2].textContent == "m5")
+    #expect(rope[1].content == "m1")
+    #expect(rope[2].content == "m5")
   }
 
   @Test func spliceWholeRangeReplacesAll() {
     var rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
     rope.splice(0..<10, with: [msg(role: .system, content: "fresh")])
     #expect(rope.count == 1)
-    #expect(rope[0].textContent == "fresh")
+    #expect(rope[0].content == "fresh")
   }
 
   @Test func spliceAtEndIsAppend() {
     var rope = MessageRope((0..<3).map { msg(role: .user, content: "m\($0)") })
     rope.splice(3..<3, with: [msg(role: .assistant, content: "tail")])
     #expect(rope.count == 4)
-    #expect(rope.last?.textContent == "tail")
+    #expect(rope.last?.content == "tail")
   }
 
 
@@ -404,7 +403,7 @@ struct MessageRopeTests {
       msg(
         role: .assistant, content: "",
         toolCalls: [
-          .init(id: "t1", _type: "function", function: .init(name: "shell", arguments: "{}"))
+          ScribeToolCall(id: "t1", name: "shell", arguments: "{}")
         ]))
     rope.append(msg(role: .tool, content: "ok", toolCallId: "t1"))
     rope.append(msg(role: .assistant, content: "done"))
@@ -419,18 +418,16 @@ struct MessageRopeTests {
 
 
   private func msg(
-    role: Components.Schemas.ChatMessage.RolePayload,
+    role: ScribeMessage.Role,
     content: String,
-    toolCalls: [Components.Schemas.AssistantToolCall]? = nil,
+    toolCalls: [ScribeToolCall]? = nil,
     toolCallId: String? = nil
-  ) -> Components.Schemas.ChatMessage {
-    .init(
+  ) -> ScribeMessage {
+    ScribeMessage(
       role: role,
-      content: .case1(content),
-      name: nil,
+      content: content,
       toolCalls: toolCalls,
-      toolCallId: toolCallId,
-      reasoningContent: nil
+      toolCallId: toolCallId
     )
   }
 }
@@ -559,8 +556,8 @@ struct MessageTests {
     let right = left.split(at: 5)
     #expect(left.messages.count == 5)
     #expect(right.messages.count == 5)
-    #expect(left.messages.last?.textContent == "m4")
-    #expect(right.messages.first?.textContent == "m5")
+    #expect(left.messages.last?.content == "m4")
+    #expect(right.messages.first?.content == "m5")
   }
 
   @Test func splitAtZero() {
@@ -568,7 +565,7 @@ struct MessageTests {
     let right = left.split(at: 0)
     #expect(left.messages.isEmpty)
     #expect(right.messages.count == 1)
-    #expect(right.messages.first?.textContent == "only")
+    #expect(right.messages.first?.content == "only")
   }
 
   @Test func splitAtEnd() {
@@ -586,10 +583,10 @@ struct MessageTests {
     // Self was empty (undersized), maxNodeSize/2 = 16. Should pull 16 from right.
     #expect(!rightBecameEmpty)
     #expect(selfMsg.messages.count == 16)
-    #expect(selfMsg.messages.first?.textContent == "r0")
-    #expect(selfMsg.messages.last?.textContent == "r15")
+    #expect(selfMsg.messages.first?.content == "r0")
+    #expect(selfMsg.messages.last?.content == "r15")
     #expect(right.messages.count == 4)
-    #expect(right.messages.first?.textContent == "r16")
+    #expect(right.messages.first?.content == "r16")
   }
 
   @Test func rebalanceNextNeighborSelfHasMessagesRightEmptyPushesToRight() {
@@ -599,9 +596,9 @@ struct MessageTests {
     // Right was empty (undersized), self has 20, give = 20 - 16 = 4.
     #expect(!rightBecameEmpty)
     #expect(selfMsg.messages.count == 16)
-    #expect(selfMsg.messages.last?.textContent == "s15")
+    #expect(selfMsg.messages.last?.content == "s15")
     #expect(right.messages.count == 4)
-    #expect(right.messages.first?.textContent == "s16")
+    #expect(right.messages.first?.content == "s16")
   }
 
   @Test func rebalanceNextNeighborBothHaveContentNoOp() {
@@ -631,9 +628,9 @@ struct MessageTests {
     let result = selfMsg.rebalance(prevNeighbor: &left)
     #expect(!result)
     #expect(left.messages.count == 16)
-    #expect(left.messages.first?.textContent == "s0")
+    #expect(left.messages.first?.content == "s0")
     #expect(selfMsg.messages.count == 4)
-    #expect(selfMsg.messages.first?.textContent == "s16")
+    #expect(selfMsg.messages.first?.content == "s16")
   }
 
   @Test func rebalancePrevNeighborLeftEmptySwapsWhenSelfBecomesEmpty() {
@@ -645,7 +642,7 @@ struct MessageTests {
     #expect(result)
     // After swap: self has the message, left is empty.
     #expect(selfMsg.messages.count == 1)
-    #expect(selfMsg.messages.first?.textContent == "only")
+    #expect(selfMsg.messages.first?.content == "only")
     #expect(left.messages.isEmpty)
   }
 
@@ -660,25 +657,9 @@ struct MessageTests {
 
 
   private func msg(
-    role: Components.Schemas.ChatMessage.RolePayload,
+    role: ScribeMessage.Role,
     content: String
-  ) -> Components.Schemas.ChatMessage {
-    .init(
-      role: role,
-      content: .case1(content),
-      name: nil,
-      toolCalls: nil,
-      toolCallId: nil,
-      reasoningContent: nil
-    )
-  }
-}
-
-// Test-local accessor: pulls the plain-text branch of `ChatMessage.content`
-// (the only branch the rope tests construct).
-extension Components.Schemas.ChatMessage {
-  fileprivate var textContent: String? {
-    if case .case1(let s) = content { return s }
-    return nil
+  ) -> ScribeMessage {
+    ScribeMessage(role: role, content: content)
   }
 }
