@@ -4,7 +4,6 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - TranscriptController tests
 
 /// Tests for the `TranscriptController` pure state machine — every event arm
 /// is exercised without a running TUI, Slate, or async machinery.
@@ -14,7 +13,6 @@ struct TranscriptControllerTests {
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
-  // MARK: - applyUserSubmitted (direct call — no longer a AgentEvent)
 
   @Test func userSubmittedProducesYouPrefix() {
     var state = TranscriptState()
@@ -42,7 +40,6 @@ struct TranscriptControllerTests {
     #expect(state.lines[2].spans[0].text.contains("world"))
   }
 
-  // MARK: - .toolInvocation (blank line now appended internally)
 
   @Test func toolInvocationAppendsTrailingBlankLine() {
     var state = TranscriptState()
@@ -60,7 +57,6 @@ struct TranscriptControllerTests {
     #expect(firstLine.contains("shell"))
   }
 
-  // MARK: - .harnessError
 
   @Test func harnessError() {
     var state = TranscriptState()
@@ -73,7 +69,6 @@ struct TranscriptControllerTests {
     #expect(state.lines[0].spans.map(\.text).joined().contains("test error"))
   }
 
-  // MARK: - .turnInterrupted
 
   @Test func turnInterrupted() {
     var state = TranscriptState()
@@ -91,7 +86,6 @@ struct TranscriptControllerTests {
     #expect(state.lines.last?.spans.map(\.text).joined() == "(interrupted)")
   }
 
-  // MARK: - .emptyAssistantTurn
 
   @Test func emptyAssistantTurn() {
     var state = TranscriptState()
@@ -104,7 +98,6 @@ struct TranscriptControllerTests {
     #expect(state.lines[1].spans[0].text == "(empty turn)")
   }
 
-  // MARK: - .enterAssistantSection
 
   @Test func enterAssistantSectionAnswer() {
     var state = TranscriptState()
@@ -136,7 +129,6 @@ struct TranscriptControllerTests {
     #expect(labelLine == "  · reasoning")
   }
 
-  // MARK: - .finalizeAssistantStream (blank line now appended internally)
 
   @Test func finalizeAssistantStreamAppendsTrailingBlankLine() {
     var state = TranscriptState()
@@ -153,7 +145,6 @@ struct TranscriptControllerTests {
     #expect(state.lines.last?.spans.isEmpty == true)
   }
 
-  // MARK: - .usage
 
   @Test func usageUpdatesHUD() {
     var state = TranscriptState()
@@ -197,7 +188,6 @@ struct TranscriptControllerTests {
     #expect(state.usageHUD?.contextWindowUsedPercent == 50)
   }
 
-  // MARK: - Streaming rendering respects followingLive
 
   @Test func appendAssistantTextSkipsRenderWhenScrolledUp() {
     var state = TranscriptState()

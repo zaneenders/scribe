@@ -3,7 +3,6 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - HostSubmitState tests
 
 /// Tests for `HostSubmitState.apply` — the pure function that translates
 /// `SubmitEffect` into host-side state mutations and side-effect descriptions.
@@ -15,7 +14,6 @@ import Testing
 @Suite
 struct HostSubmitStateTests {
 
-  // MARK: - .sendToGate
 
   @Test func sendToGatePreservesEmptyTray() {
     var state = HostSubmitState(queuedTrayTexts: ["stale zombie text"])
@@ -34,7 +32,6 @@ struct HostSubmitStateTests {
     #expect(fx.gateText == "hello")
   }
 
-  // MARK: - .interruptAndSend
 
   @Test func interruptAndSendPreservesTrayState() {
     var state = HostSubmitState(queuedTrayTexts: ["stale zombie text"])
@@ -53,7 +50,6 @@ struct HostSubmitStateTests {
     #expect(fx.gateText == "urgent")
   }
 
-  // MARK: - .setQueued
 
   @Test func setQueuedStoresTexts() {
     var state = HostSubmitState(queuedTrayTexts: [])
@@ -71,7 +67,6 @@ struct HostSubmitStateTests {
     #expect(state.queuedTrayTexts == ["new message", "another"])
   }
 
-  // MARK: - .clearQueued
 
   @Test func clearQueuedUpdatesTrayTexts() {
     var state = HostSubmitState(queuedTrayTexts: ["something queued", "more"])
@@ -86,7 +81,6 @@ struct HostSubmitStateTests {
     #expect(state.queuedTrayTexts == [])
   }
 
-  // MARK: - .interruptModel
 
   @Test func interruptModelDoesNotChangeQueuedTrayTexts() {
     var state = HostSubmitState(queuedTrayTexts: [])
@@ -107,7 +101,6 @@ struct HostSubmitStateTests {
     #expect(fx.interruptLogTag == "requested-by-ctrl-c")
   }
 
-  // MARK: - .exitChat
 
   @Test func exitChatSetsShouldExit() {
     var state = HostSubmitState(queuedTrayTexts: [])
@@ -118,7 +111,6 @@ struct HostSubmitStateTests {
     #expect(fx.needsDelayedRenderWake == false)
   }
 
-  // MARK: - .none
 
   @Test func noneIsNoOp() {
     var state = HostSubmitState(queuedTrayTexts: ["keep me"])
@@ -127,7 +119,6 @@ struct HostSubmitStateTests {
     #expect(fx == HostSubmitState.SideEffects())
   }
 
-  // MARK: - Idempotency of clear operations
 
   @Test func doubleClearIsHarmless() {
     var state = HostSubmitState(queuedTrayTexts: ["msg", "another"])

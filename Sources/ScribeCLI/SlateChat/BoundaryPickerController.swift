@@ -4,7 +4,6 @@ import ScribeCore
 import SlateCore
 import SystemPackage
 
-// MARK: - BoundaryPickerController
 
 /// Owns all boundary-picker state and logic for `/fork` and `/tldr` commands.
 ///
@@ -15,7 +14,6 @@ import SystemPackage
 @MainActor
 internal final class BoundaryPickerController {
 
-  // MARK: - Picker state (owned)
 
   /// Active picker snapshot; `nil` when the picker is closed.
   private(set) var picker: PickerSnapshot?
@@ -47,17 +45,16 @@ internal final class BoundaryPickerController {
     pickerBackup
   }
 
-  // MARK: - Dependencies (set by host after init)
 
-  /// Borrow the host-owned ``SessionDocument`` long enough to copy out a
-  /// snapshot. The picker doesn't get a reference to the doc itself — only
-  /// the host owns the `~Copyable` value.
-  var snapshot: (@MainActor () -> [ScribeMessage])?
+  /// Borrow the host-owned ``SessionDocument`` long enough to read a
+  /// message slice (for `/tldr` summarization). The picker doesn't get
+  /// a reference to the doc itself — only the host owns the `~Copyable`
+  /// value.
+  var messagesInRange: (@MainActor (Range<Int>) -> [ScribeMessage])?
   /// Apply an `EditOp` (`.fork` or `.forkSplice`) to the host-owned
-  /// document. The host inspects the returned ``ChangeSet`` and updates
-  /// transcript / banner / exit-hint state inline; the picker only needs
-  /// to know the call succeeded.
-  var applyEdit: (@MainActor (EditOp) async throws -> ChangeSet)?
+  /// document. The host updates transcript / banner / exit-hint state
+  /// inline; the picker only needs to know the call succeeded.
+  var applyEdit: (@MainActor (EditOp) async throws -> Void)?
   var configuration: ScribeConfig = ScribeConfig(
     agentModel: "", contextWindow: 0, contextWindowThreshold: 0,
     serverURL: "", apiKey: nil, workingDirectory: ".", reasoningEnabled: false)
@@ -65,7 +62,6 @@ internal final class BoundaryPickerController {
   var theme: CLITheme = .default
   var markdownRenderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
-  // MARK: - Host callbacks
 
   /// Set the model-busy flag on the host.
   var setModelBusy: ((Bool) -> Void)?
@@ -87,7 +83,6 @@ internal final class BoundaryPickerController {
   /// cannot be captured).
   var restoreHostFromBackup: (() -> Void)?
 
-  // MARK: - Input routing
 
   /// Returns `true` when the picker consumed the action; the host should skip
   /// normal input processing for that action.
@@ -114,30 +109,28 @@ internal final class BoundaryPickerController {
     return true
   }
 
-  // MARK: - Open
 
   /// Open the boundary picker.  Returns `true` when the picker is now active.
   ///
-  /// The caller is responsible for fetching the current document snapshot
-  /// (the doc is an actor; the picker stays sync). Without the doc the
-  /// picker can't run; with `modelBusy == true` the snapshot would be
-  /// stale (mid-turn) so we refuse to open.
+  /// The caller passes a borrow of the host-owned document. Without the
+  /// doc the picker can't run; with `modelBusy == true` the content would
+  /// be stale (mid-turn) so we refuse to open.
   func open(
     kind: PickerSnapshot.Kind,
-    messages: [ScribeMessage],
+    document: borrowing SessionDocument,
     modelBusy: Bool,
     transcriptState: inout TranscriptState,
     viewport: inout TranscriptViewport,
     flattenCache: inout TranscriptLayout.FlattenCache
   ) -> Bool {
-    // Snapshot lags the live coordinator while a turn is streaming.
+    // Document lags the live coordinator while a turn is streaming.
     if modelBusy {
       logger.notice(
         "chat.picker.open.skip",
         metadata: ["kind": "\(kind)", "reason": "model-busy"])
       return false
     }
-    let boundaries = messages.safeForkBoundaries()
+    let boundaries = document.safeForkBoundaries()
     switch kind {
     case .fork:
       guard !boundaries.isEmpty else {
@@ -155,20 +148,25 @@ internal final class BoundaryPickerController {
       }
     }
     let (startC, endC) = Self.defaultCursor(
-      kind: kind, messages: messages, boundaries: boundaries)
+      kind: kind, document: document, boundaries: boundaries)
     let snap = PickerSnapshot(
       kind: kind,
       boundaries: boundaries,
       startCursor: startC,
       endCursor: endC,
       activeIsEnd: false,
-      messageCount: messages.count,
-      previewText: Self.pickerPreview(for: messages, at: boundaries[startC]))
+      messageCount: document.count,
+      previewText: Self.pickerPreview(document: document, at: boundaries[startC]))
 
     // Render disk-persisted history once so cursor moves only restyle.
-    let rendered = renderMessagesToTranscriptWithStarts(
-      messages, theme: theme, renderer: markdownRenderer)
-    self.pickerMessages = messages
+    let rendered = renderDocumentToTranscriptWithStarts(
+      document, theme: theme, renderer: markdownRenderer)
+    var cachedMessages: [ScribeMessage] = []
+    cachedMessages.reserveCapacity(document.count)
+    for i in 0..<document.count {
+      cachedMessages.append(document[i])
+    }
+    self.pickerMessages = cachedMessages
     self.pickerBaseLines = rendered.lines
     self.pickerBaseStarts = rendered.messageStartLines
     self.pickerBackup = (transcriptState.lines, transcriptState.generation, viewport)
@@ -185,7 +183,6 @@ internal final class BoundaryPickerController {
     return true
   }
 
-  // MARK: - Cancel
 
   func cancel(
     transcriptState: inout TranscriptState,
@@ -220,7 +217,6 @@ internal final class BoundaryPickerController {
     scrollDirty = false
   }
 
-  // MARK: - Private: cursor movement
 
   private func moveCursor(
     by delta: Int,
@@ -264,7 +260,6 @@ internal final class BoundaryPickerController {
     applyPickerView(snapshot: snap, transcriptState: &transcriptState, flattenCache: &flattenCache)
   }
 
-  // MARK: - Private: confirm
 
   private func confirm(
     transcriptState: inout TranscriptState,
@@ -281,7 +276,7 @@ internal final class BoundaryPickerController {
     let logger = self.logger
     let parentSessionId = currentSessionId?() ?? UUID()
     let enqueue = enqueueHostEvent
-    guard let applyEdit = self.applyEdit, let snapshot = self.snapshot else {
+    guard let applyEdit = self.applyEdit, let messagesInRange = self.messagesInRange else {
       logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-document-callbacks"])
       setModelBusy?(false)
       requestRender?()
@@ -300,7 +295,7 @@ internal final class BoundaryPickerController {
     requestRender?()
 
     pickerActionTask?.cancel()
-    pickerActionTask = Task { [weak self] in
+    pickerActionTask = Task { [weak self, applyEdit, messagesInRange] in
       guard let self else { return }
       do {
         guard await MainActor.run(body: { self.isHostActive?() ?? false }) else { return }
@@ -308,7 +303,7 @@ internal final class BoundaryPickerController {
         let newId = UUID()
         switch kind {
         case .fork:
-          _ = try await applyEdit(.fork(cutAt: startCut, newSessionId: newId))
+          try await applyEdit(.fork(cutAt: startCut, newSessionId: newId))
           logger.notice(
             "chat.fork.create",
             metadata: [
@@ -317,20 +312,19 @@ internal final class BoundaryPickerController {
               "cut_at": "\(startCut)",
             ])
         case .tldr:
-          // `snapshot` is a synchronous `@MainActor` borrow; the doc
-          // isn't held across the LLM call below.
-          let messages = snapshot()
-          let slice = Array(messages[startCut..<endCut])
+          let slice = await MainActor.run {
+            messagesInRange(startCut..<endCut)
+          }
           let summary = try await SessionSummarizer.summarize(
             slice: slice, configuration: configuration, logger: logger)
           let replacement = [ScribeMessage(role: .assistant, content: summary)]
-          _ = try await applyEdit(
+          try await applyEdit(
             .forkSplice(
               startCut: startCut,
               endCut: endCut,
               replacement: replacement,
               newSessionId: newId))
-          let tailCount = max(0, messages.count - endCut)
+          let tailCount = max(0, pickerMessages.count - endCut)
           logger.notice(
             "chat.tldr.create",
             metadata: [
@@ -343,9 +337,8 @@ internal final class BoundaryPickerController {
               "summary_chars": "\(summary.count)",
             ])
         }
-        // `applyEdit` inside the host already inspects the returned
-        // ChangeSet and updates transcript / banner / exit hint inline.
-        // The picker only needs to release model-busy here.
+        // `applyEdit` inside the host already updates transcript / banner /
+        // exit hint inline. The picker only needs to release model-busy here.
         await MainActor.run { [weak self] in
           guard let self, self.isHostActive?() ?? false else { return }
           self.setModelBusy?(false)
@@ -374,7 +367,6 @@ internal final class BoundaryPickerController {
     }
   }
 
-  // MARK: - Private: picker view application
 
   private func applyPickerView(
     snapshot: PickerSnapshot,
@@ -428,7 +420,6 @@ internal final class BoundaryPickerController {
     scrollDirty = false
   }
 
-  // MARK: - Static helpers (pure functions)
 
   /// Build the picker-styled transcript lines and divider index.
   static func buildStyledLines(
@@ -513,9 +504,17 @@ internal final class BoundaryPickerController {
   }
 
   /// One-line preview of the message at `index`.
+  static func pickerPreview(document: borrowing SessionDocument, at index: Int) -> String {
+    if index >= document.count { return "<end of session>" }
+    return previewText(for: document[index])
+  }
+
   static func pickerPreview(for messages: [ScribeMessage], at index: Int) -> String {
     if index >= messages.count { return "<end of session>" }
-    let m = messages[index]
+    return previewText(for: messages[index])
+  }
+
+  private static func previewText(for m: ScribeMessage) -> String {
     let trimmed = m.content.trimmingCharacters(in: .whitespacesAndNewlines)
       .replacingOccurrences(of: "\n", with: " ")
     let snippet: String = {
@@ -530,7 +529,7 @@ internal final class BoundaryPickerController {
 
   /// Compute the picker's default cursor positions.
   static func defaultCursor(
-    kind: PickerSnapshot.Kind, messages: [ScribeMessage], boundaries: [Int]
+    kind: PickerSnapshot.Kind, document: borrowing SessionDocument, boundaries: [Int]
   ) -> (start: Int, end: Int?) {
     guard !boundaries.isEmpty else { return (0, nil) }
     switch kind {
@@ -539,7 +538,11 @@ internal final class BoundaryPickerController {
     case .tldr:
       let endIdx = boundaries.count - 1
       let startIdx: Int = {
-        if let lastUser = messages.lastIndex(where: { $0.role == .user }),
+        var lastUser: Int?
+        for i in 0..<document.count where document[i].role == .user {
+          lastUser = i
+        }
+        if let lastUser,
           let idx = boundaries.firstIndex(of: lastUser + 1),
           idx < endIdx
         {

@@ -2,7 +2,6 @@ import Foundation
 import ScribeCore
 import ScribeLLM
 
-// MARK: - TranscriptState
 
 /// Pure-value container for all transcript state the host manages.
 /// Owned by `TranscriptController`; the host holds a copy and passes
@@ -28,7 +27,6 @@ struct TranscriptState: Equatable {
   var usageHUD: UsageHUDSnapshot? = nil
 }
 
-// MARK: - TranscriptController
 
 /// Pure state machine for transcript events.
 ///
@@ -115,7 +113,6 @@ struct TranscriptController {
     }
   }
 
-  // MARK: - Private helpers
 
   private static func applyEnterAssistantSection(
     _ section: AssistantStreamSection,
@@ -353,7 +350,6 @@ struct TranscriptController {
     return Effects(needsRender: true)
   }
 
-  // MARK: - Helpers
 
   private static func isUserSubmissionLine(_ line: TLine, theme: CLITheme) -> Bool {
     guard !line.spans.isEmpty else { return false }

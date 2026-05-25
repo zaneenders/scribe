@@ -3,7 +3,6 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - TranscriptViewport tests
 
 /// Tests for the `TranscriptViewport` scroll state machine — a pure function of
 /// `(queued scroll deltas, flatCount, contentRows)` so it can be tested without a
@@ -11,7 +10,6 @@ import Testing
 @Suite
 struct TranscriptViewportTests {
 
-  // MARK: - Initial state
 
   @Test func initialFollowingLive() {
     let vp = TranscriptViewport()
@@ -19,7 +17,6 @@ struct TranscriptViewportTests {
     #expect(vp.firstVisibleRow == 0)
   }
 
-  // MARK: - Follow mode: tracks tail
 
   @Test func followModeTracksTail() {
     var vp = TranscriptViewport()
@@ -35,7 +32,6 @@ struct TranscriptViewportTests {
     #expect(first == 0)
   }
 
-  // MARK: - Scroll up breaks follow mode
 
   @Test func scrollUpBreaksFollowMode() {
     var vp = TranscriptViewport()
@@ -55,7 +51,6 @@ struct TranscriptViewportTests {
     #expect(vp.followingLive == false)
   }
 
-  // MARK: - Scroll down restores follow mode at bottom
 
   @Test func scrollDownReachesBottomRestoresFollow() {
     var vp = TranscriptViewport()
@@ -71,7 +66,6 @@ struct TranscriptViewportTests {
     #expect(vp.followingLive == true)
   }
 
-  // MARK: - Page up / page down
 
   @Test func pageUpMovesByContentHeight() {
     var vp = TranscriptViewport()
@@ -92,7 +86,6 @@ struct TranscriptViewportTests {
     #expect(first == 160)
   }
 
-  // MARK: - Go to top / bottom
 
   @Test func goToTopSetsZeroAndExitsFollow() {
     var vp = TranscriptViewport()
@@ -115,7 +108,6 @@ struct TranscriptViewportTests {
     #expect(vp.followingLive == true)
   }
 
-  // MARK: - Content shrinks while scrolled up
 
   @Test func contentShrinksWhileScrolledUpClampsToNewTail() {
     var vp = TranscriptViewport()
@@ -139,7 +131,6 @@ struct TranscriptViewportTests {
     #expect(first == 10)  // clamped to new tail
   }
 
-  // MARK: - Multiple queued scrolls combine
 
   @Test func multipleScrollDeltasAccumulate() {
     var vp = TranscriptViewport()
@@ -152,7 +143,6 @@ struct TranscriptViewportTests {
     #expect(first == 70)  // 80 - 10
   }
 
-  // MARK: - Zero content rows
 
   @Test func zeroContentRowsReturnsFlatCount() {
     var vp = TranscriptViewport()

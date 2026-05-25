@@ -155,7 +155,6 @@ struct ChatSessionPersistenceTests {
     }
   }
 
-  // MARK: - Incremental persist
 
   @Test func incrementalPersistWritesMetadataThenAppendsMessages() async throws {
     let dir = FileManager.default.temporaryDirectory
@@ -204,7 +203,6 @@ struct ChatSessionPersistenceTests {
     #expect(loaded[3].content == "q2")
   }
 
-  // MARK: - Fork
 
   @Test func forkSessionCopiesPrefixAndLinksParent() async throws {
     let tempRoot = FileManager.default.temporaryDirectory

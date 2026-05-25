@@ -1,7 +1,6 @@
 import ScribeLLM
 import _RopeModule
 
-// MARK: - MessageMetric
 
 /// Measures a `Message` in terms of raw message count.
 public struct MessageMetric: RopeMetric {

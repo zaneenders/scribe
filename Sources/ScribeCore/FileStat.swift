@@ -7,7 +7,6 @@ import Darwin
 import Glibc
 #endif
 
-// MARK: - POSIX stat wrapper
 
 /// Calls POSIX `stat()` on `path`. Returns `0` on success, `-1` on failure
 /// (with `errno` set).  Uses the C function directly (not the struct).
@@ -16,7 +15,6 @@ private func _posixStat(_ path: String, _ buf: UnsafeMutablePointer<Darwin.stat>
   stat(path, buf)
 }
 
-// MARK: - FileStat
 
 /// Synchronous file metadata from POSIX `stat()`.  Use only in contexts that
 /// cannot be made async; prefer `_NIOFileSystem` / `FileSystem.shared.info()`
@@ -58,7 +56,6 @@ public struct FileStat {
   }
 }
 
-// MARK: - Directory creation (sync)
 
 /// Create a directory and all intermediate directories, analogous to
 /// `mkdir -p`.  Returns without error when the directory already exists.
@@ -124,7 +121,6 @@ extension FilePath {
   }
 }
 
-// MARK: - Directory listing (sync)
 
 /// Returns the names of entries in the directory at `path`, excluding "."
 /// and "..".  Throws if the path cannot be opened as a directory.

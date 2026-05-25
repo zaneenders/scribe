@@ -4,14 +4,12 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - renderMessagesToTranscript tests
 
 /// Tests for `renderMessagesToTranscript()` — a pure function that walks persisted
 /// messages and produces styled transcript lines.
 @Suite
 struct TranscriptReplayTests {
 
-  // MARK: - Single-turn session with text only
 
   @Test func singleTurnTextOnly() {
     let messages: [ScribeMessage] = [
@@ -32,7 +30,6 @@ struct TranscriptReplayTests {
     #expect(lines[5].spans.first?.text == "Hi there!")
   }
 
-  // MARK: - Multi-line user submission
 
   @Test func multiLineUserSubmission() {
     let messages: [ScribeMessage] = [
@@ -49,7 +46,6 @@ struct TranscriptReplayTests {
     #expect(lines[3].spans.first?.text == "  line3")
   }
 
-  // MARK: - Reasoning + answer
 
   @Test func reasoningAndAnswer() {
     let messages: [ScribeMessage] = [
@@ -67,7 +63,6 @@ struct TranscriptReplayTests {
     #expect(texts.contains("  · answer"))
   }
 
-  // MARK: - Tool calls
 
   @Test func toolCallsWithOutput() {
     let messages: [ScribeMessage] = [
@@ -87,7 +82,6 @@ struct TranscriptReplayTests {
     #expect(texts.contains(where: { $0.contains("▶ shell") }))
   }
 
-  // MARK: - Empty assistant turn
 
   @Test func emptyAssistantTurn() {
     let messages: [ScribeMessage] = [
@@ -103,7 +97,6 @@ struct TranscriptReplayTests {
     #expect(texts.contains("  · answer"))
   }
 
-  // MARK: - Multiple turns
 
   @Test func multipleTurns() {
     let messages: [ScribeMessage] = [
@@ -122,7 +115,6 @@ struct TranscriptReplayTests {
     #expect(scribeCount == 2)
   }
 
-  // MARK: - Tool calls with multiple tools in one round
 
   @Test func multipleToolsInOneRound() {
     let messages: [ScribeMessage] = [
@@ -144,7 +136,6 @@ struct TranscriptReplayTests {
     #expect(texts.contains(where: { $0.contains("▶ shell") }))
   }
 
-  // MARK: - Skips system messages after the first
 
   @Test func skipsSystemMessages() {
     let messages: [ScribeMessage] = [
@@ -162,7 +153,6 @@ struct TranscriptReplayTests {
     #expect(texts.contains("you:"))
   }
 
-  // MARK: - Empty user content is skipped
 
   @Test func emptyUserContentSkipped() {
     let messages: [ScribeMessage] = [
@@ -177,7 +167,6 @@ struct TranscriptReplayTests {
     #expect(!texts.contains("you:"))
   }
 
-  // MARK: - renderMessagesToTranscriptWithStarts
 
   /// `messageStartLines` has length `count + 1`, starts at 0 for the first
   /// rendered message, ends at `lines.count`, and is non-decreasing.

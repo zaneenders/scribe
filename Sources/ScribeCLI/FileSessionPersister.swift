@@ -5,7 +5,6 @@ import ScribeCore
 import Synchronization
 import SystemPackage
 
-// MARK: - FileSessionPersister
 
 /// Disk-backed ``SessionPersister`` for the CLI: appends to `messages.jsonl`
 /// and writes `metadata.json` under `sessions/{uuid}/`.
@@ -15,7 +14,6 @@ import SystemPackage
 /// task without coordinating itself.
 final class FileSessionPersister: SessionPersister {
 
-  // MARK: - State
 
   private struct State {
     var sessionId: UUID
@@ -30,7 +28,6 @@ final class FileSessionPersister: SessionPersister {
   private let scribeVersion: String?
   private let logger: Logger
 
-  // MARK: - Init
 
   /// Open a persister for a fresh or resumed session.
   ///
@@ -86,32 +83,33 @@ final class FileSessionPersister: SessionPersister {
     self.logger = logger
   }
 
-  // MARK: - SessionPersister
 
   func append(_ messages: [ScribeMessage]) async throws {
     guard !messages.isEmpty else { return }
     do {
       try state.withLock { try $0.appender.append(messages) }
     } catch {
-      // Persistence is best-effort from the user's perspective — the doc
-      // already updated its in-memory rope. Log the failure but don't
-      // throw; tearing down the chat for a disk hiccup would be worse
-      // than continuing without that turn on disk.
+      // Persistence is best-effort from the user's perspective — log the
+      // failure but don't throw; tearing down the chat for a disk hiccup
+      // would be worse than continuing without that turn on disk.
       logger.error(
         "session.persister.append.fail",
         metadata: ["err": "\(String(describing: error))"])
     }
   }
 
-  func fork(
-    newContent: [ScribeMessage],
-    newSessionId: UUID,
-    parentSessionId: UUID,
-    parentForkPoint: Int
-  ) async throws -> (sessionId: UUID, directory: FilePath) {
+  func directory(for newSessionId: UUID) -> FilePath {
     let currentDir = state.withLock { $0.directory }
     let sessionsRoot = currentDir.removingLastComponent()
-    let newDir = sessionsRoot.appendingPathComponent(newSessionId.uuidString)
+    return sessionsRoot.appendingPathComponent(newSessionId.uuidString)
+  }
+
+  func openSession(
+    _ snapshot: SessionPersistenceSnapshot,
+    parent: SessionParent
+  ) async throws {
+    let newSessionId = snapshot.sessionId
+    let newDir = snapshot.directory
 
     // Create the new directory + write metadata + write content. The
     // caller commits to its in-memory doc only after this returns, so a
@@ -126,14 +124,14 @@ final class FileSessionPersister: SessionPersister {
       cwd: cwd,
       baseURL: baseURL,
       scribeVersion: scribeVersion,
-      parentSessionId: parentSessionId,
-      forkedAtIndex: parentForkPoint
+      parentSessionId: parent.sessionId,
+      forkedAtIndex: parent.forkPoint
     )
     try await ChatSessionStore.saveMetadata(meta, to: newDir)
 
     let newAppender = try ChatSessionStore.MessagesAppender(directory: newDir)
-    if !newContent.isEmpty {
-      try newAppender.append(newContent)
+    if !snapshot.messages.isEmpty {
+      try newAppender.append(snapshot.messages)
     }
 
     // Swap appender + identity atomically. The old appender's file handle
@@ -146,15 +144,13 @@ final class FileSessionPersister: SessionPersister {
     }
 
     logger.notice(
-      "session.persister.fork",
+      "session.persister.open",
       metadata: [
-        "parent": "\(parentSessionId.uuidString)",
+        "parent": "\(parent.sessionId.uuidString)",
         "child": "\(newSessionId.uuidString)",
-        "parent_fork_point": "\(parentForkPoint)",
-        "new_messages": "\(newContent.count)",
+        "parent_fork_point": "\(parent.forkPoint)",
+        "new_messages": "\(snapshot.messages.count)",
         "new_dir": "\(newDir.string)",
       ])
-
-    return (newSessionId, newDir)
   }
 }

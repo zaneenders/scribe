@@ -6,7 +6,6 @@ import Testing
 @Suite
 struct ImageSupportTests {
 
-  // MARK: - Magic-byte detection (raw data)
 
   @Test func detectsPNGByMagicBytes() {
     let data = Data([0x89, 0x50, 0x4E, 0x47])
@@ -64,7 +63,6 @@ struct ImageSupportTests {
     #expect(ImageSupport.detectImageType(data: data) == nil)
   }
 
-  // MARK: - File-based detection
 
   @Test func detectsImageFileByMagicBytes() throws {
     let dir = FileManager.default.temporaryDirectory
@@ -81,7 +79,6 @@ struct ImageSupportTests {
     #expect(ImageSupport.isImageFile(path: txtPath) == false)
   }
 
-  // MARK: - MIME type (magic bytes, not extension)
 
   @Test func detectImageTypeUsesMagicBytesNotExtension() throws {
     let dir = FileManager.default.temporaryDirectory

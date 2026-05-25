@@ -7,82 +7,88 @@ import Testing
 @Suite
 struct SessionDocumentTests {
 
-  // MARK: - Helpers
 
   private static func makeDoc(
-    initial: [ScribeMessage] = []
+    seed: [ScribeMessage] = []
   ) -> SessionDocument {
-    SessionDocument(
+    var doc = SessionDocument(
       sessionId: UUID(),
       directory: FilePath("/in-memory"),
-      initialMessages: initial,
       logger: Logger(label: "session-document-test")
     )
+    if !seed.isEmpty {
+      doc.append(seed)
+    }
+    return doc
   }
 
-  // MARK: - Append
+
+  @Test func subscriptReadsMessages() {
+    let doc = Self.makeDoc(seed: [
+      ScribeMessage(role: .system, content: "sys"),
+      ScribeMessage(role: .user, content: "hi"),
+    ])
+    #expect(doc.count == 2)
+    #expect(doc[0].content == "sys")
+    #expect(doc[1].content == "hi")
+  }
+
 
   @Test func appendGrowsRope() {
-    var doc = Self.makeDoc(initial: [ScribeMessage(role: .system, content: "sys")])
-    let change = doc.append([ScribeMessage(role: .user, content: "hi")])
+    var doc = Self.makeDoc(seed: [ScribeMessage(role: .system, content: "sys")])
+    let range = doc.append([ScribeMessage(role: .user, content: "hi")])
     #expect(doc.count == 2)
-    if case .appended(let range) = change {
-      #expect(range == 1..<2)
-    } else {
-      Issue.record("expected .appended")
-    }
+    #expect(range == 1..<2)
+    #expect(doc[1].content == "hi")
   }
 
   @Test func appendEmptyIsNoOp() {
-    var doc = Self.makeDoc(initial: [ScribeMessage(role: .system, content: "sys")])
-    let change = doc.append([])
+    var doc = Self.makeDoc(seed: [ScribeMessage(role: .system, content: "sys")])
+    let range = doc.append([])
     #expect(doc.count == 1)
-    if case .appended(let range) = change {
-      #expect(range == 1..<1)
-    }
+    #expect(range == 1..<1)
   }
 
-  // MARK: - Swap identity (fork)
+  @Test func emptyInitStartsWithZeroMessages() {
+    var doc = SessionDocument(
+      sessionId: UUID(),
+      directory: FilePath("/in-memory"),
+      logger: Logger(label: "session-document-test")
+    )
+    #expect(doc.count == 0)
+    _ = doc.append([ScribeMessage(role: .system, content: "seed")])
+    #expect(doc.count == 1)
+  }
 
-  @Test func swapIdentityBecomesNewSession() {
+
+  @Test func successorForkBecomesNewSession() {
     let initial: [ScribeMessage] = [
       ScribeMessage(role: .system, content: "sys"),
       ScribeMessage(role: .user, content: "q1"),
       ScribeMessage(role: .assistant, content: "a1"),
       ScribeMessage(role: .user, content: "q2"),
     ]
-    var doc = Self.makeDoc(initial: initial)
+    var doc = Self.makeDoc(seed: initial)
     let originalId = doc.sessionId
     let newId = UUID()
     let newDir = FilePath("/in-memory/\(newId.uuidString)")
-    let change = doc.swapIdentity(
-      cutAt: 2,
-      tail: [],
+    let successor = doc.successor(
+      splicing: 2..<doc.count,
       newSessionId: newId,
-      newDirectory: newDir,
-      reason: .fork
+      newDirectory: newDir
     )
+    doc = successor
 
     #expect(doc.count == 2)
-    let snap = doc.snapshot()
-    #expect(snap[0].content == "sys")
-    #expect(snap[1].content == "q1")
+    #expect(doc[0].content == "sys")
+    #expect(doc[1].content == "q1")
     #expect(doc.sessionId == newId)
     #expect(doc.directory == newDir)
-
-    if case .identityChanged(let prev, let now, let dir, let reason) = change {
-      #expect(prev == originalId)
-      #expect(now == newId)
-      #expect(dir == newDir)
-      if case .fork = reason {} else { Issue.record("expected .fork reason") }
-    } else {
-      Issue.record("expected .identityChanged")
-    }
+    #expect(doc.sessionId != originalId)
   }
 
-  // MARK: - Swap identity (tldr / splice)
 
-  @Test func swapIdentitySplicesReplacement() {
+  @Test func successorSplicesReplacement() {
     let initial: [ScribeMessage] = [
       ScribeMessage(role: .system, content: "sys"),
       ScribeMessage(role: .user, content: "q1"),
@@ -90,35 +96,28 @@ struct SessionDocumentTests {
       ScribeMessage(role: .user, content: "q2"),
       ScribeMessage(role: .assistant, content: "a2"),
     ]
-    var doc = Self.makeDoc(initial: initial)
+    var doc = Self.makeDoc(seed: initial)
     let summary = ScribeMessage(role: .assistant, content: "summary")
-    // forkSplice semantics: prefix(1) + [summary] + suffix(3...) =
-    // [sys, summary, q2, a2]. The host computes the tail; the doc just
-    // takes the prefix cut and the precomputed tail.
-    let suffix = Array(doc.snapshot()[3..<5])
-    let tail = [summary] + suffix
     let newId = UUID()
     let newDir = FilePath("/in-memory/\(newId.uuidString)")
-    _ = doc.swapIdentity(
-      cutAt: 1,
-      tail: tail,
+    let successor = doc.successor(
+      splicing: 1..<3,
+      inserting: [summary],
       newSessionId: newId,
-      newDirectory: newDir,
-      reason: .forkSplice
+      newDirectory: newDir
     )
+    doc = successor
 
-    let snap = doc.snapshot()
-    #expect(snap.count == 4)
-    #expect(snap[0].content == "sys")
-    #expect(snap[1].content == "summary")
-    #expect(snap[2].content == "q2")
-    #expect(snap[3].content == "a2")
+    #expect(doc.count == 4)
+    #expect(doc[0].content == "sys")
+    #expect(doc[1].content == "summary")
+    #expect(doc[2].content == "q2")
+    #expect(doc[3].content == "a2")
   }
 
-  // MARK: - Boundaries
 
   @Test func safeForkBoundariesDelegatesToRope() {
-    let doc = Self.makeDoc(initial: [
+    let doc = Self.makeDoc(seed: [
       ScribeMessage(role: .system, content: "sys"),
       ScribeMessage(role: .user, content: "q"),
     ])

@@ -3,98 +3,95 @@ import Logging
 import ScribeLLM
 import SystemPackage
 
-// MARK: - SessionDocument
-
 /// The single source of truth for a chat session's messages and identity.
 ///
 /// Owns a ``MessageRope`` and the session identity (id + on-disk
 /// directory). `SessionDocument` is `~Copyable`: the compiler enforces a
-/// single owner (the chat host). All reads are synchronous borrows; all
-/// mutations are synchronous and take `inout self`.
+/// single owner (the chat host). All reads are synchronous borrows via
+/// subscript and `count`; all mutations are synchronous and take
+/// `inout self` (append) or produce a successor (fork / tldr).
+///
+/// Message arrays are not part of the public surface — callers access
+/// content by index. Arrays appear only at I/O boundaries (incoming user
+/// input, agent output, disk wire format) via package helpers.
 ///
 /// Persistence is **not** the doc's concern. The owner pairs the doc
 /// with a ``SessionPersister`` and orchestrates the two — write to disk
 /// first, then commit the in-memory change here, so a persistence
-/// failure never leaves the rope ahead of disk. Keeping the doc's API
-/// sync-only sidesteps the "mutating async on actor-isolated property"
-/// rule that would otherwise force `nonisolated(unsafe)` on the host.
+/// failure never leaves the rope ahead of disk.
 public struct SessionDocument: ~Copyable {
-
-  // MARK: - Identity
 
   public private(set) var sessionId: UUID
   public private(set) var directory: FilePath
 
-  // MARK: - Truth
-
   private var rope: MessageRope
   private let logger: Logger
 
-  // MARK: - Init
-
-  /// Open a document over an in-memory ``MessageRope`` seeded with
-  /// `initialMessages`.
+  /// Open an empty document for a session identity.
   ///
-  /// - Parameters:
-  ///   - sessionId: Session UUID (matches the on-disk directory name).
-  ///   - directory: Session directory (`sessions/{uuid}`). Tracked for
-  ///     identity; the owner's persister is what actually reads/writes
-  ///     inside this path.
-  ///   - initialMessages: Pre-loaded transcript. For new sessions this
-  ///     is `[ScribeMessage(role: .system, content: prompt)]`. For
-  ///     resumed sessions it's whatever the owner restored from disk.
-  ///   - logger: Session logger; the doc emits `session.doc.*` events
-  ///     for each applied op.
+  /// Content enters through ``append(_:)`` (incoming user input, agent
+  /// output, or hydration from disk at an I/O boundary in the owner).
   public init(
     sessionId: UUID,
     directory: FilePath,
-    initialMessages: [ScribeMessage],
     logger: Logger
   ) {
     self.sessionId = sessionId
     self.directory = directory
-    self.rope = MessageRope(initialMessages.toChatMessages())
+    self.rope = MessageRope()
     self.logger = logger
   }
 
-  // MARK: - Reading
+  private init(
+    sessionId: UUID,
+    directory: FilePath,
+    rope: MessageRope,
+    logger: Logger
+  ) {
+    self.sessionId = sessionId
+    self.directory = directory
+    self.rope = rope
+    self.logger = logger
+  }
 
   public var count: Int { rope.count }
 
   public var isEmpty: Bool { rope.isEmpty }
 
-  /// Materialise the whole transcript. O(n). Prefer ``window(from:count:)``
-  /// when the caller only needs a viewport.
-  public borrowing func snapshot() -> [ScribeMessage] {
-    rope.toArray().map(ScribeMessage.init)
-  }
-
-  /// Snapshot in wire-type form for the agent loop, which already speaks
-  /// `Components.Schemas.ChatMessage`. Package-internal so embedders never
-  /// have to touch the OpenAI types.
-  package borrowing func snapshotChatMessages() -> [Components.Schemas.ChatMessage] {
-    rope.toArray()
-  }
-
-  public borrowing func window(from start: Int, count requestedCount: Int) -> [ScribeMessage] {
-    rope.window(from: start, count: requestedCount).map(ScribeMessage.init)
+  /// O(log n) random access to a single message.
+  public subscript(index: Int) -> ScribeMessage {
+    ScribeMessage(rope[index])
   }
 
   public borrowing func safeForkBoundaries() -> [Int] {
     rope.safeForkBoundaries()
   }
 
-  // MARK: - Mutating ops (sync)
+  /// Materialise the transcript for the agent loop. Package-internal —
+  /// embedders pass the result to ``ScribeAgent/run(_:history:)``.
+  package borrowing func agentHistory() -> [ScribeMessage] {
+    var out: [ScribeMessage] = []
+    out.reserveCapacity(count)
+    for i in 0..<count {
+      out.append(self[i])
+    }
+    return out
+  }
 
-  /// Append messages to the rope and return the index range they occupy.
+  /// Wire-type snapshot for transports that speak OpenAI chat messages.
+  package borrowing func chatMessages() -> [Components.Schemas.ChatMessage] {
+    rope.toArray()
+  }
+
+  /// Append incoming messages to the rope and return the index range they occupy.
   ///
   /// Sync — callers that mirror to disk should write through their
   /// ``SessionPersister`` **before** calling this, so a persistence
   /// failure never leaves the rope ahead of disk.
   @discardableResult
-  public mutating func append(_ messages: [ScribeMessage]) -> ChangeSet {
+  public mutating func append(_ messages: [ScribeMessage]) -> Range<Int> {
     guard !messages.isEmpty else {
-      return .appended(range: rope.count..<rope.count)
+      return rope.count..<rope.count
     }
     let startIndex = rope.count
     for m in messages.toChatMessages() {
@@ -107,50 +104,36 @@ public struct SessionDocument: ~Copyable {
         "added": "\(messages.count)",
         "total": "\(rope.count)",
       ])
-    return .appended(range: range)
+    return range
   }
 
-  /// Replace the rope with `currentMessages[0..<cutAt] + tail` and swap
-  /// the doc's identity to `newSessionId` + `newDirectory`. Returns the
-  /// resulting ``ChangeSet``.
+  /// Build a successor document by splicing `range` with `replacement`.
   ///
-  /// Sync — callers that mirror to disk should create the new session
-  /// directory + write the new content through their ``SessionPersister``
-  /// **before** calling this, so a persistence failure never leaves the
-  /// doc pointing at an unwritten session.
-  @discardableResult
-  public mutating func swapIdentity(
-    cutAt: Int,
-    tail: [ScribeMessage],
+  /// Borrowing — the original doc is intact, so the owner can persist
+  /// the successor first and only assign it (`self = successor`) if
+  /// persistence succeeds.
+  public borrowing func successor(
+    splicing range: Range<Int>,
+    inserting replacement: [ScribeMessage] = [],
     newSessionId: UUID,
-    newDirectory: FilePath,
-    reason: ChangeSet.IdentityChangeReason
-  ) -> ChangeSet {
-    precondition(cutAt >= 0 && cutAt <= rope.count, "swapIdentity cutAt out of bounds")
-    let previousSessionId = sessionId
-    let currentMessages = rope.toArray().map(ScribeMessage.init)
-
-    let newContent = Array(currentMessages.prefix(cutAt)) + tail
-    self.rope = MessageRope(newContent.toChatMessages())
-    self.sessionId = newSessionId
-    self.directory = newDirectory
-
+    newDirectory: FilePath
+  ) -> SessionDocument {
+    precondition(range.lowerBound >= 0 && range.upperBound <= count, "successor splice out of bounds")
+    var newRope = rope
+    newRope.splice(range, with: replacement.toChatMessages())
     logger.notice(
-      "session.doc.swap",
+      "session.doc.successor",
       metadata: [
-        "reason": "\(reason)",
-        "parent": "\(previousSessionId.uuidString)",
-        "child": "\(sessionId.uuidString)",
-        "cut_at": "\(cutAt)",
-        "tail_messages": "\(tail.count)",
-        "new_count": "\(rope.count)",
+        "splice": "\(range.lowerBound)..<\(range.upperBound)",
+        "replacement_messages": "\(replacement.count)",
+        "child": "\(newSessionId.uuidString)",
+        "new_count": "\(newRope.count)",
       ])
-
-    return .identityChanged(
-      previousSessionId: previousSessionId,
-      sessionId: sessionId,
-      directory: directory,
-      reason: reason
+    return SessionDocument(
+      sessionId: newSessionId,
+      directory: newDirectory,
+      rope: newRope,
+      logger: logger
     )
   }
 }

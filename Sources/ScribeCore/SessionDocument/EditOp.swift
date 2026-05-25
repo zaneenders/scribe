@@ -1,24 +1,21 @@
 import Foundation
 import SystemPackage
 
-// MARK: - EditOp
 
-/// The vocabulary of mutations that can be applied to a ``SessionDocument``.
+/// The vocabulary of mutations routed through a host's `applyEdit`.
 ///
-/// Every command that modifies session history — the agent's per-turn
-/// append, `/fork`, `/tldr`, and anything future — flows through
-/// ``SessionDocument/apply(_:)`` as one of these cases. The doc routes the
-/// op to its in-memory rope and its persister atomically, then emits the
-/// matching ``ChangeSet`` to subscribers.
+/// Every command that modifies session history — per-turn append, `/fork`,
+/// `/tldr`, and anything future — is expressed as one of these cases.
+/// The host orchestrates persistence and in-memory doc changes; the doc
+/// itself has no knowledge of ``EditOp``.
 public enum EditOp: Sendable {
 
-  /// Append the given messages to the tail of the current session.
-  /// Issued by ``ScribeAgent`` at the end of every turn.
+  /// Append incoming messages to the tail of the current session.
+  /// Issued by the coordinator after a ``ScribeAgent`` turn completes.
   case append([ScribeMessage])
 
   /// Implements `/fork`. Creates a new session whose content is
-  /// `messages[0..<cutAt]` of the current document, becomes that session
-  /// for subsequent writes, and preserves the original on disk.
+  /// `messages[0..<cutAt]` of the current document.
   ///
   /// - Parameters:
   ///   - cutAt: Index in the current rope (must be a value returned by
@@ -27,9 +24,7 @@ public enum EditOp: Sendable {
   case fork(cutAt: Int, newSessionId: UUID)
 
   /// Implements `/tldr`. Creates a new session whose content is
-  /// `messages[0..<startCut] + replacement + messages[endCut..<count]`,
-  /// becomes that session for subsequent writes, and preserves the
-  /// original on disk.
+  /// `messages[0..<startCut] + replacement + messages[endCut..<count]`.
   ///
   /// - Parameters:
   ///   - startCut: First index dropped (must be a safe fork boundary).
@@ -47,27 +42,14 @@ public enum EditOp: Sendable {
   )
 }
 
-// MARK: - ChangeSet
 
-/// What a ``SessionDocument`` observer sees after an ``EditOp`` lands.
-public enum ChangeSet: Sendable {
+/// Parent linkage recorded when a session is forked or summarized.
+public struct SessionParent: Sendable {
+  public let sessionId: UUID
+  public let forkPoint: Int
 
-  /// New messages were appended to the existing identity. `range` is the
-  /// half-open index range of new messages in the rope after the append.
-  case appended(range: Range<Int>)
-
-  /// The document moved to a new session identity (its rope content has
-  /// been entirely replaced and its writer points at a new directory).
-  /// Subscribers should re-read the full snapshot.
-  case identityChanged(
-    previousSessionId: UUID,
-    sessionId: UUID,
-    directory: FilePath,
-    reason: IdentityChangeReason
-  )
-
-  public enum IdentityChangeReason: Sendable {
-    case fork
-    case forkSplice
+  public init(sessionId: UUID, forkPoint: Int) {
+    self.sessionId = sessionId
+    self.forkPoint = forkPoint
   }
 }

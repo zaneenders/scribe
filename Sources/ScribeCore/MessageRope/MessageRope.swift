@@ -1,7 +1,6 @@
 import ScribeLLM
 import _RopeModule
 
-// MARK: - MessageRope
 
 /// A `Rope<Message>` specialised for chat history.
 ///
@@ -16,7 +15,6 @@ public struct MessageRope: Sendable {
 
   private var _rope: _Rope
 
-  // MARK: - Init
 
   public init() {
     self._rope = Rope()
@@ -47,7 +45,6 @@ public struct MessageRope: Sendable {
     self._rope = _rope
   }
 
-  // MARK: - Properties
 
   public var count: Int {
     _rope.count(in: MessageMetric())
@@ -67,7 +64,6 @@ public struct MessageRope: Sendable {
     return leaf.messages.last
   }
 
-  // MARK: - Subscript
 
   /// O(log n) random access. `precondition`s on bounds.
   public subscript(index: Int) -> Components.Schemas.ChatMessage {
@@ -75,7 +71,6 @@ public struct MessageRope: Sendable {
     return window(from: index, count: 1)[0]
   }
 
-  // MARK: - Append
 
   public mutating func append(_ message: Components.Schemas.ChatMessage) {
     _rope.append(Message(messages: [message]))
@@ -85,7 +80,6 @@ public struct MessageRope: Sendable {
     for m in messages { append(m) }
   }
 
-  // MARK: - Window
 
   /// Return `requestedCount` messages starting at `start` (0-indexed).
   public func window(from start: Int, count requestedCount: Int) -> [Components.Schemas.ChatMessage] {
@@ -137,7 +131,6 @@ public struct MessageRope: Sendable {
     return out
   }
 
-  // MARK: - Truncate
 
   public mutating func truncate(to newCount: Int) {
     precondition(newCount >= 0, "truncate count must be >= 0")
@@ -152,7 +145,6 @@ public struct MessageRope: Sendable {
     _rope.removeSubrange(newCount..<current, in: metric)
   }
 
-  // MARK: - Splice
 
   /// Replace `range` of messages with `replacement`.
   ///
@@ -173,7 +165,6 @@ public struct MessageRope: Sendable {
     self = MessageRope(arr)
   }
 
-  // MARK: - forEach
 
   public func forEach(_ body: (Components.Schemas.ChatMessage) throws -> Void) rethrows {
     for leaf in _rope {
@@ -183,7 +174,6 @@ public struct MessageRope: Sendable {
     }
   }
 
-  // MARK: - Fork boundaries
 
   /// Indices `i` at which the prefix `self[0..i)` forms a self-contained
   /// conversation — every assistant `tool_calls` has its matching `tool`

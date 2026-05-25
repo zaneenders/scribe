@@ -6,7 +6,6 @@ import Testing
 @Suite
 struct ScribeMessageTests {
 
-  // MARK: - Codable round-trip
 
   @Test func roundTripsUserMessage() throws {
     let msg = ScribeMessage(role: .user, content: "hello world")
@@ -86,7 +85,6 @@ struct ScribeMessageTests {
     #expect(decoded.contentParts == [.text("hello")])
   }
 
-  // MARK: - Decoding legacy / wire format
 
   /// Sessions saved before ``ScribeMessage`` existed encoded
   /// `Components.Schemas.ChatMessage` directly; the on-disk shape uses

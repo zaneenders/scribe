@@ -5,7 +5,6 @@ import Testing
 @Suite
 struct MessageRopeTests {
 
-  // MARK: - Init
 
   @Test func empty() {
     let rope = MessageRope()
@@ -31,7 +30,6 @@ struct MessageRopeTests {
     }
   }
 
-  // MARK: - Append
 
   @Test func appendToEmpty() {
     var rope = MessageRope()
@@ -65,7 +63,6 @@ struct MessageRopeTests {
     #expect(rope.window(from: 99, count: 1).first?.textContent == "post-49")
   }
 
-  // MARK: - first / last
 
   @Test func firstAndLast() {
     var rope = MessageRope()
@@ -76,7 +73,6 @@ struct MessageRopeTests {
     #expect(rope.last?.textContent == "last")
   }
 
-  // MARK: - Window
 
   @Test func windowFromStart() {
     let msgs = (0..<100).map { msg(role: .user, content: "msg-\($0)") }
@@ -152,7 +148,6 @@ struct MessageRopeTests {
     #expect(slice.last?.textContent == "m\(total - 1)")
   }
 
-  // MARK: - Truncate
 
   @Test func truncateShrinksCount() {
     var rope = MessageRope()
@@ -187,7 +182,6 @@ struct MessageRopeTests {
     #expect(win.first?.textContent == "m50")
   }
 
-  // MARK: - forEach
 
   @Test func forEachWalksAll() {
     let msgs = (0..<128).map { msg(role: .user, content: "m\($0)") }
@@ -199,7 +193,6 @@ struct MessageRopeTests {
     #expect(seen.last == "m127")
   }
 
-  // MARK: - Realistic chat shape
 
   @Test func realisticChatSequence() {
     var rope = MessageRope()
@@ -228,7 +221,6 @@ struct MessageRopeTests {
     #expect(win.count <= 34)
   }
 
-  // MARK: - Window edge cases
 
   @Test func windowStartPastEndReturnsEmpty() {
     let rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
@@ -262,7 +254,6 @@ struct MessageRopeTests {
     #expect(slice.last?.textContent == "m49")
   }
 
-  // MARK: - Truncate edge cases
 
   @Test func truncateToSameCountIsNoOp() {
     var rope = MessageRope((0..<50).map { msg(role: .user, content: "m\($0)") })
@@ -288,7 +279,6 @@ struct MessageRopeTests {
     #expect(rope.first?.textContent == "after")
   }
 
-  // MARK: - Chained operations
 
   @Test func appendTruncateWindowRoundTrip() {
     var rope = MessageRope()
@@ -330,7 +320,6 @@ struct MessageRopeTests {
     #expect(slice.count == 5)
   }
 
-  // MARK: - Role round-trip
 
   @Test func rolesSurviveRoundTrip() {
     var rope = MessageRope()
@@ -346,7 +335,6 @@ struct MessageRopeTests {
     #expect(rope.window(from: 3, count: 1).first?.toolCallId == "call_1")
   }
 
-  // MARK: - Subscript
 
   @Test func subscriptReturnsMessageAtIndex() {
     let rope = MessageRope((0..<50).map { msg(role: .user, content: "m\($0)") })
@@ -365,7 +353,6 @@ struct MessageRopeTests {
     #expect(rope[64].textContent == "m64")
   }
 
-  // MARK: - Splice
 
   @Test func spliceReplacesRange() {
     var rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
@@ -399,7 +386,6 @@ struct MessageRopeTests {
     #expect(rope.last?.textContent == "tail")
   }
 
-  // MARK: - safeForkBoundaries
 
   @Test func safeForkBoundariesAllSafe() {
     var rope = MessageRope()
@@ -431,7 +417,6 @@ struct MessageRopeTests {
     #expect(boundaries.contains(5))
   }
 
-  // MARK: - Helpers
 
   private func msg(
     role: Components.Schemas.ChatMessage.RolePayload,
@@ -450,7 +435,6 @@ struct MessageRopeTests {
   }
 }
 
-// MARK: - MessageSummaryTests
 
 @Suite
 struct MessageSummaryTests {
@@ -480,12 +464,10 @@ struct MessageSummaryTests {
   }
 }
 
-// MARK: - MessageTests
 
 @Suite
 struct MessageTests {
 
-  // MARK: - Init
 
   @Test func emptyInit() {
     let m = Message()
@@ -503,7 +485,6 @@ struct MessageTests {
     #expect(!m.isEmpty)
   }
 
-  // MARK: - isEmpty / isUndersized
 
   @Test func isEmptyTrue() {
     let m = Message()
@@ -525,7 +506,6 @@ struct MessageTests {
     #expect(!m.isUndersized)
   }
 
-  // MARK: - Summary
 
   @Test func summaryReflectsCount() {
     let m = Message(messages: (0..<5).map { msg(role: .user, content: "m\($0)") })
@@ -537,7 +517,6 @@ struct MessageTests {
     #expect(m.summary.isZero)
   }
 
-  // MARK: - invariantCheck
 
   @Test func invariantCheckDoesNotCrashForValidLeaf() {
     let m = Message(messages: (0..<16).map { msg(role: .user, content: "m\($0)") })
@@ -545,7 +524,6 @@ struct MessageTests {
     m.invariantCheck()
   }
 
-  // MARK: - Equatable
 
   @Test func equalWhenSameMessages() {
     let a = Message(messages: [msg(role: .user, content: "hi")])
@@ -575,7 +553,6 @@ struct MessageTests {
     #expect(Message() == Message())
   }
 
-  // MARK: - Split
 
   @Test func splitAtMiddle() {
     var left = Message(messages: (0..<10).map { msg(role: .user, content: "m\($0)") })
@@ -601,7 +578,6 @@ struct MessageTests {
     #expect(right.messages.isEmpty)
   }
 
-  // MARK: - Rebalance nextNeighbor
 
   @Test func rebalanceNextNeighborSelfEmptyPullsFromRight() {
     var selfMsg = Message()
@@ -646,7 +622,6 @@ struct MessageTests {
     #expect(right.messages.isEmpty)
   }
 
-  // MARK: - Rebalance prevNeighbor
 
   @Test func rebalancePrevNeighborLeftEmptyPullsNoSwapWhenSelfNotEmpty() {
     // left empty, self has 20. left pulls 16 from self, self keeps 4.
@@ -683,7 +658,6 @@ struct MessageTests {
     #expect(selfMsg.messages.count == 16)
   }
 
-  // MARK: - Helpers
 
   private func msg(
     role: Components.Schemas.ChatMessage.RolePayload,

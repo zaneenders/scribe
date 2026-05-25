@@ -1,6 +1,5 @@
 import _RopeModule
 
-// MARK: - MessageSummary
 
 /// Count-based summary for chat messages.  Each message contributes 1.
 public struct MessageSummary: RopeSummary {

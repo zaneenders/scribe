@@ -2,7 +2,6 @@ import SystemPackage
 import Foundation
 import Logging
 
-// MARK: - ToolExecutor
 
 /// Pluggable backend that resolves a single tool invocation to its
 /// JSON-encoded output. Default impl: ``ToolRegistry``.

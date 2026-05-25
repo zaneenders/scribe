@@ -36,7 +36,6 @@ public struct ScribeUsage: Sendable, Hashable {
   }
 }
 
-// MARK: - Bridge from Components.Schemas.CompletionUsage
 
 extension ScribeUsage {
   /// Build a ``ScribeUsage`` from the OpenAPI-generated wire type. Kept

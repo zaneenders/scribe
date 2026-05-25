@@ -1,7 +1,6 @@
 import Foundation
 import ScribeLLM
 
-// MARK: - TurnStream
 
 /// A live stream of ``AgentEvent`` values plus a deferred result that
 /// resolves when the turn completes (success, interruption, or error).
@@ -22,7 +21,6 @@ public struct TurnStream: Sendable {
   }
 }
 
-// MARK: - TurnResult
 
 /// The outcome of a model turn.
 ///

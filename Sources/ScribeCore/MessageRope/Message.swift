@@ -1,7 +1,6 @@
 import ScribeLLM
 import _RopeModule
 
-// MARK: - Message
 
 /// A leaf buffer holding zero or more `ChatMessage` values.
 ///
@@ -12,7 +11,6 @@ public struct Message: RopeElement, Sendable {
 
   public var messages: [Components.Schemas.ChatMessage]
 
-  // MARK: - RopeElement
 
   public var summary: MessageSummary { MessageSummary(count: messages.count) }
 
@@ -65,7 +63,6 @@ public struct Message: RopeElement, Sendable {
     return Message(messages: tail)
   }
 
-  // MARK: - Init
 
   public init(messages: [Components.Schemas.ChatMessage]) {
     self.messages = messages
@@ -76,7 +73,6 @@ public struct Message: RopeElement, Sendable {
   }
 }
 
-// MARK: - Equatable
 
 extension Message: Equatable {
   public static func == (lhs: Message, rhs: Message) -> Bool {

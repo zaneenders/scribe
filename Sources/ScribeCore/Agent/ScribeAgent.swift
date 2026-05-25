@@ -3,7 +3,6 @@ import Foundation
 import Logging
 import ScribeLLM
 
-// MARK: - ScribeAgent
 
 /// A pure-verb model client.
 ///
@@ -31,7 +30,6 @@ public struct ScribeAgent: Sendable {
   private let logger: Logger
   private let abortNotifier = AbortNotifier()
 
-  // MARK: - Designated initializer
 
   /// Construct an agent against a caller-supplied transport.
   ///
@@ -74,7 +72,6 @@ public struct ScribeAgent: Sendable {
     }
   }
 
-  // MARK: - Convenience initializer
 
   /// Build an agent from a ``ScribeConfig``. Internally constructs an
   /// OpenAI-compatible client from `configuration.serverURL`.
@@ -100,7 +97,6 @@ public struct ScribeAgent: Sendable {
     )
   }
 
-  // MARK: - run
 
   /// Run a turn with a single user input against `history`.
   public func run(

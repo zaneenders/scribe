@@ -3,7 +3,6 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLM
 
-// MARK: - StreamProcessor
 
 /// Processes a streaming SSE response from the LLM: decodes chunks, tracks
 /// progress, emits transcript events, and delegates **all** text/reasoning
@@ -19,7 +18,6 @@ struct StreamProcessor<AO: AbortObserver> {
   private let abortObserver: AO
   private let clock = ContinuousClock()
 
-  // MARK: - Result fields (read by caller after `process` completes)
 
   private(set) var lastUsage: Components.Schemas.CompletionUsage?
   private(set) var streamStarted = false

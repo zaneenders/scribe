@@ -3,7 +3,6 @@ import Foundation
 /// Shared helpers for detecting image files and reading them as base64 data.
 public enum ImageSupport {
 
-  // MARK: - Magic-byte image detection
 
   /// Detects whether a file is an image by reading its first bytes.
   /// Returns the MIME type if recognized, or `nil` if not an image.

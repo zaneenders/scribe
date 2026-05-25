@@ -8,7 +8,6 @@ import ScribeLLM
 import Synchronization
 import Testing
 
-// MARK: - Fake Client Transport
 
 private final class FakeClientTransport: ClientTransport, Sendable {
   let statusCode: Int
@@ -51,7 +50,6 @@ private final class FakeClientTransport: ClientTransport, Sendable {
   }
 }
 
-// MARK: - Fake tool
 
 private struct FakeTool: ScribeTool {
   static var name: String { "fake_tool" }
@@ -82,7 +80,6 @@ private struct SleepyAgentTool: ScribeTool {
   }
 }
 
-// MARK: - SSE chunk helpers
 
 private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
   ArraySlice("data: \(json)\n\n".utf8)
@@ -94,7 +91,6 @@ private func errorBody(_ message: String) -> HTTPBody.ByteChunk {
   ArraySlice(#"{"error":{"message":"\#(message)"}}"#.utf8)
 }
 
-// MARK: - Convenience
 
 private let testLogger = Logger(label: "test")
 
@@ -142,12 +138,10 @@ private func makeAgent(
   )
 }
 
-// MARK: - Tests
 
 @Suite
 struct ScribeAgentTests {
 
-  // MARK: - run: outcome
 
   @Test func runCompletesWithAnswerText() async throws {
     let chunks = [
@@ -176,7 +170,6 @@ struct ScribeAgentTests {
     #expect(result.outcome == .toolRoundLimit(rounds: 1))
   }
 
-  // MARK: - run: events
 
   @Test func runYieldsAssistantTextEvents() async throws {
     let chunks = [
@@ -237,7 +230,6 @@ struct ScribeAgentTests {
     #expect(hasUsage)
   }
 
-  // MARK: - run: result.newMessages
 
   @Test func runResultNewMessagesContainsPromptAndAssistant() async throws {
     let chunks = [
@@ -284,7 +276,6 @@ struct ScribeAgentTests {
     #expect(result.newMessages[3].content == "done")
   }
 
-  // MARK: - run: error propagation
 
   @Test func runPropagatesHTTPError() async {
     let agent = makeAgent(statusCode: 500, chunks: [errorBody("boom")])
@@ -318,7 +309,6 @@ struct ScribeAgentTests {
     #expect(eventCount == 0)
   }
 
-  // MARK: - run: abort
 
   /// Verify `agent.abort()` interrupts an in-flight turn. We can't pre-set
   /// abort before `run()` because the agent clears its private notifier
@@ -359,7 +349,6 @@ struct ScribeAgentTests {
     #expect(result.outcome == .completed)
   }
 
-  // MARK: - ScribeMessage prompt overload
 
   @Test func runAcceptsScribeMessageArray() async throws {
     let chunks = [
@@ -376,7 +365,6 @@ struct ScribeAgentTests {
     #expect(result.newMessages.last?.content == "ack")
   }
 
-  // MARK: - Custom ToolExecutor
 
   /// A fake tool that records calls — `ToolExecutor` should never be
   /// invoked for it because the test installs a custom executor that

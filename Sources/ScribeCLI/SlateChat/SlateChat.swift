@@ -73,9 +73,6 @@ enum SlateChat {
       throw ScribeError.sessionCorrupted(
         reason: "Resumed conversation must begin with a system message.")
     }
-    let initialMessages: [ScribeMessage] = isNewSession
-      ? [ScribeMessage(role: .system, content: systemPrompt)]
-      : resumeMessages
 
     let cwdString = FilePath.currentDirectory.string
     let persister = try await FileSessionPersister.open(
@@ -89,30 +86,27 @@ enum SlateChat {
       scribeVersion: GitVersion.hash,
       logger: logger
     )
-    if isNewSession {
-      // The persister wrote metadata.json but not the seed; the doc
-      // will initialise its rope with `initialMessages` so we persist
-      // them once here. Going through the persister directly avoids the
-      // double-write of routing through `apply(.append(...))`.
-      try await persister.append(initialMessages)
-    }
     return try await Task { @MainActor () throws -> ChatExitInfo in
       // Build the `~Copyable` document on the MainActor so the value is
       // born in the same isolation domain that will own it (the host
-      // also runs on the MainActor). The doc holds no persister — the
-      // host pairs the two and orchestrates persistence around sync
-      // doc mutations.
-      let document = SessionDocument(
+      // also runs on the MainActor). The doc starts empty; seed content
+      // enters through `append` after any persist-first I/O.
+      var document = SessionDocument(
         sessionId: sessionId,
         directory: sessionDirectory,
-        initialMessages: initialMessages,
         logger: logger
       )
+      if isNewSession {
+        let system = ScribeMessage(role: .system, content: systemPrompt)
+        try await persister.append([system])
+        document.append([system])
+      } else {
+        document.append(resumeMessages)
+      }
       let host = SlateChatHost(
         configuration: configuration,
         document: consume document,
         persister: persister,
-        initialMessages: initialMessages,
         sessionDirectory: sessionDirectory,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,

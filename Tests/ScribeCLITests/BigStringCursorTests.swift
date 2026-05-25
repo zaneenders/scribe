@@ -9,7 +9,6 @@ import _RopeModule
 @Suite
 struct BigStringCursorTests {
 
-  // MARK: - Empty buffer
 
   @Test func emptyBufferHasStartEqualToEnd() {
     let buf = BigString()
@@ -18,7 +17,6 @@ struct BigStringCursorTests {
     #expect(String(buf) == "")
   }
 
-  // MARK: - Insert
 
   @Test func insertAtStartOfEmptyBuffer() {
     var buf = BigString()
@@ -84,7 +82,6 @@ struct BigStringCursorTests {
     #expect(buf.count == 11)
   }
 
-  // MARK: - Backspace (delete backward)
 
   @Test func backspaceFromEmptyBufferIsNoop() {
     var buf = BigString()
@@ -149,7 +146,6 @@ struct BigStringCursorTests {
     #expect(cursor == buf.endIndex)
   }
 
-  // MARK: - Cursor navigation
 
   @Test func cursorAfterMovesForward() {
     let buf = BigString("abc")
@@ -175,7 +171,6 @@ struct BigStringCursorTests {
     #expect(buf.startIndex < buf.endIndex)
   }
 
-  // MARK: - Multi-codepoint characters
 
   @Test func insertAndRemoveEmoji() {
     var buf = BigString()
@@ -216,7 +211,6 @@ struct BigStringCursorTests {
     #expect(buf.count == 2)
   }
 
-  // MARK: - New buffer from replacement
 
   @Test func replacingBufferAfterSubmitPreservesNewCursor() {
     // Simulate submitUserLine: create new BigString, reset cursor
@@ -232,7 +226,6 @@ struct BigStringCursorTests {
     #expect(cursor == buf.endIndex)
   }
 
-  // MARK: - Recall queue into buffer
 
   @Test func recallQueuedMessageSetsBufferAndCursorToEnd() {
     let queued = "recalled message"
@@ -245,7 +238,6 @@ struct BigStringCursorTests {
     #expect(buf.count == queued.count)
   }
 
-  // MARK: - Edge cases
 
   @Test func insertEmptyStringDoesNothing() {
     var buf = BigString()

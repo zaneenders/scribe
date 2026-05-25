@@ -8,8 +8,8 @@ import SystemPackage
 ///
 /// `ChatCoordinator` is intentionally narrow: it owns nothing UI-shaped
 /// (Slate, `@MainActor`, terminal handling all live in ``SlateChatHost``)
-/// and no longer owns persistence either — the document handles that
-/// through its ``SessionPersister``. Copy this file to ship Scribe inside
+/// and no longer owns persistence either — the host orchestrates the doc
+/// and its ``SessionPersister``. Copy this file to ship Scribe inside
 /// a server or another tool; the only outside-the-agent dependencies are
 /// two `@MainActor` closures into the host (where the doc lives) and the
 /// `enqueue` callback (where transcript events are routed).
@@ -19,10 +19,10 @@ final class ChatCoordinator: Sendable {
   private let logger: Logger
   private let enqueue: @Sendable (HostEvent) -> Void
   private let lines: AsyncStream<String>
-  /// Borrow the host-owned document long enough to copy out a snapshot.
+  /// Borrow the host-owned document long enough to copy agent history.
   /// Runs on the MainActor; the doc is borrowed without any await so
   /// the call is always safe.
-  private let snapshot: @MainActor @Sendable () -> [ScribeMessage]
+  private let agentHistory: @MainActor @Sendable () -> [ScribeMessage]
   /// Append a turn's worth of new messages to the host-owned document.
   /// The closure body hops to the MainActor and routes the append
   /// through the host's persist-first / commit-second orchestrator —
@@ -37,7 +37,7 @@ final class ChatCoordinator: Sendable {
     configuration: ScribeConfig,
     logger: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
-    snapshot: @escaping @MainActor @Sendable () -> [ScribeMessage],
+    agentHistory: @escaping @MainActor @Sendable () -> [ScribeMessage],
     applyAppend: @escaping @MainActor @Sendable ([ScribeMessage]) async throws -> Void,
     documentCount: @escaping @MainActor @Sendable () -> Int,
     lines: AsyncStream<String>
@@ -49,7 +49,7 @@ final class ChatCoordinator: Sendable {
     self.configuration = configuration
     self.logger = logger
     self.enqueue = enqueue
-    self.snapshot = snapshot
+    self.agentHistory = agentHistory
     self.applyAppend = applyAppend
     self.documentCount = documentCount
     self.lines = lines
@@ -91,10 +91,10 @@ final class ChatCoordinator: Sendable {
 
       let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
 
-      // Borrow the doc on the MainActor for a snapshot, then run the
+      // Borrow the doc on the MainActor for agent history, then run the
       // turn without holding the doc. New messages get folded back into
       // the doc only after the turn completes.
-      let history = await snapshot()
+      let history = await agentHistory()
 
       do {
         let ts = agent.run(promptMessages, history: history)

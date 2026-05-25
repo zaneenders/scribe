@@ -10,7 +10,6 @@ import Glibc
 import Musl
 #endif
 
-// MARK: - ProcessKiller
 
 /// Strategy that terminates the process tree spawned by a single shell
 /// invocation. Different platforms need different approaches:
@@ -56,7 +55,6 @@ extension ProcessKiller where Self == DefaultProcessKiller {
   package static var platformDefault: DefaultProcessKiller { DefaultProcessKiller() }
 }
 
-// MARK: - DefaultProcessKiller
 
 /// Resolves to the right platform strategy at compile time.  Kept as a
 /// concrete type rather than a typealias so callers can always say
@@ -96,7 +94,6 @@ package struct DefaultProcessKiller: ProcessKiller {
   }
 }
 
-// MARK: - PgroupKiller (macOS / *BSD)
 
 /// `kill(-pgid, SIGKILL)` via swift-subprocess. Catches the foreground
 /// process group; misses `setsid` grandchildren — but the process-group
@@ -136,7 +133,6 @@ package struct PgroupKiller: ProcessKiller {
   }
 }
 
-// MARK: - ProcTreeKiller (Linux)
 
 /// Walks the process tree via a `ProcessTreeReader` and SIGKILLs from the
 /// leaves toward the root. Catches `setsid` grandchildren that the

@@ -11,7 +11,6 @@ import Glibc
 import Musl
 #endif
 
-// MARK: - OutputCapture
 
 /// Owns the per-invocation stdout/stderr temp files for a shell run plus
 /// the drain task that pumps subprocess bytes into them. Encapsulates
@@ -88,7 +87,6 @@ struct OutputCapture: Sendable {
     )
   }
 
-  // MARK: Drain orchestration
 
   /// Spawns a `Task.detached` that iterates `stdout` and `stderr`
   /// concurrently and writes them to the temp files. Returns the task —
@@ -173,7 +171,6 @@ struct OutputCapture: Sendable {
     }.value
   }
 
-  // MARK: writeStream
 
   /// Drain a single `AsyncBufferSequence` to a `FileHandle`, returning
   /// the byte count actually written. The "drain and discard" pattern
@@ -294,7 +291,6 @@ struct OutputCapture: Sendable {
   }
 }
 
-// MARK: - DrainBytes
 
 /// Stdout/stderr byte counts returned by a completed drain.
 struct DrainBytes: Sendable {

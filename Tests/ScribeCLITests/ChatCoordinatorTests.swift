@@ -7,7 +7,6 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - ChatCoordinator tests
 
 /// Tests for the `ChatCoordinator` — verifies initialization and the
 /// `interrupt()` surface without needing a real ScribeAgent. Persistence
@@ -23,18 +22,17 @@ struct ChatCoordinatorTests {
   /// reference. Tests don't actually drive a turn, so the closures are
   /// all no-ops returning empty data.
   private static func noopDocClosures() -> (
-    snapshot: @MainActor @Sendable () -> [ScribeMessage],
+    agentHistory: @MainActor @Sendable () -> [ScribeMessage],
     applyAppend: @MainActor @Sendable ([ScribeMessage]) async throws -> Void,
     documentCount: @MainActor @Sendable () -> Int
   ) {
     return (
-      snapshot: { [] },
+      agentHistory: { [] },
       applyAppend: { _ in },
       documentCount: { 0 }
     )
   }
 
-  // MARK: - Initialization
 
   @Test func coordinatorInitialization() async throws {
     let (lines, _) = AsyncStream<String>.makeStream()
@@ -45,7 +43,7 @@ struct ChatCoordinatorTests {
       configuration: .testValue,
       logger: logger,
       enqueue: { event in events.withLock { $0.append(event) } },
-      snapshot: closures.snapshot,
+      agentHistory: closures.agentHistory,
       applyAppend: closures.applyAppend,
       documentCount: closures.documentCount,
       lines: lines
@@ -68,7 +66,7 @@ struct ChatCoordinatorTests {
       configuration: .testValue,
       logger: logger,
       enqueue: { event in events.withLock { $0.append(event) } },
-      snapshot: closures.snapshot,
+      agentHistory: closures.agentHistory,
       applyAppend: closures.applyAppend,
       documentCount: closures.documentCount,
       lines: lines
@@ -79,7 +77,6 @@ struct ChatCoordinatorTests {
   }
 }
 
-// MARK: - Test helpers
 
 extension ScribeConfig {
   static let testValue = ScribeConfig(
