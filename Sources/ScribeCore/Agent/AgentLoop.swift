@@ -34,6 +34,26 @@ struct AgentLoopConfig: Sendable {
   let maxToolRounds: Int
   let workingDirectory: FilePath
   let reasoningEnabled: Bool?
+  let hooks: AgentLoopHooks
+}
+
+/// Per-round LLM settings that ``prepareNextTurn`` may override.
+private struct RoundSettings: Sendable {
+  var model: String
+  var temperature: Double
+  var reasoningEnabled: Bool?
+
+  init(config: AgentLoopConfig) {
+    model = config.model
+    temperature = config.temperature
+    reasoningEnabled = config.reasoningEnabled
+  }
+
+  mutating func apply(_ overrides: NextTurnOverrides) {
+    if let model = overrides.model { self.model = model }
+    if let temperature = overrides.temperature { self.temperature = temperature }
+    if let reasoningEnabled = overrides.reasoningEnabled { self.reasoningEnabled = reasoningEnabled }
+  }
 }
 
 /// Why the agent loop stopped.
@@ -41,6 +61,14 @@ enum LoopTermination: Sendable {
   case completed
   case interrupted
   case toolRoundLimit(rounds: Int)
+}
+
+private func turnOutcome(from termination: LoopTermination) -> TurnOutcome {
+  switch termination {
+  case .completed: return .completed
+  case .interrupted: return .interrupted
+  case .toolRoundLimit(let rounds): return .toolRoundLimit(rounds: rounds)
+  }
 }
 
 
@@ -59,11 +87,21 @@ func runAgentLoop(
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: LoopTermination) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
+  var roundSettings = RoundSettings(config: config)
+  var termination: LoopTermination = .completed
+
+  emit(.boundary(.agentStart))
+
+  defer {
+    emit(.boundary(.agentEnd(turnOutcome(from: termination))))
+  }
 
   // Append prompt messages to context
   for msg in promptMessages {
+    emit(.boundary(.messageStart(role: .user, round: 0)))
     currentContext.messages.append(msg)
     newMessages.append(msg)
+    emit(.boundary(.messageEnd(role: .user, round: 0)))
   }
 
   let clock = ContinuousClock()
@@ -74,8 +112,15 @@ func runAgentLoop(
     round += 1
     if abortObserver.isAborted() {
       logger.debug("agent.abort", metadata: ["where": "before-http", "round": "\(round)"])
-      return (newMessages, .interrupted)
+      termination = .interrupted
+      return (newMessages, termination)
     }
+
+    emit(.boundary(.turnStart(round: round)))
+
+    let overrides = await config.hooks.prepareNextTurn(round, currentContext.messages)
+    roundSettings.apply(overrides)
+    currentContext.messages = await config.hooks.transformContext(currentContext.messages)
 
     let messagesCountBeforeRound = currentContext.messages.count
     let roundResult: RoundOutcome
@@ -87,11 +132,12 @@ func runAgentLoop(
       // lets the watcher task cancel it on abort, which propagates down to
       // AsyncHTTPClient and tears down the connection.
       let outcome = try await abortObserver.race {
-        [currentContext, config, emit, logger, round] in
+        [currentContext, config, emit, logger, round, roundSettings, abortObserver] in
         var localCtx = currentContext
         let result = try await runSingleRound(
           context: &localCtx,
           config: config,
+          roundSettings: roundSettings,
           emit: emit,
           logger: logger,
           clock: clock,
@@ -108,7 +154,9 @@ func runAgentLoop(
         metadata: [
           "where": "mid-stream", "round": "\(round)",
         ])
-      return (newMessages, .interrupted)
+      emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
+      termination = .interrupted
+      return (newMessages, termination)
     } catch let scribeError as ScribeError where !attemptedRecovery && isContextLengthError(scribeError) {
       // Attachment-overflow recovery: the previous round's tool likely
       // injected a too-large synthetic-attachment user message. Drop the
@@ -129,6 +177,7 @@ func runAgentLoop(
       attemptedRecovery = true
       logger.notice("agent.recover", metadata: ["reason": "\(reason)"])
       emit(.lifecycle(.recovered(reason: reason)))
+      emit(.boundary(.turnEnd(round: round, outcome: .completed)))
       continue
     }
 
@@ -141,21 +190,31 @@ func runAgentLoop(
       // Remove uncommitted round messages
       currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
       newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
-      return (newMessages, .interrupted)
+      emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
+      termination = .interrupted
+      return (newMessages, termination)
     }
 
     switch roundResult {
     case .completed:
-      return (newMessages, .completed)
+      emit(.boundary(.turnEnd(round: round, outcome: .completed)))
+      if await config.hooks.shouldStopAfterTurn(round) {
+        termination = .completed
+        return (newMessages, termination)
+      }
+      termination = .completed
+      return (newMessages, termination)
 
     case .toolCalls(let invocations):
+      emit(.boundary(.turnEnd(round: round, outcome: .toolCalls(count: invocations.count))))
       if round >= config.maxToolRounds {
         logger.notice(
           "agent.turn.tool-round-limit",
           metadata: ["max": "\(config.maxToolRounds)"])
         currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
         newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
-        return (newMessages, .toolRoundLimit(rounds: config.maxToolRounds))
+        termination = .toolRoundLimit(rounds: config.maxToolRounds)
+        return (newMessages, termination)
       }
 
       logger.info(
@@ -174,54 +233,82 @@ func runAgentLoop(
             ])
           currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
           newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
-          return (newMessages, .interrupted)
+          termination = .interrupted
+          return (newMessages, termination)
         }
+
+        let beforeDecision = await config.hooks.beforeToolCall(inv)
+        let resolvedInv: ToolInvocation
+        let preflightResult: ToolResult?
+        switch beforeDecision {
+        case .proceed(let rewritten):
+          resolvedInv = rewritten
+          preflightResult = nil
+        case .block(let reason):
+          resolvedInv = inv
+          preflightResult = ToolResult.text(ToolRegistry.jsonError(reason))
+        }
+
+        emit(.boundary(.toolExecutionStart(name: resolvedInv.name, arguments: resolvedInv.arguments)))
+
         let result: ToolResult
-        do {
-          result = try await config.toolExecutor.execute(
-            inv,
-            workingDirectory: config.workingDirectory,
-            logger: logger,
-            abort: abortObserver)
-        } catch is AgentTurnInterruptedError {
-          currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
-          newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
-          return (newMessages, .interrupted)
-        } catch let ScribeError.toolUnknown(name) {
-          logger.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
-          result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
-        } catch {
-          // Defensive: a custom ToolExecutor may throw arbitrary errors.
-          // Surface them to the model as a JSON-encoded tool failure so the
-          // assistant can self-correct, rather than aborting the turn.
-          logger.warning(
-            "agent.tool.executor.error",
-            metadata: [
-              "tool": "\(inv.name)", "round": "\(round)",
-              "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
-            ])
-          result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
+        if let preflightResult {
+          result = preflightResult
+        } else {
+          do {
+            result = try await config.toolExecutor.execute(
+              resolvedInv,
+              workingDirectory: config.workingDirectory,
+              logger: logger,
+              abort: abortObserver)
+          } catch is AgentTurnInterruptedError {
+            currentContext.messages.removeSubrange(messagesCountBeforeRound..<currentContext.messages.endIndex)
+            newMessages.removeSubrange(newMessages.count - roundMessages.count..<newMessages.count)
+            termination = .interrupted
+            return (newMessages, termination)
+          } catch let ScribeError.toolUnknown(name) {
+            logger.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
+            result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
+          } catch {
+            // Defensive: a custom ToolExecutor may throw arbitrary errors.
+            // Surface them to the model as a JSON-encoded tool failure so the
+            // assistant can self-correct, rather than aborting the turn.
+            logger.warning(
+              "agent.tool.executor.error",
+              metadata: [
+                "tool": "\(resolvedInv.name)", "round": "\(round)",
+                "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+              ])
+            result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
+          }
         }
-        emit(.tool(.invocation(name: inv.name, arguments: inv.arguments, output: result.text)))
-        for warning in result.warnings {
+
+        let afterDecision = await config.hooks.afterToolCall(resolvedInv, result)
+        let finalResult = afterDecision.result
+        emit(.boundary(.toolExecutionEnd(name: resolvedInv.name, output: finalResult.text)))
+        emit(.tool(.invocation(name: resolvedInv.name, arguments: resolvedInv.arguments, output: finalResult.text)))
+        for warning in finalResult.warnings {
           emit(.tool(.warning(warning)))
         }
+
+        emit(.boundary(.messageStart(role: .tool, round: round)))
         let toolMsg = Components.Schemas.ChatMessage(
-          role: .tool, content: .case1(result.text), name: nil, toolCalls: nil, toolCallId: inv.id)
+          role: .tool, content: .case1(finalResult.text), name: nil, toolCalls: nil, toolCallId: resolvedInv.id)
         currentContext.messages.append(toolMsg)
         newMessages.append(toolMsg)
+        emit(.boundary(.messageEnd(role: .tool, round: round)))
 
         // If the tool returned attachments (images, PDFs, etc.), inject a
         // follow-up user message so the model can view them on the next
         // turn.  OpenAI-compatible APIs only accept string content in
         // tool results, so media must flow through synthetic user messages.
-        for attachment in result.attachments {
+        for attachment in finalResult.attachments {
           let b64chars = attachment.base64.count
           logger.info(
             "agent.tool.attachment.inject",
             metadata: [
               "round": "\(round)",
-              "tool": "\(inv.name)",
+              "tool": "\(resolvedInv.name)",
               "mime_type": "\(attachment.mimeType)",
               "base64_chars": "\(b64chars)",
               "source_path": "\(attachment.sourcePath ?? "nil")",
@@ -230,9 +317,16 @@ func runAgentLoop(
             .text((attachment.sourcePath ?? attachment.filename).map { "\($0):" } ?? "Attached media:"),
             .image(url: attachment.dataUri, detail: nil),
           ]
+          emit(.boundary(.messageStart(role: .user, round: round)))
           let imageMsg = ScribeMessage(role: .user, contentParts: parts).toChatMessage()
           currentContext.messages.append(imageMsg)
           newMessages.append(imageMsg)
+          emit(.boundary(.messageEnd(role: .user, round: round)))
+        }
+
+        if afterDecision.terminate {
+          termination = .completed
+          return (newMessages, termination)
         }
       }
     }
@@ -260,6 +354,7 @@ private struct RoundExecutionResult: Sendable {
 private func runSingleRound(
   context: inout AgentContext,
   config: AgentLoopConfig,
+  roundSettings: RoundSettings,
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   clock: ContinuousClock,
@@ -267,18 +362,20 @@ private func runSingleRound(
   abortObserver: some AbortObserver
 ) async throws -> RoundOutcome {
 
+  emit(.boundary(.messageStart(role: .assistant, round: round)))
+
   // ── Build request ────────────────────────────────────
   let requestBody = Components.Schemas.CreateChatCompletionRequest(
-    model: config.model,
+    model: roundSettings.model,
     messages: context.messages,
     stream: true,
-    temperature: Float(config.temperature),
+    temperature: Float(roundSettings.temperature),
     maxTokens: nil,
     tools: config.chatTools,
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
-    reasoning: config.reasoningEnabled == nil
-      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled)
+    reasoning: roundSettings.reasoningEnabled == nil
+      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: roundSettings.reasoningEnabled)
   )
 
   // ── Send HTTP request ────────────────────────────────
@@ -364,6 +461,7 @@ private func runSingleRound(
     reasoningContent: assistantReasoning
   )
   context.messages.append(assistantMessage)
+  emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
   // Emit usage if available
   if let u = processor.lastUsage {

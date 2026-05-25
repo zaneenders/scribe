@@ -174,7 +174,8 @@ private func makeConfig(
     chatTools: registry.chatTools,
     temperature: temperature,
     maxToolRounds: maxToolRounds, workingDirectory: FilePath("/tmp"),
-    reasoningEnabled: true
+    reasoningEnabled: true,
+    hooks: .default
   )
 }
 
@@ -307,7 +308,8 @@ struct AgentLoopTests {
       chatTools: registry.chatTools,
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: true
+      reasoningEnabled: true,
+      hooks: .default
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -418,7 +420,8 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil
+      reasoningEnabled: nil,
+      hooks: .default
     )
     let notifier = AbortNotifier()
 
@@ -464,7 +467,8 @@ struct AgentLoopTests {
         chatTools: registry.chatTools,
         temperature: 0,
         maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
-        reasoningEnabled: true
+        reasoningEnabled: true,
+        hooks: .default
       )
       let (messages, termination) = try await runLoop(
         prompt: "test",
@@ -645,7 +649,8 @@ struct AgentLoopTests {
       chatTools: registry.chatTools,
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: true
+      reasoningEnabled: true,
+      hooks: .default
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -685,7 +690,8 @@ struct AgentLoopTests {
       chatTools: registry.chatTools,
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: true
+      reasoningEnabled: true,
+      hooks: .default
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -752,7 +758,8 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil
+      reasoningEnabled: nil,
+      hooks: .default
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
@@ -820,7 +827,8 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
-      reasoningEnabled: nil
+      reasoningEnabled: nil,
+      hooks: .default
     )
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
     do {
@@ -856,6 +864,186 @@ struct AgentLoopTests {
       expectTermination(termination, .interrupted)
       _ = messages  // silence unused warning
     }
+  }
+
+
+  @Test func emitsAgentAndTurnBoundaries() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
+      doneChunk(),
+    ]
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
+    _ = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: makeConfig(chunks: chunks),
+      emit: { event in events.withLock { $0.append(event) } },
+      logger: testLogger,
+      abortObserver: AbortNotifier()
+    )
+
+    let captured = events.withLock { $0 }
+    #expect(captured.contains(where: { if case .boundary(.agentStart) = $0 { return true }; return false }))
+    #expect(
+      captured.contains(where: {
+        if case .boundary(.agentEnd(.completed)) = $0 { return true }
+        return false
+      }))
+    #expect(captured.contains(where: { if case .boundary(.turnStart(round: 1)) = $0 { return true }; return false }))
+    #expect(
+      captured.contains(where: {
+        if case .boundary(.turnEnd(round: 1, outcome: .completed)) = $0 { return true }
+        return false
+      }))
+    #expect(
+      captured.contains(where: {
+        if case .boundary(.messageStart(role: .user, round: 0)) = $0 { return true }
+        return false
+      }))
+    #expect(
+      captured.contains(where: {
+        if case .boundary(.messageStart(role: .assistant, round: 1)) = $0 { return true }
+        return false
+      }))
+  }
+
+
+  @Test func beforeToolCallCanBlockExecution() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let replyChunks = [
+      sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = FakeClientTransport(
+      statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [FakeTool()], logger: testLogger)
+    let hooks = AgentLoopHooks(
+      beforeToolCall: { _ in .block(reason: "denied by policy") }
+    )
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: hooks
+    )
+    let (messages, termination) = try await runLoop(
+      prompt: "test",
+      config: config,
+      abortNotifier: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+    let toolMsg = messages.first { $0.role == .tool }
+    #expect(stringContent(toolMsg!)?.contains("denied by policy") == true)
+  }
+
+
+  @Test func afterToolCallCanTerminateLoop() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let transport = FakeClientTransport(statusCode: 200, responseBodyChunks: toolChunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [FakeTool()], logger: testLogger)
+    let hooks = AgentLoopHooks(
+      afterToolCall: { _, result in
+        AfterToolCallDecision(result: ToolResult.text("{\"stopped\":true}"), terminate: true)
+      }
+    )
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: hooks
+    )
+    let (messages, termination) = try await runLoop(
+      prompt: "test",
+      config: config,
+      abortNotifier: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+    // user + assistant(tool call) + tool — no second LLM round
+    #expect(messages.count == 3)
+    #expect(messages[2].role == .tool)
+    #expect(stringContent(messages[2])?.contains("stopped") == true)
+  }
+
+
+  @Test func transformContextRunsBeforeEachLLMRound() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = FakeClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let seen = Mutex<[Int]>([])
+    let hooks = AgentLoopHooks(
+      transformContext: { messages in
+        seen.withLock { $0.append(messages.count) }
+        return messages
+      }
+    )
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: hooks
+    )
+    _ = try await runLoop(prompt: "hi", config: config, abortNotifier: AbortNotifier())
+    #expect(seen.withLock { $0 } == [1])
+  }
+
+
+  @Test func shouldStopAfterTurnEndsLoopEarly() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
+      doneChunk(),
+    ]
+    let hooks = AgentLoopHooks(shouldStopAfterTurn: { _ in true })
+    let config = makeConfig(chunks: chunks)
+    let configWithHook = AgentLoopConfig(
+      model: config.model,
+      client: config.client,
+      toolExecutor: config.toolExecutor,
+      chatTools: config.chatTools,
+      temperature: config.temperature,
+      maxToolRounds: config.maxToolRounds,
+      workingDirectory: config.workingDirectory,
+      reasoningEnabled: config.reasoningEnabled,
+      hooks: hooks
+    )
+    let (messages, termination) = try await runLoop(
+      prompt: "stop",
+      config: configWithHook,
+      abortNotifier: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+    #expect(messages.count == 2)
   }
 }
 
