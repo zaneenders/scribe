@@ -1,7 +1,6 @@
 import Foundation
 import ScribeCore
 
-/// Shared presentation helpers for token counts in the CLI.
 public enum ScribeUsageFormatting {
   private static let groupingFormatter: NumberFormatter = {
     let f = NumberFormatter()
@@ -18,9 +17,7 @@ public enum ScribeUsageFormatting {
 }
 
 extension ScribeUsage {
-  /// Best-effort counts for one provider response when presenting usage in the CLI.
-  ///
-  /// Some servers omit `total_tokens`; if so, uses `prompt_tokens + completion_tokens` when those are present.
+
   public var scribeReportedPromptCompletionTotal: (prompt: Int, completion: Int, total: Int)? {
     let p = promptTokens ?? 0
     let c = completionTokens ?? 0

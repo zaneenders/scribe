@@ -4,11 +4,8 @@ import Testing
 
 @testable import ScribeCore
 
-/// Tests for the chunk-accumulation logic in `StreamedAssistantTurn`,
-/// which assembles streamed deltas into final text, reasoning, and tool calls.
 @Suite
 struct StreamedAssistantTurnTests {
-
 
   private func makeChunk(
     content: String? = nil,
@@ -55,7 +52,6 @@ struct StreamedAssistantTurnTests {
     )
   }
 
-
   @Test func accumulatesTextAcrossMultipleChunks() {
     var turn = StreamedAssistantTurn()
     turn.apply(chunk: makeChunk(content: "hello"))
@@ -77,7 +73,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.text == "real")
   }
 
-
   @Test func accumulatesReasoningContentField() {
     var turn = StreamedAssistantTurn()
     turn.apply(chunk: makeChunk(reasoningContent: "think-"))
@@ -95,8 +90,7 @@ struct StreamedAssistantTurnTests {
   @Test func accumulatesReasoningFromBothFields() {
     var turn = StreamedAssistantTurn()
     turn.apply(chunk: makeChunk(reasoningContent: "rc-", reasoning: "r-"))
-    // Both fields are iterated; order matters — reasoningContent first then reasoning
-    // based on AgentHarness code: [delta.reasoningContent, delta.reasoning].compactMap...
+
     #expect(turn.reasoningText == "rc-r-")
   }
 
@@ -106,7 +100,6 @@ struct StreamedAssistantTurnTests {
     turn.apply(chunk: makeChunk(reasoningContent: "valid"))
     #expect(turn.reasoningText == "valid")
   }
-
 
   @Test func capturesFinishReasonFromChunk() {
     var turn = StreamedAssistantTurn()
@@ -130,20 +123,19 @@ struct StreamedAssistantTurnTests {
     #expect(turn.finishReason == "stop")
   }
 
-
   @Test func assemblesSingleToolCallFromStreamedDeltas() {
     var turn = StreamedAssistantTurn()
-    // First chunk: id + name
+
     turn.apply(
       chunk: makeChunk(toolDeltas: [
         makeToolDelta(index: 0, id: "call_1", name: "shell")
       ]))
-    // Second chunk: arguments part 1
+
     turn.apply(
       chunk: makeChunk(toolDeltas: [
         makeToolDelta(index: 0, arguments: "{\"com")
       ]))
-    // Third chunk: arguments part 2
+
     turn.apply(
       chunk: makeChunk(toolDeltas: [
         makeToolDelta(index: 0, arguments: "mand\":\"ls\"}")
@@ -169,7 +161,6 @@ struct StreamedAssistantTurnTests {
     #expect(resolved[1].name == "read_file")
   }
 
-
   @Test func toolCallMissingIdIsNotResolved() {
     var turn = StreamedAssistantTurn()
     turn.apply(
@@ -189,7 +180,7 @@ struct StreamedAssistantTurnTests {
   }
 
   @Test func toolCallWithEmptyIdIsResolvedWhenNamePresent() {
-    // Per the code: `guard let id = t.id, let name = t.name` — empty string is truthy in Swift
+
     var turn = StreamedAssistantTurn()
     turn.apply(
       chunk: makeChunk(toolDeltas: [
@@ -202,7 +193,7 @@ struct StreamedAssistantTurnTests {
 
   @Test func toolCallDefaultIndexIsZero() {
     var turn = StreamedAssistantTurn()
-    // Two tool deltas with no explicit index both default to 0, so they merge
+
     turn.apply(
       chunk: makeChunk(toolDeltas: [
         makeToolDelta(index: nil, id: "call_1", name: "shell"),
@@ -235,7 +226,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.resolvedToolCalls().isEmpty)
   }
 
-
   @Test func interleavesTextAndToolCalls() {
     var turn = StreamedAssistantTurn()
     turn.apply(
@@ -247,7 +237,6 @@ struct StreamedAssistantTurnTests {
     #expect(turn.text == "Let me check")
     #expect(turn.resolvedToolCalls().count == 1)
   }
-
 
   @Test func resolvedToolCallsAreSortedByIndex() {
     var turn = StreamedAssistantTurn()

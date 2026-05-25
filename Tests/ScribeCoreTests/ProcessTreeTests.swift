@@ -12,9 +12,6 @@ import Glibc
 import Musl
 #endif
 
-
-/// Records every `children(of:)` call so tests can verify the walker
-/// visits the right pids in the right order, then returns the canned tree.
 private final class StubReader: ProcessTreeReader, @unchecked Sendable {
   private struct State {
     var visited: [pid_t] = []
@@ -36,14 +33,9 @@ private final class StubReader: ProcessTreeReader, @unchecked Sendable {
   }
 }
 
-
-/// All of these run on macOS too — the tree-walker logic is what historically
-/// shipped with the buggy Linux-only code path; making it pure-and-injectable
-/// is the whole point of the `ProcessTreeReader` extraction.
 @Suite
 struct ProcessTreeWalkerTests {
 
-  /// Single root with no children → the result is just the root.
   @Test func leafRootReturnsRootOnly() {
     let reader = StubReader(tree: [:])
     let result = collectProcessTree(rootPid: 100, reader: reader)
@@ -51,8 +43,6 @@ struct ProcessTreeWalkerTests {
     #expect(reader.visitOrder == [100])
   }
 
-  /// Standard shell scenario: /bin/sh forks a child which forks two
-  /// grandchildren. BFS order means parents come before grandchildren.
   @Test func bfsOrderForBalancedTree() {
     let reader = StubReader(tree: [
       100: [200],
@@ -60,13 +50,10 @@ struct ProcessTreeWalkerTests {
     ])
     let result = collectProcessTree(rootPid: 100, reader: reader)
     #expect(result == [100, 200, 300, 400])
-    // Walker visits each pid exactly once.
+
     #expect(reader.visitOrder == [100, 200, 300, 400])
   }
 
-  /// PID 1 (init/launchd) and PID 2 (kthreadd) MUST be skipped — signalling
-  /// either is a recipe for taking the system down. A misreported child of
-  /// 0/1/2 from a corrupt /proc listing is a sign to drop it, not propagate.
   @Test func skipsKernelPids() {
     let reader = StubReader(tree: [
       100: [1, 2, 3, 4]
@@ -77,11 +64,8 @@ struct ProcessTreeWalkerTests {
     #expect(!result.contains(2))
   }
 
-  /// Cycle resistance: a circular `/proc` listing (we've seen reports during
-  /// PID wraparound) must not loop forever. The "already in result" check
-  /// handles this — verify the walker terminates and reports each pid once.
   @Test func cycleDoesNotInfiniteLoop() {
-    // 100 → 200 → 300 → 100 (cycle back)
+
     let reader = StubReader(tree: [
       100: [200],
       200: [300],
@@ -91,8 +75,6 @@ struct ProcessTreeWalkerTests {
     #expect(result == [100, 200, 300])
   }
 
-  /// Diamond: two parents share a grandchild. The walker should see the
-  /// grandchild once even though both parents reference it.
   @Test func diamondGraphDeduplicates() {
     let reader = StubReader(tree: [
       100: [200, 300],
@@ -103,8 +85,6 @@ struct ProcessTreeWalkerTests {
     #expect(result == [100, 200, 300, 400])
   }
 
-  /// Deep chain — guards against accidental recursion-depth limits in the
-  /// implementation. `collectProcessTree` is iterative, so this should fly.
   @Test func deepChain() {
     var tree: [pid_t: [pid_t]] = [:]
     let depth: pid_t = 50
@@ -117,13 +97,6 @@ struct ProcessTreeWalkerTests {
   }
 }
 
-
-/// Verifies that ProcTreeKiller iterates from leaves toward the root.  We
-/// can't easily intercept the `kill(2)` syscall on real pids without a
-/// signal handler, so this test runs the walker against a stub reader and
-/// asserts the *collected order* — which is what the killer reverses
-/// before calling `kill`. Combined with the killer's `pids.reversed()`,
-/// this proves the kill order is leaves-first.
 @Suite
 struct ProcTreeKillerOrderTests {
   @Test func killOrderIsLeavesFirst() {
@@ -134,10 +107,7 @@ struct ProcTreeKillerOrderTests {
     ])
     let collected = collectProcessTree(rootPid: 100, reader: reader)
     #expect(collected == [100, 200, 300, 400, 500])
-    // The killer reverses this — leaves (500, 400) get SIGKILL first,
-    // then their parents (300, 200), then the root (100). That order is
-    // important so a parent doesn't try to reap a child while we're
-    // still in the process of signalling it.
+
     let killOrder = Array(collected.reversed())
     #expect(killOrder == [500, 400, 300, 200, 100])
   }

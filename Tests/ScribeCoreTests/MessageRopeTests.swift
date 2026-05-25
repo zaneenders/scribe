@@ -4,7 +4,6 @@ import Testing
 @Suite
 struct MessageRopeTests {
 
-
   @Test func empty() {
     let rope = MessageRope()
     #expect(rope.isEmpty)
@@ -29,7 +28,6 @@ struct MessageRopeTests {
     }
   }
 
-
   @Test func appendToEmpty() {
     var rope = MessageRope()
     rope.append(msg(role: .system, content: "sys"))
@@ -43,7 +41,7 @@ struct MessageRopeTests {
       rope.append(msg(role: .user, content: "m\(i)"))
     }
     #expect(rope.count == 500)
-    // Spot-check window extraction at various positions.
+
     #expect(rope.window(from: 0, count: 1).first?.content == "m0")
     #expect(rope.window(from: 250, count: 1).first?.content == "m250")
     #expect(rope.window(from: 499, count: 1).first?.content == "m499")
@@ -62,7 +60,6 @@ struct MessageRopeTests {
     #expect(rope.window(from: 99, count: 1).first?.content == "post-49")
   }
 
-
   @Test func firstAndLast() {
     var rope = MessageRope()
     rope.append(msg(role: .system, content: "first"))
@@ -71,7 +68,6 @@ struct MessageRopeTests {
     #expect(rope.first?.content == "first")
     #expect(rope.last?.content == "last")
   }
-
 
   @Test func windowFromStart() {
     let msgs = (0..<100).map { msg(role: .user, content: "msg-\($0)") }
@@ -101,14 +97,14 @@ struct MessageRopeTests {
   }
 
   @Test func windowSimulatedViewportBottom() {
-    // Bottom of conversation: 24 viewport + 5 above buffer = 29
+
     var rope = MessageRope()
     for i in 0..<200 {
       rope.append(msg(role: .user, content: "m\(i)"))
     }
     let viewportMessages = 24
     let bufferAbove = 5
-    let total = viewportMessages + bufferAbove  // 29
+    let total = viewportMessages + bufferAbove
     let start = max(0, rope.count - total)
     let slice = rope.window(from: start, count: total)
     #expect(slice.count == total)
@@ -117,14 +113,14 @@ struct MessageRopeTests {
   }
 
   @Test func windowSimulatedViewportMiddle() {
-    // Middle: 5 above + 24 viewport + 5 below = 34
+
     var rope = MessageRope()
     for i in 0..<200 {
       rope.append(msg(role: .user, content: "m\(i)"))
     }
     let viewportMessages = 24
     let buffer = 5
-    let total = buffer + viewportMessages + buffer  // 34
+    let total = buffer + viewportMessages + buffer
     let scrollPos = 100
     let start = max(0, scrollPos - buffer)
     let slice = rope.window(from: start, count: total)
@@ -133,20 +129,19 @@ struct MessageRopeTests {
   }
 
   @Test func windowSimulatedViewportTop() {
-    // Top: 24 viewport + 5 below = 29
+
     var rope = MessageRope()
     for i in 0..<200 {
       rope.append(msg(role: .user, content: "m\(i)"))
     }
     let viewportMessages = 24
     let bufferBelow = 5
-    let total = viewportMessages + bufferBelow  // 29
+    let total = viewportMessages + bufferBelow
     let slice = rope.window(from: 0, count: total)
     #expect(slice.count == total)
     #expect(slice.first?.content == "m0")
     #expect(slice.last?.content == "m\(total - 1)")
   }
-
 
   @Test func truncateShrinksCount() {
     var rope = MessageRope()
@@ -171,16 +166,15 @@ struct MessageRopeTests {
     for i in 0..<200 {
       rope.append(msg(role: .user, content: "m\(i)"))
     }
-    // Take a window, then truncate the original.
+
     let win = rope.window(from: 50, count: 30)
     rope.truncate(to: 80)
     #expect(rope.count == 80)
     #expect(rope.last?.content == "m79")
-    // Window snapshot unaffected.
+
     #expect(win.count == 30)
     #expect(win.first?.content == "m50")
   }
-
 
   @Test func forEachWalksAll() {
     let msgs = (0..<128).map { msg(role: .user, content: "m\($0)") }
@@ -191,7 +185,6 @@ struct MessageRopeTests {
     #expect(seen.first == "m0")
     #expect(seen.last == "m127")
   }
-
 
   @Test func realisticChatSequence() {
     var rope = MessageRope()
@@ -219,7 +212,6 @@ struct MessageRopeTests {
     #expect(!win.isEmpty)
     #expect(win.count <= 34)
   }
-
 
   @Test func windowStartPastEndReturnsEmpty() {
     let rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
@@ -253,7 +245,6 @@ struct MessageRopeTests {
     #expect(slice.last?.content == "m49")
   }
 
-
   @Test func truncateToSameCountIsNoOp() {
     var rope = MessageRope((0..<50).map { msg(role: .user, content: "m\($0)") })
     rope.truncate(to: 50)
@@ -278,25 +269,24 @@ struct MessageRopeTests {
     #expect(rope.first?.content == "after")
   }
 
-
   @Test func appendTruncateWindowRoundTrip() {
     var rope = MessageRope()
-    // Build up
+
     for i in 0..<200 {
       rope.append(msg(role: .user, content: "m\(i)"))
     }
     #expect(rope.count == 200)
-    // Truncate
+
     rope.truncate(to: 150)
     #expect(rope.count == 150)
     #expect(rope.last?.content == "m149")
-    // Append more
+
     for i in 0..<50 {
       rope.append(msg(role: .assistant, content: "a\(i)"))
     }
     #expect(rope.count == 200)
     #expect(rope.last?.content == "a49")
-    // Window still works
+
     let slice = rope.window(from: 140, count: 20)
     #expect(slice.count == 20)
     #expect(slice.first?.content == "m140")
@@ -304,7 +294,7 @@ struct MessageRopeTests {
   }
 
   @Test func manyTruncationsTriggerInternalRebalance() {
-    // Repeatedly truncate and re-append to exercise Rope internal rebalancing.
+
     var rope = MessageRope()
     for cycle in 0..<20 {
       for i in 0..<100 {
@@ -313,12 +303,11 @@ struct MessageRopeTests {
       rope.truncate(to: 50)
       #expect(rope.count == 50)
     }
-    // Final state
+
     #expect(rope.count == 50)
     let slice = rope.window(from: 0, count: 5)
     #expect(slice.count == 5)
   }
-
 
   @Test func rolesSurviveRoundTrip() {
     var rope = MessageRope()
@@ -334,7 +323,6 @@ struct MessageRopeTests {
     #expect(rope.window(from: 3, count: 1).first?.toolCallId == "call_1")
   }
 
-
   @Test func subscriptReturnsMessageAtIndex() {
     let rope = MessageRope((0..<50).map { msg(role: .user, content: "m\($0)") })
     #expect(rope[0].content == "m0")
@@ -343,8 +331,7 @@ struct MessageRopeTests {
   }
 
   @Test func subscriptCrossesLeafBoundary() {
-    // 100 messages spans multiple 32-msg leaves; index 31 and 32 sit on a
-    // leaf boundary so this catches any off-by-one in window().
+
     let rope = MessageRope((0..<100).map { msg(role: .user, content: "m\($0)") })
     #expect(rope[31].content == "m31")
     #expect(rope[32].content == "m32")
@@ -352,11 +339,10 @@ struct MessageRopeTests {
     #expect(rope[64].content == "m64")
   }
 
-
   @Test func spliceReplacesRange() {
     var rope = MessageRope((0..<10).map { msg(role: .user, content: "m\($0)") })
     rope.splice(3..<7, with: [msg(role: .assistant, content: "summary")])
-    #expect(rope.count == 7)  // 10 - 4 removed + 1 added
+    #expect(rope.count == 7)
     #expect(rope[2].content == "m2")
     #expect(rope[3].content == "summary")
     #expect(rope[4].content == "m7")
@@ -385,13 +371,12 @@ struct MessageRopeTests {
     #expect(rope.last?.content == "tail")
   }
 
-
   @Test func safeForkBoundariesAllSafe() {
     var rope = MessageRope()
     rope.append(msg(role: .system, content: "sys"))
     rope.append(msg(role: .user, content: "q"))
     rope.append(msg(role: .assistant, content: "a"))
-    // Every index closes cleanly — no open tool calls anywhere.
+
     #expect(rope.safeForkBoundaries() == [1, 2, 3])
   }
 
@@ -407,7 +392,7 @@ struct MessageRopeTests {
         ]))
     rope.append(msg(role: .tool, content: "ok", toolCallId: "t1"))
     rope.append(msg(role: .assistant, content: "done"))
-    // Indices 3 (between assistant tool_calls and tool result) is unsafe.
+
     let boundaries = rope.safeForkBoundaries()
     #expect(!boundaries.contains(3))
     #expect(boundaries.contains(1))
@@ -415,7 +400,6 @@ struct MessageRopeTests {
     #expect(boundaries.contains(4))
     #expect(boundaries.contains(5))
   }
-
 
   private func msg(
     role: ScribeMessage.Role,
@@ -431,7 +415,6 @@ struct MessageRopeTests {
     )
   }
 }
-
 
 @Suite
 struct MessageSummaryTests {
@@ -461,10 +444,8 @@ struct MessageSummaryTests {
   }
 }
 
-
 @Suite
 struct MessageTests {
-
 
   @Test func emptyInit() {
     let m = Message()
@@ -481,7 +462,6 @@ struct MessageTests {
     #expect(m.messages.count == 2)
     #expect(!m.isEmpty)
   }
-
 
   @Test func isEmptyTrue() {
     let m = Message()
@@ -503,7 +483,6 @@ struct MessageTests {
     #expect(!m.isUndersized)
   }
 
-
   @Test func summaryReflectsCount() {
     let m = Message(messages: (0..<5).map { msg(role: .user, content: "m\($0)") })
     #expect(m.summary.count == 5)
@@ -514,13 +493,11 @@ struct MessageTests {
     #expect(m.summary.isZero)
   }
 
-
   @Test func invariantCheckDoesNotCrashForValidLeaf() {
     let m = Message(messages: (0..<16).map { msg(role: .user, content: "m\($0)") })
-    // Must not trap for a leaf within maxNodeSize.
+
     m.invariantCheck()
   }
-
 
   @Test func equalWhenSameMessages() {
     let a = Message(messages: [msg(role: .user, content: "hi")])
@@ -550,7 +527,6 @@ struct MessageTests {
     #expect(Message() == Message())
   }
 
-
   @Test func splitAtMiddle() {
     var left = Message(messages: (0..<10).map { msg(role: .user, content: "m\($0)") })
     let right = left.split(at: 5)
@@ -575,12 +551,11 @@ struct MessageTests {
     #expect(right.messages.isEmpty)
   }
 
-
   @Test func rebalanceNextNeighborSelfEmptyPullsFromRight() {
     var selfMsg = Message()
     var right = Message(messages: (0..<20).map { msg(role: .user, content: "r\($0)") })
     let rightBecameEmpty = selfMsg.rebalance(nextNeighbor: &right)
-    // Self was empty (undersized), maxNodeSize/2 = 16. Should pull 16 from right.
+
     #expect(!rightBecameEmpty)
     #expect(selfMsg.messages.count == 16)
     #expect(selfMsg.messages.first?.content == "r0")
@@ -593,7 +568,7 @@ struct MessageTests {
     var selfMsg = Message(messages: (0..<20).map { msg(role: .user, content: "s\($0)") })
     var right = Message()
     let rightBecameEmpty = selfMsg.rebalance(nextNeighbor: &right)
-    // Right was empty (undersized), self has 20, give = 20 - 16 = 4.
+
     #expect(!rightBecameEmpty)
     #expect(selfMsg.messages.count == 16)
     #expect(selfMsg.messages.last?.content == "s15")
@@ -619,10 +594,8 @@ struct MessageTests {
     #expect(right.messages.isEmpty)
   }
 
-
   @Test func rebalancePrevNeighborLeftEmptyPullsNoSwapWhenSelfNotEmpty() {
-    // left empty, self has 20. left pulls 16 from self, self keeps 4.
-    // right (self) is not empty so left.rebalance returns false → no swap.
+
     var left = Message()
     var selfMsg = Message(messages: (0..<20).map { msg(role: .user, content: "s\($0)") })
     let result = selfMsg.rebalance(prevNeighbor: &left)
@@ -634,13 +607,12 @@ struct MessageTests {
   }
 
   @Test func rebalancePrevNeighborLeftEmptySwapsWhenSelfBecomesEmpty() {
-    // left empty, self has 1. left pulls 1 from self, self becomes empty.
-    // left.rebalance returns true → swap occurs.
+
     var left = Message()
     var selfMsg = Message(messages: [msg(role: .user, content: "only")])
     let result = selfMsg.rebalance(prevNeighbor: &left)
     #expect(result)
-    // After swap: self has the message, left is empty.
+
     #expect(selfMsg.messages.count == 1)
     #expect(selfMsg.messages.first?.content == "only")
     #expect(left.messages.isEmpty)
@@ -654,7 +626,6 @@ struct MessageTests {
     #expect(left.messages.count == 16)
     #expect(selfMsg.messages.count == 16)
   }
-
 
   private func msg(
     role: ScribeMessage.Role,

@@ -2,11 +2,6 @@ import Foundation
 import Logging
 import Synchronization
 
-/// Lightweight client-side token accumulator and context-window monitor.
-///
-/// Uses API-reported usage to track session totals and the current prompt size.
-/// When the prompt size exceeds a configurable fraction of the context window,
-/// it logs warnings. It does **not** mutate conversation history.
 public final class TokenTracker: Sendable {
   private let state = Mutex(State())
 
@@ -23,7 +18,6 @@ public final class TokenTracker: Sendable {
     self.threshold = threshold
   }
 
-  /// Adds a usage snapshot to the running tallies.
   public func accumulate(usage: ScribeUsage) {
     state.withLock { state in
       if let total = usage.totalTokens, total > 0 {
@@ -46,29 +40,24 @@ public final class TokenTracker: Sendable {
     }
   }
 
-  /// Total tokens consumed across all turns in the session.
   public var sessionTotalTokens: Int {
     state.withLock { $0.sessionTotalTokens }
   }
 
-  /// Tokens in the most recent prompt (best proxy for current context size).
   public var lastPromptTokens: Int {
     state.withLock { $0.lastPromptTokens }
   }
 
-  /// Whether the current prompt size exceeds the configured threshold.
   public var isApproachingLimit: Bool {
     guard contextWindow > 0 else { return false }
     return lastPromptTokens > Int(Double(contextWindow) * threshold)
   }
 
-  /// Whether the current prompt size exceeds the full context window.
   public var isOverLimit: Bool {
     guard contextWindow > 0 else { return false }
     return lastPromptTokens > contextWindow
   }
 
-  /// Logs a warning when approaching or over the context-window limit.
   public func logStatus(logger: Logger) {
     guard contextWindow > 0 else { return }
     let prompt = lastPromptTokens

@@ -11,40 +11,18 @@ import Glibc
 import Musl
 #endif
 
-
-/// Owns the per-invocation stdout/stderr temp files for a shell run plus
-/// the drain task that pumps subprocess bytes into them. Encapsulates
-/// three concerns that used to be inlined in `Shell.run`:
-///
-/// 1. **Temp file lifecycle** — paths, creation, handle ownership.
-/// 2. **Drain orchestration** — concurrently iterating both `AsyncBufferSequence`s
-///    and writing to disk, with a "drain-and-discard" mode that protects
-///    against a stuck consumer hanging the producer pipe (suspect C from
-///    the CPU-spin investigation).
-/// 3. **Bounded post-cancellation wait** — racing the detached drain
-///    against a fixed deadline so a `setsid` grandchild that keeps the
-///    pipe open after `SIGKILL` can no longer hang the parent indefinitely
-///    (suspect E).
-///
-/// `Shell.run` owns one `OutputCapture` per invocation. The capture is
-/// `Sendable` so the detached drain task can hold onto it across
-/// concurrency boundaries.
 struct OutputCapture: Sendable {
 
   let id: UUID
   let stdoutFile: FilePath
   let stderrFile: FilePath
 
-  /// Underlying URLs kept around so we can stat them for fallback byte
-  /// counts when the drain misses its deadline.
   let stdoutURL: URL
   let stderrURL: URL
 
   let stdoutHandle: FileHandle
   let stderrHandle: FileHandle
 
-  /// Build a fresh pair of temp files under the system temp dir and open
-  /// write handles to each. Throws if the create or open step fails.
   static func create(id: UUID, in tmpDir: URL) throws -> OutputCapture {
     let stdoutURL = tmpDir.appendingPathComponent(
       "scribe-shell-\(id.uuidString)-stdout.txt")
@@ -71,15 +49,11 @@ struct OutputCapture: Sendable {
     )
   }
 
-  /// Closes both file handles. Idempotent — safe to call after a partial
-  /// drain or if the handles were never used.
   func closeHandles() {
     try? stdoutHandle.close()
     try? stderrHandle.close()
   }
 
-  /// Returns the on-disk size of each temp file, used as a fallback when
-  /// the in-memory drain counts are unavailable (deadline missed).
   func diskSizes() -> DrainBytes {
     DrainBytes(
       out: Int(Self.fileSize(url: stdoutURL)),
@@ -87,17 +61,6 @@ struct OutputCapture: Sendable {
     )
   }
 
-
-  /// Spawns a `Task.detached` that iterates `stdout` and `stderr`
-  /// concurrently and writes them to the temp files. Returns the task —
-  /// the caller awaits it directly on the happy path or hands it to
-  /// `awaitDrainWithDeadline` after cancellation.
-  ///
-  /// The detached task is intentional: the parent task may be cancelled
-  /// while we still want the drain to keep emptying the subprocess pipes
-  /// (so a `SIGKILL`'d process can EOF cleanly). If the drain is cancelled
-  /// directly the writes still finish — `writeStream` only `break`s on
-  /// `Task.isCancelled`, never on the parent's flag.
   func startDrain(
     stdout: AsyncBufferSequence,
     stderr: AsyncBufferSequence,
@@ -117,15 +80,6 @@ struct OutputCapture: Sendable {
     }
   }
 
-  /// Race a detached drain task against a fixed deadline.  Returns the
-  /// drain's byte counts when the drain completes first, or `nil` when
-  /// the deadline fires (in which case the caller should close handles
-  /// and read sizes from disk via `diskSizes()`).
-  ///
-  /// The race itself runs in a fresh detached task so it isn't subject
-  /// to the calling task's cancellation state — otherwise `Task.sleep`
-  /// would throw immediately on a cancelled parent and collapse the
-  /// deadline to zero.
   static func awaitDrainWithDeadline(
     drainTask: Task<DrainBytes, Error>,
     deadlineMs: Int,
@@ -171,17 +125,6 @@ struct OutputCapture: Sendable {
     }.value
   }
 
-
-  /// Drain a single `AsyncBufferSequence` to a `FileHandle`, returning
-  /// the byte count actually written. The "drain and discard" pattern
-  /// (suspect C) is critical here: once the disk write fails or we hit
-  /// the chunk cap, we keep pulling from the sequence so the underlying
-  /// pipe stays drained — otherwise the producer subprocess blocks on
-  /// its next stdout write, the sequence never EOFs, and a SIGKILL'd
-  /// process can leave this drain hanging forever.
-  ///
-  /// `Task.isCancelled` is the only signal that breaks out hard. By the
-  /// time it flips, `onCancel` has already SIGKILL'd the process tree.
   static func writeStream(
     from sequence: AsyncBufferSequence,
     to handle: FileHandle,
@@ -291,8 +234,6 @@ struct OutputCapture: Sendable {
   }
 }
 
-
-/// Stdout/stderr byte counts returned by a completed drain.
 struct DrainBytes: Sendable {
   let out: Int
   let err: Int

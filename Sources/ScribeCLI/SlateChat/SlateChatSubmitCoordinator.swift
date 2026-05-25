@@ -1,27 +1,25 @@
 
-/// Effects the host must perform in response to a submit action.
-/// Each case maps to exactly one host-side operation — no ambiguity.
+
 enum SubmitEffect: Equatable, Sendable {
-  /// Send text to the coordinator via `UserLineGate` (model is idle).
+
   case sendToGate(String)
   case popAndSendToGate
-  /// Interrupt the model and send text to the gate.
+
   case interruptAndSend(String)
   case popAndInterruptAndSend
   case recallSteeringToInput
   case enqueueSteering(String)
   case enqueueFollowUp(String)
-  /// Request an interrupt of the in-flight model turn.
+
   case interruptModel
-  /// Stop the chat loop (Ctrl+C on idle, Ctrl+D, EOF).
+
   case exitChat
-  /// No state change needed.
+
   case none
 }
 
 enum SubmitCoordinator {
 
-  /// User pressed Enter with `text` in the input buffer.
   static func handleEnter(
     text: String,
     modelBusy: Bool,
@@ -62,10 +60,6 @@ enum SubmitCoordinator {
     return .sendToGate(text)
   }
 
-  /// Three-step ladder, evaluated in order:
-  /// 1. Queued steering message present → recall oldest to input buffer.
-  /// 2. Model is busy → request interrupt.
-  /// 3. Model is idle, nothing queued → exit chat.
   static func handleCtrlC(
     steeringQueueCount: Int,
     modelBusy: Bool
@@ -80,11 +74,10 @@ enum SubmitCoordinator {
   }
 }
 
-
 struct HostSubmitSideEffects: Equatable {
   var gateText: String?
   var popSteeringToGate: Bool = false
-  /// Non-nil tag means the host must request a model interrupt + log with this tag.
+
   var interruptLogTag: String?
   var needsDelayedRenderWake: Bool = false
   var shouldExit: Bool = false

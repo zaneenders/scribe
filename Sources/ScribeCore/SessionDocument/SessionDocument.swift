@@ -3,22 +3,6 @@ import Logging
 import ScribeLLM
 import SystemPackage
 
-/// The single source of truth for a chat session's messages and identity.
-///
-/// Owns a ``MessageRope`` and the session identity (id + on-disk
-/// directory). `SessionDocument` is `~Copyable`: the compiler enforces a
-/// single owner (typically ``SessionHarness``). All reads are synchronous borrows via
-/// subscript and `count`; all mutations are synchronous and take
-/// `inout self` (append) or produce a successor (fork / tldr).
-///
-/// Message arrays are not part of the public surface — callers access
-/// content by index. Arrays appear only at I/O boundaries (incoming user
-/// input, agent output, disk wire format) via package helpers.
-///
-/// Persistence is **not** the doc's concern. The owner pairs the doc
-/// with a ``SessionPersister`` and orchestrates the two — write to disk
-/// first, then commit the in-memory change here, so a persistence
-/// failure never leaves the rope ahead of disk.
 public struct SessionDocument: ~Copyable {
 
   public private(set) var sessionId: UUID
@@ -27,10 +11,6 @@ public struct SessionDocument: ~Copyable {
   private var rope: MessageRope
   private let logger: Logger
 
-  /// Open an empty document for a session identity.
-  ///
-  /// Content enters through ``append(_:)`` (incoming user input, agent
-  /// output, or hydration from disk at an I/O boundary in the owner).
   public init(
     sessionId: UUID,
     directory: FilePath,
@@ -58,7 +38,6 @@ public struct SessionDocument: ~Copyable {
 
   public var isEmpty: Bool { rope.isEmpty }
 
-  /// O(log n) random access to a single message.
   public subscript(index: Int) -> ScribeMessage {
     rope[index]
   }
@@ -75,11 +54,6 @@ public struct SessionDocument: ~Copyable {
     rope.toArray().toWireMessages()
   }
 
-  /// Append incoming messages to the rope and return the index range they occupy.
-  ///
-  /// Sync — callers that mirror to disk should write through their
-  /// ``SessionPersister`` **before** calling this, so a persistence
-  /// failure never leaves the rope ahead of disk.
   @discardableResult
   public mutating func append(_ messages: [ScribeMessage]) -> Range<Int> {
     guard !messages.isEmpty else {
@@ -97,11 +71,6 @@ public struct SessionDocument: ~Copyable {
     return range
   }
 
-  /// Build a successor document by splicing `range` with `replacement`.
-  ///
-  /// Borrowing — the original doc is intact, so the owner can persist
-  /// the successor first and only assign it (`self = successor`) if
-  /// persistence succeeds.
   public borrowing func successor(
     splicing range: Range<Int>,
     inserting replacement: [ScribeMessage] = [],

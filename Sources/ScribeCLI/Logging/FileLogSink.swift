@@ -1,8 +1,6 @@
 import Foundation
 import Synchronization
 
-
-/// Serializes writes from concurrent swift-log calls onto a single backend.
 final class LockedDataWriter: Sendable {
   private let mutex = Mutex(())
   private let emit: @Sendable (Data) -> Void

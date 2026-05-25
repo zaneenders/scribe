@@ -1,10 +1,9 @@
 import Foundation
 import ScribeLLM
 
-/// Accumulates one assistant step from streamed chunks (content + parallel tool calls).
 struct StreamedAssistantTurn {
   var text = ""
-  /// Accumulated thinking/reasoning stream; must be sent back as `reasoning_content` on the next API call for providers such as DeepSeek.
+
   var reasoningText = ""
   var toolCalls: [Int: PartialToolCall] = [:]
   var finishReason: String?

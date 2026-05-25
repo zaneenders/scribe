@@ -155,7 +155,6 @@ struct ChatSessionPersistenceTests {
     }
   }
 
-
   @Test func incrementalPersistWritesMetadataThenAppendsMessages() async throws {
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -194,7 +193,6 @@ struct ChatSessionPersistenceTests {
     let asst1 = ScribeMessage(role: .assistant, content: "a1")
     let user2 = ScribeMessage(role: .user, content: "q2")
 
-    // Simulate: persist initial, then append only new
     try ChatSessionStore.appendMessages([sys, user1, asst1], to: FilePath(dir.path))
     try ChatSessionStore.appendMessages([user2], to: FilePath(dir.path))
 
@@ -202,7 +200,6 @@ struct ChatSessionPersistenceTests {
     #expect(loaded.count == 4)
     #expect(loaded[3].content == "q2")
   }
-
 
   @Test func forkSessionCopiesPrefixAndLinksParent() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
@@ -255,7 +252,6 @@ struct ChatSessionPersistenceTests {
     #expect(childMessages[1].content == "q1")
     #expect(childMessages[2].content == "a1")
 
-    // Parent must be untouched.
     let parentMessages = try ChatSessionStore.loadMessages(from: parentDir)
     #expect(parentMessages.count == 5)
   }
@@ -282,7 +278,6 @@ struct ChatSessionPersistenceTests {
     try await ChatSessionStore.saveMetadata(parentMeta, to: parentDir)
     try ChatSessionStore.appendMessages(messages, to: parentDir)
 
-    // Cut 3 splits between assistant tool_calls and the tool result — not safe.
     await #expect(throws: ScribeError.self) {
       _ = try await ChatSessionStore.forkSession(
         from: parentDir,

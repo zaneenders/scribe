@@ -4,8 +4,6 @@ import Testing
 
 @testable import ScribeCLI
 
-
-/// Renders markdown incrementally, simulating streaming SSE chunks.
 private func renderIncremental(
   chunks: [String],
   baseFG: TerminalRGB = ScribePalette.cyan,
@@ -22,7 +20,6 @@ private func renderIncremental(
   return snapshots
 }
 
-/// Renders markdown in one shot.
 private func render(
   _ text: String,
   baseFG: TerminalRGB = ScribePalette.cyan,
@@ -31,23 +28,16 @@ private func render(
   SwiftMarkdownRenderer().render(text: text, baseFG: baseFG, baseBold: baseBold)
 }
 
-/// Joins all span text in a line into a plain string.
 private func plain(_ line: TLine) -> String {
   line.spans.map(\.text).joined()
 }
 
-/// Plain text of every line.
 private func plainLines(_ lines: [TLine]) -> [String] {
   lines.map { plain($0) }
 }
 
-
-/// A test suite that stress‑tests the streaming markdown renderer and its
-/// safety‑net inline‑pattern scanner.  The renderer is called on every SSE
-/// chunk so inputs grow incrementally — the tests mirror that pattern.
 @Suite
 struct MarkdownRendererTests {
-
 
   @Test func emptyString() {
     let lines = render("")
@@ -130,7 +120,6 @@ struct MarkdownRendererTests {
     #expect(plainLines(lines) == ["x"])
   }
 
-
   @Test func streamingSingleCharChunks() {
     let text = "Hello **world** with `code`"
     let chunks = text.map { String($0) }
@@ -149,7 +138,7 @@ struct MarkdownRendererTests {
   }
 
   @Test func streamingSplitMidDelimiter() {
-    // Split right through **bold** — stresses safety‑net path.
+
     let chunks = ["Hello **bo", "ld** world"]
     let snapshots = renderIncremental(chunks: chunks)
     let oneShot = render("Hello **bold** world")
@@ -169,7 +158,6 @@ struct MarkdownRendererTests {
     #expect(!snapshots.last!.isEmpty)
   }
 
-
   @Test func headingsAllLevels() {
     for level in 1...6 {
       let prefix = String(repeating: "#", count: level)
@@ -186,7 +174,6 @@ struct MarkdownRendererTests {
     #expect(allSpans.contains { $0.fg == ScribePalette.markdownItalic })
   }
 
-
   @Test func boldAndItalicCombined() {
     let lines = render("This is ***bold italic*** and **bold** and *italic*")
     let allSpans = lines.flatMap(\.spans)
@@ -200,7 +187,6 @@ struct MarkdownRendererTests {
     #expect(allSpans.contains { $0.fg == ScribePalette.gray && $0.text.contains("struck") })
   }
 
-
   @Test func inlineCode() {
     let lines = render("Use `let x = 1` to bind")
     let allSpans = lines.flatMap(\.spans)
@@ -208,7 +194,7 @@ struct MarkdownRendererTests {
   }
 
   @Test func inlineCodeWithMarkdownInside() {
-    // Text inside backticks should NOT be styled as bold/italic.
+
     let lines = render("`**not bold**`")
     let allSpans = lines.flatMap(\.spans)
     #expect(allSpans.contains { $0.text.contains("**not bold**") && $0.fg == ScribePalette.markdownCode })
@@ -218,7 +204,6 @@ struct MarkdownRendererTests {
     let lines = render("Use `` `nested` `` syntax")
     #expect(!lines.isEmpty)
   }
-
 
   @Test func fencedCodeBlock() {
     let lines = render("```\nhello\nworld\n```")
@@ -246,7 +231,6 @@ struct MarkdownRendererTests {
     #expect(!lines.isEmpty)
   }
 
-
   @Test func blockQuote() {
     let lines = render("> This is a quote")
     let allSpans = lines.flatMap(\.spans)
@@ -265,7 +249,6 @@ struct MarkdownRendererTests {
     let allSpans = lines.flatMap(\.spans)
     #expect(allSpans.contains { $0.bold })
   }
-
 
   @Test func unorderedList() {
     let lines = render("- item one\n- item two\n- item three")
@@ -298,7 +281,6 @@ struct MarkdownRendererTests {
     #expect(!lines.isEmpty)
   }
 
-
   @Test func tableBasic() {
     let md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |\n"
     let lines = render(md)
@@ -307,7 +289,7 @@ struct MarkdownRendererTests {
     #expect(allText.contains("Bob"))
     #expect(allText.contains("30"))
     #expect(allText.contains("25"))
-    // Verify header row renders (previously dropped).
+
     #expect(allText.contains("Name"))
     #expect(allText.contains("Age"))
   }
@@ -356,7 +338,7 @@ struct MarkdownRendererTests {
   @Test func tableColumnPadding() {
     let md = "| Name | Age |\n| --- | --- |\n| A | 100 |\n"
     let lines = render(md)
-    // The "A" cell should be padded to match "Name" width.
+
     let p = plainLines(lines)
     let dataRow = p.first { $0.contains("│ A") }
     #expect(dataRow != nil)
@@ -399,13 +381,13 @@ struct MarkdownRendererTests {
   }
 
   @Test func tableMismatchedColumns() {
-    // Row with fewer cells than header
+
     let md = "| A | B | C |\n|---|---|---|\n| 1 | 2 |\n"
     let lines = render(md)
     let p = plainLines(lines)
     #expect(p.contains { $0.contains("1") })
     #expect(p.contains { $0.contains("2") })
-    // Should still render three columns (third cell empty)
+
     let dataRow = p.first { $0.contains("1") && $0.contains("2") }
     #expect(dataRow != nil)
   }
@@ -414,10 +396,10 @@ struct MarkdownRendererTests {
     let md = "| Short | VeryLongHeaderName |\n| --- | --- |\n| x | y |\n"
     let lines = render(md)
     let p = plainLines(lines)
-    // Both data cells should be on the same line as the borders
+
     let dataRow = p.first { $0.contains("x") && $0.contains("y") }
     #expect(dataRow != nil)
-    // The short column header should appear on its own row
+
     #expect(p.contains { $0.contains("Short") })
   }
 
@@ -425,14 +407,10 @@ struct MarkdownRendererTests {
     let md = "| Name | Age |\n| --- | --- |\n| A | 100 |\n"
     let lines = render(md)
     let p = plainLines(lines)
-    // Find the data row; "A" should be followed by enough spaces
-    // to align with the "Name" column width (4) + padding.
-    // The cell content should be " A    " (1 pad + A + 3 pads + 1 pad).
-    // We look for "│ A " at minimum.
+
     let dataRow = p.first { $0.contains("│ A ") }
     #expect(dataRow != nil)
   }
-
 
   @Test func link() {
     let lines = render("[Click here](https://example.com)")
@@ -446,10 +424,8 @@ struct MarkdownRendererTests {
     #expect(allSpans.contains { $0.text.contains("alt text") })
   }
 
-
   @Test func thematicBreak() {
-    // A blank line is required before a thematic break, otherwise ---
-    // is parsed as a setext heading underline.
+
     let lines = render("before\n\n---\nafter")
     #expect(plainLines(lines).contains("---"))
   }
@@ -461,7 +437,6 @@ struct MarkdownRendererTests {
       #expect(p.contains { $0.contains("---") || $0.contains("***") || $0.contains("___") })
     }
   }
-
 
   @Test func inlineHTML() {
     let lines = render("Some <b>bold</b> text")
@@ -475,7 +450,6 @@ struct MarkdownRendererTests {
     #expect(allSpans.contains { $0.fg == ScribePalette.gray })
   }
 
-
   @Test func hardBreak() {
     let lines = render("line one  \nline two")
     #expect(plainLines(lines).count >= 2)
@@ -485,7 +459,6 @@ struct MarkdownRendererTests {
     let lines = render("line one\nline two")
     #expect(plainLines(lines).count >= 2)
   }
-
 
   @Test func singleAsteriskLiteral() {
     let lines = render("This is a * literal asterisk")
@@ -557,7 +530,6 @@ struct MarkdownRendererTests {
     #expect(snapshots.last! == oneShot)
   }
 
-
   @Test func emojiInBold() {
     let lines = render("**🔥 fire**")
     let allSpans = lines.flatMap(\.spans)
@@ -587,7 +559,6 @@ struct MarkdownRendererTests {
     let lines = render("**café** résumé naïve")
     #expect(!lines.isEmpty)
   }
-
 
   @Test func veryLongLine() {
     let long = String(repeating: "a", count: 10_000)
@@ -633,9 +604,8 @@ struct MarkdownRendererTests {
     #expect(!lines.isEmpty)
   }
 
-
   @Test func everythingAllAtOnce() {
-    // Build table portion unindented so it is recognized as a table.
+
     let md =
       """
       # Heading 1
@@ -679,7 +649,6 @@ struct MarkdownRendererTests {
     #expect(p.contains("---"))
   }
 
-
   @Test func streamingMatchesOneShot_everything() {
     let md = """
       # Title
@@ -709,14 +678,12 @@ struct MarkdownRendererTests {
     #expect(snapshots.last! == oneShot)
   }
 
-
   @Test func spanMergingPreservesText() {
     let md = "**bold** normal *italic* `code`"
     let lines1 = render(md)
     let lines2 = render(md)
     #expect(plainLines(lines1) == plainLines(lines2))
   }
-
 
   @Test func safetyNetDoesNotDoubleStyle() {
     let lines = render("plain **bold** plain")
@@ -725,7 +692,6 @@ struct MarkdownRendererTests {
     let boldTextTotal = boldSpans.map(\.text).joined()
     #expect(boldTextTotal == "bold")
   }
-
 
   @Test func baseStyleAppliedToPlainText() {
     let lines = render("plain text", baseFG: ScribePalette.cyan, baseBold: false)

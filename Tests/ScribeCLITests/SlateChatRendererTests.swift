@@ -3,11 +3,8 @@ import Testing
 
 @testable import ScribeCLI
 
-/// Tests for `SlateChatRenderer.buildSemanticInputRows` — mode-label rendering, cursor,
-/// gutter, and spinner behavior in the input strip.
 @Suite
 struct SlateChatRendererBuildSemanticInputRowsTests {
-
 
   @Test func editModeShowsEDITLabelInUserPrefixColor() {
     let theme = CLITheme.default
@@ -30,7 +27,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: false,
       theme: theme)
 
-    // "EDIT: " = 6 chars
     #expect(grid[0][0].text == "E")
     #expect(grid[0][0].fg == theme.userPrefix)
     #expect(grid[0][1].text == "D")
@@ -61,7 +57,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: false,
       theme: theme)
 
-    // "READ: " = 6 chars in scribePrefix color
     #expect(grid[0][0].text == "R")
     #expect(grid[0][0].fg == theme.scribePrefix)
     #expect(grid[0][1].text == "E")
@@ -70,7 +65,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
     #expect(grid[0][4].text == ":")
     #expect(grid[0][5].text == " ")
   }
-
 
   @Test func cursorAppearsOnLastRow() {
     let theme = CLITheme.default
@@ -93,7 +87,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: false,
       theme: theme)
 
-    // After "EDIT: " (6), "hello" (5) = col 11 should be the cursor
     #expect(grid[0][11].text == "▏")
     #expect(grid[0][11].fg == theme.inputCursor)
   }
@@ -119,13 +112,8 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: false,
       theme: theme)
 
-    // Row 0 (not last): no cursor — the cursor "▏" only appears on the last row
-    // After "EDIT: " (6) + "line1" (5) = 11 chars of content.
-    // The cursor glyph should NOT be present on row 0.
-    // Row 0 col 11 is beyond the text, should still be background fill.
     #expect(grid[0][11].text == " ")
   }
-
 
   @Test func continuationRowsUseGutter() {
     let theme = CLITheme.default
@@ -148,15 +136,13 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: false,
       theme: theme)
 
-    // Row 0: "EDIT: " + "line1"
     #expect(grid[0][0].text == "E")
-    // Row 1: 6-space gutter then "line2"
+
     #expect(grid[1][0].text == " ")
     #expect(grid[1][0].fg == theme.inputGutter)
     #expect(grid[1][5].text == " ")
     #expect(grid[1][6].text == "l")
   }
-
 
   @Test func spinnerShowsWhenWaitingForLLM() {
     let theme = CLITheme.default
@@ -179,12 +165,10 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: true,
       theme: theme)
 
-    // Always shows mode label: "EDIT: " or "READ: " (edit → userPrefix orange)
     #expect(grid[0][0].text == "E")
     #expect(grid[0][0].fg == theme.userPrefix)
-    // After mode label is spinner glyph, then cursor (no "thinking..." text)
-  }
 
+  }
 
   @Test func buildSemanticInputRowsClipsToGridBounds() {
     let theme = CLITheme.default
@@ -195,7 +179,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       count: rows
     )
 
-    // Should not crash with startRow beyond grid
     SlateChatRenderer.buildSemanticInputRows(
       &grid,
       startRow: 5,
@@ -208,7 +191,6 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: false,
       theme: theme)
 
-    // Grid should be unchanged
     #expect(grid[0][0].text == " ")
   }
 
@@ -233,13 +215,10 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
       waitingForLLM: false,
       theme: theme)
 
-    // Grid should be unchanged
     #expect(grid[0][0].text == " ")
   }
 }
 
-
-/// Tests for `SlateChatRenderer.queuedTrayVisualLines` and `queuedTrayRowCount`.
 @Suite
 struct SlateChatRendererQueuedTrayTests {
 

@@ -6,18 +6,13 @@ import RegexBuilder
 struct ShellToolResult: Encodable, Sendable {
   let ok = true
   let exitCode: Int
-  /// Path to temp file containing stdout (always present, may be empty).
+
   let stdoutFile: String
-  /// Path to temp file containing stderr (always present, may be empty).
+
   let stderrFile: String
   let pid: pid_t
 }
 
-/// Returned when the shell command contains `sudo`.  Scribe does not have
-/// elevated privileges, so `sudo` (and common equivalents like `su`,
-/// `doas`, `pkexec`) is blocked before execution.  The model sees a JSON
-/// error and a user-visible warning so it can ask the operator to run the
-/// command manually.
 struct ShellSudoBlockedResult: Encodable, WarnableToolResult, Sendable {
   let ok = false
   let command: String
@@ -26,12 +21,6 @@ struct ShellSudoBlockedResult: Encodable, WarnableToolResult, Sendable {
   var toolWarnings: [String] { [error] }
 }
 
-/// **`shell`** runs commands via `/bin/sh -c`. Stdout and stderr are streamed to per-invocation
-/// temp files (under the system temporary directory, e.g. `/tmp/` on Linux). The tool result
-/// returns `stdoutFile` and `stderrFile` paths rather than inline output — the agent reads them
-/// with `read_file` when it needs the contents. These temp files are not automatically cleaned
-/// up; they persist until the system purges its temp directory (on reboot for Linux tmpfs, or
-/// periodically on macOS).
 public struct ShellTool: ScribeTool {
   public static var name: String { "shell" }
   public static var description: String {
@@ -63,8 +52,6 @@ public struct ShellTool: ScribeTool {
 
   public init() {}
 
-  /// Returns true when `command` asks for elevated privileges via `sudo`,
-  /// `su`, `doas`, or `pkexec` as standalone words (word-boundary match).
   private static func containsPrivilegeEscalation(_ command: String) -> Bool {
     let regex = Regex {
       Anchor.wordBoundary
@@ -85,9 +72,6 @@ public struct ShellTool: ScribeTool {
     var cwd: String? = ToolArgumentParsing.optionalString(obj["cwd"])
     if let c = cwd, c.isEmpty { cwd = nil }
 
-    // Block privilege-escalation commands before they hit the shell.
-    // Scribe cannot respond to password prompts and would hang until
-    // the process-tree kill timeout fires.
     if Self.containsPrivilegeEscalation(command) {
       let blocked = "Scribe cannot run `\(command)` — this command requires elevated "
         + "privileges (sudo/su/doas/pkexec). Please ask the user to run it manually "

@@ -3,14 +3,9 @@ import Testing
 
 @testable import ScribeCLI
 
-
-/// Tests for the `RenderLoop.buildFrame` pure function — verifies that
-/// transcript flatten, viewport resolution, and content-row calculation
-/// are correct for various screen sizes and transcript states.
 @Suite
 @MainActor
 struct RenderLoopTests {
-
 
   @Test func emptyTranscript() {
     var state = RenderState(
@@ -33,7 +28,6 @@ struct RenderLoopTests {
     #expect(output.transcriptTailStart == 0)
   }
 
-
   @Test func smallTranscriptFitsOnScreen() {
     let lines = [
       TLine(spans: [StyledSpan(fg: .blue, bg: .black, bold: false, text: "you:")]),
@@ -55,11 +49,10 @@ struct RenderLoopTests {
       rows: 24
     )
     let output = RenderLoop.buildFrame(state: &state)
-    // With 3 header rows (banner), 1 input row, 20 content rows, 2 transcript lines
-    #expect(output.flattenedTranscript.count == 2)
-    #expect(output.transcriptTailStart == 0)  // fits on screen, followingLive
-  }
 
+    #expect(output.flattenedTranscript.count == 2)
+    #expect(output.transcriptTailStart == 0)
+  }
 
   @Test func largeTranscriptTracksTail() {
     var lines: [TLine] = []
@@ -82,12 +75,11 @@ struct RenderLoopTests {
       rows: 24
     )
     let output = RenderLoop.buildFrame(state: &state)
-    // Content rows = 80 chars wide, 24 rows, 3 header, 1 input = 20 content
+
     let contentRows = 20
     let expectedTail = max(0, output.flattenedTranscript.count - contentRows)
     #expect(output.transcriptTailStart == expectedTail)
   }
-
 
   @Test func viewportScrollUpDisablesFollow() {
     let lines = (0..<50).map {
@@ -112,10 +104,9 @@ struct RenderLoopTests {
       rows: 24
     )
     let output = RenderLoop.buildFrame(state: &state)
-    // After scrolling up by 5, followingLive should be false
+
     #expect(!output.viewport.followingLive)
   }
-
 
   @Test func flattenCacheReusesOnSameGeneration() {
     let lines = [
@@ -132,16 +123,15 @@ struct RenderLoopTests {
     let output1 = RenderLoop.buildFrame(state: &state1)
 
     var state2 = RenderState(
-      transcriptLines: lines, streamingOpenLine: nil, generation: 1,  // same generation
+      transcriptLines: lines, streamingOpenLine: nil, generation: 1,
       flattenCache: output1.flattenCache, banner: nil, usageHUD: nil, inputBuffer: "",
       modelBusy: false, queuedTraySnapshot: QueuedTraySnapshot(), llmWaitAnimationFrame: 0,
       viewport: TranscriptViewport(), cols: 80, rows: 24
     )
     let output2 = RenderLoop.buildFrame(state: &state2)
-    // Same generation + same width → cache should be reused (completedLogicalLines > 0)
+
     #expect(output2.flattenCache.completedLogicalLines > 0)
   }
-
 
   @Test func generationChangeInvalidatesFlattenCache() {
     let lines = [
@@ -157,7 +147,7 @@ struct RenderLoopTests {
       viewport: TranscriptViewport(), cols: 80, rows: 24
     )
     let output = RenderLoop.buildFrame(state: &state)
-    // Generation changed → cache reset, completedLogicalLines should be 1
+
     #expect(output.flattenCache.completedLogicalLines == 1)
   }
 }
