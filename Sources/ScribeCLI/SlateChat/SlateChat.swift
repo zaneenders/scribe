@@ -105,8 +105,12 @@ enum SlateChat {
       }
       let host = SlateChatHost(
         configuration: configuration,
-        document: consume document,
-        persister: persister,
+        harness: try SessionHarness(
+          configuration: configuration,
+          document: consume document,
+          persister: persister,
+          logger: logger
+        ),
         sessionDirectory: sessionDirectory,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
