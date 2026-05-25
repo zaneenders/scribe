@@ -2,11 +2,12 @@ import Foundation
 import HTTPTypes
 import Logging
 import OpenAPIRuntime
-@testable import ScribeCore
 import ScribeLLM
-import SystemPackage
 import Synchronization
+import SystemPackage
 import Testing
+
+@testable import ScribeCore
 
 @Suite
 struct SessionHarnessTests {
@@ -348,8 +349,8 @@ private final class TrackingPersister: SessionPersister, @unchecked Sendable {
   }
 }
 
-private extension ScribeConfig {
-  static let testValue = ScribeConfig(
+extension ScribeConfig {
+  fileprivate static let testValue = ScribeConfig(
     agentModel: "test-model",
     contextWindow: 4000,
     contextWindowThreshold: 0.75,

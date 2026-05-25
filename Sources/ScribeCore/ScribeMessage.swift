@@ -265,10 +265,11 @@ extension ScribeMessage {
             default: return .auto
             }
           }()
-          return .imageUrl(.init(
-            _type: .imageUrl,
-            imageUrl: .init(url: url, detail: detailPayload)
-          ))
+          return .imageUrl(
+            .init(
+              _type: .imageUrl,
+              imageUrl: .init(url: url, detail: detailPayload)
+            ))
         }
       }
       contentPayload = .case2(chatParts)

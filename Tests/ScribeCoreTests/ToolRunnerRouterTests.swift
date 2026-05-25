@@ -1,5 +1,5 @@
-import SystemPackage
 import Foundation
+import SystemPackage
 import Testing
 
 @testable import ScribeCore
@@ -7,7 +7,8 @@ import Testing
 @Suite
 struct ToolRunnerRouterTests {
   @Test func unknownToolThrowsTypedError() async throws {
-    let registry = ToolRegistry(tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
+    let registry = ToolRegistry(
+      tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
     do {
       _ = try await registry.run(
         name: "not_a_registered_tool", arguments: "{}", workingDirectory: FilePath("/tmp"),

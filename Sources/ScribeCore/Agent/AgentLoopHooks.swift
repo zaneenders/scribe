@@ -1,31 +1,67 @@
 import Foundation
 import ScribeLLM
 
-public struct AgentLoopHooks: Sendable {
+enum BeforeToolCallDecision: Sendable, Equatable {
+  case proceed(ToolInvocation)
+  case block(reason: String)
+}
 
-  public var transformContext:
-    @Sendable ([Components.Schemas.ChatMessage]) async -> [Components.Schemas.ChatMessage]
+struct AfterToolCallDecision: Sendable {
+  var result: ToolResult
+  var terminate: Bool
 
-  public var beforeToolCall: @Sendable (ToolInvocation) async -> BeforeToolCallDecision
+  init(result: ToolResult, terminate: Bool = false) {
+    self.result = result
+    self.terminate = terminate
+  }
 
-  public var afterToolCall:
-    @Sendable (ToolInvocation, ToolResult) async -> AfterToolCallDecision
+  static func passThrough(_ result: ToolResult) -> Self {
+    AfterToolCallDecision(result: result, terminate: false)
+  }
+}
 
-  public var prepareNextTurn:
-    @Sendable (Int, [Components.Schemas.ChatMessage]) async -> NextTurnOverrides
+struct NextTurnOverrides: Sendable, Equatable {
+  var model: String?
+  var reasoningEnabled: Bool?
+  var temperature: Double?
 
-  public var shouldStopAfterTurn: @Sendable (Int) async -> Bool
+  init(
+    model: String? = nil,
+    reasoningEnabled: Bool? = nil,
+    temperature: Double? = nil
+  ) {
+    self.model = model
+    self.reasoningEnabled = reasoningEnabled
+    self.temperature = temperature
+  }
 
-  public init(
-    transformContext: @escaping @Sendable ([Components.Schemas.ChatMessage]) async
+  static let none = NextTurnOverrides()
+}
+
+struct AgentLoopHooks: Sendable {
+
+  var transformContext: @Sendable ([Components.Schemas.ChatMessage]) async -> [Components.Schemas.ChatMessage]
+
+  var beforeToolCall: @Sendable (ToolInvocation) async -> BeforeToolCallDecision
+
+  var afterToolCall: @Sendable (ToolInvocation, ToolResult) async -> AfterToolCallDecision
+
+  var prepareNextTurn: @Sendable (Int, [Components.Schemas.ChatMessage]) async -> NextTurnOverrides
+
+  var shouldStopAfterTurn: @Sendable (Int) async -> Bool
+
+  init(
+    transformContext:
+      @escaping @Sendable ([Components.Schemas.ChatMessage]) async
       -> [Components.Schemas.ChatMessage] = { $0 },
     beforeToolCall: @escaping @Sendable (ToolInvocation) async -> BeforeToolCallDecision = {
       .proceed($0)
     },
     afterToolCall: @escaping @Sendable (ToolInvocation, ToolResult) async -> AfterToolCallDecision = {
-      .passThrough($1)
+      _, result in .passThrough(result)
     },
-    prepareNextTurn: @escaping @Sendable (Int, [Components.Schemas.ChatMessage]) async
+    prepareNextTurn:
+      @escaping @Sendable (Int, [Components.Schemas.ChatMessage]) async
       -> NextTurnOverrides = { _, _ in .none },
     shouldStopAfterTurn: @escaping @Sendable (Int) async -> Bool = { _ in false }
   ) {
@@ -36,44 +72,5 @@ public struct AgentLoopHooks: Sendable {
     self.shouldStopAfterTurn = shouldStopAfterTurn
   }
 
-  public static let `default` = AgentLoopHooks()
-}
-
-public enum BeforeToolCallDecision: Sendable, Equatable {
-
-  case proceed(ToolInvocation)
-
-  case block(reason: String)
-}
-
-public struct AfterToolCallDecision: Sendable {
-  public var result: ToolResult
-  public var terminate: Bool
-
-  public init(result: ToolResult, terminate: Bool = false) {
-    self.result = result
-    self.terminate = terminate
-  }
-
-  public static func passThrough(_ result: ToolResult) -> Self {
-    AfterToolCallDecision(result: result, terminate: false)
-  }
-}
-
-public struct NextTurnOverrides: Sendable, Equatable {
-  public var model: String?
-  public var reasoningEnabled: Bool?
-  public var temperature: Double?
-
-  public init(
-    model: String? = nil,
-    reasoningEnabled: Bool? = nil,
-    temperature: Double? = nil
-  ) {
-    self.model = model
-    self.reasoningEnabled = reasoningEnabled
-    self.temperature = temperature
-  }
-
-  public static let none = NextTurnOverrides()
+  static let `default` = AgentLoopHooks()
 }

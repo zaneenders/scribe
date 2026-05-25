@@ -1,5 +1,3 @@
-
-
 public struct ScribeConfig: Sendable {
   public var agentModel: String
   public var contextWindow: Int

@@ -93,7 +93,7 @@ enum SessionSummarizer {
       ScribeMessage(role: .system, content: summarizerSystemPrompt)
     ]
     let turn = agent.run(userPrompt, history: history)
-    for await _ in turn.events {  }
+    for await _ in turn.events {}
     let result = try await turn.result.value
 
     guard

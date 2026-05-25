@@ -1,7 +1,7 @@
-import SystemPackage
 import Foundation
 import Logging
 import ScribeLLM
+import SystemPackage
 
 public struct ToolRegistry: Sendable, ToolExecutor {
   private let tools: [String: any ScribeTool]
