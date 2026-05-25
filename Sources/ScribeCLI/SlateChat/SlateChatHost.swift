@@ -97,31 +97,11 @@ extension TranscriptLayout {
 internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
-  /// Session directory the document is currently writing to. Tracks the
-  /// document — updated inline after every successful `apply`.
+  private let harness: SessionHarness
   private var sessionDirectory: FilePath
-  /// UUID of the active session. Tracks the document.
   private var sessionId: UUID
-  /// Created-at timestamp of the active session.
   private var sessionCreatedAt: Date
-  /// Input gate the coordinator consumes. Single instance for the whole
-  /// host — `/fork` and `/tldr` mutate the doc in place without needing
-  /// to retire and rebuild the coordinator.
   private var gate: UserLineGate = UserLineGate()
-  /// The session document. `~Copyable`, sole owner is this class.
-  /// Every doc mutation flows through ``applyEdit(_:)`` so transcript /
-  /// banner / exit-hint state stays in lock-step.
-  ///
-  /// Mutating methods on the doc are intentionally **sync**: that
-  /// avoids the "mutating async on an actor-isolated property" rule
-  /// (which would otherwise require `nonisolated(unsafe)`). Async I/O
-  /// lives on the persister and runs *between* sync borrows of the
-  /// doc, never across one.
-  private var document: SessionDocument
-  /// Disk-backed persister paired with the document. The host writes
-  /// to disk first, then commits to the doc — that order means a
-  /// persistence failure never leaves the rope ahead of the JSONL.
-  private let persister: any SessionPersister
 
   private var inputHandler = TerminalInputHandler()
   private var submitCoordinator = SubmitCoordinator()
@@ -175,16 +155,14 @@ internal final class SlateChatHost {
 
   init(
     configuration: ScribeConfig,
-    document: consuming SessionDocument,
-    persister: any SessionPersister,
+    harness: SessionHarness,
     sessionDirectory: FilePath,
     sessionId: UUID,
     sessionCreatedAt: Date,
     logger: Logger
   ) {
     self.configuration = configuration
-    self.document = document
-    self.persister = persister
+    self.harness = harness
     self.sessionDirectory = sessionDirectory
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
@@ -223,11 +201,6 @@ internal final class SlateChatHost {
   }
 
   func run() async throws -> ChatExitInfo {
-    // The session document was built by the caller and consumed into
-    // `self.document` at init — the host is its sole owner. Every doc
-    // mutation flows through `applyEdit(_:)` so the host updates UI state
-    // inline (no observer task, no continuation cleanup).
-
     var slate = try Slate()
 
     await slate.subscribe(
@@ -235,67 +208,61 @@ internal final class SlateChatHost {
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
 
-        // Wire picker controller's doc-access closures + configuration.
-        // The closures bottom out at `self.document` (the sole owner) —
-        // the picker never sees the `~Copyable` value itself.
-        self.pickerController.messagesInRange = { [weak self] range in
-          guard let self else { return [] }
-          return range.map { self.document[$0] }
-        }
         self.pickerController.applyEdit = { [weak self] op in
           guard let self else {
             throw ScribeError.generic("chat host gone before apply")
           }
-          try await self.applyEdit(op)
+          if let change = try await self.harness.applyEdit(op) {
+            self.handleIdentityChange(change)
+          }
         }
         self.pickerController.configuration = self.configuration
 
-        // Initial transcript seed + banner setup, then start the
-        // coordinator. The coordinator and document live for the host's
-        // whole lifetime — no hot-swap dance on `/fork` / `/tldr`.
-        self.refreshTranscriptFromDocument()
+        Task { @MainActor in
+          await self.refreshTranscriptFromDocument()
 
-        let cwd = FilePath.currentDirectory.string
-        self.banner = BannerSnapshot(
-          baseURL: self.configuration.serverURL,
-          model: self.configuration.agentModel,
-          cwd: cwd,
-          scribeVersion: GitVersion.hash,
-          gitBranch: nil,
-          sessionId: self.sessionId.uuidString)
+          let cwd = FilePath.currentDirectory.string
+          self.banner = BannerSnapshot(
+            baseURL: self.configuration.serverURL,
+            model: self.configuration.agentModel,
+            cwd: cwd,
+            scribeVersion: GitVersion.hash,
+            gitBranch: nil,
+            sessionId: self.sessionId.uuidString)
 
-        // Detect git branch asynchronously.
-        let baseURL = self.configuration.serverURL
-        let model = self.configuration.agentModel
-        let version = GitVersion.hash
-        let sid = self.sessionId.uuidString
-        Task.detached(priority: .background) { [weak self] in
-          if let branch = SlateChatHost.detectGitBranch(cwd: cwd) {
-            await MainActor.run {
-              self?.banner = BannerSnapshot(
-                baseURL: baseURL,
-                model: model,
-                cwd: cwd,
-                scribeVersion: version,
-                gitBranch: branch,
-                sessionId: sid)
+          // Detect git branch asynchronously.
+          let baseURL = self.configuration.serverURL
+          let model = self.configuration.agentModel
+          let version = GitVersion.hash
+          let sid = self.sessionId.uuidString
+          Task.detached(priority: .background) { [weak self] in
+            if let branch = SlateChatHost.detectGitBranch(cwd: cwd) {
+              await MainActor.run {
+                self?.banner = BannerSnapshot(
+                  baseURL: baseURL,
+                  model: model,
+                  cwd: cwd,
+                  scribeVersion: version,
+                  gitBranch: branch,
+                  sessionId: sid)
+              }
             }
           }
-        }
 
-        self.installCoordinator()
+          self.installCoordinator()
 
-        self.spinnerTask?.cancel()
-        self.spinnerTask = Task { [weak self] in
-          while !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(90))
-            guard let self else { return }
-            guard self.modelBusy else { continue }
-            self.llmWaitAnimationFrame &+= 1
-            self.renderWake?.requestRender()
+          self.spinnerTask?.cancel()
+          self.spinnerTask = Task { [weak self] in
+            while !Task.isCancelled {
+              try? await Task.sleep(for: .milliseconds(90))
+              guard let self else { return }
+              guard self.modelBusy else { continue }
+              self.llmWaitAnimationFrame &+= 1
+              self.renderWake?.requestRender()
+            }
           }
+          wake.requestRender()
         }
-        wake.requestRender()
       },
       coalesceMaxFPS: 60,
       onEvent: { slate, event in
@@ -347,19 +314,19 @@ internal final class SlateChatHost {
                 if trimmed == "/fork" || trimmed == "/tldr" {
                   let kind: PickerSnapshot.Kind =
                     trimmed == "/fork" ? .fork : .tldr
-                  // The doc is `~Copyable` and lives here on the
-                  // MainActor; snapshot synchronously and open the
-                  // picker on the same tick.
                   self.inputBuffer = ""
                   let busy = self.modelBusy
-                  _ = self.pickerController.open(
-                    kind: kind,
-                    document: self.document,
-                    modelBusy: busy,
-                    transcriptState: &self.transcriptState,
-                    viewport: &self.viewport,
-                    flattenCache: &self.flattenCache)
-                  self.renderWake?.requestRender()
+                  Task { @MainActor in
+                    let snapshot = await self.harness.snapshot()
+                    _ = self.pickerController.open(
+                      kind: kind,
+                      snapshot: snapshot,
+                      modelBusy: busy,
+                      transcriptState: &self.transcriptState,
+                      viewport: &self.viewport,
+                      flattenCache: &self.flattenCache)
+                    self.renderWake?.requestRender()
+                  }
                 } else {
                   self.inputBuffer = ""
                   self.submitCoordinator.setModelBusy(self.modelBusy)
@@ -562,116 +529,40 @@ internal final class SlateChatHost {
   }
 
 
-  /// Build the line stream for `self.gate` and start the host's one and
-  /// only ChatCoordinator. The coordinator gets thin closures back into
-  /// the host for snapshotting and appending; the doc itself stays
-  /// owned here. `/fork` and `/tldr` mutate the doc in place and the
-  /// agent keeps running against the new identity automatically.
   private func installCoordinator() {
     let (lineStream, lineCont) = AsyncStream<String>.makeStream()
     self.gate.setStreamContinuation(lineCont)
 
-    let coordinator: ChatCoordinator
-    do {
-      coordinator = try ChatCoordinator(
-        configuration: configuration,
-        logger: self.logger,
-        enqueue: { [eventQueue] event in
-          eventQueue.enqueue(event)
-        },
-        agentHistory: { [weak self] in
-          self?.document.agentHistory() ?? []
-        },
-        applyAppend: { [weak self] msgs in
-          guard let self else { return }
-          try await self.applyEdit(.append(msgs))
-        },
-        documentCount: { [weak self] in
-          self?.document.count ?? 0
-        },
-        lines: lineStream
-      )
-    } catch {
-      let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-      eventQueue.enqueue(.transcript(.lifecycle(.error(scribeError))))
-      eventQueue.enqueue(.coordinatorFinished)
-      self.logger.error(
-        "chat.coordinator.init.fail",
-        metadata: [
-          "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
-        ])
-      return
-    }
+    let coordinator = ChatCoordinator(
+      harness: harness,
+      logger: self.logger,
+      enqueue: { [eventQueue] event in
+        eventQueue.enqueue(event)
+      },
+      lines: lineStream
+    )
     self.coordinator = coordinator
     self.coordinatorTask = Task {
       await coordinator.run()
     }
   }
 
-  /// Replay the doc's content into the transcript pane. Used for the
-  /// initial render (where we already have the seed in hand) and after
-  /// the document changes identity via `/fork` or `/tldr`.
-  private func refreshTranscriptFromDocument() {
-    transcriptState.lines = document.isEmpty
+  private func refreshTranscriptFromDocument() async {
+    let snapshot = await harness.snapshot()
+    transcriptState.lines = snapshot.isEmpty
       ? []
-      : renderDocumentToTranscript(
-        document, theme: self.theme, renderer: self.markdownRenderer)
+      : renderMessagesToTranscript(
+        snapshot.messages, theme: self.theme, renderer: self.markdownRenderer)
     flattenCache = TranscriptLayout.FlattenCache()
   }
 
-  /// Apply an `EditOp` against the host-owned doc + persister.
-  ///
-  /// Async I/O on the persister happens **between** sync borrows of
-  /// the doc, never across one — that's what lets `self.document` stay
-  /// a plain `@MainActor` stored property (no `nonisolated(unsafe)`).
-  /// Persist-first / commit-second means a persistence failure leaves
-  /// the in-memory rope untouched.
-  fileprivate func applyEdit(_ op: EditOp) async throws {
-    switch op {
-    case .append(let messages):
-      guard !messages.isEmpty else { return }
-      try await persister.append(messages)
-      document.append(messages)
-
-    case .fork(let cutAt, let newSessionId):
-      let parentId = document.sessionId
-      let newDir = persister.directory(for: newSessionId)
-      let successor = document.successor(
-        splicing: cutAt..<document.count,
-        newSessionId: newSessionId,
-        newDirectory: newDir
-      )
-      try await persister.openSession(
-        SessionPersistenceSnapshot(successor),
-        parent: SessionParent(sessionId: parentId, forkPoint: cutAt)
-      )
-      document = successor
-      handleIdentityChange(previous: parentId, sessionId: newSessionId, directory: newDir)
-
-    case .forkSplice(let startCut, let endCut, let replacement, let newSessionId):
-      let parentId = document.sessionId
-      let newDir = persister.directory(for: newSessionId)
-      let successor = document.successor(
-        splicing: startCut..<endCut,
-        inserting: replacement,
-        newSessionId: newSessionId,
-        newDirectory: newDir
-      )
-      try await persister.openSession(
-        SessionPersistenceSnapshot(successor),
-        parent: SessionParent(sessionId: parentId, forkPoint: startCut)
-      )
-      document = successor
-      handleIdentityChange(previous: parentId, sessionId: newSessionId, directory: newDir)
-    }
+  private func handleIdentityChange(_ change: SessionIdentityChange) {
+    handleIdentityChange(
+      previous: change.previousSessionId,
+      sessionId: change.newSessionId,
+      directory: change.newDirectory)
   }
 
-  /// React to a session identity swap after `/fork` or `/tldr`.
-  /// The doc has already swapped its own session id + directory + rope
-  /// content; the host's job is to mirror that into UI state (transcript
-  /// snapshot, banner, exit-hint) and reset per-turn scratch state. No
-  /// coordinator restart — the coordinator + agent operate against the
-  /// host's `snapshot` closure and follow the new identity automatically.
   private func handleIdentityChange(previous: UUID, sessionId newId: UUID, directory newDirectory: FilePath) {
     guard hostActive else {
       logger.notice("chat.identity.skip", metadata: ["reason": "host-inactive"])
@@ -709,9 +600,11 @@ internal final class SlateChatHost {
         sessionId: newId.uuidString)
     }
 
-    // Re-render transcript from the doc's post-swap content.
-    self.refreshTranscriptFromDocument()
-    renderWake?.requestRender()
+    // Re-render transcript from the post-swap content.
+    Task { @MainActor in
+      await self.refreshTranscriptFromDocument()
+      self.renderWake?.requestRender()
+    }
   }
 
   private func drainIncomingEvents() {

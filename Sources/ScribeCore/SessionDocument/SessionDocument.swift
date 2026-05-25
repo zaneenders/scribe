@@ -7,7 +7,7 @@ import SystemPackage
 ///
 /// Owns a ``MessageRope`` and the session identity (id + on-disk
 /// directory). `SessionDocument` is `~Copyable`: the compiler enforces a
-/// single owner (the chat host). All reads are synchronous borrows via
+/// single owner (typically ``SessionHarness``). All reads are synchronous borrows via
 /// subscript and `count`; all mutations are synchronous and take
 /// `inout self` (append) or produce a successor (fork / tldr).
 ///
