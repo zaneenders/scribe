@@ -12,7 +12,7 @@ struct RenderState {
   var usageHUD: UsageHUDSnapshot?
   var inputBuffer: String
   var modelBusy: Bool
-  var queuedTrayText: String?
+  var queuedTraySnapshot: QueuedTraySnapshot
   var llmWaitAnimationFrame: Int
   var viewport: TranscriptViewport
   var cols: Int
@@ -59,7 +59,7 @@ enum RenderLoop {
       usage: state.usageHUD,
       inputLine: state.inputBuffer,
       waitingForLLM: state.modelBusy,
-      queuedTrayText: state.queuedTrayText)
+      queuedTraySnapshot: state.queuedTraySnapshot)
 
     _ = state.viewport.resolve(flatCount: flatTranscript.count, contentRows: contentRows)
     let tailStart = state.viewport.firstVisibleRow

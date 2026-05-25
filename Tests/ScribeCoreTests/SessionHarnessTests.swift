@@ -1,6 +1,9 @@
 import Foundation
+import HTTPTypes
 import Logging
-import ScribeCore
+import OpenAPIRuntime
+@testable import ScribeCore
+import ScribeLLM
 import SystemPackage
 import Synchronization
 import Testing
@@ -13,7 +16,7 @@ struct SessionHarnessTests {
   private func makeHarness(
     seed: [ScribeMessage] = [],
     persister: (any SessionPersister)? = nil
-  ) throws -> SessionHarness {
+  ) throws -> (SessionHarness, SessionMessageQueues) {
     let sessionId = UUID()
     var document = SessionDocument(
       sessionId: sessionId,
@@ -23,16 +26,19 @@ struct SessionHarnessTests {
     if !seed.isEmpty {
       document.append(seed)
     }
-    return try SessionHarness(
+    let queues = SessionMessageQueues()
+    let harness = try SessionHarness(
       configuration: .testValue,
       document: consume document,
       persister: persister ?? InMemorySessionPersister(),
-      logger: logger
+      logger: logger,
+      messageQueues: queues
     )
+    return (harness, queues)
   }
 
   @Test func snapshotReflectsDocument() async throws {
-    let harness = try makeHarness(seed: [
+    let (harness, _) = try makeHarness(seed: [
       ScribeMessage(role: .system, content: "sys"),
       ScribeMessage(role: .user, content: "hi"),
     ])
@@ -46,7 +52,7 @@ struct SessionHarnessTests {
 
   @Test func appendPersistsBeforeCommit() async throws {
     let tracking = TrackingPersister()
-    let harness = try makeHarness(persister: tracking)
+    let (harness, _) = try makeHarness(persister: tracking)
     try await harness.applyEdit(.append([ScribeMessage(role: .user, content: "q")]))
     let snap = await harness.snapshot()
     #expect(snap.count == 1)
@@ -56,7 +62,7 @@ struct SessionHarnessTests {
 
   @Test func forkReturnsIdentityChange() async throws {
     let tracking = TrackingPersister()
-    let harness = try makeHarness(
+    let (harness, _) = try makeHarness(
       seed: [
         ScribeMessage(role: .system, content: "sys"),
         ScribeMessage(role: .user, content: "hi"),
@@ -76,9 +82,237 @@ struct SessionHarnessTests {
   }
 
   @Test func submitEmptyIsNoOp() async throws {
-    let harness = try makeHarness()
+    let (harness, _) = try makeHarness()
     let outcome = try await harness.submit("   ") { _ in }
     #expect(outcome == .completed)
+  }
+
+  @Test func enqueueSteeringWhileBusyIsVisibleToHarness() async throws {
+    let (_, queues) = try makeHarness()
+    queues.enqueueSteering(text: "steer me")
+    #expect(queues.steeringCount() == 1)
+    #expect(queues.steeringPreviewTexts() == ["steer me"])
+  }
+
+  @Test func followUpQueueDrainsOnlyAfterCompletedTurn() async throws {
+    let (_, queues) = try makeHarness()
+    queues.enqueueFollowUp(text: "later")
+    #expect(queues.followUpCount() == 1)
+    queues.clearFollowUp()
+    #expect(queues.followUpCount() == 0)
+  }
+
+  @Test func steeringDrainInvokesOnUserPromptForEachMessage() async throws {
+    let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
+    let chunks = [sseChunk(reply), doneChunk()]
+    let transport = CountingTransport(chunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let agent = ScribeAgent(
+      client: client,
+      model: "test-model",
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      logger: logger
+    )
+
+    let sessionId = UUID()
+    var document = SessionDocument(
+      sessionId: sessionId,
+      directory: FilePath("/in-memory/\(sessionId.uuidString)"),
+      logger: logger
+    )
+    document.append([ScribeMessage(role: .system, content: "sys")])
+
+    let queues = SessionMessageQueues()
+    let harness = SessionHarness(
+      configuration: .testValue,
+      document: consume document,
+      persister: InMemorySessionPersister(),
+      agent: agent,
+      logger: logger,
+      messageQueues: queues
+    )
+    queues.enqueueSteering(text: "steer-a")
+    queues.enqueueSteering(text: "steer-b")
+
+    let prompts = Mutex<[String]>([])
+    _ = try await harness.submit(
+      "hello",
+      onUserPrompt: { text in prompts.withLock { $0.append(text) } },
+      onEvent: { _ in }
+    )
+
+    #expect(prompts.withLock { $0 } == ["hello", "steer-a", "steer-b"])
+  }
+
+  @Test func fourQueuedMessagesAllRunAfterPopAndSubmit() async throws {
+    let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
+    let chunks = [sseChunk(reply), doneChunk()]
+    let transport = CountingTransport(chunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let agent = ScribeAgent(
+      client: client,
+      model: "test-model",
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      logger: logger
+    )
+
+    let sessionId = UUID()
+    var document = SessionDocument(
+      sessionId: sessionId,
+      directory: FilePath("/in-memory/\(sessionId.uuidString)"),
+      logger: logger
+    )
+    document.append([ScribeMessage(role: .system, content: "sys")])
+
+    let queues = SessionMessageQueues()
+    let harness = SessionHarness(
+      configuration: .testValue,
+      document: consume document,
+      persister: InMemorySessionPersister(),
+      agent: agent,
+      logger: logger,
+      messageQueues: queues
+    )
+    queues.enqueueSteering(text: "msg-one")
+    queues.enqueueSteering(text: "msg-two")
+    queues.enqueueSteering(text: "msg-three")
+    queues.enqueueSteering(text: "msg-four")
+
+    let first = queues.popSteeringForRecall()
+    #expect(first == "msg-one")
+
+    let prompts = Mutex<[String]>([])
+    _ = try await harness.submit(
+      first!,
+      onUserPrompt: { text in prompts.withLock { $0.append(text) } },
+      onEvent: { _ in }
+    )
+
+    #expect(prompts.withLock { $0 } == ["msg-one", "msg-two", "msg-three", "msg-four"])
+    #expect(queues.steeringCount() == 0)
+    #expect(transport.callCount == 4)
+  }
+
+  @Test func steeringModeAllDrainsInSingleTurn() async throws {
+    let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
+    let chunks = [sseChunk(reply), doneChunk()]
+    let transport = CountingTransport(chunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let agent = ScribeAgent(
+      client: client,
+      model: "test-model",
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      logger: logger
+    )
+
+    let sessionId = UUID()
+    var document = SessionDocument(
+      sessionId: sessionId,
+      directory: FilePath("/in-memory/\(sessionId.uuidString)"),
+      logger: logger
+    )
+    document.append([ScribeMessage(role: .system, content: "sys")])
+
+    let queues = SessionMessageQueues()
+    let harness = SessionHarness(
+      configuration: .testValue,
+      document: consume document,
+      persister: InMemorySessionPersister(),
+      agent: agent,
+      logger: logger,
+      messageQueues: queues
+    )
+    queues.setSteeringMode(.all)
+    queues.enqueueSteering(text: "steer-a")
+    queues.enqueueSteering(text: "steer-b")
+
+    _ = try await harness.submit("hello") { _ in }
+
+    #expect(queues.steeringCount() == 0)
+    // Initial turn + one steering turn (both steer messages batched).
+    #expect(transport.callCount == 2)
+
+    let snap = await harness.snapshot()
+    let userContents = snap.messages.filter { $0.role == .user }.map(\.content)
+    #expect(userContents.contains("hello"))
+    #expect(userContents.contains("steer-a"))
+    #expect(userContents.contains("steer-b"))
+  }
+
+  @Test func steeringModeOneAtATimeDrainsSequentially() async throws {
+    let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
+    let chunks = [sseChunk(reply), doneChunk()]
+    let transport = CountingTransport(chunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let agent = ScribeAgent(
+      client: client,
+      model: "test-model",
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      logger: logger
+    )
+
+    let sessionId = UUID()
+    var document = SessionDocument(
+      sessionId: sessionId,
+      directory: FilePath("/in-memory/\(sessionId.uuidString)"),
+      logger: logger
+    )
+    document.append([ScribeMessage(role: .system, content: "sys")])
+
+    let queues = SessionMessageQueues()
+    let harness = SessionHarness(
+      configuration: .testValue,
+      document: consume document,
+      persister: InMemorySessionPersister(),
+      agent: agent,
+      logger: logger,
+      messageQueues: queues
+    )
+    queues.enqueueSteering(text: "steer-a")
+    queues.enqueueSteering(text: "steer-b")
+
+    _ = try await harness.submit("hello") { _ in }
+
+    #expect(queues.steeringCount() == 0)
+    // Initial + two steering turns (one message each).
+    #expect(transport.callCount == 3)
+  }
+}
+
+private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
+  ArraySlice("data: \(json)\n\n".utf8)
+}
+
+private func doneChunk() -> HTTPBody.ByteChunk {
+  ArraySlice("data: [DONE]\n\n".utf8)
+}
+
+private final class CountingTransport: ClientTransport, Sendable {
+  private let chunks: [HTTPBody.ByteChunk]
+  private let state = Mutex(0)
+
+  var callCount: Int { state.withLock { $0 } }
+
+  init(chunks: [HTTPBody.ByteChunk]) {
+    self.chunks = chunks
+  }
+
+  func send(
+    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+  ) async throws -> (HTTPResponse, HTTPBody?) {
+    state.withLock { $0 += 1 }
+    let response = HTTPResponse(status: .init(code: 200))
+    let streamBody = HTTPBody(
+      AsyncStream { continuation in
+        for chunk in chunks { continuation.yield(chunk) }
+        continuation.finish()
+      },
+      length: .unknown)
+    return (response, streamBody)
   }
 }
 

@@ -99,14 +99,17 @@ enum SlateChat {
       } else {
         document.append(resumeMessages)
       }
+      let messageQueues = SessionMessageQueues()
       let host = SlateChatHost(
         configuration: configuration,
         harness: try SessionHarness(
           configuration: configuration,
           document: consume document,
           persister: persister,
-          logger: logger
+          logger: logger,
+          messageQueues: messageQueues
         ),
+        messageQueues: messageQueues,
         sessionDirectory: sessionDirectory,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
