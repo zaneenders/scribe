@@ -67,13 +67,10 @@ public struct SessionDocument: ~Copyable {
     rope.safeForkBoundaries()
   }
 
-  /// Materialise the transcript for the agent loop. Package-internal —
-  /// embedders pass the result to ``ScribeAgent/run(_:history:)``.
   package borrowing func agentHistory() -> [ScribeMessage] {
     rope.toArray()
   }
 
-  /// Wire-type snapshot for transports that speak OpenAI chat messages.
   package borrowing func chatMessages() -> [Components.Schemas.ChatMessage] {
     rope.toArray().toWireMessages()
   }

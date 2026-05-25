@@ -1,9 +1,6 @@
 import _RopeModule
 
 
-/// A leaf buffer holding zero or more ``ScribeMessage`` values.
-///
-/// Each leaf holds at most `MessageSummary.maxNodeSize` (32) messages.
 public struct Message: RopeElement, Sendable {
   public typealias Summary = MessageSummary
   public typealias Index = Int
