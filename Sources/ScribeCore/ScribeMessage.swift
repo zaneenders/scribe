@@ -59,14 +59,8 @@ public enum ScribeContentPart: Sendable, Codable, Hashable {
 
 /// Transport-agnostic chat message used by Scribe's public agent API.
 ///
-/// `ScribeMessage` is the lingua franca for embedders: it carries the same
-/// shape as the OpenAI chat-completion `ChatMessage` (so on-disk JSONL and
-/// HTTP request bodies round-trip cleanly), but it is **not** the generated
-/// `Components.Schemas.ChatMessage` — that type belongs to the OpenAI wire
-/// transport and is an implementation detail of ``ScribeLLM``. Defining a
-/// thin in-Core message type lets us add Anthropic / Gemini transports
-/// later (and gives session JSONL a stable schema that is forward-compatible
-/// with non-OpenAI providers).
+/// Not the generated `Components.Schemas.ChatMessage` — wire conversion
+/// happens at the loop boundary via ``Array/toWireMessages()``.
 ///
 /// The Codable conformance uses snake_case keys (`tool_calls`,
 /// `tool_call_id`, `reasoning_content`) so historic session files written
@@ -336,8 +330,12 @@ extension ScribeMessage {
 }
 
 extension Array where Element == ScribeMessage {
-  package func toChatMessages() -> [Components.Schemas.ChatMessage] {
+  package func toWireMessages() -> [Components.Schemas.ChatMessage] {
     map { $0.toChatMessage() }
+  }
+
+  package func toChatMessages() -> [Components.Schemas.ChatMessage] {
+    toWireMessages()
   }
 }
 
