@@ -7,10 +7,6 @@ import Testing
 
 @testable import ScribeCLI
 
-/// Tests for the `ChatCoordinator` — verifies initialization and the
-/// `interrupt()` surface without needing a real ScribeAgent. Session
-/// lifecycle is owned by ``SessionHarness`` and covered by
-/// ``SessionHarnessTests``.
 @Suite
 struct ChatCoordinatorTests {
 

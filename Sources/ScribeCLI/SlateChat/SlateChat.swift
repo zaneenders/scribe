@@ -87,10 +87,6 @@ enum SlateChat {
       logger: logger
     )
     return try await Task { @MainActor () throws -> ChatExitInfo in
-      // Build the `~Copyable` document on the MainActor so the value is
-      // born in the same isolation domain that will own it (the host
-      // also runs on the MainActor). The doc starts empty; seed content
-      // enters through `append` after any persist-first I/O.
       var document = SessionDocument(
         sessionId: sessionId,
         directory: sessionDirectory,

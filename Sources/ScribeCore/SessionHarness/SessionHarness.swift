@@ -2,16 +2,7 @@ import Foundation
 import Logging
 import SystemPackage
 
-/// Orchestration layer between embedders and ``ScribeAgent``.
-///
-/// Owns the paired ``SessionDocument`` and ``SessionPersister``, coordinates
-/// turn dispatch, persist-first mutations, and token monitoring. The agent
-/// loop stays stateless — history enters as a snapshot and turn diffs are
-/// folded back here after persistence succeeds.
-///
-/// Embedders (TUI, server, tests) call ``submit(_:options:onEvent:)`` for
-/// turns and ``applyEdit(_:)`` for fork/summary mutations. Slate-specific
-/// UI remains outside this type.
+/// Owns session state and coordinates ``ScribeAgent`` turns.
 public actor SessionHarness {
 
   private var document: SessionDocument
@@ -21,7 +12,6 @@ public actor SessionHarness {
   private let agent: ScribeAgent
   private let tokenTracker: TokenTracker
 
-  /// Construct a harness that consumes the sole owner of `document`.
   public init(
     configuration: ScribeConfig,
     document: consuming SessionDocument,
@@ -39,7 +29,6 @@ public actor SessionHarness {
     )
   }
 
-  /// Construct a harness with a caller-supplied agent (tests, custom transport).
   init(
     configuration: ScribeConfig,
     document: consuming SessionDocument,
@@ -58,8 +47,6 @@ public actor SessionHarness {
     )
   }
 
-  // MARK: - Reads
-
   public var sessionId: UUID { document.sessionId }
 
   public var sessionDirectory: FilePath { document.directory }
@@ -68,12 +55,10 @@ public actor SessionHarness {
 
   public var isEmpty: Bool { document.isEmpty }
 
-  /// Materialise agent history for the current document.
   public func agentHistory() -> [ScribeMessage] {
     document.agentHistory()
   }
 
-  /// Sendable snapshot for cross-isolation reads (picker, transcript replay).
   public func snapshot() -> SessionDocumentSnapshot {
     SessionDocumentSnapshot(
       sessionId: document.sessionId,
@@ -83,19 +68,12 @@ public actor SessionHarness {
     )
   }
 
-  /// Whether the latest prompt size exceeds the configured threshold.
   public var isApproachingTokenLimit: Bool { tokenTracker.isApproachingLimit }
 
-  /// Whether the latest prompt size exceeds the full context window.
   public var isOverTokenLimit: Bool { tokenTracker.isOverLimit }
 
   public var lastPromptTokens: Int { tokenTracker.lastPromptTokens }
 
-  // MARK: - Mutations
-
-  /// Apply a session edit with persist-first / commit-second ordering.
-  ///
-  /// Returns ``SessionIdentityChange`` when the edit forks into a new session.
   @discardableResult
   public func applyEdit(_ op: EditOp) async throws -> SessionIdentityChange? {
     switch op {
@@ -146,9 +124,6 @@ public actor SessionHarness {
     }
   }
 
-  // MARK: - Turn dispatch
-
-  /// Run one user turn: snapshot history, drive the agent, persist the diff.
   public func submit(
     _ text: String,
     options: AgentRunOptions = AgentRunOptions(),
@@ -195,7 +170,6 @@ public actor SessionHarness {
     return result.outcome
   }
 
-  /// Request interruption of the in-flight agent turn.
   public func interrupt() {
     agent.abort()
   }

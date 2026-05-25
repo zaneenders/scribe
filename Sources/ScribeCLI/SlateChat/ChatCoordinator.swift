@@ -2,13 +2,7 @@ import Foundation
 import Logging
 import ScribeCore
 
-/// Reference embedder that drives a ``SessionHarness`` from a `lines` stream.
-///
-/// `ChatCoordinator` is intentionally narrow: it owns nothing UI-shaped
-/// (Slate, `@MainActor`, terminal handling all live in ``SlateChatHost``)
-/// and delegates session lifecycle to ``SessionHarness``. Copy this file to
-/// ship Scribe inside a server or another tool; the only outside-the-harness
-/// dependency is the `enqueue` callback (where transcript events are routed).
+/// Drives a ``SessionHarness`` from a line stream. UI lives in ``SlateChatHost``.
 final class ChatCoordinator: Sendable {
 
   private let harness: SessionHarness
@@ -58,16 +52,8 @@ final class ChatCoordinator: Sendable {
       defer { enqueue(.modelTurnRunning(false)) }
 
       do {
-        let outcome = try await harness.submit(trimmed) { [enqueue] event in
+        _ = try await harness.submit(trimmed) { [enqueue] event in
           enqueue(.transcript(event))
-        }
-        switch outcome {
-        case .completed:
-          break
-        case .interrupted:
-          break
-        case .toolRoundLimit:
-          break
         }
       } catch {
         let se = (error as? ScribeError) ?? .generic(String(describing: error))

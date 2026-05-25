@@ -46,9 +46,6 @@ internal final class BoundaryPickerController {
   }
 
 
-  /// Apply an `EditOp` (`.fork` or `.forkSplice`) through the session
-  /// harness. The host updates transcript / banner / exit-hint state
-  /// inline; the picker only needs to know the call succeeded.
   var applyEdit: (@MainActor (EditOp) async throws -> Void)?
   var configuration: ScribeConfig = ScribeConfig(
     agentModel: "", contextWindow: 0, contextWindowThreshold: 0,
@@ -105,10 +102,6 @@ internal final class BoundaryPickerController {
   }
 
 
-  /// Open the boundary picker.  Returns `true` when the picker is now active.
-  ///
-  /// The caller passes a harness snapshot. With `modelBusy == true` the
-  /// content would be stale (mid-turn) so we refuse to open.
   func open(
     kind: PickerSnapshot.Kind,
     snapshot: SessionDocumentSnapshot,

@@ -97,18 +97,10 @@ extension TranscriptLayout {
 internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
-  /// Session orchestration — owns the document and persister.
   private let harness: SessionHarness
-  /// Session directory the harness is currently writing to. Tracks identity
-  /// changes after `/fork` or `/tldr`.
   private var sessionDirectory: FilePath
-  /// UUID of the active session. Tracks the harness.
   private var sessionId: UUID
-  /// Created-at timestamp of the active session.
   private var sessionCreatedAt: Date
-  /// Bridges keystroke submissions to the coordinator's line stream.
-  /// `/fork` and `/tldr` mutate the harness in place without rebuilding
-  /// the coordinator.
   private var gate: UserLineGate = UserLineGate()
 
   private var inputHandler = TerminalInputHandler()
@@ -209,10 +201,6 @@ internal final class SlateChatHost {
   }
 
   func run() async throws -> ChatExitInfo {
-    // The session harness was built by the caller and wired at init.
-    // Every doc mutation flows through the harness; the host updates UI
-    // state inline (no observer task, no continuation cleanup).
-
     var slate = try Slate()
 
     await slate.subscribe(
@@ -220,7 +208,6 @@ internal final class SlateChatHost {
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
 
-        // Wire picker controller's harness callbacks + configuration.
         self.pickerController.applyEdit = { [weak self] op in
           guard let self else {
             throw ScribeError.generic("chat host gone before apply")
@@ -234,9 +221,6 @@ internal final class SlateChatHost {
         Task { @MainActor in
           await self.refreshTranscriptFromDocument()
 
-          // Initial transcript seed + banner setup, then start the
-          // coordinator. The coordinator and harness live for the host's
-          // whole lifetime — no hot-swap dance on `/fork` / `/tldr`.
           let cwd = FilePath.currentDirectory.string
           self.banner = BannerSnapshot(
             baseURL: self.configuration.serverURL,
@@ -545,10 +529,6 @@ internal final class SlateChatHost {
   }
 
 
-  /// Build the line stream for `self.gate` and start the host's one and
-  /// only ChatCoordinator. The coordinator drives the shared harness;
-  /// `/fork` and `/tldr` mutate harness state in place and the agent
-  /// keeps running against the new identity automatically.
   private func installCoordinator() {
     let (lineStream, lineCont) = AsyncStream<String>.makeStream()
     self.gate.setStreamContinuation(lineCont)
@@ -567,7 +547,6 @@ internal final class SlateChatHost {
     }
   }
 
-  /// Replay the harness transcript into the transcript pane.
   private func refreshTranscriptFromDocument() async {
     let snapshot = await harness.snapshot()
     transcriptState.lines = snapshot.isEmpty
@@ -577,10 +556,6 @@ internal final class SlateChatHost {
     flattenCache = TranscriptLayout.FlattenCache()
   }
 
-  /// React to a session identity swap after `/fork` or `/tldr`.
-  /// The harness has already swapped session id + directory + rope
-  /// content; the host mirrors that into UI state (transcript, banner,
-  /// exit-hint) and resets per-turn scratch state.
   private func handleIdentityChange(_ change: SessionIdentityChange) {
     handleIdentityChange(
       previous: change.previousSessionId,
@@ -625,7 +600,7 @@ internal final class SlateChatHost {
         sessionId: newId.uuidString)
     }
 
-    // Re-render transcript from the harness post-swap content.
+    // Re-render transcript from the post-swap content.
     Task { @MainActor in
       await self.refreshTranscriptFromDocument()
       self.renderWake?.requestRender()
