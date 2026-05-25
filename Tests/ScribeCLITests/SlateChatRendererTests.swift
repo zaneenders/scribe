@@ -400,17 +400,44 @@ struct SlateChatRendererQueuedTrayTests {
     #expect(grid[0][8].bg == theme.inputAreaBg)
   }
 
+  @Test func dispatchSnapshotShowsSendingAndWaitingRows() {
+    let snapshot = QueuedTraySnapshot(
+      pending: ["second", "third"],
+      activeDispatch: .init(index: 1, text: "first"),
+      batchTotal: 3,
+      modelBusy: true)
+    let lines = SlateChatRenderer.queuedTrayVisualLines(snapshot: snapshot, textWidth: 40)
+    #expect(lines.count == 3)
+    #expect(lines[0].kind == .sending)
+    #expect(lines[0].text == "[1/3] first")
+    #expect(lines[1].kind == .waiting)
+    #expect(lines[1].text == "[2/3] second")
+    #expect(lines[2].text == "[3/3] third")
+  }
+
+  @Test func autoDrainSnapshotMarksNextUp() {
+    let snapshot = QueuedTraySnapshot(
+      pending: ["second", "third"],
+      batchTotal: 3,
+      modelBusy: true)
+    let lines = SlateChatRenderer.queuedTrayVisualLines(snapshot: snapshot, textWidth: 40)
+    #expect(lines[0].kind == .nextUp)
+    #expect(lines[0].text == "[2/3] second")
+    #expect(lines[1].kind == .waiting)
+    #expect(lines[1].text == "[3/3] third")
+  }
+
   @Test func transcriptContentRowsAccountsForTrayRows() {
     let withoutTray = SlateChatRenderer.transcriptContentRows(
       cols: 80, rows: 24,
       banner: nil, usage: nil,
       inputLine: "", waitingForLLM: false,
-      queuedTrayMessages: [])
+      queuedTraySnapshot: QueuedTraySnapshot())
     let withTray = SlateChatRenderer.transcriptContentRows(
       cols: 80, rows: 24,
       banner: nil, usage: nil,
       inputLine: "", waitingForLLM: false,
-      queuedTrayMessages: ["line1\nline2"])
+      queuedTraySnapshot: QueuedTraySnapshot(pending: ["line1\nline2"]))
     #expect(withTray == withoutTray - 2)
   }
 }

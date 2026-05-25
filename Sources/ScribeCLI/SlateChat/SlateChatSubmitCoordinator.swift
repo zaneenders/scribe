@@ -32,7 +32,8 @@ enum SubmitCoordinator {
   static func handleEnter(
     text: String,
     modelBusy: Bool,
-    steeringQueueCount: Int
+    steeringQueueCount: Int,
+    steeringLineOutstanding: Bool
   ) -> SubmitEffect {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -40,7 +41,16 @@ enum SubmitCoordinator {
       guard steeringQueueCount > 0 else {
         return .none
       }
-      return modelBusy ? .popAndInterruptAndSend : .popAndSendToGate
+      if modelBusy {
+        // Flush the whole queue inside the in-flight ``SessionHarness/submit``
+        // after the interrupt lands — do not pop to the gate (that races the
+        // harness drain and can drop the last message).
+        return .interruptModel
+      }
+      if steeringLineOutstanding {
+        return .none
+      }
+      return .popAndSendToGate
     }
 
     if modelBusy {

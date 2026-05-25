@@ -181,6 +181,7 @@ public actor SessionHarness {
   public func submit(
     _ text: String,
     options: AgentRunOptions = AgentRunOptions(),
+    onUserPrompt: @Sendable (String) -> Void = { _ in },
     onEvent: @Sendable (AgentEvent) -> Void
   ) async throws -> TurnOutcome {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -191,6 +192,7 @@ public actor SessionHarness {
     var outcome = try await runTurn(
       promptMessages: [ScribeMessage(role: .user, content: trimmed)],
       options: options,
+      onUserPrompt: onUserPrompt,
       onEvent: onEvent
     )
 
@@ -200,6 +202,7 @@ public actor SessionHarness {
         outcome = try await runTurn(
           promptMessages: steering,
           options: options,
+          onUserPrompt: onUserPrompt,
           onEvent: onEvent,
           queueKind: .steering
         )
@@ -218,6 +221,7 @@ public actor SessionHarness {
       outcome = try await runTurn(
         promptMessages: followUp,
         options: options,
+        onUserPrompt: onUserPrompt,
         onEvent: onEvent,
         queueKind: .followUp
       )
@@ -227,10 +231,15 @@ public actor SessionHarness {
   private func runTurn(
     promptMessages: [ScribeMessage],
     options: AgentRunOptions,
+    onUserPrompt: @Sendable (String) -> Void,
     onEvent: @Sendable (AgentEvent) -> Void,
     queueKind: MessageQueueKind? = nil
   ) async throws -> TurnOutcome {
     guard !promptMessages.isEmpty else { return .completed }
+
+    for msg in promptMessages where msg.role == .user {
+      onUserPrompt(msg.content)
+    }
 
     let charCount = promptMessages.reduce(0) { $0 + $1.content.count }
     var metadata: Logger.Metadata = ["chars": "\(charCount)", "messages": "\(promptMessages.count)"]

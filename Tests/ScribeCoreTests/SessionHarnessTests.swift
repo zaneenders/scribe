@@ -99,6 +99,95 @@ struct SessionHarnessTests {
     #expect(harness.followUpQueueCount == 0)
   }
 
+  @Test func steeringDrainInvokesOnUserPromptForEachMessage() async throws {
+    let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
+    let chunks = [sseChunk(reply), doneChunk()]
+    let transport = CountingTransport(chunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let agent = ScribeAgent(
+      client: client,
+      model: "test-model",
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      logger: logger
+    )
+
+    let sessionId = UUID()
+    var document = SessionDocument(
+      sessionId: sessionId,
+      directory: FilePath("/in-memory/\(sessionId.uuidString)"),
+      logger: logger
+    )
+    document.append([ScribeMessage(role: .system, content: "sys")])
+
+    let harness = SessionHarness(
+      configuration: .testValue,
+      document: consume document,
+      persister: InMemorySessionPersister(),
+      agent: agent,
+      logger: logger
+    )
+    harness.enqueueSteering("steer-a")
+    harness.enqueueSteering("steer-b")
+
+    let prompts = Mutex<[String]>([])
+    _ = try await harness.submit(
+      "hello",
+      onUserPrompt: { text in prompts.withLock { $0.append(text) } },
+      onEvent: { _ in }
+    )
+
+    #expect(prompts.withLock { $0 } == ["hello", "steer-a", "steer-b"])
+  }
+
+  @Test func fourQueuedMessagesAllRunAfterPopAndSubmit() async throws {
+    let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
+    let chunks = [sseChunk(reply), doneChunk()]
+    let transport = CountingTransport(chunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let agent = ScribeAgent(
+      client: client,
+      model: "test-model",
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      logger: logger
+    )
+
+    let sessionId = UUID()
+    var document = SessionDocument(
+      sessionId: sessionId,
+      directory: FilePath("/in-memory/\(sessionId.uuidString)"),
+      logger: logger
+    )
+    document.append([ScribeMessage(role: .system, content: "sys")])
+
+    let harness = SessionHarness(
+      configuration: .testValue,
+      document: consume document,
+      persister: InMemorySessionPersister(),
+      agent: agent,
+      logger: logger
+    )
+    harness.enqueueSteering("msg-one")
+    harness.enqueueSteering("msg-two")
+    harness.enqueueSteering("msg-three")
+    harness.enqueueSteering("msg-four")
+
+    let first = harness.popSteeringForRecall()
+    #expect(first == "msg-one")
+
+    let prompts = Mutex<[String]>([])
+    _ = try await harness.submit(
+      first!,
+      onUserPrompt: { text in prompts.withLock { $0.append(text) } },
+      onEvent: { _ in }
+    )
+
+    #expect(prompts.withLock { $0 } == ["msg-one", "msg-two", "msg-three", "msg-four"])
+    #expect(harness.steeringQueueCount == 0)
+    #expect(transport.callCount == 4)
+  }
+
   @Test func steeringModeAllDrainsInSingleTurn() async throws {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]

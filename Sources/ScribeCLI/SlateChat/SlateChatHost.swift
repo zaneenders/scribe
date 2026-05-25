@@ -114,6 +114,11 @@ internal final class SlateChatHost {
   private var inputBuffer: String = ""
   private var inPaste: Bool = false
   private var modelBusy: Bool = false
+  private var queueTrayDispatch: QueuedTraySnapshot.ActiveDispatch?
+  /// Messages queued during the current busy spell (stable [i/N] labels in the tray).
+  private var queueBatchTotal: Int = 0
+  /// True while a popped steering message is on the gate but not yet consumed.
+  private var steeringLineOutstanding: Bool = false
   private var coordinatorFinished: Bool = false
   /// False once `run()` begins teardown — picker side-effects must not
   /// mutate UI after the host is winding down.
@@ -330,7 +335,8 @@ internal final class SlateChatHost {
                   let effect = SubmitCoordinator.handleEnter(
                     text: text,
                     modelBusy: self.modelBusy,
-                    steeringQueueCount: self.harness.steeringQueueCount)
+                    steeringQueueCount: self.harness.steeringQueueCount,
+                    steeringLineOutstanding: self.steeringLineOutstanding)
                   shouldStop = self.applySubmitEffect(effect)
                 }
               }
@@ -415,7 +421,7 @@ internal final class SlateChatHost {
         }
 
         let nowBusy = self.modelBusy
-        let queuedTrayMessages = self.harness.steeringQueuePreview()
+        let queuedTraySnapshot = self.makeQueuedTraySnapshot()
 
         self.drainIncomingEvents()
 
@@ -439,7 +445,7 @@ internal final class SlateChatHost {
               cols: scrCols, rows: scrRows,
               banner: self.banner, usage: self.transcriptState.usageHUD,
               inputLine: self.inputBuffer, waitingForLLM: self.modelBusy,
-              queuedTrayMessages: queuedTrayMessages)
+              queuedTraySnapshot: queuedTraySnapshot)
             let topOffset = max(0, contentRows / 3)
             self.viewport.queueScrollToRow(max(0, dividerFlatRow &- topOffset))
             self.pickerController.scrollDirty = false
@@ -455,7 +461,7 @@ internal final class SlateChatHost {
             usageHUD: self.transcriptState.usageHUD,
             inputBuffer: self.inputBuffer,
             modelBusy: self.modelBusy,
-            queuedTrayMessages: queuedTrayMessages,
+            queuedTraySnapshot: queuedTraySnapshot,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             viewport: self.viewport,
             cols: scrCols,
@@ -478,7 +484,7 @@ internal final class SlateChatHost {
             inputMode: self.editMode,
             llmWaitAnimationFrame: self.llmWaitAnimationFrame,
             waitingForLLM: self.modelBusy,
-            queuedTrayMessages: queuedTrayMessages,
+            queuedTraySnapshot: queuedTraySnapshot,
             picker: self.pickerController.picker,
             theme: .default)
           // Paint semantic spans into the terminal grid
@@ -505,8 +511,9 @@ internal final class SlateChatHost {
                 "cols": "\(scrCols)",
                 "rows": "\(scrRows)",
                 "model_busy": "\(nowBusy)",
-                "queue_depth": "\(queuedTrayMessages.count)",
-                "queue_chars": "\(queuedTrayMessages.first?.count ?? 0)",
+                "queue_depth": "\(queuedTraySnapshot.pending.count)",
+                "queue_batch": "\(queuedTraySnapshot.batchTotal)",
+                "queue_chars": "\(queuedTraySnapshot.pending.first?.count ?? 0)",
                 "buffer_chars": "\(self.inputBuffer.count)",
               ])
           }
@@ -583,6 +590,9 @@ internal final class SlateChatHost {
     self.sessionId = newId
     self.sessionCreatedAt = Date()
     self.modelBusy = false
+    queueTrayDispatch = nil
+    queueBatchTotal = 0
+    steeringLineOutstanding = false
     Task { await self.harness.clearAllQueues() }
 
     // Refresh banner with the new session id (other fields unchanged).
@@ -620,6 +630,13 @@ internal final class SlateChatHost {
           renderWake?.requestRender()
         }
       case .userSubmitted(let text):
+        if let dispatch = queueTrayDispatch,
+          text.trimmingCharacters(in: .whitespacesAndNewlines)
+            == dispatch.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        {
+          queueTrayDispatch = nil
+          steeringLineOutstanding = false
+        }
         let effects = TranscriptController.applyUserSubmitted(
           text, state: &transcriptState, theme: theme)
         if effects.needsRender {
@@ -657,6 +674,30 @@ internal final class SlateChatHost {
     }
   }
 
+  private func makeQueuedTraySnapshot() -> QueuedTraySnapshot {
+    let pending = harness.steeringQueuePreview()
+    let inFlight = queueTrayDispatch == nil ? 0 : 1
+    queueBatchTotal = max(queueBatchTotal, pending.count + inFlight)
+    if pending.isEmpty, queueTrayDispatch == nil {
+      queueBatchTotal = 0
+    }
+    let batchTotal = max(queueBatchTotal, pending.count + inFlight)
+    return QueuedTraySnapshot(
+      pending: pending,
+      activeDispatch: queueTrayDispatch,
+      batchTotal: batchTotal,
+      modelBusy: modelBusy)
+  }
+
+  private func recordSteeringPopDispatch(poppedText: String) {
+    let pendingBeforePop = harness.steeringQueueCount
+    let index = max(1, queueBatchTotal - pendingBeforePop + 1)
+    queueBatchTotal = max(queueBatchTotal, pendingBeforePop + index - 1)
+    queueTrayDispatch = QueuedTraySnapshot.ActiveDispatch(
+      index: index,
+      text: poppedText)
+  }
+
   private func applySubmitEffect(
     _ effect: SubmitEffect
   ) -> Bool {
@@ -664,6 +705,7 @@ internal final class SlateChatHost {
 
     if let text = fx.enqueueSteering {
       if harness.enqueueSteering(text) {
+        queueBatchTotal = max(queueBatchTotal, harness.steeringQueueCount)
         logger.debug(
           "chat.queue.steer",
           metadata: ["chars": "\(text.count)", "depth": "\(harness.steeringQueueCount)"])
@@ -694,6 +736,8 @@ internal final class SlateChatHost {
 
     if fx.popSteeringToGate {
       if let text = harness.popSteeringForRecall(), !text.isEmpty {
+        recordSteeringPopDispatch(poppedText: text)
+        steeringLineOutstanding = true
         gate.complete(text)
       } else {
         logger.warning(
