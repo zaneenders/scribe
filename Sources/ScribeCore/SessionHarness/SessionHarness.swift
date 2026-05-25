@@ -11,13 +11,14 @@ public actor SessionHarness {
   private let logger: Logger
   private let agent: ScribeAgent
   private let tokenTracker: TokenTracker
-  private nonisolated let messageQueues = SessionMessageQueues()
+  private let messageQueues: SessionMessageQueues
 
   public init(
     configuration: ScribeConfig,
     document: consuming SessionDocument,
     persister: any SessionPersister,
-    logger: Logger
+    logger: Logger,
+    messageQueues: SessionMessageQueues = SessionMessageQueues()
   ) throws {
     self.document = document
     self.persister = persister
@@ -28,6 +29,7 @@ public actor SessionHarness {
       contextWindow: configuration.contextWindow,
       threshold: configuration.contextWindowThreshold
     )
+    self.messageQueues = messageQueues
   }
 
   init(
@@ -35,7 +37,8 @@ public actor SessionHarness {
     document: consuming SessionDocument,
     persister: any SessionPersister,
     agent: ScribeAgent,
-    logger: Logger
+    logger: Logger,
+    messageQueues: SessionMessageQueues = SessionMessageQueues()
   ) {
     self.document = document
     self.persister = persister
@@ -46,6 +49,7 @@ public actor SessionHarness {
       contextWindow: configuration.contextWindow,
       threshold: configuration.contextWindowThreshold
     )
+    self.messageQueues = messageQueues
   }
 
   public var sessionId: UUID { document.sessionId }
@@ -74,56 +78,6 @@ public actor SessionHarness {
   public var isOverTokenLimit: Bool { tokenTracker.isOverLimit }
 
   public var lastPromptTokens: Int { tokenTracker.lastPromptTokens }
-
-  public var steeringMode: QueueMode { messageQueues.steeringMode }
-
-  public var followUpMode: QueueMode { messageQueues.followUpMode }
-
-  public nonisolated var steeringQueueCount: Int { messageQueues.steeringCount() }
-
-  public nonisolated var followUpQueueCount: Int { messageQueues.followUpCount() }
-
-  public nonisolated func steeringQueuePreview() -> [String] {
-    messageQueues.steeringPreviewTexts()
-  }
-
-  public nonisolated func followUpQueuePreview() -> [String] {
-    messageQueues.followUpPreviewTexts()
-  }
-
-  public func setSteeringMode(_ mode: QueueMode) {
-    messageQueues.setSteeringMode(mode)
-  }
-
-  public func setFollowUpMode(_ mode: QueueMode) {
-    messageQueues.setFollowUpMode(mode)
-  }
-
-  @discardableResult
-  public nonisolated func enqueueSteering(_ text: String) -> Bool {
-    messageQueues.enqueueSteering(text: text)
-  }
-
-  @discardableResult
-  public nonisolated func enqueueFollowUp(_ text: String) -> Bool {
-    messageQueues.enqueueFollowUp(text: text)
-  }
-
-  public func clearSteeringQueue() {
-    messageQueues.clearSteering()
-  }
-
-  public func clearFollowUpQueue() {
-    messageQueues.clearFollowUp()
-  }
-
-  public func clearAllQueues() {
-    messageQueues.clearAll()
-  }
-
-  public nonisolated func popSteeringForRecall() -> String? {
-    messageQueues.popSteeringFirst()?.content
-  }
 
   @discardableResult
   public func applyEdit(_ op: EditOp) async throws -> SessionIdentityChange? {

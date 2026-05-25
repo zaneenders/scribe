@@ -68,7 +68,7 @@ public struct PendingMessageQueue: Sendable {
   }
 }
 
-final class SessionMessageQueues: Sendable {
+public final class SessionMessageQueues: Sendable {
   private let lock = Mutex(State())
 
   private struct State {
@@ -76,60 +76,68 @@ final class SessionMessageQueues: Sendable {
     var followUp = PendingMessageQueue()
   }
 
-  var steeringMode: QueueMode {
+  public var steeringMode: QueueMode {
     lock.withLock { $0.steering.mode }
   }
 
-  var followUpMode: QueueMode {
+  public var followUpMode: QueueMode {
     lock.withLock { $0.followUp.mode }
   }
 
-  func setSteeringMode(_ mode: QueueMode) {
+  public init() {}
+
+  public func setSteeringMode(_ mode: QueueMode) {
     lock.withLock { $0.steering.setMode(mode) }
   }
 
-  func setFollowUpMode(_ mode: QueueMode) {
+  public func setFollowUpMode(_ mode: QueueMode) {
     lock.withLock { $0.followUp.setMode(mode) }
   }
 
-  func enqueueSteering(text: String) -> Bool {
+  @discardableResult
+  public func enqueueSteering(text: String) -> Bool {
     lock.withLock { $0.steering.enqueue(text: text) }
   }
 
-  func enqueueFollowUp(text: String) -> Bool {
+  @discardableResult
+  public func enqueueFollowUp(text: String) -> Bool {
     lock.withLock { $0.followUp.enqueue(text: text) }
   }
 
-  func steeringCount() -> Int {
+  public func steeringCount() -> Int {
     lock.withLock { $0.steering.count }
   }
 
-  func followUpCount() -> Int {
+  public func followUpCount() -> Int {
     lock.withLock { $0.followUp.count }
   }
 
-  func steeringPreviewTexts() -> [String] {
+  public func steeringPreviewTexts() -> [String] {
     lock.withLock { $0.steering.previewTexts }
   }
 
-  func followUpPreviewTexts() -> [String] {
+  public func followUpPreviewTexts() -> [String] {
     lock.withLock { $0.followUp.previewTexts }
   }
 
   @discardableResult
-  func popSteeringFirst() -> ScribeMessage? {
+  public func popSteeringFirst() -> ScribeMessage? {
     lock.withLock { $0.steering.popFirst() }
   }
 
-  func clearSteering() {
+  public func popSteeringForRecall() -> String? {
+    popSteeringFirst()?.content
+  }
+
+  public func clearSteering() {
     lock.withLock { $0.steering.clear() }
   }
 
-  func clearFollowUp() {
+  public func clearFollowUp() {
     lock.withLock { $0.followUp.clear() }
   }
 
-  func clearAll() {
+  public func clearAll() {
     lock.withLock {
       $0.steering.clear()
       $0.followUp.clear()

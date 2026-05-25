@@ -98,6 +98,7 @@ internal final class SlateChatHost {
 
   private let configuration: ScribeConfig
   private let harness: SessionHarness
+  private let messageQueues: SessionMessageQueues
   private var sessionDirectory: FilePath
   private var sessionId: UUID
   private var sessionCreatedAt: Date
@@ -157,6 +158,7 @@ internal final class SlateChatHost {
   init(
     configuration: ScribeConfig,
     harness: SessionHarness,
+    messageQueues: SessionMessageQueues,
     sessionDirectory: FilePath,
     sessionId: UUID,
     sessionCreatedAt: Date,
@@ -164,6 +166,7 @@ internal final class SlateChatHost {
   ) {
     self.configuration = configuration
     self.harness = harness
+    self.messageQueues = messageQueues
     self.sessionDirectory = sessionDirectory
     self.sessionId = sessionId
     self.sessionCreatedAt = sessionCreatedAt
@@ -333,7 +336,7 @@ internal final class SlateChatHost {
                   let effect = SubmitCoordinator.handleEnter(
                     text: text,
                     modelBusy: self.modelBusy,
-                    steeringQueueCount: self.harness.steeringQueueCount,
+                    steeringQueueCount: self.messageQueues.steeringCount(),
                     steeringLineOutstanding: self.steeringLineOutstanding)
                   shouldStop = self.applySubmitEffect(effect)
                 }
@@ -347,11 +350,11 @@ internal final class SlateChatHost {
                 self.editMode = .read
               } else {
                 let effect = SubmitCoordinator.handleCtrlC(
-                  steeringQueueCount: self.harness.steeringQueueCount,
+                  steeringQueueCount: self.messageQueues.steeringCount(),
                   modelBusy: self.modelBusy)
                 shouldStop = self.applySubmitEffect(effect)
                 if case .recallSteeringToInput = effect {
-                  if let recall = self.harness.popSteeringForRecall() {
+                  if let recall = self.messageQueues.popSteeringForRecall() {
                     self.inputBuffer = recall
                     self.editMode = .edit
                     self.renderWake?.requestRender()
@@ -395,8 +398,8 @@ internal final class SlateChatHost {
                 metadata: [
                   "source": "shift-enter",
                   "buffer_chars": "\(self.inputBuffer.count)",
-                  "steering_queue": "\(self.harness.steeringQueueCount)",
-                  "follow_up_queue": "\(self.harness.followUpQueueCount)",
+                  "steering_queue": "\(self.messageQueues.steeringCount())",
+                  "follow_up_queue": "\(self.messageQueues.followUpCount())",
                 ])
 
             case .character(let ch):
@@ -591,7 +594,7 @@ internal final class SlateChatHost {
     queueTrayDispatch = nil
     queueBatchTotal = 0
     steeringLineOutstanding = false
-    Task { await self.harness.clearAllQueues() }
+    messageQueues.clearAll()
 
     // Refresh banner with the new session id (other fields unchanged).
     if let banner = self.banner {
@@ -673,7 +676,7 @@ internal final class SlateChatHost {
   }
 
   private func makeQueuedTraySnapshot() -> QueuedTraySnapshot {
-    let pending = harness.steeringQueuePreview()
+    let pending = messageQueues.steeringPreviewTexts()
     let inFlight = queueTrayDispatch == nil ? 0 : 1
     queueBatchTotal = max(queueBatchTotal, pending.count + inFlight)
     if pending.isEmpty, queueTrayDispatch == nil {
@@ -688,7 +691,7 @@ internal final class SlateChatHost {
   }
 
   private func recordSteeringPopDispatch(poppedText: String) {
-    let pendingBeforePop = harness.steeringQueueCount
+    let pendingBeforePop = messageQueues.steeringCount()
     let index = max(1, queueBatchTotal - pendingBeforePop + 1)
     queueBatchTotal = max(queueBatchTotal, pendingBeforePop + index - 1)
     queueTrayDispatch = QueuedTraySnapshot.ActiveDispatch(
@@ -702,11 +705,11 @@ internal final class SlateChatHost {
     let fx = HostSubmitSideEffects.from(effect)
 
     if let text = fx.enqueueSteering {
-      if harness.enqueueSteering(text) {
-        queueBatchTotal = max(queueBatchTotal, harness.steeringQueueCount)
+      if messageQueues.enqueueSteering(text: text) {
+        queueBatchTotal = max(queueBatchTotal, messageQueues.steeringCount())
         logger.debug(
           "chat.queue.steer",
-          metadata: ["chars": "\(text.count)", "depth": "\(harness.steeringQueueCount)"])
+          metadata: ["chars": "\(text.count)", "depth": "\(messageQueues.steeringCount())"])
       } else {
         logger.debug(
           "chat.queue.steer-skipped",
@@ -714,10 +717,10 @@ internal final class SlateChatHost {
       }
     }
     if let text = fx.enqueueFollowUp {
-      if harness.enqueueFollowUp(text) {
+      if messageQueues.enqueueFollowUp(text: text) {
         logger.debug(
           "chat.queue.follow-up",
-          metadata: ["chars": "\(text.count)", "depth": "\(harness.followUpQueueCount)"])
+          metadata: ["chars": "\(text.count)", "depth": "\(messageQueues.followUpCount())"])
       } else {
         logger.debug(
           "chat.queue.follow-up-skipped",
@@ -733,7 +736,7 @@ internal final class SlateChatHost {
     }
 
     if fx.popSteeringToGate {
-      if let text = harness.popSteeringForRecall(), !text.isEmpty {
+      if let text = messageQueues.popSteeringForRecall(), !text.isEmpty {
         recordSteeringPopDispatch(poppedText: text)
         steeringLineOutstanding = true
         gate.complete(text)
