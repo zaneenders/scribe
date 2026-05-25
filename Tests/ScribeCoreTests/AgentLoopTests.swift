@@ -255,7 +255,7 @@ struct AgentLoopTests {
   }
 
   @Test func completesWithEmptyAssistantText() async throws {
-    // Assistant returns no content and no tool calls
+    // Assistant returns no content and no tool calls — omit content rather than "".
     let chunks = [
       sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}]}"#),
       doneChunk(),
@@ -265,7 +265,7 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(messages[1].role == .assistant)
-    #expect(stringContent(messages[1]) == "")
+    #expect(messages[1].content == nil)
   }
 
 
@@ -599,6 +599,21 @@ struct AgentLoopTests {
     #expect(messages[1].reasoningContent == "Let me think...")
   }
 
+  @Test func reasoningOnlyAssistantMessageOmitsEmptyContent() async throws {
+    let chunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"reasoning_content":"Let me think..."}}]}"#),
+      doneChunk(),
+    ]
+    let (messages, termination) = try await runLoop(
+      prompt: "test", config: makeConfig(chunks: chunks), abortNotifier: AbortNotifier())
+    expectTermination(termination, .completed)
+    #expect(messages.count == 2)
+    #expect(messages[1].role == .assistant)
+    #expect(messages[1].content == nil)
+    #expect(messages[1].toolCalls == nil)
+    #expect(messages[1].reasoningContent == "Let me think...")
+  }
 
   @Test func emptyPromptMessagesWithInitialContext() async throws {
     let chunks = [

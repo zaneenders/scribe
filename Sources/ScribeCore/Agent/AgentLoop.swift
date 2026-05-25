@@ -1,9 +1,8 @@
-import SystemPackage
 import Foundation
 import Logging
 import OpenAPIRuntime
 import ScribeLLM
-
+import SystemPackage
 
 /// Immutable snapshot of agent state taken before a run starts.
 ///
@@ -70,7 +69,6 @@ private func turnOutcome(from termination: LoopTermination) -> TurnOutcome {
   case .toolRoundLimit(let rounds): return .toolRoundLimit(rounds: rounds)
   }
 }
-
 
 /// Execute the agent loop for a set of prompt messages.
 ///
@@ -333,7 +331,6 @@ func runAgentLoop(
   }
 }
 
-
 private enum RoundOutcome: Sendable, Equatable {
   case completed
   case toolCalls([ToolInvocation])
@@ -347,7 +344,6 @@ private struct RoundExecutionResult: Sendable {
   let context: AgentContext
   let outcome: RoundOutcome
 }
-
 
 /// Execute one LLM round: stream an assistant response, accumulate it, and
 /// return the outcome (completed or tool calls).
@@ -442,12 +438,13 @@ private func runSingleRound(
 
   // ── Finalize ─────────────────────────────────────────
   let toolInvocations = turn.resolvedToolCalls()
-  let assistantText = turn.text.isEmpty ? "" : turn.text
+  let assistantContent: Components.Schemas.ChatMessage.ContentPayload? =
+    turn.text.isEmpty ? nil : .case1(turn.text)
   let assistantReasoning = turn.reasoningText.isEmpty ? nil : turn.reasoningText
 
   let assistantMessage = Components.Schemas.ChatMessage(
     role: .assistant,
-    content: .case1(assistantText),
+    content: assistantContent,
     name: nil,
     toolCalls: toolInvocations.isEmpty
       ? nil
@@ -487,7 +484,7 @@ private func runSingleRound(
     logger.info(
       "agent.assistant.final",
       metadata: [
-        "answer_chars": "\(assistantText.count)",
+        "answer_chars": "\(turn.text.count)",
         "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
       ])
     return .completed
@@ -495,7 +492,6 @@ private func runSingleRound(
 
   return .toolCalls(toolInvocations)
 }
-
 
 /// Heuristic: does this HTTP error look like a context-length / prompt-too-long
 /// failure that we can recover from by dropping over-sized tool attachments?
@@ -567,8 +563,7 @@ func rollbackAttachmentOverflow(
     toolCallId: original.toolCallId
   )
   messages[toolMsgIdx] = replacement
-  if let newIdx = newMessages.lastIndex(where: { $0.role == .tool && $0.toolCallId == original.toolCallId })
-  {
+  if let newIdx = newMessages.lastIndex(where: { $0.role == .tool && $0.toolCallId == original.toolCallId }) {
     newMessages[newIdx] = replacement
   }
   return "tool output exceeded model context — dropped \(droppedAttachments) attachment(s)"

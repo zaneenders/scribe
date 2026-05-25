@@ -5,16 +5,10 @@ import SlateCore
 import Synchronization
 import SystemPackage
 
-/// Bridges keystroke-driven submissions on the host's MainActor to the
-/// coordinator's `AsyncStream<String>`. Synchronous — the host always calls
-/// it from the MainActor and needs `setStreamContinuation` to land before
-/// the next `complete(...)` (otherwise hot-swap could drop a queued
-/// submission); a Mutex-backed class buys both that ordering and Sendable
-/// access without the actor-hop race the previous actor implementation had.
-private final class UserLineGate: @unchecked Sendable {
-  private let state = Mutex<State>(State())
+private final class UserLineGate: Sendable {
+  private let state = Mutex(GateState())
 
-  private struct State {
+  private struct GateState: Sendable {
     var streamContinuation: AsyncStream<String>.Continuation?
   }
 
@@ -533,7 +527,6 @@ internal final class SlateChatHost {
     return exitInfo
   }
 
-
   private func installCoordinator() {
     let (lineStream, lineCont) = AsyncStream<String>.makeStream()
     self.gate.setStreamContinuation(lineCont)
@@ -554,7 +547,8 @@ internal final class SlateChatHost {
 
   private func refreshTranscriptFromDocument() async {
     let snapshot = await harness.snapshot()
-    transcriptState.lines = snapshot.isEmpty
+    transcriptState.lines =
+      snapshot.isEmpty
       ? []
       : renderMessagesToTranscript(
         snapshot.messages, theme: self.theme, renderer: self.markdownRenderer)
