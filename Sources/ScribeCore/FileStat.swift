@@ -3,8 +3,13 @@ import SystemPackage
 
 #if canImport(Darwin)
 import Darwin
+private typealias CStat = Darwin.stat
 #elseif canImport(Glibc)
 import Glibc
+private typealias CStat = Glibc.stat
+#elseif canImport(Musl)
+import Musl
+private typealias CStat = Musl.stat
 #endif
 
 // MARK: - POSIX stat wrapper
@@ -12,7 +17,7 @@ import Glibc
 /// Calls POSIX `stat()` on `path`. Returns `0` on success, `-1` on failure
 /// (with `errno` set).  Uses the C function directly (not the struct).
 @discardableResult
-private func _posixStat(_ path: String, _ buf: UnsafeMutablePointer<Darwin.stat>) -> Int32 {
+private func _posixStat(_ path: String, _ buf: UnsafeMutablePointer<CStat>) -> Int32 {
   stat(path, buf)
 }
 
@@ -30,15 +35,21 @@ public struct FileStat {
   /// Read file metadata for the given path.  Returns a value with
   /// `exists == false` when the path does not exist.
   public static func stat(_ path: FilePath) -> FileStat {
-    var s: Darwin.stat = Darwin.stat()
+    var s: CStat = CStat()
     let rc = _posixStat(path.string, &s)
     if rc != 0 {
       return FileStat(exists: false, isDirectory: false, size: 0, modificationDate: .distantPast)
     }
     let isDir = (s.st_mode & S_IFMT) == S_IFDIR
+#if canImport(Darwin)
     let mtime = Date(
       timeIntervalSince1970: Double(s.st_mtimespec.tv_sec)
         + Double(s.st_mtimespec.tv_nsec) / 1_000_000_000)
+#else
+    let mtime = Date(
+      timeIntervalSince1970: Double(s.st_mtim.tv_sec)
+        + Double(s.st_mtim.tv_nsec) / 1_000_000_000)
+#endif
     return FileStat(
       exists: true,
       isDirectory: isDir,
@@ -85,7 +96,7 @@ public func createDirectoryWithIntermediates(_ path: FilePath) throws {
 
   // Create missing directories from the top down.
   for dir in missing.reversed() {
-    if Darwin.mkdir(dir.string, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0 {
+    if mkdir(dir.string, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0 {
       let err = errno
       if err == EEXIST { continue }
       throw FileStatError.mkdirFailed(dir, err)
