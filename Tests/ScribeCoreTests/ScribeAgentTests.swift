@@ -1,4 +1,3 @@
-import SystemPackage
 import Foundation
 import HTTPTypes
 import Logging
@@ -6,6 +5,7 @@ import OpenAPIRuntime
 import ScribeCore
 import ScribeLLM
 import Synchronization
+import SystemPackage
 import Testing
 
 private final class FakeClientTransport: ClientTransport, Sendable {
@@ -210,7 +210,9 @@ struct ScribeAgentTests {
     for await event in ts.events { events.append(event) }
     _ = try await ts.result.value
     let hasUsage = events.contains(where: {
-      if case .lifecycle(.usage(let u, _)) = $0, u.promptTokens == 10, u.completionTokens == 5, u.totalTokens == 15 { return true }
+      if case .lifecycle(.usage(let u, _)) = $0, u.promptTokens == 10, u.completionTokens == 5, u.totalTokens == 15 {
+        return true
+      }
       return false
     })
     #expect(hasUsage)
@@ -288,7 +290,11 @@ struct ScribeAgentTests {
       didThrow = false
     } catch { didThrow = true }
     #expect(didThrow)
-    #expect(events.contains(where: { if case .boundary(.agentStart) = $0 { return true }; return false }))
+    #expect(
+      events.contains(where: {
+        if case .boundary(.agentStart) = $0 { return true }
+        return false
+      }))
     #expect(
       events.contains(where: {
         if case .boundary(.agentEnd) = $0 { return true }

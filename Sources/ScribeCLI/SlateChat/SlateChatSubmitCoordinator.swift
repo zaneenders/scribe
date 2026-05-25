@@ -1,5 +1,3 @@
-
-
 enum SubmitEffect: Equatable, Sendable {
 
   case sendToGate(String)

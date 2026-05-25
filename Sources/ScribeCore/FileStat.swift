@@ -30,15 +30,15 @@ public struct FileStat {
       return FileStat(exists: false, isDirectory: false, size: 0, modificationDate: .distantPast)
     }
     let isDir = (s.st_mode & S_IFMT) == S_IFDIR
-#if canImport(Darwin)
+    #if canImport(Darwin)
     let mtime = Date(
       timeIntervalSince1970: Double(s.st_mtimespec.tv_sec)
         + Double(s.st_mtimespec.tv_nsec) / 1_000_000_000)
-#else
+    #else
     let mtime = Date(
       timeIntervalSince1970: Double(s.st_mtim.tv_sec)
         + Double(s.st_mtim.tv_nsec) / 1_000_000_000)
-#endif
+    #endif
     return FileStat(
       exists: true,
       isDirectory: isDir,

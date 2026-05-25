@@ -1,10 +1,10 @@
-import SystemPackage
 import Foundation
 import HTTPTypes
 import Logging
 import OpenAPIRuntime
 import ScribeLLM
 import Synchronization
+import SystemPackage
 import Testing
 
 @testable import ScribeCore
@@ -145,7 +145,8 @@ private func makeConfig(
   model: String = "test-model",
   tools: [any ScribeTool] = [],
   temperature: Double = 0,
-  maxToolRounds: Int = .max
+  maxToolRounds: Int = .max,
+  hooks: AgentLoopHooks = .default
 ) -> AgentLoopConfig {
   let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
@@ -158,7 +159,7 @@ private func makeConfig(
     temperature: temperature,
     maxToolRounds: maxToolRounds, workingDirectory: FilePath("/tmp"),
     reasoningEnabled: true,
-    hooks: .default
+    hooks: hooks
   )
 }
 
@@ -836,13 +837,21 @@ struct AgentLoopTests {
     )
 
     let captured = events.withLock { $0 }
-    #expect(captured.contains(where: { if case .boundary(.agentStart) = $0 { return true }; return false }))
+    #expect(
+      captured.contains(where: {
+        if case .boundary(.agentStart) = $0 { return true }
+        return false
+      }))
     #expect(
       captured.contains(where: {
         if case .boundary(.agentEnd(.completed)) = $0 { return true }
         return false
       }))
-    #expect(captured.contains(where: { if case .boundary(.turnStart(round: 1)) = $0 { return true }; return false }))
+    #expect(
+      captured.contains(where: {
+        if case .boundary(.turnStart(round: 1)) = $0 { return true }
+        return false
+      }))
     #expect(
       captured.contains(where: {
         if case .boundary(.turnEnd(round: 1, outcome: .completed)) = $0 { return true }
@@ -973,21 +982,10 @@ struct AgentLoopTests {
       doneChunk(),
     ]
     let hooks = AgentLoopHooks(shouldStopAfterTurn: { _ in true })
-    let config = makeConfig(chunks: chunks)
-    let configWithHook = AgentLoopConfig(
-      model: config.model,
-      client: config.client,
-      toolExecutor: config.toolExecutor,
-      chatTools: config.chatTools,
-      temperature: config.temperature,
-      maxToolRounds: config.maxToolRounds,
-      workingDirectory: config.workingDirectory,
-      reasoningEnabled: config.reasoningEnabled,
-      hooks: hooks
-    )
+    let config = makeConfig(chunks: chunks, hooks: hooks)
     let (messages, termination) = try await runLoop(
       prompt: "stop",
-      config: configWithHook,
+      config: config,
       abortNotifier: AbortNotifier()
     )
     expectTermination(termination, .completed)

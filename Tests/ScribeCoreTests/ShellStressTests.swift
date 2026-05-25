@@ -1,7 +1,7 @@
-import SystemPackage
 import Foundation
 import Logging
 import Synchronization
+import SystemPackage
 import Testing
 
 @testable import ScribeCore

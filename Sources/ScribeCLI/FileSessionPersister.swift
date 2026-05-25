@@ -1,9 +1,9 @@
 import Foundation
 import Logging
-import _NIOFileSystem
 import ScribeCore
 import Synchronization
 import SystemPackage
+import _NIOFileSystem
 
 final class FileSessionPersister: SessionPersister {
 

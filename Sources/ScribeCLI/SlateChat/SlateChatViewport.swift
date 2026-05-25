@@ -1,5 +1,3 @@
-
-
 struct TranscriptViewport: Equatable, Sendable {
 
   private(set) var firstVisibleRow: Int = 0

@@ -1,7 +1,7 @@
-import SystemPackage
 import Foundation
 import Logging
 import RegexBuilder
+import SystemPackage
 
 struct ShellToolResult: Encodable, Sendable {
   let ok = true
@@ -73,7 +73,8 @@ public struct ShellTool: ScribeTool {
     if let c = cwd, c.isEmpty { cwd = nil }
 
     if Self.containsPrivilegeEscalation(command) {
-      let blocked = "Scribe cannot run `\(command)` — this command requires elevated "
+      let blocked =
+        "Scribe cannot run `\(command)` — this command requires elevated "
         + "privileges (sudo/su/doas/pkexec). Please ask the user to run it manually "
         + "in their terminal."
       logger.warning(

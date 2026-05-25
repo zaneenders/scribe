@@ -27,7 +27,8 @@ internal final class BoundaryPickerController {
     pickerBackup
   }
 
-  var applyEdit: (@MainActor (EditOp) async throws -> Void)?
+  var harness: SessionHarness?
+  var onIdentityChange: ((SessionIdentityChange) -> Void)?
   var configuration: ScribeConfig = ScribeConfig(
     agentModel: "", contextWindow: 0, contextWindowThreshold: 0,
     serverURL: "", apiKey: nil, workingDirectory: ".", reasoningEnabled: false)
@@ -218,8 +219,8 @@ internal final class BoundaryPickerController {
     let logger = self.logger
     let parentSessionId = currentSessionId?() ?? UUID()
     let enqueue = enqueueHostEvent
-    guard let applyEdit = self.applyEdit else {
-      logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-apply-callback"])
+    guard let harness = self.harness else {
+      logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-harness"])
       setModelBusy?(false)
       requestRender?()
       return
@@ -237,7 +238,7 @@ internal final class BoundaryPickerController {
     requestRender?()
 
     pickerActionTask?.cancel()
-    pickerActionTask = Task { [weak self, applyEdit] in
+    pickerActionTask = Task { [weak self] in
       guard let self else { return }
       do {
         guard await MainActor.run(body: { self.isHostActive?() ?? false }) else { return }
@@ -245,7 +246,9 @@ internal final class BoundaryPickerController {
         let newId = UUID()
         switch kind {
         case .fork:
-          try await applyEdit(.fork(cutAt: startCut, newSessionId: newId))
+          if let change = try await harness.applyEdit(.fork(cutAt: startCut, newSessionId: newId)) {
+            await MainActor.run { self.onIdentityChange?(change) }
+          }
           logger.notice(
             "chat.fork.create",
             metadata: [
@@ -260,12 +263,15 @@ internal final class BoundaryPickerController {
           let summary = try await SessionSummarizer.summarize(
             slice: slice, configuration: configuration, logger: logger)
           let replacement = [ScribeMessage(role: .assistant, content: summary)]
-          try await applyEdit(
+          if let change = try await harness.applyEdit(
             .forkSplice(
               startCut: startCut,
               endCut: endCut,
               replacement: replacement,
               newSessionId: newId))
+          {
+            await MainActor.run { self.onIdentityChange?(change) }
+          }
           let tailCount = max(0, pickerMessages.count - endCut)
           logger.notice(
             "chat.tldr.create",

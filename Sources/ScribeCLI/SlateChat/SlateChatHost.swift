@@ -201,13 +201,9 @@ internal final class SlateChatHost {
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
 
-        self.pickerController.applyEdit = { [weak self] op in
-          guard let self else {
-            throw ScribeError.generic("chat host gone before apply")
-          }
-          if let change = try await self.harness.applyEdit(op) {
-            self.handleIdentityChange(change)
-          }
+        self.pickerController.harness = self.harness
+        self.pickerController.onIdentityChange = { [weak self] change in
+          self?.handleIdentityChange(change)
         }
         self.pickerController.configuration = self.configuration
 

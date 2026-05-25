@@ -1,8 +1,8 @@
 import Foundation
 import Logging
 import ScribeCore
-import SystemPackage
 import Synchronization
+import SystemPackage
 import Testing
 
 @testable import ScribeCLI
@@ -56,8 +56,8 @@ struct ChatCoordinatorTests {
   }
 }
 
-private extension ScribeConfig {
-  static let testValue = ScribeConfig(
+extension ScribeConfig {
+  fileprivate static let testValue = ScribeConfig(
     agentModel: "test-model",
     contextWindow: 4000,
     contextWindowThreshold: 0.75,

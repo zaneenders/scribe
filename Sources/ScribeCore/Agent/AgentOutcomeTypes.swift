@@ -1,5 +1,3 @@
-
-
 struct AgentTurnInterruptedError: Error, Sendable {
   init() {}
 }

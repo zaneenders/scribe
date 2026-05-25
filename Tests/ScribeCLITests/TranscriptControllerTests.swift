@@ -39,9 +39,10 @@ struct TranscriptControllerTests {
   @Test func toolInvocationAppendsTrailingBlankLine() {
     var state = TranscriptState()
     let effects = TranscriptController.apply(
-      .tool(.invocation(
-        name: "shell", arguments: #"{"command":"ls"}"#,
-        output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#)),
+      .tool(
+        .invocation(
+          name: "shell", arguments: #"{"command":"ls"}"#,
+          output: #"{"ok":true,"stdout":"file.txt\n","exitCode":0}"#)),
       to: &state, theme: theme, renderer: renderer,
       followingLive: true, contextWindow: nil)
     #expect(effects.needsRender)

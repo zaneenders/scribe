@@ -1,6 +1,6 @@
 import Foundation
-import Testing
 import SystemPackage
+import Testing
 
 @testable import ScribeCLI
 

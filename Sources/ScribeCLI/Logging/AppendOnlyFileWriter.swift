@@ -1,7 +1,7 @@
 import Foundation
 import ScribeCore
-import SystemPackage
 import Synchronization
+import SystemPackage
 
 final class AppendOnlyFileWriter: Sendable {
   private let fd: Mutex<FileDescriptor?>

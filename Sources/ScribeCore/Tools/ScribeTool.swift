@@ -1,8 +1,8 @@
-import SystemPackage
 import Foundation
 import Logging
 import OpenAPIRuntime
 import ScribeLLM
+import SystemPackage
 
 public struct ToolAttachment: Sendable {
   public let mimeType: String

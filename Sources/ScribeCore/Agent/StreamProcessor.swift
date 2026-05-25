@@ -43,95 +43,95 @@ struct StreamProcessor<AO: AbortObserver> {
     let streamProgressEvery = 200
 
     do {
-    for try await sse in sseStream {
-      if abortObserver.isAborted() {
-        logger.notice(
-          "agent.stream.abort",
-          metadata: [
-            "where": "mid-stream",
-            "chunks": "\(decodedChunkCount)",
-            "had_visible_tokens": "\(streamStarted)",
-          ])
-        if streamStarted {
-          onEvent(.output(.finalized))
-        }
-        throw AgentTurnInterruptedError()
-      }
-      guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
-      else { continue }
-      if raw == "[DONE]" { break }
-
-      let chunk: Components.Schemas.ChatCompletionChunk
-      do {
-        chunk = try jsonDecoder.decode(
-          Components.Schemas.ChatCompletionChunk.self,
-          from: Data(raw.utf8)
-        )
-      } catch {
-        skippedChunkCount += 1
-        logger.warning(
-          "agent.stream.unreadable-chunk",
-          metadata: [
-            "chunk_index": "\(decodedChunkCount + 1)",
-            "err": "\(error.localizedDescription)",
-            "raw_prefix": "\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))",
-          ])
-        continue
-      }
-      decodedChunkCount += 1
-
-      turn.apply(chunk: chunk)
-
-      if let u = chunk.usage {
-        lastUsage = u
-      }
-      for choice in chunk.choices ?? [] {
-        guard let delta = choice.delta else { continue }
-
-        for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
-          if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
-          streamStarted = true
-          if case .some(.reasoning) = streamSection {
-
-          } else {
-            onEvent(.output(.sectionStarted(.reasoning, previous: streamSection)))
-            streamSection = .reasoning
+      for try await sse in sseStream {
+        if abortObserver.isAborted() {
+          logger.notice(
+            "agent.stream.abort",
+            metadata: [
+              "where": "mid-stream",
+              "chunks": "\(decodedChunkCount)",
+              "had_visible_tokens": "\(streamStarted)",
+            ])
+          if streamStarted {
+            onEvent(.output(.finalized))
           }
-          onEvent(.output(.text(.reasoning, r)))
+          throw AgentTurnInterruptedError()
         }
+        guard let raw = sse.data?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+        else { continue }
+        if raw == "[DONE]" { break }
 
-        if let t = delta.content, !t.isEmpty {
-          if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
-          streamStarted = true
-          if case .some(.answer) = streamSection {
+        let chunk: Components.Schemas.ChatCompletionChunk
+        do {
+          chunk = try jsonDecoder.decode(
+            Components.Schemas.ChatCompletionChunk.self,
+            from: Data(raw.utf8)
+          )
+        } catch {
+          skippedChunkCount += 1
+          logger.warning(
+            "agent.stream.unreadable-chunk",
+            metadata: [
+              "chunk_index": "\(decodedChunkCount + 1)",
+              "err": "\(error.localizedDescription)",
+              "raw_prefix": "\(raw.prefix(120).replacingOccurrences(of: "\"", with: "\\\""))",
+            ])
+          continue
+        }
+        decodedChunkCount += 1
 
-          } else {
-            onEvent(.output(.sectionStarted(.answer, previous: streamSection)))
-            streamSection = .answer
+        turn.apply(chunk: chunk)
+
+        if let u = chunk.usage {
+          lastUsage = u
+        }
+        for choice in chunk.choices ?? [] {
+          guard let delta = choice.delta else { continue }
+
+          for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
+            streamStarted = true
+            if case .some(.reasoning) = streamSection {
+
+            } else {
+              onEvent(.output(.sectionStarted(.reasoning, previous: streamSection)))
+              streamSection = .reasoning
+            }
+            onEvent(.output(.text(.reasoning, r)))
           }
-          onEvent(.output(.text(.answer, t)))
+
+          if let t = delta.content, !t.isEmpty {
+            if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
+            streamStarted = true
+            if case .some(.answer) = streamSection {
+
+            } else {
+              onEvent(.output(.sectionStarted(.answer, previous: streamSection)))
+              streamSection = .answer
+            }
+            onEvent(.output(.text(.answer, t)))
+          }
+        }
+
+        if !loggedFirstChunk {
+          loggedFirstChunk = true
+          logger.debug(
+            "agent.stream.first-chunk",
+            metadata: [
+              "ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"
+            ])
+        } else if decodedChunkCount % streamProgressEvery == 0 {
+          let elapsedMs = Int((clock.now - streamWallStart) / .milliseconds(1))
+          let chunksPerSec = Double(decodedChunkCount) / (Double(elapsedMs) / 1000.0)
+          logger.trace(
+            "agent.stream.progress",
+            metadata: [
+              "chunks": "\(decodedChunkCount)",
+              "elapsed_ms": "\(elapsedMs)",
+              "chunks_per_s": "\(String(format: "%.1f", chunksPerSec))",
+            ])
         }
       }
-
-      if !loggedFirstChunk {
-        loggedFirstChunk = true
-        logger.debug(
-          "agent.stream.first-chunk",
-          metadata: [
-            "ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))",
-          ])
-      } else if decodedChunkCount % streamProgressEvery == 0 {
-        let elapsedMs = Int((clock.now - streamWallStart) / .milliseconds(1))
-        let chunksPerSec = Double(decodedChunkCount) / (Double(elapsedMs) / 1000.0)
-        logger.trace(
-          "agent.stream.progress",
-          metadata: [
-            "chunks": "\(decodedChunkCount)",
-            "elapsed_ms": "\(elapsedMs)",
-            "chunks_per_s": "\(String(format: "%.1f", chunksPerSec))",
-          ])
-      }
-    }
     } catch is AgentTurnInterruptedError {
       throw AgentTurnInterruptedError()
     } catch {

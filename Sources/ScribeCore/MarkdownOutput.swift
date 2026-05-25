@@ -1,5 +1,3 @@
-
-
 public struct MarkdownSpan: Equatable, Sendable {
   public var text: String
   public var kind: MarkdownSpanKind
