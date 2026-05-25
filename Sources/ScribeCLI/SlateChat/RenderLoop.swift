@@ -1,6 +1,5 @@
 import ScribeCore
 
-// MARK: - RenderState
 
 /// Pure-value snapshot of everything needed to build a single render frame.
 /// Collected by the host and passed into `RenderLoop.buildFrame`.
@@ -20,7 +19,6 @@ struct RenderState {
   var rows: Int
 }
 
-// MARK: - RenderOutput
 
 /// The computed output of `buildFrame`: everything the host needs to paint.
 struct RenderOutput {
@@ -34,7 +32,6 @@ struct RenderOutput {
   var flattenCache: TranscriptLayout.FlattenCache
 }
 
-// MARK: - RenderLoop
 
 /// Pure-function render pipeline: takes immutable state, returns what to render.
 ///

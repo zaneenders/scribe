@@ -8,7 +8,6 @@ import Testing
 @Suite
 struct AbortNotifierTests {
 
-  // MARK: - Primitive behaviour
 
   @Test func freshNotifierIsNotAborted() {
     let n = AbortNotifier()
@@ -86,7 +85,6 @@ struct AbortNotifierTests {
     #expect(results.2 == true)
   }
 
-  // MARK: - ToolRegistry integration
 
   /// Confirms the event-driven abort path in `ToolRegistry.run` wakes the
   /// watch task essentially immediately. We use a tool that sleeps for a

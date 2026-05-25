@@ -1,7 +1,6 @@
 import Foundation
 import ScribeCore
 
-// MARK: - ChatDriver
 
 /// Headless orchestrator that wires `TranscriptController` + `MarkdownRenderer`
 /// together without Slate, `@MainActor`, or a terminal.

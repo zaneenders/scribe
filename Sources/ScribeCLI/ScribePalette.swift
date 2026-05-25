@@ -5,7 +5,6 @@ import SlateCore
 /// Vibrant Easter-pastel palette: coral pinks, wisteria lavenders, mint greens,
 /// sky blues, and soft peach on a deep violet-black background.
 enum ScribePalette {
-  // MARK: - Primary accents
 
   /// Coral pink — "you:" prefix, queued tray
   static let orange = TerminalRGB(r: 255, g: 130, b: 150)
@@ -20,7 +19,6 @@ enum ScribePalette {
   /// Rose pink — errors
   static let red = TerminalRGB(r: 255, g: 90, b: 130)
 
-  // MARK: - Grays (warm undertone)
 
   static let grayDark = TerminalRGB(r: 105, g: 95, b: 115)
   static let grayLight = TerminalRGB(r: 215, g: 205, b: 225)
@@ -33,7 +31,6 @@ enum ScribePalette {
   /// Bottom input strip (slightly lifted lavender-gray)
   static let inputAreaBg = TerminalRGB(r: 44, g: 40, b: 54)
 
-  // MARK: - Usage HUD
 
   /// Metric labels (not numeric values)
   static let usageLabel = TerminalRGB(r: 170, g: 160, b: 185)
@@ -54,7 +51,6 @@ enum ScribePalette {
 
   static let usageMuted = TerminalRGB(r: 128, g: 128, b: 128)
 
-  // MARK: - Markdown styling
 
   static let markdownHeading = TerminalRGB(r: 80, g: 255, b: 185)
   static let markdownHeadingPrefix = TerminalRGB(r: 120, g: 210, b: 155)
@@ -67,7 +63,6 @@ enum ScribePalette {
   static let markdownLink = TerminalRGB(r: 75, g: 215, b: 255)
   static let markdownHR = TerminalRGB(r: 130, g: 210, b: 165)
 
-  // MARK: - Grayscale markdown (reasoning)
 
   static let grayHeading = TerminalRGB(r: 235, g: 232, b: 240)
   static let grayHeadingPrefix = TerminalRGB(r: 150, g: 147, b: 165)

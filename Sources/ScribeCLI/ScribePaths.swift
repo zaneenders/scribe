@@ -1,7 +1,6 @@
 import Foundation
 import SystemPackage
 
-// MARK: - ScribePaths
 
 /// Centralized path resolution for Scribe.  The data home defaults to `~/.scribe/`
 /// and can be overridden with the `SCRIBE_HOME` environment variable.  Config,
@@ -22,7 +21,6 @@ public struct ScribePaths: Sendable {
   /// String form of ``dataHome``.
   public var dataHomePath: String { dataHome.string }
 
-  // MARK: - Init
 
   public init(dataHome: FilePath) {
     self.dataHome = dataHome
@@ -30,7 +28,6 @@ public struct ScribePaths: Sendable {
     self.sessionsDirectory = dataHome.appendingPathComponent("sessions")
   }
 
-  // MARK: - Static factory
 
   /// Resolve all Scribe paths from the current environment.
   public static func resolve() -> ScribePaths {
@@ -52,7 +49,6 @@ public struct ScribePaths: Sendable {
     sessionDirectory(sessionId: sessionId).appendingPathComponent("messages.jsonl")
   }
 
-  // MARK: - Private helpers
 
   private static func resolveDataHome() -> String {
     if let raw = ProcessInfo.processInfo.environment["SCRIBE_HOME"] {

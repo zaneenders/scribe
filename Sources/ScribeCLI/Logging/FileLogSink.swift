@@ -1,7 +1,6 @@
 import Foundation
 import Synchronization
 
-// MARK: - Locked writer
 
 /// Serializes writes from concurrent swift-log calls onto a single backend.
 final class LockedDataWriter: Sendable {

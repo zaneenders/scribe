@@ -3,7 +3,6 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - RenderLoop tests
 
 /// Tests for the `RenderLoop.buildFrame` pure function — verifies that
 /// transcript flatten, viewport resolution, and content-row calculation
@@ -12,7 +11,6 @@ import Testing
 @MainActor
 struct RenderLoopTests {
 
-  // MARK: - Empty transcript
 
   @Test func emptyTranscript() {
     var state = RenderState(
@@ -35,7 +33,6 @@ struct RenderLoopTests {
     #expect(output.transcriptTailStart == 0)
   }
 
-  // MARK: - Small transcript fits on screen
 
   @Test func smallTranscriptFitsOnScreen() {
     let lines = [
@@ -63,7 +60,6 @@ struct RenderLoopTests {
     #expect(output.transcriptTailStart == 0)  // fits on screen, followingLive
   }
 
-  // MARK: - Large transcript: tail tracking
 
   @Test func largeTranscriptTracksTail() {
     var lines: [TLine] = []
@@ -92,7 +88,6 @@ struct RenderLoopTests {
     #expect(output.transcriptTailStart == expectedTail)
   }
 
-  // MARK: - Viewport scroll-up
 
   @Test func viewportScrollUpDisablesFollow() {
     let lines = (0..<50).map {
@@ -121,7 +116,6 @@ struct RenderLoopTests {
     #expect(!output.viewport.followingLive)
   }
 
-  // MARK: - FlattenCache reuse
 
   @Test func flattenCacheReusesOnSameGeneration() {
     let lines = [
@@ -148,7 +142,6 @@ struct RenderLoopTests {
     #expect(output2.flattenCache.completedLogicalLines > 0)
   }
 
-  // MARK: - Generation change invalidates cache
 
   @Test func generationChangeInvalidatesFlattenCache() {
     let lines = [

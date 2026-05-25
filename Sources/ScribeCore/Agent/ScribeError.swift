@@ -1,6 +1,5 @@
 import Foundation
 
-// MARK: - ScribeError
 
 public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
   case configuration(key: String?, reason: String)

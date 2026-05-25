@@ -22,7 +22,6 @@ public protocol AbortObserver: Sendable {
   func signals() -> AsyncStream<Void>
 }
 
-// MARK: - Abort race
 
 extension AbortObserver {
   /// Race `operation` against this abort observer. If abort fires before
@@ -56,7 +55,6 @@ extension AbortObserver {
   }
 }
 
-// MARK: - AbortNotifier
 
 internal final class AbortNotifier: AbortObserver, Sendable {
 

@@ -5,7 +5,6 @@ import Testing
 @Suite
 struct SessionForkTests {
 
-  // MARK: Helpers
 
   private func sys(_ text: String = "sys") -> ScribeMessage {
     ScribeMessage(role: .system, content: text)
@@ -27,7 +26,6 @@ struct SessionForkTests {
     ScribeToolCall(id: id, name: name, arguments: "{}")
   }
 
-  // MARK: Tests
 
   /// An empty log has no boundaries.
   @Test func emptyLogHasNoBoundaries() {

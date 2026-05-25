@@ -1,4 +1,3 @@
-// MARK: - ScribeConfig
 
 /// Agent configuration that controls LLM model selection, context window,
 /// the OpenAI-compatible API endpoint, and the tool set available to the agent.

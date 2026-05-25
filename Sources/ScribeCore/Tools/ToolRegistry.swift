@@ -179,7 +179,6 @@ public struct ToolRegistry: Sendable, ToolExecutor {
     return result
   }
 
-  // MARK: - Encoding helpers
 
   private static func encode<T: Encodable>(_ value: T, using encoder: JSONEncoder) throws -> String {
     let data = try encoder.encode(value)

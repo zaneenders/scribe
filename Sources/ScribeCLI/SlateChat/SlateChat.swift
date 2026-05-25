@@ -63,12 +63,50 @@ enum SlateChat {
     logger.debug(
       "chat.fullscreen.attach",
       metadata: ["session_file": "\(sessionDirectory.lastComponent?.string ?? sessionDirectory.string)"])
+    // Build the persister + session document up front so the host can
+    // own a fully-formed `~Copyable` doc from init. Doing this here (in
+    // the caller, before slate attaches) keeps the host's stored
+    // property non-optional.
+    let sessionCreatedAt = Date()
+    let isNewSession = resumeMessages.isEmpty
+    if !isNewSession, resumeMessages.first?.role != .system {
+      throw ScribeError.sessionCorrupted(
+        reason: "Resumed conversation must begin with a system message.")
+    }
+
+    let cwdString = FilePath.currentDirectory.string
+    let persister = try await FileSessionPersister.open(
+      sessionId: sessionId,
+      directory: sessionDirectory,
+      sessionCreatedAt: sessionCreatedAt,
+      isNewSession: isNewSession,
+      model: configuration.agentModel,
+      cwd: cwdString,
+      baseURL: configuration.serverURL,
+      scribeVersion: GitVersion.hash,
+      logger: logger
+    )
     return try await Task { @MainActor () throws -> ChatExitInfo in
-      let sessionCreatedAt = Date()
+      // Build the `~Copyable` document on the MainActor so the value is
+      // born in the same isolation domain that will own it (the host
+      // also runs on the MainActor). The doc starts empty; seed content
+      // enters through `append` after any persist-first I/O.
+      var document = SessionDocument(
+        sessionId: sessionId,
+        directory: sessionDirectory,
+        logger: logger
+      )
+      if isNewSession {
+        let system = ScribeMessage(role: .system, content: systemPrompt)
+        try await persister.append([system])
+        document.append([system])
+      } else {
+        document.append(resumeMessages)
+      }
       let host = SlateChatHost(
         configuration: configuration,
-        systemPrompt: systemPrompt,
-        resumeMessages: resumeMessages,
+        document: consume document,
+        persister: persister,
         sessionDirectory: sessionDirectory,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,

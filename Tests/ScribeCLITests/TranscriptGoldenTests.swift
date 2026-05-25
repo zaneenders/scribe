@@ -4,7 +4,6 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - TranscriptGoldenTests
 
 /// Golden tests that compare the streaming transcript render path against
 /// the batch render path (`renderMessagesToTranscript`) to detect drift.
@@ -14,7 +13,6 @@ struct TranscriptGoldenTests {
   private let theme = CLITheme.default
   private let renderer: MarkdownRenderer = SwiftMarkdownRenderer()
 
-  // MARK: - Simple message golden
 
   @Test func simpleUserAssistantGolden() {
     let messages: [ScribeMessage] = [
@@ -42,7 +40,6 @@ struct TranscriptGoldenTests {
     #expect(streamingText.contains("hello") == batchText.contains("hello"))
   }
 
-  // MARK: - Multi-turn golden
 
   @Test func multiTurnGolden() {
     let messages: [ScribeMessage] = [
@@ -65,7 +62,6 @@ struct TranscriptGoldenTests {
     #expect(scribeCount == 2)
   }
 
-  // MARK: - Tool call golden
 
   @Test func toolCallGolden() {
     let messages: [ScribeMessage] = [
@@ -89,7 +85,6 @@ struct TranscriptGoldenTests {
     #expect(batchText.contains("Done!"))
   }
 
-  // MARK: - Reasoning golden
 
   @Test func reasoningGolden() {
     let messages: [ScribeMessage] = [

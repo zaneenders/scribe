@@ -5,7 +5,6 @@ import ScribeCore
 import ScribeLLM
 import SystemPackage
 
-// MARK: - Config key bindings
 
 /// Dotted keys in `scribe-config.json` for `ConfigReader` (matches nested JSON paths).
 /// All application settings are read from that file; there are no separate secret lookup
@@ -20,7 +19,6 @@ public enum ScribeConfigBinding {
   public static let loggingLevel: ConfigKey = "logging.level"
 }
 
-// MARK: - Codable mirror for writing a default config file
 
 /// Mirror of `scribe-config.json` used only when a default must be written to disk.
 private struct ConfigTemplate: Codable {
@@ -48,7 +46,6 @@ private struct ConfigTemplate: Codable {
   }
 }
 
-// MARK: - LoadedConfig
 
 /// Loaded configuration bundle returned by `ConfigLoader.load()`.
 public struct LoadedConfig: Sendable {
@@ -81,7 +78,6 @@ public struct LoadedConfig: Sendable {
   }
 }
 
-// MARK: - Config loading
 
 public enum ConfigLoader {
   private static let configFileName = "scribe-config.json"
@@ -232,7 +228,6 @@ public enum ConfigLoader {
     )
   }
 
-  // MARK: - Write default config
 
   private static func writeDefaultConfig(to path: String) throws {
     let template = ConfigTemplate(

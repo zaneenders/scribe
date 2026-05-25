@@ -1,7 +1,6 @@
 import Foundation
 import ScribeLLM
 
-// MARK: - ScribeContentPart
 
 /// A single part of a message's content — either plain text or an image.
 ///
@@ -57,7 +56,6 @@ public enum ScribeContentPart: Sendable, Codable, Hashable {
   }
 }
 
-// MARK: - ScribeMessage
 
 /// Transport-agnostic chat message used by Scribe's public agent API.
 ///
@@ -175,7 +173,6 @@ public struct ScribeMessage: Sendable, Codable, Hashable {
   }
 }
 
-// MARK: - ScribeToolCall
 
 /// A resolved tool call attached to an assistant message.
 ///
@@ -196,7 +193,6 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
     self.arguments = arguments
   }
 
-  // MARK: Codable bridge for the nested OpenAI shape
 
   fileprivate struct Wire: Codable, Hashable {
     var id: String?
@@ -237,7 +233,6 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
   }
 }
 
-// MARK: - Bridge to / from Components.Schemas.ChatMessage
 
 /// Internal conversions between ``ScribeMessage`` and the generated
 /// OpenAI-compatible `Components.Schemas.ChatMessage` type. Kept

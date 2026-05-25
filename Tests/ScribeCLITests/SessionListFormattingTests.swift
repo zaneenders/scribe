@@ -8,7 +8,6 @@ import Testing
 @Suite
 struct SessionListFormattingTests {
 
-  // MARK: - relativeTime
 
   @Test func relativeTimeJustNow() {
     let now = Date()
@@ -100,7 +99,6 @@ struct SessionListFormattingTests {
     #expect(result == "1h ago")
   }
 
-  // MARK: - formatSessionLine alignment
 
   /// Strips ANSI SGR escape sequences so column positions can be verified.
   private func stripANSI(_ s: String) -> String {

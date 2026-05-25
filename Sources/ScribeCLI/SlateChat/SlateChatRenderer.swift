@@ -2,7 +2,6 @@ import Foundation
 import ScribeCore
 import SlateCore
 
-// MARK: - Grid render
 
 /// Builds the semantic chat grid: transcript, queued tray, input strip, banner, and usage HUD.
 ///
@@ -139,7 +138,6 @@ internal enum SlateChatRenderer {
     return max(0, firstTrayRow &- headerRows)
   }
 
-  // MARK: - Semantic grid builder (pure, Slate-independent)
 
   /// Builds a semantic grid — a `rows × cols` matrix of single-character `StyledSpan` cells.
   /// Pure function: no Slate dependency, no side effects.
@@ -389,7 +387,6 @@ internal enum SlateChatRenderer {
     }
   }
 
-  // MARK: - Semantic grid helpers (pure, operate on [[StyledSpan]])
 
   /// Fill a rectangular region of the semantic grid.
   private nonisolated static func fillSemanticRect(
@@ -429,7 +426,6 @@ internal enum SlateChatRenderer {
     }
   }
 
-  // MARK: - Semantic paint functions
 
   private nonisolated static func buildSemanticBannerKV(
     _ grid: inout [[StyledSpan]],
@@ -582,7 +578,6 @@ internal enum SlateChatRenderer {
     }
   }
 
-  // MARK: - Semantic HUD helpers (StyledSpan versions)
 
   private nonisolated static func semanticHudSpan(
     _ fg: TerminalRGB, _ text: String, bg: TerminalRGB, bold: Bool = false
@@ -674,7 +669,6 @@ internal enum SlateChatRenderer {
 
 }
 
-// MARK: - TerminalCell + StyledSpan bridge
 
 extension TerminalCell {
   /// Create a `TerminalCell` from a `StyledSpan` whose text is a single character.

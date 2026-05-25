@@ -107,7 +107,6 @@ func withTemporaryDirectory<T>(
   return try await body(dir)
 }
 
-// MARK: - Shared test helpers
 
 /// Mutable boolean flag used by tool tests that exercise abort logic.
 final class AbortState: @unchecked Sendable {

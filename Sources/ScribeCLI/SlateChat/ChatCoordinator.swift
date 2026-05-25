@@ -4,63 +4,54 @@ import ScribeCore
 import SystemPackage
 
 /// Reference embedder that drives a ``ScribeAgent`` from a `lines` stream
-/// of user submissions.
+/// of user submissions, on top of a host-owned ``SessionDocument``.
 ///
 /// `ChatCoordinator` is intentionally narrow: it owns nothing UI-shaped
 /// (Slate, `@MainActor`, terminal handling all live in ``SlateChatHost``)
-/// and reaches for the ``ScribeAgent`` only through its public surface —
-/// `prompt(...)`, `abort()`, and the ``TurnResult`` it returns. Copy this
-/// file to ship Scribe inside a server or another tool; the only
-/// outside-the-agent dependencies are ``ChatSessionStore`` (persistence)
-/// and the `enqueue` callback (where transcript events are routed).
+/// and no longer owns persistence either — the host orchestrates the doc
+/// and its ``SessionPersister``. Copy this file to ship Scribe inside
+/// a server or another tool; the only outside-the-agent dependencies are
+/// two `@MainActor` closures into the host (where the doc lives) and the
+/// `enqueue` callback (where transcript events are routed).
 final class ChatCoordinator: Sendable {
 
   private let configuration: ScribeConfig
-  private let resumeSnapshot: [ScribeMessage]
   private let logger: Logger
   private let enqueue: @Sendable (HostEvent) -> Void
-  private let persistDirectory: FilePath
-  private let sessionId: UUID
-  private let sessionCreatedAt: Date
   private let lines: AsyncStream<String>
-
+  /// Borrow the host-owned document long enough to copy agent history.
+  /// Runs on the MainActor; the doc is borrowed without any await so
+  /// the call is always safe.
+  private let agentHistory: @MainActor @Sendable () -> [ScribeMessage]
+  /// Append a turn's worth of new messages to the host-owned document.
+  /// The closure body hops to the MainActor and routes the append
+  /// through the host's persist-first / commit-second orchestrator —
+  /// that's the only path that mutates the doc from the coordinator.
+  private let applyAppend: @MainActor @Sendable ([ScribeMessage]) async throws -> Void
+  /// Read the current message count from the host-owned doc (for the
+  /// start/end log lines).
+  private let documentCount: @MainActor @Sendable () -> Int
   private let agent: ScribeAgent
-
-  private let initialMessages: [ScribeMessage]
 
   init(
     configuration: ScribeConfig,
-    systemPrompt: String,
-    resumeSnapshot: [ScribeMessage],
     logger: Logger,
     enqueue: @escaping @Sendable (HostEvent) -> Void,
-    persistDirectory: FilePath,
-    sessionId: UUID,
-    sessionCreatedAt: Date,
+    agentHistory: @escaping @MainActor @Sendable () -> [ScribeMessage],
+    applyAppend: @escaping @MainActor @Sendable ([ScribeMessage]) async throws -> Void,
+    documentCount: @escaping @MainActor @Sendable () -> Int,
     lines: AsyncStream<String>
   ) throws {
-    if !resumeSnapshot.isEmpty {
-      guard resumeSnapshot.first?.role == .system else {
-        throw ScribeError.sessionCorrupted(
-          reason: "Resumed conversation must begin with a system message.")
-      }
-      self.initialMessages = resumeSnapshot
-    } else {
-      self.initialMessages = [ScribeMessage(role: .system, content: systemPrompt)]
-    }
     self.agent = try ScribeAgent(
       configuration: configuration,
-      systemPrompt: systemPrompt,
-      initialMessages: self.initialMessages,
       logger: logger
     )
     self.configuration = configuration
-    self.resumeSnapshot = resumeSnapshot
     self.logger = logger
     self.enqueue = enqueue
-    self.persistDirectory = persistDirectory
-    self.sessionId = sessionId
-    self.sessionCreatedAt = sessionCreatedAt
+    self.agentHistory = agentHistory
+    self.applyAppend = applyAppend
+    self.documentCount = documentCount
     self.lines = lines
   }
 
@@ -69,159 +60,80 @@ final class ChatCoordinator: Sendable {
   }
 
   func run() async {
-    let messagesAppender: ChatSessionStore.MessagesAppender
-    do {
-      messagesAppender = try ChatSessionStore.MessagesAppender(directory: persistDirectory)
-    } catch {
-      logger.error(
-        "chat.persist.init.fail",
-        metadata: [
-          "path": "\(persistDirectory.string)",
-          "err": "\(error.localizedDescription)",
-        ])
-      enqueue(.coordinatorFinished)
-      return
-    }
+    let initialCount = await documentCount()
+    logger.debug(
+      "chat.coordinator.start",
+      metadata: ["messages": "\(initialCount)"])
 
-    /// Append messages produced by the most recent turn to the JSONL store.
-    /// Uses the messages returned by ``TurnResult`` rather than reaching back
-    /// into the agent's internal buffer — keeping the coordinator on the
-    /// public surface.
-    func persistNew(
-      allMessages: [ScribeMessage],
-      persistedCount: Int
-    ) {
-      guard persistedCount < allMessages.count else { return }
-      let newMessages = Array(allMessages[persistedCount...])
+    let tracker = TokenTracker(
+      contextWindow: configuration.contextWindow,
+      threshold: configuration.contextWindowThreshold
+    )
+
+    for await line in lines {
+      let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed == "exit" {
+        logger.notice("chat.user.exit-command")
+        break
+      }
+      if trimmed.isEmpty {
+        logger.trace("chat.user.empty-skip")
+        continue
+      }
+
+      enqueue(.userSubmitted(trimmed))
+      logger.debug(
+        "agent.turn.dispatch",
+        metadata: ["chars": "\(trimmed.count)"])
+
+      enqueue(.modelTurnRunning(true))
+      defer { enqueue(.modelTurnRunning(false)) }
+
+      let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
+
+      // Borrow the doc on the MainActor for agent history, then run the
+      // turn without holding the doc. New messages get folded back into
+      // the doc only after the turn completes.
+      let history = await agentHistory()
+
       do {
-        try messagesAppender.append(newMessages)
-        logger.trace(
-          "chat.persist.append",
-          metadata: [
-            "new": "\(newMessages.count)",
-            "total": "\(allMessages.count)",
-            "path": "\(persistDirectory.string)",
-          ])
-      } catch {
-        logger.error(
-          "chat.persist.fail",
-          metadata: [
-            "path": "\(persistDirectory.string)",
-            "err": "\(error.localizedDescription)",
-          ])
-      }
-    }
-
-    do {
-      if resumeSnapshot.isEmpty {
-        let cwd = FilePath.currentDirectory.string
-        let meta = ChatSessionMetadata(
-          id: sessionId,
-          createdAt: sessionCreatedAt,
-          model: configuration.agentModel,
-          cwd: cwd,
-          baseURL: configuration.serverURL,
-          scribeVersion: GitVersion.hash
-        )
-        try? await ChatSessionStore.saveMetadata(meta, to: persistDirectory)
-        try messagesAppender.append(initialMessages)
-      }
-      var persistedCount = initialMessages.count
-
-      let msgCount = initialMessages.count
-      logger.debug(
-        "chat.coordinator.start",
-        metadata: [
-          "messages": "\(msgCount)",
-          "resumed": "\(!resumeSnapshot.isEmpty)",
-        ])
-
-      let tracker = TokenTracker(
-        contextWindow: configuration.contextWindow,
-        threshold: configuration.contextWindowThreshold
-      )
-
-      for await line in lines {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "exit" {
-          logger.notice("chat.user.exit-command")
-          break
+        let ts = agent.run(promptMessages, history: history)
+        for await event in ts.events {
+          if case .lifecycle(.usage(let usage, _)) = event { tracker.accumulate(usage: usage) }
+          enqueue(.transcript(event))
         }
-        if trimmed.isEmpty {
-          logger.trace("chat.user.empty-skip")
-          continue
+        let result = try await ts.result.value
+        // Fold the turn's diff back into the host's doc.
+        if !result.newMessages.isEmpty {
+          try await applyAppend(result.newMessages)
         }
-
-        enqueue(.userSubmitted(trimmed))
-        logger.debug(
-          "agent.turn.dispatch",
-          metadata: ["chars": "\(trimmed.count)"])
-
-        enqueue(.modelTurnRunning(true))
-        defer { enqueue(.modelTurnRunning(false)) }
-
-        let promptMessages: [ScribeMessage] = [ScribeMessage(role: .user, content: trimmed)]
-
-        // Track the messages the agent committed during this turn so we can
-        // persist + emit `turnComplete` without reaching back into the
-        // agent's storage actor. Falls back to the agent's snapshot if the
-        // turn never produced a TurnResult (e.g. HTTP error before stream).
-        var committed: [ScribeMessage]? = nil
-        do {
-          let ts = await agent.stream(promptMessages)
-          for await event in ts.events {
-            if case .lifecycle(.usage(let usage, _)) = event { tracker.accumulate(usage: usage) }
-            enqueue(.transcript(event))
-          }
-          let result = try await ts.result.value
-          committed = result.messages
-          switch result.outcome {
-          case .completed:
-            logger.info("agent.turn.end", metadata: ["status": "completed"])
-            tracker.logStatus(logger: logger)
-          case .interrupted:
-            logger.notice("agent.turn.end", metadata: ["status": "interrupted"])
-          case .toolRoundLimit(let max):
-            logger.notice(
-              "agent.turn.end",
-              metadata: ["status": "tool-round-limit", "limit": "\(max)"])
-            enqueue(.transcript(.lifecycle(.interrupted)))
-          }
-        } catch {
-          let se = (error as? ScribeError) ?? .generic(String(describing: error))
-          logger.error(
+        switch result.outcome {
+        case .completed:
+          logger.info("agent.turn.end", metadata: ["status": "completed"])
+          tracker.logStatus(logger: logger)
+        case .interrupted:
+          logger.notice("agent.turn.end", metadata: ["status": "interrupted"])
+        case .toolRoundLimit(let max):
+          logger.notice(
             "agent.turn.end",
-            metadata: [
-              "status": "error",
-              "err": "\(se.errorDescription ?? String(describing: se))",
-            ])
-          enqueue(.transcript(.lifecycle(.error(se))))
+            metadata: ["status": "tool-round-limit", "limit": "\(max)"])
+          enqueue(.transcript(.lifecycle(.interrupted)))
         }
-
-        let allMessages: [ScribeMessage]
-        if let committed {
-          allMessages = committed
-        } else {
-          allMessages = await agent.messages
-        }
-        persistNew(allMessages: allMessages, persistedCount: persistedCount)
-        persistedCount = allMessages.count
+      } catch {
+        let se = (error as? ScribeError) ?? .generic(String(describing: error))
+        logger.error(
+          "agent.turn.end",
+          metadata: [
+            "status": "error",
+            "err": "\(se.errorDescription ?? String(describing: se))",
+          ])
+        enqueue(.transcript(.lifecycle(.error(se))))
       }
-      // Final flush in case the loop exited with un-persisted messages.
-      let trailing = await agent.messages
-      persistNew(allMessages: trailing, persistedCount: persistedCount)
-      logger.debug(
-        "chat.coordinator.end",
-        metadata: ["transcript_messages": "\(trailing.count)"])
-    } catch {
-      let scribeError = (error as? ScribeError) ?? .generic(String(describing: error))
-      enqueue(.transcript(.lifecycle(.error(scribeError))))
-      logger.error(
-        "chat.coordinator.fail",
-        metadata: [
-          "err": "\(scribeError.errorDescription ?? String(describing: scribeError))"
-        ])
     }
+    let finalCount = await documentCount()
+    logger.debug(
+      "chat.coordinator.end",
+      metadata: ["transcript_messages": "\(finalCount)"])
     enqueue(.coordinatorFinished)
   }
 }

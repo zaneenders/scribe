@@ -7,104 +7,76 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - ChatCoordinator tests
 
-/// Tests for the `ChatCoordinator` actor — verifies initialization, event
-/// emission patterns, and lifecycle without needing a real ScribeAgent.
+/// Tests for the `ChatCoordinator` — verifies initialization and the
+/// `interrupt()` surface without needing a real ScribeAgent. Persistence
+/// and session-level concerns now live on the host-owned ``SessionDocument``
+/// and ``FileSessionPersister`` and are covered by ``SessionDocumentTests``
+/// and host-level integration tests.
 @Suite
 struct ChatCoordinatorTests {
 
   private let logger = Logger(label: "test.chat-coordinator")
 
-  // MARK: - Initialization
+  /// Build the three closures the coordinator expects in lieu of a doc
+  /// reference. Tests don't actually drive a turn, so the closures are
+  /// all no-ops returning empty data.
+  private static func noopDocClosures() -> (
+    agentHistory: @MainActor @Sendable () -> [ScribeMessage],
+    applyAppend: @MainActor @Sendable ([ScribeMessage]) async throws -> Void,
+    documentCount: @MainActor @Sendable () -> Int
+  ) {
+    return (
+      agentHistory: { [] },
+      applyAppend: { _ in },
+      documentCount: { 0 }
+    )
+  }
+
 
   @Test func coordinatorInitialization() async throws {
     let (lines, _) = AsyncStream<String>.makeStream()
     let events: Mutex<[HostEvent]> = Mutex([])
+    let closures = Self.noopDocClosures()
 
     let coordinator = try ChatCoordinator(
       configuration: .testValue,
-      systemPrompt: "test prompt",
-      resumeSnapshot: [],
       logger: logger,
-      enqueue: { event in
-        events.withLock { $0.append(event) }
-      },
-      persistDirectory: FilePath("/tmp/test"),
-      sessionId: UUID(),
-      sessionCreatedAt: Date(),
+      enqueue: { event in events.withLock { $0.append(event) } },
+      agentHistory: closures.agentHistory,
+      applyAppend: closures.applyAppend,
+      documentCount: closures.documentCount,
       lines: lines
     )
     // Coordinator should initialize without crashing.
-    #expect(true)
-    _ = coordinator  // silence unused warning
+    _ = coordinator
   }
 
-  /// `interrupt()` is a `nonisolated` no-op when no turn is in flight —
-  /// the host calls it freely from its Ctrl+C handler, including before
-  /// `run()` has started consuming lines. With eager agent construction
-  /// the agent always exists, but the agent's notifier is `clear()`-ed at
-  /// the top of every prompt, so an `abort()` issued before/between
-  /// prompts is dropped on the next `prompt()`.
+  /// `interrupt()` is a no-op when no turn is in flight — the host calls
+  /// it freely from its Ctrl+C handler, including before `run()` has
+  /// started consuming lines. With eager agent construction the agent
+  /// always exists, but the agent's notifier is cleared at the top of
+  /// every turn, so an `abort()` issued before/between turns is dropped
+  /// on the next `run()`.
   @Test func interruptBeforeRunIsNoOp() async throws {
     let (lines, _) = AsyncStream<String>.makeStream()
     let events: Mutex<[HostEvent]> = Mutex([])
+    let closures = Self.noopDocClosures()
     let coordinator = try ChatCoordinator(
       configuration: .testValue,
-      systemPrompt: "test prompt",
-      resumeSnapshot: [],
       logger: logger,
       enqueue: { event in events.withLock { $0.append(event) } },
-      persistDirectory: FilePath("/tmp/test"),
-      sessionId: UUID(),
-      sessionCreatedAt: Date(),
+      agentHistory: closures.agentHistory,
+      applyAppend: closures.applyAppend,
+      documentCount: closures.documentCount,
       lines: lines
     )
     // Should not crash, throw, or block.
     coordinator.interrupt()
     #expect(events.withLock { $0.isEmpty })
   }
-
-  /// A resume snapshot that doesn't lead with a system message is malformed;
-  /// `init` should reject it rather than letting the bad state reach the
-  /// agent loop.
-  @Test func coordinatorRejectsCorruptResumeSnapshot() async {
-    let (lines, _) = AsyncStream<String>.makeStream()
-    let events: Mutex<[HostEvent]> = Mutex([])
-    let badSnapshot: [ScribeMessage] = [
-      ScribeMessage(role: .user, content: "no system message in front")
-    ]
-    do {
-      _ = try ChatCoordinator(
-        configuration: .testValue,
-        systemPrompt: "test prompt",
-        resumeSnapshot: badSnapshot,
-        logger: logger,
-        enqueue: { event in events.withLock { $0.append(event) } },
-        persistDirectory: FilePath("/tmp/test"),
-        sessionId: UUID(),
-        sessionCreatedAt: Date(),
-        lines: lines
-      )
-      Issue.record("Expected ScribeError.sessionCorrupted")
-    } catch let error as ScribeError {
-      if case .sessionCorrupted = error {
-        // expected
-      } else {
-        Issue.record("Wrong ScribeError variant: \(error)")
-      }
-    } catch {
-      Issue.record("Wrong error type: \(error)")
-    }
-  }
-
-  // (`AbortNotifier` itself is tested directly in
-  // `ScribeCoreTests/AbortNotifierTests` — fresh state, set, clear,
-  // late subscribers, and multi-subscriber broadcast all live there.
-  // Coordinator-level tests focus on the `interrupt()` API surface.)
 }
 
-// MARK: - Test helpers
 
 extension ScribeConfig {
   static let testValue = ScribeConfig(
@@ -114,5 +86,6 @@ extension ScribeConfig {
     serverURL: "https://test.example.com",
     apiKey: "test-token",
     workingDirectory: "/tmp",
-reasoningEnabled: nil  )
+    reasoningEnabled: nil
+  )
 }

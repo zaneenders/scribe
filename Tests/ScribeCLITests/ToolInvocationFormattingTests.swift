@@ -7,7 +7,6 @@ import Testing
 /// only what the human-facing UI sees.
 @Suite
 struct ToolInvocationFormattingTests {
-  // MARK: - shell
 
   @Test func shellShowsExitCodeAndFilePaths() {
     let json = """
@@ -52,7 +51,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines.allSatisfy { !$0.hasPrefix("stdout → ") })
   }
 
-  // MARK: - read_file (sanity check that the existing summary line keeps working)
 
   @Test func readFileReturnsSingleSummaryLine() {
     let json = """
@@ -85,7 +83,6 @@ struct ToolInvocationFormattingTests {
     return escaped
   }
 
-  // MARK: - argumentSummary
 
   @Test func argumentSummaryShellWithCwdIncludesDirectory() {
     let summary = ToolInvocationFormatting.argumentSummary(
@@ -151,7 +148,6 @@ struct ToolInvocationFormattingTests {
     #expect(summary == nil)
   }
 
-  // MARK: - outputLines for edit_file / write_file
 
   @Test func outputLinesEditFileReturnsReplaced() {
     let json = """
@@ -169,7 +165,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines == ["written"])
   }
 
-  // MARK: - outputLines for error cases
 
   @Test func outputLinesErrorShowsErrorMessage() {
     let json = """
@@ -187,7 +182,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines == ["error: unknown error"])
   }
 
-  // MARK: - outputLines for invalid JSON
 
   @Test func outputLinesInvalidJSONReturnsRawOutput() {
     let raw = "garbage"
@@ -195,7 +189,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines == [raw])
   }
 
-  // MARK: - outputLines for shell edge cases
 
   @Test func shellEmptyStreamsWithExitCodeShowsExitOnly() {
     // When both file paths are present but files are empty, we still show them.
@@ -226,7 +219,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines.contains { $0.hasPrefix("stdout → /tmp/f.txt") })
   }
 
-  // MARK: - readFileSummaryLine edge cases
 
   @Test func readFileSummaryOffsetPastEndShowsZeroLines() {
     let json = """
@@ -255,7 +247,6 @@ struct ToolInvocationFormattingTests {
     #expect(lines[0] == "(no content)")
   }
 
-  // MARK: - outputLines for unknown tool with valid JSON
 
   @Test func outputLinesUnknownToolPrettyPrintsJSON() {
     let json = """

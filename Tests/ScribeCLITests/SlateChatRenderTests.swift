@@ -4,14 +4,12 @@ import Testing
 
 @testable import ScribeCLI
 
-// MARK: - SlateChatRenderer transcript rendering tests
 
 /// Tests that the render pipeline correctly paints transcript content
 /// for the first-message scenario and during transcript growth.
 @Suite
 struct SlateChatRenderTests {
 
-  // MARK: - First message: transcript appears at the bottom
 
   @Test func firstUserMessageAppearsInTranscriptArea() {
     let cols = 80
@@ -77,7 +75,6 @@ struct SlateChatRenderTests {
     }
   }
 
-  // MARK: - Transcript grows while following live
 
   @Test func transcriptGrowthTracksTail() {
     let cols = 80
@@ -154,7 +151,6 @@ struct SlateChatRenderTests {
     #expect(topSpan.text != "y", "Expected first message to be scrolled off, but 'y' found at row \(firstContentRow)")
   }
 
-  // MARK: - Empty transcript renders blank area correctly
 
   @Test func emptyTranscriptRendersBlank() {
     let cols = 80
@@ -191,7 +187,6 @@ struct SlateChatRenderTests {
   }
 }
 
-// MARK: - TranscriptLayout.inputVisualLines tests
 
 /// Tests for `TranscriptLayout.inputVisualLines` — the pure function that splits
 /// a multi-line input buffer into visual lines for the input area.
@@ -203,7 +198,6 @@ struct SlateChatRenderTests {
 @Suite
 struct InputVisualLinesTests {
 
-  // MARK: - Empty / zero-width
 
   @Test func emptyBufferReturnsSingleEmptyLine() {
     let lines = TranscriptLayout.inputVisualLines(from: "", textWidth: 80)
@@ -220,7 +214,6 @@ struct InputVisualLinesTests {
     #expect(lines == [])
   }
 
-  // MARK: - Single line (no newlines)
 
   @Test func singleShortLine() {
     let lines = TranscriptLayout.inputVisualLines(from: "hello", textWidth: 80)
@@ -243,7 +236,6 @@ struct InputVisualLinesTests {
     #expect(lines == ["abc", "def", "ghi", "j"])
   }
 
-  // MARK: - Multi-line from newlines
 
   @Test func multipleLinesPreserveNewlineSplits() {
     let lines = TranscriptLayout.inputVisualLines(from: "line1\nline2\nline3", textWidth: 80)
@@ -270,7 +262,6 @@ struct InputVisualLinesTests {
     #expect(lines == ["", "", ""])
   }
 
-  // MARK: - Multi-line with wrapping
 
   @Test func multiLineWithWrapping() {
     // Character-level wrapping: each logical line split every 6 characters
@@ -293,7 +284,6 @@ struct InputVisualLinesTests {
       ])
   }
 
-  // MARK: - Whitespace handling
 
   @Test func leadingWhitespaceOnLogicalLineIsPreserved() {
     let lines = TranscriptLayout.inputVisualLines(from: "  indented", textWidth: 80)
@@ -306,7 +296,6 @@ struct InputVisualLinesTests {
     #expect(lines == ["  func foo() {", "    bar()", "  }"])
   }
 
-  // MARK: - Pass-through invariant: visual wrapping is lossless
 
   @Test func visualWrappingPreservesOriginalContent() {
     // The visual lines joined together (without any separator) should

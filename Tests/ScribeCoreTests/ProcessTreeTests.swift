@@ -12,7 +12,6 @@ import Glibc
 import Musl
 #endif
 
-// MARK: - ProcessTreeReader stub
 
 /// Records every `children(of:)` call so tests can verify the walker
 /// visits the right pids in the right order, then returns the canned tree.
@@ -37,7 +36,6 @@ private final class StubReader: ProcessTreeReader, @unchecked Sendable {
   }
 }
 
-// MARK: - collectProcessTree
 
 /// All of these run on macOS too — the tree-walker logic is what historically
 /// shipped with the buggy Linux-only code path; making it pure-and-injectable
@@ -119,7 +117,6 @@ struct ProcessTreeWalkerTests {
   }
 }
 
-// MARK: - ProcTreeKiller (kill-order without invoking real kill())
 
 /// Verifies that ProcTreeKiller iterates from leaves toward the root.  We
 /// can't easily intercept the `kill(2)` syscall on real pids without a

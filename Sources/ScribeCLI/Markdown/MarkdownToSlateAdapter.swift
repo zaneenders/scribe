@@ -1,7 +1,6 @@
 import ScribeCore
 import SlateCore
 
-// MARK: - MarkdownToSlateAdapter
 
 /// Converts between semantic `MarkdownLine`/`MarkdownSpan` types (ScribeCore, no Slate deps)
 /// and Slate `TLine`/`StyledSpan` types (ScribeCLI, Slate deps).
@@ -41,7 +40,6 @@ struct MarkdownToSlateAdapter {
     MarkdownLine(spans: line.spans.map { convert($0, baseFG: baseFG, baseBold: baseBold, theme: theme) })
   }
 
-  // MARK: - Private
 
   private static func convert(
     _ span: MarkdownSpan,

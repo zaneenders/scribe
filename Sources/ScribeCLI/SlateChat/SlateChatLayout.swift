@@ -2,7 +2,6 @@ import Foundation
 import ScribeCore
 import SlateCore
 
-// MARK: - Styled transcript model
 
 public struct StyledSpan: Equatable, Sendable, TerminalSpanProtocol {
   public var fg: TerminalRGB
@@ -31,7 +30,6 @@ public struct TLine: Equatable, Sendable {
   }
 }
 
-// MARK: - Snapshot types
 
 /// Snapshot of token-usage counters rendered in the upper‑right HUD strip.
 ///
@@ -77,7 +75,6 @@ internal struct BannerSnapshot: Equatable {
   var sessionId: String
 }
 
-// MARK: - Layout
 
 internal enum TranscriptLayout {
 

@@ -1,4 +1,3 @@
-// MARK: - Outcome types for agent turns and rounds
 
 /// Thrown when an interactive host asks to stop the current model/tool round.
 struct AgentTurnInterruptedError: Error, Sendable {
