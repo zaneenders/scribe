@@ -110,6 +110,9 @@ struct TranscriptController {
           StyledSpan(fg: theme.warningFG, bg: theme.background, bold: false, text: "(recovered: \(reason))")
         ]))
       return Effects(needsRender: true)
+
+    case .boundary:
+      return Effects()
     }
   }
 
