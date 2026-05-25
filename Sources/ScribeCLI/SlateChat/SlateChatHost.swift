@@ -115,9 +115,7 @@ internal final class SlateChatHost {
   private var inPaste: Bool = false
   private var modelBusy: Bool = false
   private var queueTrayDispatch: QueuedTraySnapshot.ActiveDispatch?
-  /// Messages queued during the current busy spell (stable [i/N] labels in the tray).
   private var queueBatchTotal: Int = 0
-  /// True while a popped steering message is on the gate but not yet consumed.
   private var steeringLineOutstanding: Bool = false
   private var coordinatorFinished: Bool = false
   /// False once `run()` begins teardown — picker side-effects must not

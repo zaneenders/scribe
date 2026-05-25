@@ -3,18 +3,12 @@ import ScribeCore
 import SlateCore
 
 
-/// One painted row in the queued-message tray (between transcript and input).
 struct QueuedTrayLine: Equatable, Sendable {
   enum Kind: Equatable, Sendable {
-    /// Idle queue — first row uses the `queued:` prefix.
     case firstMessage
-    /// Idle queue — continuation row.
     case additionalMessage
-    /// Popped and sent after empty Enter while the model was busy.
     case sending
-    /// Still in the harness queue while another message is running.
     case waiting
-    /// Next up — harness will auto-drain this when the current turn finishes.
     case nextUp
     case overflowRemaining(Int)
     case hint
@@ -61,12 +55,11 @@ struct QueuedTrayLine: Equatable, Sendable {
 ///
 /// The tray sits between the transcript and the input strip, shares the input
 /// strip background, indents continuation rows under an 8-space gutter (matching
-/// the width of `queued: `), and is hard-capped at 4 rows. Multiple queued
-/// messages each get a one-line preview with `[i/N]` labels; a trailing
-/// `+ N more queued` row appears when the list is truncated.
+/// the width of `queued: `), and is hard-capped at 4 rows with trailing `…`
+/// truncation so a long queued paste cannot push the transcript off screen.
 ///
-/// - ``queuedTrayRowCount(queuedMessages:cols:)`` returns the number of rows to
-///   reserve for the queued tray strip (0 when no queued messages).
+/// - ``queuedTrayRowCount(queuedTrayText:cols:)`` returns the number of rows to
+///   reserve for the queued tray strip (0 when no queued message).
 /// - ``buildSemanticQueuedTrayRows(_:startRow:cols:textWidth:visualLines:theme:)``
 ///   paints the tray rows: first row prefixed with `queued: ` (orange) plus the
 ///   message in dimmed white; continuation rows align under the message with an
@@ -84,7 +77,6 @@ internal enum SlateChatRenderer {
   /// Hard cap on tray rows so a long queued message can't push the transcript off-screen.
   private nonisolated static let queuedTrayMaxRows = 4
 
-  /// Collapse a queued message to a single preview line for the tray.
   nonisolated static func queuedMessagePreview(_ raw: String, maxWidth: Int) -> String {
     let normalized = raw
       .replacingOccurrences(of: "\r\n", with: "\n")
@@ -96,7 +88,6 @@ internal enum SlateChatRenderer {
     return String(normalized.prefix(maxWidth - 1)) + "…"
   }
 
-  /// Build tray rows from a ``QueuedTraySnapshot`` (oldest first).
   nonisolated static func queuedTrayVisualLines(
     snapshot: QueuedTraySnapshot,
     textWidth: Int
@@ -260,9 +251,6 @@ internal enum SlateChatRenderer {
     return lines
   }
 
-  /// Build tray rows for one or more queued messages (oldest first).
-  ///
-  /// Deprecated path — prefer ``queuedTrayVisualLines(snapshot:textWidth:)``.
   nonisolated static func queuedTrayVisualLines(
     queuedMessages: [String],
     textWidth: Int
@@ -272,7 +260,7 @@ internal enum SlateChatRenderer {
       textWidth: textWidth)
   }
 
-  /// Number of rows to reserve for the queued tray strip (0 when empty).
+  /// Number of rows to reserve for the queued tray strip (0 when no queued message).
   nonisolated static func queuedTrayRowCount(
     snapshot: QueuedTraySnapshot,
     cols: Int

@@ -4,17 +4,12 @@
 enum SubmitEffect: Equatable, Sendable {
   /// Send text to the coordinator via `UserLineGate` (model is idle).
   case sendToGate(String)
-  /// Pop the oldest steering message and send it to the gate (model is idle).
   case popAndSendToGate
   /// Interrupt the model and send text to the gate.
   case interruptAndSend(String)
-  /// Pop the oldest steering message, interrupt the model, and send it to the gate.
   case popAndInterruptAndSend
-  /// Pop the oldest steering message back into the input buffer (Ctrl+C recall).
   case recallSteeringToInput
-  /// Park text in the harness steering queue (model is busy).
   case enqueueSteering(String)
-  /// Park text in the harness follow-up queue (model is busy).
   case enqueueFollowUp(String)
   /// Request an interrupt of the in-flight model turn.
   case interruptModel
@@ -24,8 +19,6 @@ enum SubmitEffect: Equatable, Sendable {
   case none
 }
 
-/// Pure routing for submit actions. Queues live in ``SessionHarness``; this type
-/// only decides where a submission goes from model-busy state and queue depth.
 enum SubmitCoordinator {
 
   /// User pressed Enter with `text` in the input buffer.
@@ -42,9 +35,6 @@ enum SubmitCoordinator {
         return .none
       }
       if modelBusy {
-        // Flush the whole queue inside the in-flight ``SessionHarness/submit``
-        // after the interrupt lands — do not pop to the gate (that races the
-        // harness drain and can drop the last message).
         return .interruptModel
       }
       if steeringLineOutstanding {
@@ -60,8 +50,6 @@ enum SubmitCoordinator {
     return .sendToGate(text)
   }
 
-  /// Queue a follow-up when the model is busy; send immediately when idle.
-  /// Reserved for future keybindings / RPC — not wired in the TUI yet.
   static func handleFollowUpSubmit(
     text: String,
     modelBusy: Bool
@@ -93,10 +81,10 @@ enum SubmitCoordinator {
 }
 
 
-/// Side effects the host must execute after applying a ``SubmitEffect``.
 struct HostSubmitSideEffects: Equatable {
   var gateText: String?
   var popSteeringToGate: Bool = false
+  /// Non-nil tag means the host must request a model interrupt + log with this tag.
   var interruptLogTag: String?
   var needsDelayedRenderWake: Bool = false
   var shouldExit: Bool = false

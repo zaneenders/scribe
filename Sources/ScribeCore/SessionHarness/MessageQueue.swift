@@ -1,30 +1,16 @@
 import Foundation
 import Synchronization
 
-/// How queued messages are delivered when drained.
 public enum QueueMode: Sendable, Equatable {
-  /// Deliver one message, wait for the agent to finish, then deliver the next.
-  ///
-  /// Default for steering — lets the user interrupt or recall between
-  /// auto-flushes (unlike the old TUI burst flush of every queued message).
   case oneAtATime
-  /// Deliver every queued message in a single agent turn.
   case all
 }
 
-/// Which queue a pending user message belongs to.
 public enum MessageQueueKind: Sendable, Equatable {
-  /// Injected after the current assistant turn and tool batch finish.
   case steering
-  /// Injected only when the agent would otherwise stop.
   case followUp
 }
 
-/// FIFO queue of user messages with a configurable drain strategy.
-///
-/// Uses ``ScribeMessage`` today; when transcript vs wire types split (see
-/// architecture doc §2), this can adopt ``TranscriptMessage`` without changing
-/// call sites on ``SessionHarness``.
 public struct PendingMessageQueue: Sendable {
   private var messages: [ScribeMessage] = []
   public private(set) var mode: QueueMode
@@ -37,7 +23,6 @@ public struct PendingMessageQueue: Sendable {
 
   public var count: Int { messages.count }
 
-  /// Preview of queued user text (oldest first) for UI trays.
   public var previewTexts: [String] {
     messages.map(\.content)
   }
@@ -59,7 +44,6 @@ public struct PendingMessageQueue: Sendable {
     messages.append(message)
   }
 
-  /// Remove and return the oldest message, if any.
   @discardableResult
   public mutating func popFirst() -> ScribeMessage? {
     guard !messages.isEmpty else { return nil }
@@ -70,7 +54,6 @@ public struct PendingMessageQueue: Sendable {
     messages = []
   }
 
-  /// Remove messages according to ``mode`` (or an explicit override).
   public mutating func drain(mode override: QueueMode? = nil) -> [ScribeMessage] {
     let mode = override ?? mode
     guard !messages.isEmpty else { return [] }
@@ -85,7 +68,6 @@ public struct PendingMessageQueue: Sendable {
   }
 }
 
-/// Thread-safe pair of steering and follow-up queues for ``SessionHarness``.
 final class SessionMessageQueues: Sendable {
   private let lock = Mutex(State())
 

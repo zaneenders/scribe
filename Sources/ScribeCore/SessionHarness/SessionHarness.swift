@@ -99,13 +99,11 @@ public actor SessionHarness {
     messageQueues.setFollowUpMode(mode)
   }
 
-  /// Queue a user message to inject after the current turn's tool batch finishes.
   @discardableResult
   public nonisolated func enqueueSteering(_ text: String) -> Bool {
     messageQueues.enqueueSteering(text: text)
   }
 
-  /// Queue a user message to run only after the agent would otherwise stop.
   @discardableResult
   public nonisolated func enqueueFollowUp(_ text: String) -> Bool {
     messageQueues.enqueueFollowUp(text: text)
@@ -123,7 +121,6 @@ public actor SessionHarness {
     messageQueues.clearAll()
   }
 
-  /// Remove the oldest steering message (for Ctrl+C recall in the TUI).
   public nonisolated func popSteeringForRecall() -> String? {
     messageQueues.popSteeringFirst()?.content
   }
