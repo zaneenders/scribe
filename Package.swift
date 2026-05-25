@@ -9,7 +9,6 @@ let package = Package(
   products: [
     .executable(name: "scribe", targets: ["ScribeCLI"]),
     .library(name: "ScribeCore", targets: ["ScribeCore"]),
-    .library(name: "ScribeLLM", targets: ["ScribeLLM"]),
   ],
   dependencies: [
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
