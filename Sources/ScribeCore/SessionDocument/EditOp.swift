@@ -2,12 +2,7 @@ import Foundation
 import SystemPackage
 
 
-/// The vocabulary of mutations routed through a host's `applyEdit`.
-///
-/// Every command that modifies session history — per-turn append, `/fork`,
-/// `/tldr`, and anything future — is expressed as one of these cases.
-/// The host orchestrates persistence and in-memory doc changes; the doc
-/// itself has no knowledge of ``EditOp``.
+/// Mutations routed through ``SessionHarness/applyEdit(_:)``.
 public enum EditOp: Sendable {
 
   /// Append incoming messages to the tail of the current session.
