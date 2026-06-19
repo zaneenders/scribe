@@ -77,15 +77,18 @@ enum Shell {
         "cancelled": "\(Task.isCancelled)",
       ])
 
-    let outcome: ExecutionOutcome<(pid_t, Int, Int)>
+    let outcome: ExecutionResult<(pid_t, Int, Int), SequenceOutput, SequenceOutput>
     do {
       outcome = try await Subprocess.run(
         .path(SubprocessFilePathBridge.executable(FilePath("/bin/sh"))),
         arguments: ["-c", trimmed],
         environment: .inherit,
         workingDirectory: SubprocessFilePathBridge.workingDirectory(shellCwd),
-        platformOptions: platformOptions
-      ) { execution, _, outputSequence, errorSequence in
+        platformOptions: platformOptions,
+        input: .none,
+        output: .sequence,
+        error: .sequence
+      ) { execution in
         let pid = execution.processIdentifier.value
         let tBody = ContinuousClock.now
         logger.trace(
@@ -107,8 +110,8 @@ enum Shell {
           let tDrain = ContinuousClock.now
 
           let drainTask = capture.startDrain(
-            stdout: outputSequence,
-            stderr: errorSequence,
+            stdout: execution.standardOutput,
+            stderr: execution.standardError,
             pid: pid,
             logger: logger)
 
@@ -206,10 +209,10 @@ enum Shell {
       "shell-run-returning",
       metadata: [
         "shell_id": "\(id)",
-        "pid": "\(outcome.value.0)",
+        "pid": "\(outcome.closureResult.0)",
         "termination": "\(String(describing: outcome.terminationStatus))",
-        "out_bytes": "\(outcome.value.1)",
-        "err_bytes": "\(outcome.value.2)",
+        "out_bytes": "\(outcome.closureResult.1)",
+        "err_bytes": "\(outcome.closureResult.2)",
         "out_file_bytes": "\(onDisk.out)",
         "err_file_bytes": "\(onDisk.err)",
         "total_elapsed_us": "\(totalUs)",
@@ -218,7 +221,7 @@ enum Shell {
       exitCode: outcome.terminationStatus,
       stdoutFile: capture.stdoutFile,
       stderrFile: capture.stderrFile,
-      pid: outcome.value.0
+      pid: outcome.closureResult.0
     )
   }
 }
