@@ -62,8 +62,8 @@ struct OutputCapture: Sendable {
   }
 
   func startDrain(
-    stdout: AsyncBufferSequence,
-    stderr: AsyncBufferSequence,
+    stdout: SubprocessOutputSequence,
+    stderr: SubprocessOutputSequence,
     pid: pid_t,
     logger: Logger
   ) -> Task<DrainBytes, Error> {
@@ -126,7 +126,7 @@ struct OutputCapture: Sendable {
   }
 
   static func writeStream(
-    from sequence: AsyncBufferSequence,
+    from sequence: SubprocessOutputSequence,
     to handle: FileHandle,
     label: String,
     pid: pid_t,
@@ -177,7 +177,9 @@ struct OutputCapture: Sendable {
 
       if !stopWriting {
         do {
-          try handle.write(contentsOf: Data(buffer: buffer))
+          try buffer.withUnsafeBytes { ptr in
+            try handle.write(contentsOf: Data(ptr))
+          }
           totalBytes += buffer.count
         } catch {
           logger.trace(

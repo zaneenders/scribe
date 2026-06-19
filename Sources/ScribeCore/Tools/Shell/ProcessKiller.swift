@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Subprocess
+import SystemPackage
 
 #if canImport(Darwin)
 import Darwin
@@ -10,11 +11,13 @@ import Glibc
 import Musl
 #endif
 
+package typealias ShellSubprocessExecution = Execution<NoInput, SequenceOutput, SequenceOutput>
+
 package protocol ProcessKiller: Sendable {
 
   func killTree(
     rootPid: pid_t,
-    execution: Subprocess.Execution,
+    execution: ShellSubprocessExecution,
     logger: Logger,
     shellID: UUID
   ) -> Int
@@ -30,7 +33,7 @@ package struct DefaultProcessKiller: ProcessKiller {
 
   package func killTree(
     rootPid: pid_t,
-    execution: Subprocess.Execution,
+    execution: ShellSubprocessExecution,
     logger: Logger,
     shellID: UUID
   ) -> Int {
@@ -65,7 +68,7 @@ package struct PgroupKiller: ProcessKiller {
 
   package func killTree(
     rootPid: pid_t,
-    execution: Subprocess.Execution,
+    execution: ShellSubprocessExecution,
     logger: Logger,
     shellID: UUID
   ) -> Int {
@@ -101,7 +104,7 @@ package struct ProcTreeKiller: ProcessKiller {
 
   package func killTree(
     rootPid: pid_t,
-    execution: Subprocess.Execution,
+    execution: ShellSubprocessExecution,
     logger: Logger,
     shellID: UUID
   ) -> Int {

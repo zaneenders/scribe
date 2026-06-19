@@ -17,7 +17,11 @@ let package = Package(
     .package(url: "https://github.com/swift-server/swift-openapi-async-http-client", from: "1.0.0"),
     .package(url: "https://github.com/apple/swift-system.git", from: "1.4.0"),
     .package(url: "https://github.com/apple/swift-configuration", from: "1.0.0"),
-    .package(url: "https://github.com/swiftlang/swift-subprocess.git", from: "0.4.0"),
+    .package(
+      url: "https://github.com/swiftlang/swift-subprocess.git",
+      revision: "049ddf9",
+      traits: ["SubprocessFoundation"]
+    ),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),

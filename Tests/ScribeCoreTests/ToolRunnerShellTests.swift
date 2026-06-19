@@ -268,7 +268,7 @@ final class SpyProcessKiller: ProcessKiller, Sendable {
 
   func killTree(
     rootPid: pid_t,
-    execution: Subprocess.Execution,
+    execution: ShellSubprocessExecution,
     logger: Logger,
     shellID: UUID
   ) -> Int {
