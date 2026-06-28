@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     container: swift:latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Cache Static SDK
         id: cache-sdk
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /root/.swiftpm/swift-sdks
           key: swift-static-sdk-6.3.2-v2
@@ -30,7 +30,7 @@ jobs:
           swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
       - name: Cache Swift packages
         id: cache-spm
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
@@ -49,14 +49,14 @@ jobs:
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Restore Static SDK
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /root/.swiftpm/swift-sdks
           key: swift-static-sdk-6.3.2-v2
       - name: Restore Swift packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
@@ -65,7 +65,7 @@ jobs:
       - name: Build ${{ matrix.arch }}
         run: swift build --swift-sdk ${{ matrix.arch }}-swift-linux-musl -c release
       - name: Upload ${{ matrix.arch }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: scribe-${{ matrix.arch }}
           path: |
@@ -79,11 +79,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: scribe-*
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             scribe-x86_64/*
