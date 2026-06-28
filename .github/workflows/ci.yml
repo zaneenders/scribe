@@ -13,30 +13,25 @@ concurrency:
 
 jobs:
   build:
-    name: Static SDK
+    name: Static SDK (${{ matrix.arch }})
     runs-on: ubuntu-latest
     container: swift:latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - name: Download Static SDK
         run: |
           swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
-      - name: Build x86_64
-        run: swift build --swift-sdk x86_64-swift-linux-musl -c release
-      - name: Build aarch64
-        run: swift build --swift-sdk aarch64-swift-linux-musl -c release
-      - name: Upload x86_64 binary
+      - name: Build ${{ matrix.arch }}
+        run: swift build --swift-sdk ${{ matrix.arch }}-swift-linux-musl -c release
+      - name: Upload ${{ matrix.arch }} binary
         uses: actions/upload-artifact@v4
         with:
-          name: scribe-x86_64
+          name: scribe-${{ matrix.arch }}
           path: |
-            .build/x86_64-swift-linux-musl/release/scribe
-      - name: Upload aarch64 binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: scribe-aarch64
-          path: |
-            .build/aarch64-swift-linux-musl/release/scribe
+            .build/${{ matrix.arch }}-swift-linux-musl/release/scribe
 
   release:
     name: Create Release
