@@ -20,16 +20,16 @@ jobs:
       matrix:
         arch: [x86_64, aarch64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Cache Static SDK
         id: cache-sdk
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.swiftpm/swift-sdks
           key: swift-static-sdk-6.3.2
       - name: Cache Swift packages
         id: cache-spm
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .build/checkouts
@@ -45,7 +45,7 @@ jobs:
       - name: Build ${{ matrix.arch }}
         run: swift build --swift-sdk ${{ matrix.arch }}-swift-linux-musl -c release
       - name: Upload ${{ matrix.arch }} binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: scribe-${{ matrix.arch }}
           path: |
@@ -59,7 +59,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: scribe-*
       - name: Release
