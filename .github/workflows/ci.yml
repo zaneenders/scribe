@@ -21,7 +21,25 @@ jobs:
         arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Static SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ~/.swiftpm/swift-sdks
+          key: swift-static-sdk-6.3.2
+      - name: Cache Swift packages
+        id: cache-spm
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+          key: spm-${{ hashFiles('Package.resolved') }}
+      - name: Resolve dependencies
+        if: steps.cache-spm.outputs.cache-hit != 'true'
+        run: swift package resolve
       - name: Download Static SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
           swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
       - name: Build ${{ matrix.arch }}
