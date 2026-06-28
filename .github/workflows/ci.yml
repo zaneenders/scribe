@@ -12,13 +12,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Static SDK (${{ matrix.arch }})
+  setup:
+    name: Setup
     runs-on: ubuntu-latest
     container: swift:latest
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v5
       - name: Cache Static SDK
@@ -27,6 +24,10 @@ jobs:
         with:
           path: ~/.swiftpm/swift-sdks
           key: swift-static-sdk-6.3.2
+      - name: Download Static SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
       - name: Cache Swift packages
         id: cache-spm
         uses: actions/cache@v5
@@ -38,13 +39,32 @@ jobs:
       - name: Resolve dependencies
         if: steps.cache-spm.outputs.cache-hit != 'true'
         run: swift package resolve
-      - name: Download Static SDK
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
-        run: |
-          swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: setup
+    runs-on: ubuntu-latest
+    container: swift:latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Restore Static SDK
+        uses: actions/cache@v5
+        with:
+          path: ~/.swiftpm/swift-sdks
+          key: swift-static-sdk-6.3.2
+      - name: Restore Swift packages
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+          key: spm-${{ hashFiles('Package.resolved') }}
       - name: Build ${{ matrix.arch }}
         run: swift build --swift-sdk ${{ matrix.arch }}-swift-linux-musl -c release
-      - name: Upload ${{ matrix.arch }} binary
+      - name: Upload ${{ matrix.arch }}
         uses: actions/upload-artifact@v5
         with:
           name: scribe-${{ matrix.arch }}
