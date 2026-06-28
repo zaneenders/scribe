@@ -22,8 +22,8 @@ jobs:
         id: cache-sdk
         uses: actions/cache@v5
         with:
-          path: ~/.swiftpm/swift-sdks
-          key: swift-static-sdk-6.3.2
+          path: /root/.swiftpm/swift-sdks
+          key: swift-static-sdk-6.3.2-v2
       - name: Download Static SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
@@ -53,8 +53,8 @@ jobs:
       - name: Restore Static SDK
         uses: actions/cache@v5
         with:
-          path: ~/.swiftpm/swift-sdks
-          key: swift-static-sdk-6.3.2
+          path: /root/.swiftpm/swift-sdks
+          key: swift-static-sdk-6.3.2-v2
       - name: Restore Swift packages
         uses: actions/cache@v5
         with:
