@@ -23,6 +23,7 @@ struct SlateChatRenderTests {
       from: transcriptLines, width: cols)
 
     let banner = BannerSnapshot(
+      profileName: "test",
       baseURL: "https://api.example.com",
       model: "test-model",
       cwd: "/tmp",
@@ -69,6 +70,7 @@ struct SlateChatRenderTests {
     let rows = 24
 
     let banner = BannerSnapshot(
+      profileName: "test",
       baseURL: "https://api.example.com",
       model: "test-model",
       cwd: "/tmp",
@@ -137,6 +139,7 @@ struct SlateChatRenderTests {
     let rows = 24
 
     let banner = BannerSnapshot(
+      profileName: "test",
       baseURL: "https://api.example.com",
       model: "test-model",
       cwd: "/tmp",

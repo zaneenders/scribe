@@ -24,6 +24,15 @@ import SystemPackage
   @Flag(name: .long, help: "Print Scribe's resolved paths, version, and configuration and exit.")
   var info = false
 
+  @Flag(name: .long, help: "List configured backends and exit.")
+  var listProfiles = false
+
+  @Option(
+    name: .long,
+    help: "Use this named backend profile for this run (does not change the saved selection)."
+  )
+  var profile: String?
+
   @Flag(
     name: [.customShort("r")],
     help: "Resume the latest session (preferring current working directory)."
@@ -43,10 +52,15 @@ import SystemPackage
       key: nil,
       reason: "Scribe is only tested on macOS and Linux.")
     #endif
-    let loaded = try await ConfigLoader.load()
+    let loaded = try await ConfigLoader.load(profileOverride: profile)
 
     if info {
       printInfo(loaded: loaded)
+      return
+    }
+
+    if listProfiles {
+      printProfiles(loaded: loaded)
       return
     }
 
@@ -170,6 +184,7 @@ import SystemPackage
         "cwd": "\(cwd)",
         "session_file": "\(sessionDirectory.string)",
         "config_file": "\(loaded.resolvedConfigurationPath)",
+        "profile": "\(loaded.activeProfileName)",
       ])
     if let meta = resumeMetadata, meta.model != scribeConfig.agentModel {
       logger.warning(
@@ -190,6 +205,9 @@ import SystemPackage
       resumeMessages: resumeMessages,
       sessionDirectory: sessionDirectory,
       sessionId: sessionId,
+      profileCatalog: loaded.profiles,
+      activeProfileName: loaded.activeProfileName,
+      scribePaths: loaded.paths,
       logger: logger
     )
     logger.notice("chat.session.end", metadata: ["status": "ok"])
@@ -223,6 +241,10 @@ import SystemPackage
     print("Scribe version:  \(GitVersion.hash)")
     print("Data home:       \(abbreviate(p.dataHomePath))")
     print("Config:          \(abbreviate(loaded.resolvedConfigurationPath))")
+    print("Active profile:  \(loaded.activeProfileName)")
+    print("Selection file:  \(abbreviate(p.activeProfilePath.string))")
+    print("Model:           \(loaded.scribeConfig.agentModel)")
+    print("API base URL:    \(loaded.apiBaseURL)")
     print(
       "Sessions:        \(abbreviate(p.sessionsDirectoryPath))  ({sessionId}/metadata.json, messages.jsonl, scribe.log)"
     )
@@ -231,6 +253,18 @@ import SystemPackage
     } else {
       print("SCRIBE_HOME:     (not set)")
     }
+  }
+
+  private func printProfiles(loaded: LoadedConfig) {
+    for entry in loaded.profiles {
+      let marker = entry.name == loaded.activeProfileName ? "*" : " "
+      print("\(marker) \(entry.name)")
+      print("    model: \(entry.model)")
+      print("    api:   \(entry.baseURL)")
+    }
+    print("")
+    print("Saved selection: \(loaded.activeProfileName) (\(loaded.paths.activeProfilePath.string))")
+    print("Switch in chat with `/model`, or pass `--profile <name>` for one run.")
   }
 }
 

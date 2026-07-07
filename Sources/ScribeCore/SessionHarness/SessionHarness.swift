@@ -6,10 +6,10 @@ public actor SessionHarness {
 
   private var document: SessionDocument
   private let persister: any SessionPersister
-  private let configuration: ScribeConfig
+  private var configuration: ScribeConfig
   private let logger: Logger
-  private let agent: ScribeAgent
-  private let tokenTracker: TokenTracker
+  private var agent: ScribeAgent
+  private var tokenTracker: TokenTracker
   private let messageQueues: SessionMessageQueues
 
   public init(
@@ -77,6 +77,21 @@ public actor SessionHarness {
   public var isOverTokenLimit: Bool { tokenTracker.isOverLimit }
 
   public var lastPromptTokens: Int { tokenTracker.lastPromptTokens }
+
+  public func reconfigure(configuration: ScribeConfig) throws {
+    self.configuration = configuration
+    self.agent = try ScribeAgent(configuration: configuration, logger: logger)
+    self.tokenTracker = TokenTracker(
+      contextWindow: configuration.contextWindow,
+      threshold: configuration.contextWindowThreshold
+    )
+    logger.notice(
+      "session.harness.reconfigure",
+      metadata: [
+        "model": "\(configuration.agentModel)",
+        "base_url": "\(configuration.serverURL)",
+      ])
+  }
 
   @discardableResult
   public func applyEdit(_ op: EditOp) async throws -> SessionIdentityChange? {

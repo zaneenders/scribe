@@ -36,6 +36,9 @@ enum SlateChat {
     resumeMessages: [ScribeMessage] = [],
     sessionDirectory: FilePath,
     sessionId: UUID,
+    profileCatalog: [ProfileSummary],
+    activeProfileName: String,
+    scribePaths: ScribePaths,
     logger: Logger
   ) async throws -> ChatExitInfo {
     guard isatty(STDIN_FILENO) != 0 else {
@@ -94,6 +97,9 @@ enum SlateChat {
         sessionDirectory: sessionDirectory,
         sessionId: sessionId,
         sessionCreatedAt: sessionCreatedAt,
+        profileCatalog: profileCatalog,
+        activeProfileName: activeProfileName,
+        scribePaths: scribePaths,
         logger: logger
       )
       do {

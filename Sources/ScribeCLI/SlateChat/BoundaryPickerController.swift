@@ -9,8 +9,6 @@ internal final class BoundaryPickerController {
 
   private(set) var picker: PickerSnapshot?
 
-  private var pickerActionTask: Task<Void, Never>?
-
   private var pickerBackup: (lines: [TLine], generation: Int, viewport: TranscriptViewport)?
 
   private var pickerMessages: [ScribeMessage] = []
@@ -27,7 +25,6 @@ internal final class BoundaryPickerController {
     pickerBackup
   }
 
-  weak var host: (any BoundaryPickerHost)?
   var configuration: ScribeConfig = ScribeConfig(
     agentModel: "", contextWindow: 0, contextWindowThreshold: 0,
     serverURL: "", apiKey: nil, workingDirectory: ".", reasoningEnabled: false)
@@ -40,22 +37,24 @@ internal final class BoundaryPickerController {
     transcriptState: inout TranscriptState,
     viewport: inout TranscriptViewport,
     flattenCache: inout TranscriptLayout.FlattenCache
-  ) -> Bool {
+  ) -> BoundaryPickerEffects? {
+    guard picker != nil else { return nil }
     switch action {
     case .arrowUp:
-      moveCursor(by: -1, transcriptState: &transcriptState, flattenCache: &flattenCache)
+      return moveCursor(by: -1, transcriptState: &transcriptState, flattenCache: &flattenCache)
     case .arrowDown:
-      moveCursor(by: +1, transcriptState: &transcriptState, flattenCache: &flattenCache)
+      return moveCursor(by: +1, transcriptState: &transcriptState, flattenCache: &flattenCache)
     case .tab:
-      toggleActive(transcriptState: &transcriptState, flattenCache: &flattenCache)
+      return toggleActive(transcriptState: &transcriptState, flattenCache: &flattenCache)
     case .enter:
-      confirm(transcriptState: &transcriptState, viewport: &viewport, flattenCache: &flattenCache)
+      return confirm(
+        transcriptState: &transcriptState, viewport: &viewport, flattenCache: &flattenCache)
     case .escape, .ctrlC:
-      cancel(transcriptState: &transcriptState, viewport: &viewport, flattenCache: &flattenCache)
+      return cancel(
+        transcriptState: &transcriptState, viewport: &viewport, flattenCache: &flattenCache)
     default:
-      return false
+      return nil
     }
-    return true
   }
 
   func open(
@@ -124,24 +123,26 @@ internal final class BoundaryPickerController {
     transcriptState: inout TranscriptState,
     viewport: inout TranscriptViewport,
     flattenCache: inout TranscriptLayout.FlattenCache
-  ) {
-    guard picker != nil else { return }
+  ) -> BoundaryPickerEffects {
+    guard picker != nil else { return .none }
     picker = nil
     restoreFromBackup(
       transcriptState: &transcriptState, viewport: &viewport, flattenCache: &flattenCache)
     logger.debug("chat.picker.cancel")
-    host?.requestRender()
+    return BoundaryPickerEffects(needsRender: true)
   }
 
-  func cancelTask() {
-    pickerActionTask?.cancel()
-    pickerActionTask = nil
+  func resetAfterFailure() {
+    picker = nil
+    pickerBackup = nil
+    pickerMessages = []
+    pickerBaseLines = []
+    pickerBaseStarts = []
+    scrollDirty = false
   }
 
   func clear() {
     picker = nil
-    pickerActionTask?.cancel()
-    pickerActionTask = nil
     pickerBackup = nil
     pickerMessages = []
     pickerBaseLines = []
@@ -154,8 +155,8 @@ internal final class BoundaryPickerController {
     by delta: Int,
     transcriptState: inout TranscriptState,
     flattenCache: inout TranscriptLayout.FlattenCache
-  ) {
-    guard var snap = picker else { return }
+  ) -> BoundaryPickerEffects {
+    guard var snap = picker else { return .none }
     let activeCurrent =
       snap.activeIsEnd ? (snap.endCursor ?? snap.startCursor) : snap.startCursor
     var newCursor = max(0, min(snap.boundaries.count - 1, activeCurrent + delta))
@@ -167,7 +168,7 @@ internal final class BoundaryPickerController {
       }
       newCursor = max(0, min(snap.boundaries.count - 1, newCursor))
     }
-    if newCursor == activeCurrent { return }
+    if newCursor == activeCurrent { return .none }
     if snap.activeIsEnd {
       snap.endCursor = newCursor
     } else {
@@ -176,41 +177,36 @@ internal final class BoundaryPickerController {
     snap.previewText = Self.pickerPreview(
       for: pickerMessages, at: snap.boundaries[newCursor])
     applyPickerView(snapshot: snap, transcriptState: &transcriptState, flattenCache: &flattenCache)
+    return BoundaryPickerEffects(needsRender: true)
   }
 
   private func toggleActive(
     transcriptState: inout TranscriptState,
     flattenCache: inout TranscriptLayout.FlattenCache
-  ) {
-    guard var snap = picker, snap.kind == .tldr, snap.endCursor != nil else { return }
+  ) -> BoundaryPickerEffects {
+    guard var snap = picker, snap.kind == .tldr, snap.endCursor != nil else { return .none }
     snap.activeIsEnd.toggle()
     let activeCursor =
       snap.activeIsEnd ? (snap.endCursor ?? snap.startCursor) : snap.startCursor
     snap.previewText = Self.pickerPreview(
       for: pickerMessages, at: snap.boundaries[activeCursor])
     applyPickerView(snapshot: snap, transcriptState: &transcriptState, flattenCache: &flattenCache)
+    return BoundaryPickerEffects(needsRender: true)
   }
 
   private func confirm(
     transcriptState: inout TranscriptState,
     viewport: inout TranscriptViewport,
     flattenCache: inout TranscriptLayout.FlattenCache
-  ) {
-    guard let snap = picker else { return }
-    picker = nil
-    scrollDirty = false
+  ) -> BoundaryPickerEffects {
+    guard let snap = picker else { return .none }
     let kind = snap.kind
     let startCut = snap.startBoundary
     let endCut = snap.endBoundary
-    let configuration = self.configuration
-    let logger = self.logger
-    let parentSessionId = host?.sessionId ?? UUID()
-    guard let harness = host?.harness else {
-      logger.warning("chat.picker.confirm.skip", metadata: ["reason": "no-harness"])
-      host?.setModelBusy(false)
-      host?.requestRender()
-      return
-    }
+    let slice =
+      kind == .tldr
+      ? Array(pickerMessages[startCut..<endCut])
+      : []
 
     logger.notice(
       "chat.picker.confirm",
@@ -220,84 +216,17 @@ internal final class BoundaryPickerController {
         "end_cut": kind == .tldr ? "\(endCut)" : "n/a",
       ])
 
-    host?.setModelBusy(true)
-    host?.requestRender()
+    picker = nil
+    scrollDirty = false
 
-    pickerActionTask?.cancel()
-    pickerActionTask = Task { [weak self] in
-      guard let self else { return }
-      do {
-        guard await MainActor.run(body: { self.host?.isHostActive ?? false }) else { return }
-
-        let newId = UUID()
-        switch kind {
-        case .fork:
-          if let change = try await harness.applyEdit(.fork(cutAt: startCut, newSessionId: newId)) {
-            await MainActor.run { self.host?.handleIdentityChange(change) }
-          }
-          logger.notice(
-            "chat.fork.create",
-            metadata: [
-              "parent": "\(parentSessionId.uuidString)",
-              "child": "\(newId.uuidString)",
-              "cut_at": "\(startCut)",
-            ])
-        case .tldr:
-          let slice = await MainActor.run {
-            Array(self.pickerMessages[startCut..<endCut])
-          }
-          let summary = try await SessionSummarizer.summarize(
-            slice: slice, configuration: configuration, logger: logger)
-          let replacement = [ScribeMessage(role: .assistant, content: summary)]
-          if let change = try await harness.applyEdit(
-            .forkSplice(
-              startCut: startCut,
-              endCut: endCut,
-              replacement: replacement,
-              newSessionId: newId))
-          {
-            await MainActor.run { self.host?.handleIdentityChange(change) }
-          }
-          let tailCount = max(0, pickerMessages.count - endCut)
-          logger.notice(
-            "chat.tldr.create",
-            metadata: [
-              "parent": "\(parentSessionId.uuidString)",
-              "child": "\(newId.uuidString)",
-              "start_cut": "\(startCut)",
-              "end_cut": "\(endCut)",
-              "slice_messages": "\(slice.count)",
-              "tail_messages": "\(tailCount)",
-              "summary_chars": "\(summary.count)",
-            ])
-        }
-
-        await MainActor.run { [weak self] in
-          guard let self, self.host?.isHostActive ?? false else { return }
-          self.host?.setModelBusy(false)
-          self.host?.requestRender()
-        }
-      } catch {
-        if Task.isCancelled { return }
-        let se = (error as? ScribeError) ?? .generic(String(describing: error))
-        logger.error(
-          "chat.picker.action.fail",
-          metadata: ["err": "\(se.errorDescription ?? String(describing: se))"])
-        await MainActor.run { [weak self] in
-          guard let self, let host = self.host, host.isHostActive else { return }
-          host.enqueueTranscriptEvent(.lifecycle(.error(se)))
-          host.restoreTranscriptFromPickerBackup()
-          self.picker = nil
-          self.pickerBackup = nil
-          self.pickerMessages = []
-          self.pickerBaseLines = []
-          self.pickerBaseStarts = []
-          self.scrollDirty = false
-          host.setModelBusy(false)
-          host.requestRender()
-        }
-      }
-    }
+    return BoundaryPickerEffects(
+      needsRender: true,
+      confirm: BoundaryPickerConfirmRequest(
+        kind: kind,
+        startCut: startCut,
+        endCut: endCut,
+        slice: slice,
+        messageCount: pickerMessages.count))
   }
 
   private func applyPickerView(
@@ -332,7 +261,6 @@ internal final class BoundaryPickerController {
     dividerLogicalLine = styled.dividerLine
     scrollDirty = true
     flattenCache = TranscriptLayout.FlattenCache()
-    host?.requestRender()
   }
 
   private func restoreFromBackup(

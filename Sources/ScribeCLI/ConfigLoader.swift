@@ -1,4 +1,3 @@
-import Configuration
 import Foundation
 import Logging
 import ScribeCore
@@ -6,16 +5,28 @@ import ScribeLLM
 import SystemPackage
 
 public enum ScribeConfigBinding {
-  public static let apiBaseURL: ConfigKey = "api.baseUrl"
-  public static let apiKey: ConfigKey = "api.apiKey"
-  public static let agentModel: ConfigKey = "agent.model"
-  public static let contextWindow: ConfigKey = "agent.contextWindow"
-  public static let contextWindowThreshold: ConfigKey = "agent.contextWindowThreshold"
-  public static let reasoningEnabled: ConfigKey = "agent.reasoning"
-  public static let loggingLevel: ConfigKey = "logging.level"
+  public static let apiBaseURL = "api.baseUrl"
+  public static let apiKey = "api.apiKey"
+  public static let agentModel = "agent.model"
+  public static let contextWindow = "agent.contextWindow"
+  public static let contextWindowThreshold = "agent.contextWindowThreshold"
+  public static let reasoningEnabled = "agent.reasoning"
+  public static let loggingLevel = "logging.level"
 }
 
-private struct ConfigTemplate: Codable {
+public struct ProfileSummary: Sendable, Equatable {
+  public var name: String
+  public var model: String
+  public var baseURL: String
+
+  public init(name: String, model: String, baseURL: String) {
+    self.name = name
+    self.model = model
+    self.baseURL = baseURL
+  }
+}
+
+private struct ConfigManifest: Codable {
   struct APISection: Codable {
     var baseUrl: String
     var apiKey: String
@@ -29,15 +40,13 @@ private struct ConfigTemplate: Codable {
   struct LoggingSection: Codable {
     var level: String
   }
-  var api: APISection
-  var agent: AgentSection
-  var logging: LoggingSection
-
-  enum CodingKeys: String, CodingKey {
-    case api
-    case agent
-    case logging
+  struct ProfileEntry: Codable {
+    var name: String
+    var api: APISection
+    var agent: AgentSection
+    var logging: LoggingSection
   }
+  var profiles: [ProfileEntry]
 }
 
 public struct LoadedConfig: Sendable {
@@ -47,14 +56,16 @@ public struct LoadedConfig: Sendable {
   public var logLevel: ScribeLogLevel
   public var chatSessionsDirectoryPath: String
   public var resolvedConfigurationPath: String
+  public var activeProfileName: String
+  public var profiles: [ProfileSummary]
   public var paths: ScribePaths
 
   public func makeClient() throws -> Client {
     guard let serverURL = URL(string: apiBaseURL) else {
       throw ScribeError.configuration(
-        key: ScribeConfigBinding.apiBaseURL.description,
+        key: ScribeConfigBinding.apiBaseURL,
         reason:
-          "Invalid \(ScribeConfigBinding.apiBaseURL.description) in `scribe-config.json`. Use host only, no `/v1` (e.g. http://127.0.0.1:11434 for Ollama)."
+          "Invalid `\(ScribeConfigBinding.apiBaseURL)` for profile `\(activeProfileName)`. Use host only, no `/v1` (e.g. http://127.0.0.1:11434 for Ollama)."
       )
     }
     return OpenAICompatibleClient.make(serverURL: serverURL, apiKey: apiKey)
@@ -70,129 +81,195 @@ public struct LoadedConfig: Sendable {
 }
 
 public enum ConfigLoader {
-  private static let configFileName = "scribe-config.json"
+  private static let configFileName = "scribe.config.json"
 
-  public static func load() async throws -> LoadedConfig {
+  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
     let paths = ScribePaths.resolve()
+    let configPath = try resolveConfigurationPath(paths: paths)
+    return try await loadConfiguration(
+      at: configPath, paths: paths, profileOverride: profileOverride)
+  }
 
+  private static func resolveConfigurationPath(paths: ScribePaths) throws -> FilePath {
     if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
       let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
       if !t.isEmpty {
-        return try await loadConfig(at: FilePath(t), paths: paths)
+        return FilePath(t)
       }
     }
 
-    if FileStat.stat(paths.defaultConfigPath).exists {
-      return try await loadConfig(at: paths.defaultConfigPath, paths: paths)
+    if FileStat.stat(paths.profileManifestPath).exists {
+      return paths.profileManifestPath
     }
 
     let cwd = FilePath.currentDirectory.string
     let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
       .appendingPathComponent(configFileName).path
     if FileStat.stat(FilePath(cwdCandidate)).exists {
-      return try await loadConfig(at: FilePath(cwdCandidate), paths: paths)
+      return FilePath(cwdCandidate)
     }
 
-    let defaultCandidate = paths.defaultConfigPath
-    try writeDefaultConfig(to: defaultCandidate.string)
-    if let data = "scribe: no config found — wrote default \(configFileName) to \(defaultCandidate.string)\n"
-      .data(using: .utf8)
+    try writeDefaultSetup(paths: paths)
+    if let data =
+      "scribe: no config found — wrote default \(configFileName) to \(paths.dataHomePath)\n"
+        .data(using: .utf8)
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
-    return try await loadConfig(at: defaultCandidate, paths: paths)
+    return paths.profileManifestPath
   }
 
-  private static func loadConfig(
-    at path: FilePath,
-    paths: ScribePaths
+  private static func loadConfiguration(
+    at configPath: FilePath,
+    paths: ScribePaths,
+    profileOverride: String?
   ) async throws -> LoadedConfig {
-    let fileProvider: FileProvider<JSONSnapshot>
+    let url = URL(fileURLWithPath: configPath.string)
+    let data: Data
     do {
-      fileProvider = try await FileProvider<JSONSnapshot>(
-        filePath: path)
+      data = try Data(contentsOf: url)
     } catch {
       throw ScribeError.configuration(
         key: nil,
         reason:
-          "Could not load configuration at \(path). Create `\(configFileName)` in `~` or the current directory, or set SCRIBE_CONFIG_PATH to a JSON file path. (\(error))"
+          "Could not load configuration at \(configPath). Create `\(configFileName)` in `~/.scribe`, or set SCRIBE_CONFIG_PATH to its path. (\(error))"
       )
     }
-    return try await parse(reader: ConfigReader(providers: [fileProvider]), configPath: path, paths: paths)
+
+    let manifest: ConfigManifest
+    do {
+      manifest = try JSONDecoder().decode(ConfigManifest.self, from: data)
+    } catch {
+      throw ScribeError.configuration(
+        key: "profiles",
+        reason:
+          "Could not decode `\(configFileName)` — expected a `profiles` array of named entries with `api`, `agent`, and `logging`. (\(error))"
+      )
+    }
+
+    return try parse(
+      manifest: manifest,
+      configPath: configPath,
+      paths: paths,
+      profileOverride: profileOverride)
   }
 
   private static func parse(
-    reader: ConfigReader,
+    manifest: ConfigManifest,
     configPath: FilePath,
+    paths: ScribePaths,
+    profileOverride: String?
+  ) throws -> LoadedConfig {
+    guard !manifest.profiles.isEmpty else {
+      throw ScribeError.configuration(
+        key: "profiles",
+        reason: "`profiles` must contain at least one entry in `\(configFileName)`."
+      )
+    }
+
+    var seenNames: Set<String> = []
+    for entry in manifest.profiles {
+      let trimmedName = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmedName.isEmpty else {
+        throw ScribeError.configuration(
+          key: "profiles.name",
+          reason: "Each profile must have a non-empty `name` in `\(configFileName)`."
+        )
+      }
+      guard seenNames.insert(trimmedName).inserted else {
+        throw ScribeError.configuration(
+          key: "profiles.name",
+          reason: "Duplicate profile name `\(trimmedName)` in `\(configFileName)`."
+        )
+      }
+    }
+
+    let summaries = manifest.profiles.map { entry in
+      ProfileSummary(
+        name: entry.name.trimmingCharacters(in: .whitespacesAndNewlines),
+        model: entry.agent.model,
+        baseURL: entry.api.baseUrl)
+    }
+
+    let activeName = try resolveActiveProfileName(
+      summaries: summaries,
+      paths: paths,
+      override: profileOverride)
+
+    guard
+      let selected = manifest.profiles.first(where: {
+        $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == activeName
+      })
+    else {
+      throw ScribeError.configuration(
+        key: "activeProfile",
+        reason: "Active profile `\(activeName)` was not found in `\(configFileName)`."
+      )
+    }
+
+    return try buildLoadedConfig(
+      profile: selected,
+      profileName: activeName,
+      configPath: configPath,
+      summaries: summaries,
+      paths: paths)
+  }
+
+  private static func buildLoadedConfig(
+    profile: ConfigManifest.ProfileEntry,
+    profileName: String,
+    configPath: FilePath,
+    summaries: [ProfileSummary],
     paths: ScribePaths
-  ) async throws -> LoadedConfig {
-    let baseURL = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.apiBaseURL)
+  ) throws -> LoadedConfig {
+    let baseURL = profile.api.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !baseURL.isEmpty else {
       throw ScribeError.configuration(
-        key: ScribeConfigBinding.apiBaseURL.description,
+        key: ScribeConfigBinding.apiBaseURL,
         reason:
-          "\(ScribeConfigBinding.apiBaseURL.description) must be a non-empty string in `\(configFileName)`."
+          "`\(ScribeConfigBinding.apiBaseURL)` must be a non-empty string for profile `\(profileName)`."
       )
     }
-    let model = try await reader.fetchRequiredString(forKey: ScribeConfigBinding.agentModel)
+
+    let model = profile.agent.model.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !model.isEmpty else {
       throw ScribeError.configuration(
-        key: ScribeConfigBinding.agentModel.description,
+        key: ScribeConfigBinding.agentModel,
         reason:
-          "\(ScribeConfigBinding.agentModel.description) must be a non-empty string in `\(configFileName)`."
+          "`\(ScribeConfigBinding.agentModel)` must be a non-empty string for profile `\(profileName)`."
       )
     }
 
-    let contextWindow = try await reader.fetchRequiredInt(
-      forKey: ScribeConfigBinding.contextWindow)
+    let contextWindow = profile.agent.contextWindow
     guard contextWindow > 0 else {
       throw ScribeError.configuration(
-        key: ScribeConfigBinding.contextWindow.description,
+        key: ScribeConfigBinding.contextWindow,
         reason:
-          "`\(ScribeConfigBinding.contextWindow.description)` must be a positive integer in `\(configFileName)`."
+          "`\(ScribeConfigBinding.contextWindow)` must be a positive integer for profile `\(profileName)`."
       )
     }
 
-    let contextWindowThreshold = try await reader.fetchRequiredDouble(
-      forKey: ScribeConfigBinding.contextWindowThreshold)
+    let contextWindowThreshold = profile.agent.contextWindowThreshold
     guard contextWindowThreshold > 0 else {
       throw ScribeError.configuration(
-        key: ScribeConfigBinding.contextWindowThreshold.description,
+        key: ScribeConfigBinding.contextWindowThreshold,
         reason:
-          "`\(ScribeConfigBinding.contextWindowThreshold.description)` must be a number greater than 0 in `\(configFileName)`."
+          "`\(ScribeConfigBinding.contextWindowThreshold)` must be a number greater than 0 for profile `\(profileName)`."
       )
     }
 
-    let apiKey: String
-    do {
-      apiKey = try await reader.fetchRequiredString(
-        forKey: ScribeConfigBinding.apiKey)
-    } catch {
-      throw ScribeError.configuration(
-        key: ScribeConfigBinding.apiKey.description,
-        reason:
-          "`\(ScribeConfigBinding.apiKey.description)` must be present in `\(configFileName)` (use \"\" when no API key is required, e.g. local Ollama). Underlying error: \(error)"
-      )
-    }
-    let apiKeyTrimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    let apiKeyTrimmed = profile.api.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
 
-    let levelRaw = try await reader.fetchRequiredString(
-      forKey: ScribeConfigBinding.loggingLevel)
+    let levelRaw = profile.logging.level.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
       let allowed = ScribeLogLevel.allCases.map(\.rawValue).joined(separator: ", ")
       throw ScribeError.configuration(
-        key: ScribeConfigBinding.loggingLevel.description,
+        key: ScribeConfigBinding.loggingLevel,
         reason:
-          "`\(ScribeConfigBinding.loggingLevel.description)` must be one of \(allowed) in `\(configFileName)`."
+          "`\(ScribeConfigBinding.loggingLevel)` must be one of \(allowed) for profile `\(profileName)`."
       )
     }
-
-    let reasoningEnabled = try await reader.fetchBool(forKey: ScribeConfigBinding.reasoningEnabled)
-
-    let chatSessionsDirectoryPath = paths.sessionsDirectoryPath
-
-    let resolvedPathString = configPath.string
 
     let scribeConfig = ScribeConfig(
       agentModel: model,
@@ -201,41 +278,87 @@ public enum ConfigLoader {
       serverURL: baseURL,
       apiKey: resolvedAPIKey,
       workingDirectory: ".",
-      reasoningEnabled: reasoningEnabled
+      reasoningEnabled: profile.agent.reasoning
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,
       apiBaseURL: baseURL,
       apiKey: resolvedAPIKey,
       logLevel: logLevel,
-      chatSessionsDirectoryPath: chatSessionsDirectoryPath,
-      resolvedConfigurationPath: resolvedPathString,
+      chatSessionsDirectoryPath: paths.sessionsDirectoryPath,
+      resolvedConfigurationPath: configPath.string,
+      activeProfileName: profileName,
+      profiles: summaries,
       paths: paths
     )
   }
 
-  private static func writeDefaultConfig(to path: String) throws {
-    let template = ConfigTemplate(
-      api: ConfigTemplate.APISection(
-        baseUrl: "http://localhost:11434",
-        apiKey: ""
-      ),
-      agent: ConfigTemplate.AgentSection(
-        model: "gemma4:e2b",
-        contextWindow: 128000,
-        contextWindowThreshold: 0.8,
-        reasoning: false
-      ),
-      logging: ConfigTemplate.LoggingSection(
-        level: "trace"
-      )
+  private static func resolveActiveProfileName(
+    summaries: [ProfileSummary],
+    paths: ScribePaths,
+    override: String?
+  ) throws -> String {
+    if let override {
+      let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else {
+        throw ScribeError.configuration(
+          key: "activeProfile",
+          reason: "`--profile` must be a non-empty profile name."
+        )
+      }
+      guard summaries.contains(where: { $0.name == trimmed }) else {
+        let available = summaries.map(\.name).joined(separator: ", ")
+        throw ScribeError.configuration(
+          key: "activeProfile",
+          reason: "Unknown profile `\(trimmed)`. Available profiles: \(available)."
+        )
+      }
+      return trimmed
+    }
+
+    if let stored = try ActiveProfileStore.read(from: paths) {
+      guard summaries.contains(where: { $0.name == stored }) else {
+        let available = summaries.map(\.name).joined(separator: ", ")
+        throw ScribeError.configuration(
+          key: "activeProfile",
+          reason:
+            "`active-profile.json` selects `\(stored)`, which is not listed in `\(configFileName)`. Available profiles: \(available)."
+        )
+      }
+      return stored
+    }
+
+    let first = summaries[0].name
+    try ActiveProfileStore.write(first, paths: paths)
+    return first
+  }
+
+  private static func writeDefaultSetup(paths: ScribePaths) throws {
+    let template = ConfigManifest(
+      profiles: [
+        ConfigManifest.ProfileEntry(
+          name: "local",
+          api: ConfigManifest.APISection(
+            baseUrl: "http://localhost:11434",
+            apiKey: ""
+          ),
+          agent: ConfigManifest.AgentSection(
+            model: "gemma4:e2b",
+            contextWindow: 128000,
+            contextWindowThreshold: 0.8,
+            reasoning: false
+          ),
+          logging: ConfigManifest.LoggingSection(level: "trace")
+        )
+      ]
     )
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     let data = try encoder.encode(template)
-    let url = URL(fileURLWithPath: path)
+    let url = URL(fileURLWithPath: paths.profileManifestPath.string)
     let dir = url.deletingLastPathComponent()
     try createDirectoryWithIntermediates(FilePath(dir.path))
     try data.write(to: url, options: .atomic)
+    try ActiveProfileStore.write("local", paths: paths)
   }
 }
