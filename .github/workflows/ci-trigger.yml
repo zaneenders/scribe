@@ -1,0 +1,61 @@
+name: CI trigger
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  dispatch:
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@ci') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issueNumber = context.issue.number;
+
+            async function reply(body) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body,
+              });
+            }
+
+            try {
+              const pull = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: issueNumber,
+              });
+              const ref = pull.data.head.ref;
+
+              await github.rest.actions.createWorkflowDispatch({
+                owner,
+                repo,
+                workflow_id: 'ci.yml',
+                ref,
+              });
+
+              await reply(
+                `Triggered CI on \`${ref}\`. ` +
+                  `[View runs](https://github.com/${owner}/${repo}/actions/workflows/ci.yml)`
+              );
+            } catch (error) {
+              core.setFailed(error.message);
+              await reply(
+                `Could not trigger CI: ${error.message}\n\n` +
+                  `If this workflow was just added, merge it to \`main\` first — ` +
+                  `@ci only works after \`ci-trigger.yml\` is on the default branch.`
+              );
+            }
