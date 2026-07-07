@@ -55,6 +55,7 @@ internal struct UsageHUDSnapshot: Equatable {
 }
 
 internal struct BannerSnapshot: Equatable {
+  var profileName: String
   var baseURL: String
   var model: String
   var cwd: String

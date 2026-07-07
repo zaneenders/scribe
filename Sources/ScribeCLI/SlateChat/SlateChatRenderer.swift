@@ -285,6 +285,7 @@ internal enum SlateChatRenderer {
     waitingForLLM: Bool,
     queuedTraySnapshot: QueuedTraySnapshot,
     picker: PickerSnapshot? = nil,
+    profilePicker: ProfilePickerSnapshot? = nil,
     theme: CLITheme
   ) -> [[StyledSpan]] {
     let transcriptFill = StyledSpan(fg: theme.inputText, bg: theme.background, bold: false, text: " ")
@@ -368,7 +369,8 @@ internal enum SlateChatRenderer {
 
     if headerRows >= 2, let banner {
       let shortId = String(banner.sessionId.prefix(8))
-      let modelWithVersion = "\(banner.model)  v:\(banner.scribeVersion)  sid:\(shortId)"
+      let modelWithVersion =
+        "[\(banner.profileName)] \(banner.model)  v:\(banner.scribeVersion)  sid:\(shortId)"
       buildSemanticBannerKV(
         &grid, row: 1, cols: cols, maxWidth: bannerMaxWithUsage,
         label: "Model: ",
@@ -417,7 +419,11 @@ internal enum SlateChatRenderer {
         textWidth: trayTextWidth, visualLines: trayVisualLines, theme: theme)
     }
 
-    if let picker {
+    if let profilePicker {
+      buildSemanticProfilePickerRows(
+        &grid, startRow: firstInputRow, cols: cols,
+        rowCount: min(2, inputRowCount), picker: profilePicker, theme: theme)
+    } else if let picker {
       buildSemanticPickerRows(
         &grid, startRow: firstInputRow, cols: cols,
         rowCount: inputRowCount, picker: picker, theme: theme)
@@ -431,6 +437,51 @@ internal enum SlateChatRenderer {
     }
 
     return grid
+  }
+
+  nonisolated static func buildSemanticProfilePickerRows(
+    _ grid: inout [[StyledSpan]],
+    startRow: Int, cols: Int, rowCount: Int,
+    picker: ProfilePickerSnapshot,
+    theme: CLITheme
+  ) {
+    guard rowCount >= 1, cols > 0 else { return }
+    let bg = theme.inputAreaBg
+    let labelColor = theme.userPrefix
+    let normalFG = theme.inputText
+    let hintFG = theme.inputGutter
+    let activeFG = theme.warningFG
+
+    let profile = picker.currentProfile
+    let position = "\(picker.cursor + 1)/\(picker.profileCount)"
+    let marker = profile.name == picker.activeName ? "▸ " : "  "
+    let hint = "   ↑↓ move · Enter select · Esc cancel"
+
+    let row0 = startRow
+    if row0 >= 0, row0 < grid.count {
+      let spans: [StyledSpan] = [
+        StyledSpan(fg: labelColor, bg: bg, bold: true, text: "[MODEL] "),
+        StyledSpan(fg: hintFG, bg: bg, bold: false, text: position + " "),
+        StyledSpan(
+          fg: profile.name == picker.activeName ? activeFG : normalFG,
+          bg: bg,
+          bold: profile.name == picker.activeName,
+          text: marker + profile.name),
+        StyledSpan(fg: hintFG, bg: bg, bold: false, text: hint),
+      ]
+      writeSemanticSpans(&grid, col: 0, row: row0, maxWidth: cols, spans: spans)
+    }
+
+    guard rowCount >= 2 else { return }
+    let row1 = startRow + 1
+    if row1 >= 0, row1 < grid.count {
+      let detail = "\(profile.model) · \(profile.baseURL)"
+      let spans: [StyledSpan] = [
+        StyledSpan(fg: hintFG, bg: bg, bold: false, text: "        "),
+        StyledSpan(fg: normalFG, bg: bg, bold: false, text: detail),
+      ]
+      writeSemanticSpans(&grid, col: 0, row: row1, maxWidth: cols, spans: spans)
+    }
   }
 
   nonisolated static func buildSemanticPickerRows(

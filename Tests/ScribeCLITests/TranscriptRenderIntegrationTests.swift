@@ -17,6 +17,7 @@ struct TranscriptRenderIntegrationTests {
     var transcriptLines: [TLine] = []
 
     let banner = BannerSnapshot(
+      profileName: "test",
       baseURL: "https://api.example.com",
       model: "test-model",
       cwd: "/tmp",
