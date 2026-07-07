@@ -6,6 +6,7 @@ on:
 
 permissions:
   actions: write
+  issues: write
   pull-requests: read
 
 jobs:
@@ -20,22 +21,41 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const pull = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: context.issue.number,
-            });
-            await github.rest.actions.createWorkflowDispatch({
-              owner,
-              repo,
-              workflow_id: 'ci.yml',
-              ref: pull.data.head.ref,
-            });
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: context.issue.number,
-              body:
-                `Triggered CI on \`${pull.data.head.ref}\`. ` +
-                `[View runs](https://github.com/${owner}/${repo}/actions/workflows/ci.yml)`,
-            });
+            const issueNumber = context.issue.number;
+
+            async function reply(body) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body,
+              });
+            }
+
+            try {
+              const pull = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: issueNumber,
+              });
+              const ref = pull.data.head.ref;
+
+              await github.rest.actions.createWorkflowDispatch({
+                owner,
+                repo,
+                workflow_id: 'ci.yml',
+                ref,
+              });
+
+              await reply(
+                `Triggered CI on \`${ref}\`. ` +
+                  `[View runs](https://github.com/${owner}/${repo}/actions/workflows/ci.yml)`
+              );
+            } catch (error) {
+              core.setFailed(error.message);
+              await reply(
+                `Could not trigger CI: ${error.message}\n\n` +
+                  `If this workflow was just added, merge it to \`main\` first — ` +
+                  `@ci only works after \`ci-trigger.yml\` is on the default branch.`
+              );
+            }
