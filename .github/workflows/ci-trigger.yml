@@ -45,12 +45,10 @@ jobs:
                 repo,
                 workflow_id: 'ci.yml',
                 ref,
+                inputs: {
+                  pr_number: String(issueNumber),
+                },
               });
-
-              await reply(
-                `Triggered CI on \`${ref}\`. ` +
-                  `[View runs](https://github.com/${owner}/${repo}/actions/workflows/ci.yml)`
-              );
             } catch (error) {
               core.setFailed(error.message);
               await reply(
