@@ -5,7 +5,9 @@ public struct ScribePaths: Sendable {
 
   public let dataHome: FilePath
 
-  public let defaultConfigPath: FilePath
+  public let profileManifestPath: FilePath
+
+  public let activeProfilePath: FilePath
 
   public let sessionsDirectory: FilePath
 
@@ -15,7 +17,8 @@ public struct ScribePaths: Sendable {
 
   public init(dataHome: FilePath) {
     self.dataHome = dataHome
-    self.defaultConfigPath = dataHome.appendingPathComponent("scribe-config.json")
+    self.profileManifestPath = dataHome.appendingPathComponent("scribe.config.json")
+    self.activeProfilePath = dataHome.appendingPathComponent("active-profile.json")
     self.sessionsDirectory = dataHome.appendingPathComponent("sessions")
   }
 
