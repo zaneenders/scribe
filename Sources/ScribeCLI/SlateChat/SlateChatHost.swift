@@ -85,19 +85,6 @@ extension TranscriptLayout {
 }
 
 @MainActor
-internal protocol BoundaryPickerHost: AnyObject {
-  var sessionId: UUID { get }
-  var harness: SessionHarness { get }
-  var isHostActive: Bool { get }
-
-  func setModelBusy(_ busy: Bool)
-  func requestRender()
-  func enqueueTranscriptEvent(_ event: AgentEvent)
-  func handleIdentityChange(_ change: SessionIdentityChange)
-  func restoreTranscriptFromPickerBackup()
-}
-
-@MainActor
 internal final class SlateChatHost {
 
   private var configuration: ScribeConfig
@@ -159,6 +146,7 @@ internal final class SlateChatHost {
   private var llmWaitAnimationFrame: Int = 0
   private var spinnerTask: Task<Void, Never>?
   private var coordinatorTask: Task<Void, Never>?
+  private var boundaryPickerTask: Task<Void, Never>?
   private let logger: Logger
 
   init(
@@ -184,16 +172,12 @@ internal final class SlateChatHost {
     self.scribePaths = scribePaths
     self.logger = logger
 
-    pickerController.host = self
     pickerController.logger = logger
     pickerController.theme = theme
     pickerController.markdownRenderer = markdownRenderer
     pickerController.configuration = configuration
 
-    profilePickerController.host = self
     profilePickerController.logger = logger
-    profilePickerController.theme = theme
-    profilePickerController.paths = scribePaths
   }
 
   func restoreTranscriptFromPickerBackup() {
@@ -285,17 +269,17 @@ internal final class SlateChatHost {
 
           for action in actions {
 
-            if self.profilePickerController.snapshot != nil {
-              if self.profilePickerController.handleInput(action) {
-                continue
-              }
+            if let effects = self.profilePickerController.handleInput(action) {
+              self.applyProfilePickerEffects(effects)
+              continue
             }
 
             if self.pickerController.picker != nil {
-              if self.pickerController.handleInput(
+              if let effects = self.pickerController.handleInput(
                 action, transcriptState: &self.transcriptState,
                 viewport: &self.viewport, flattenCache: &self.flattenCache)
               {
+                self.applyBoundaryPickerEffects(effects)
                 continue
               }
             }
@@ -535,7 +519,9 @@ internal final class SlateChatHost {
     renderWake = nil
 
     hostActive = false
-    pickerController.cancelTask()
+    boundaryPickerTask?.cancel()
+    boundaryPickerTask = nil
+    pickerController.clear()
     profilePickerController.clear()
     coordinatorTask?.cancel()
     self.gate.complete(nil)
@@ -834,24 +820,103 @@ internal final class SlateChatHost {
   }
 }
 
-extension SlateChatHost: BoundaryPickerHost {
-  var isHostActive: Bool { hostActive }
-
-  func setModelBusy(_ busy: Bool) {
-    modelBusy = busy
-  }
-
-  func requestRender() {
+extension SlateChatHost {
+  private func requestRender() {
     renderWake?.requestRender()
   }
 
-  func enqueueTranscriptEvent(_ event: AgentEvent) {
-    eventQueue.enqueue(.transcript(event))
+  private func applyProfilePickerEffects(_ effects: ProfilePickerEffects) {
+    if effects.needsRender {
+      requestRender()
+    }
+    if let apply = effects.applyModel {
+      Task { await self.applyModelProfile(apply.name, previousName: apply.previousName) }
+    }
   }
-}
 
-extension SlateChatHost: ProfilePickerHost {
-  func appendProfilePickerNotice(_ text: String) {
+  private func applyBoundaryPickerEffects(_ effects: BoundaryPickerEffects) {
+    if effects.needsRender {
+      requestRender()
+    }
+    if let confirm = effects.confirm {
+      executeBoundaryPickerConfirm(confirm)
+    }
+  }
+
+  private func executeBoundaryPickerConfirm(_ request: BoundaryPickerConfirmRequest) {
+    guard hostActive else { return }
+    modelBusy = true
+    requestRender()
+
+    boundaryPickerTask?.cancel()
+    let harness = self.harness
+    let configuration = self.configuration
+    let logger = self.logger
+    let parentSessionId = self.sessionId
+    boundaryPickerTask = Task { @MainActor in
+      do {
+        guard self.hostActive else { return }
+
+        let newId = UUID()
+        switch request.kind {
+        case .fork:
+          if let change = try await harness.applyEdit(.fork(cutAt: request.startCut, newSessionId: newId)) {
+            self.handleIdentityChange(change)
+          }
+          logger.notice(
+            "chat.fork.create",
+            metadata: [
+              "parent": "\(parentSessionId.uuidString)",
+              "child": "\(newId.uuidString)",
+              "cut_at": "\(request.startCut)",
+            ])
+        case .tldr:
+          let summary = try await SessionSummarizer.summarize(
+            slice: request.slice, configuration: configuration, logger: logger)
+          let replacement = [ScribeMessage(role: .assistant, content: summary)]
+          if let change = try await harness.applyEdit(
+            .forkSplice(
+              startCut: request.startCut,
+              endCut: request.endCut,
+              replacement: replacement,
+              newSessionId: newId))
+          {
+            self.handleIdentityChange(change)
+          }
+          let tailCount = max(0, request.messageCount - request.endCut)
+          logger.notice(
+            "chat.tldr.create",
+            metadata: [
+              "parent": "\(parentSessionId.uuidString)",
+              "child": "\(newId.uuidString)",
+              "start_cut": "\(request.startCut)",
+              "end_cut": "\(request.endCut)",
+              "slice_messages": "\(request.slice.count)",
+              "tail_messages": "\(tailCount)",
+              "summary_chars": "\(summary.count)",
+            ])
+        }
+
+        guard self.hostActive else { return }
+        self.modelBusy = false
+        self.requestRender()
+      } catch {
+        if Task.isCancelled { return }
+        let se = (error as? ScribeError) ?? .generic(String(describing: error))
+        logger.error(
+          "chat.picker.action.fail",
+          metadata: ["err": "\(se.errorDescription ?? String(describing: se))"])
+        guard self.hostActive else { return }
+        self.eventQueue.enqueue(.transcript(.lifecycle(.error(se))))
+        self.restoreTranscriptFromPickerBackup()
+        self.pickerController.resetAfterFailure()
+        self.modelBusy = false
+        self.requestRender()
+      }
+    }
+  }
+
+  private func appendProfilePickerNotice(_ text: String) {
     transcriptState.lines.append(
       TLine(spans: [
         StyledSpan(fg: theme.warningFG, bg: theme.background, bold: false, text: text)
@@ -859,7 +924,7 @@ extension SlateChatHost: ProfilePickerHost {
     transcriptState.generation &+= 1
   }
 
-  func applyBackendProfile(_ name: String, previousName: String) async {
+  private func applyModelProfile(_ name: String, previousName: String) async {
     do {
       try ActiveProfileStore.write(name, paths: scribePaths)
       let loaded = try await ConfigLoader.load()
@@ -904,5 +969,6 @@ extension SlateChatHost: ProfilePickerHost {
         "chat.profile-picker.apply.fail",
         metadata: ["err": "\(message)"])
     }
+    requestRender()
   }
 }

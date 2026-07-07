@@ -9,34 +9,32 @@ internal final class ProfilePickerController {
 
   private(set) var snapshot: ProfilePickerSnapshot?
 
-  weak var host: (any ProfilePickerHost)?
   var logger: Logger = Logger(label: "scribe.profile-picker.unset")
-  var theme: CLITheme = .default
-  var paths: ScribePaths = ScribePaths(dataHome: FilePath("/"))
 
-  func handleInput(_ action: TerminalInputAction) -> Bool {
-    guard var snap = snapshot else { return false }
+  func handleInput(_ action: TerminalInputAction) -> ProfilePickerEffects? {
+    guard var snap = snapshot else { return nil }
     switch action {
     case .arrowUp:
       if !snap.profiles.isEmpty {
         snap.cursor = (snap.cursor - 1 + snap.profiles.count) % snap.profiles.count
         snapshot = snap
-        host?.requestRender()
+        return ProfilePickerEffects(needsRender: true)
       }
+      return ProfilePickerEffects.none
     case .arrowDown:
       if !snap.profiles.isEmpty {
         snap.cursor = (snap.cursor + 1) % snap.profiles.count
         snapshot = snap
-        host?.requestRender()
+        return ProfilePickerEffects(needsRender: true)
       }
+      return ProfilePickerEffects.none
     case .enter:
-      confirm()
+      return confirm()
     case .escape, .ctrlC:
-      cancel()
+      return cancel()
     default:
-      return false
+      return nil
     }
-    return true
   }
 
   func open(profiles: [ProfileSummary], activeName: String, modelBusy: Bool) -> Bool {
@@ -66,28 +64,20 @@ internal final class ProfilePickerController {
     snapshot = nil
   }
 
-  private func confirm() {
-    guard let snap = snapshot else { return }
+  private func confirm() -> ProfilePickerEffects {
+    guard let snap = snapshot else { return .none }
     let selected = snap.currentProfile
     let previousName = snap.activeName
     snapshot = nil
-    Task { @MainActor in
-      await self.host?.applyBackendProfile(selected.name, previousName: previousName)
-      self.host?.requestRender()
-    }
+    return ProfilePickerEffects(
+      needsRender: true,
+      applyModel: ApplyModelRequest(name: selected.name, previousName: previousName))
   }
 
-  private func cancel() {
-    guard snapshot != nil else { return }
+  private func cancel() -> ProfilePickerEffects {
+    guard snapshot != nil else { return .none }
     snapshot = nil
     logger.debug("chat.profile-picker.cancel")
-    host?.requestRender()
+    return ProfilePickerEffects(needsRender: true)
   }
-}
-
-@MainActor
-internal protocol ProfilePickerHost: AnyObject {
-  func requestRender()
-  func appendProfilePickerNotice(_ text: String)
-  func applyBackendProfile(_ name: String, previousName: String) async
 }
