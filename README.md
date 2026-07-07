@@ -4,31 +4,49 @@ Ai Agent written in Swift
 
 ## Install
 
-The recommended setup is to clone Scribe into `~/.scribe/` so it shares the same root as
-config, logs, and sessions — this lets Scribe find and modify its own source.
+### Requirements
+
+- [Swift 6.3](https://www.swift.org/install/) or newer
+- macOS 26+ or Linux (x86_64 or aarch64)
+
+Clone Scribe into `~/.scribe/scribe` so it shares the same root as config, logs, and
+sessions — this lets Scribe find and modify its own source.
 
 On first run Scribe writes a default `scribe-config.json` targeting Ollama at
 `http://localhost:11434` with the **`gemma4:e2b`** model.  Edit the file or set
 `SCRIBE_CONFIG_PATH` to point to your own config.
 
-### MacOS
+Put the binary on your `PATH` (for example `~/.local/bin`):
+
+```bash
+# ensure ~/.local/bin is on your PATH
+mkdir -p ~/.local/bin
+```
+
+### macOS
 
 ```bash
 mkdir -p ~/.scribe
 git clone https://github.com/zaneenders/scribe.git ~/.scribe/scribe
 cd ~/.scribe/scribe
 swift build -c release
-sudo cp .build/release/scribe /usr/local/bin/scribe
+install -m 755 .build/release/scribe ~/.local/bin/scribe
 ```
 
 ### Linux
 
+Install the Swift static SDK once, then build for your architecture:
+
 ```bash
+swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
+  --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
+
 mkdir -p ~/.scribe
 git clone https://github.com/zaneenders/scribe.git ~/.scribe/scribe
 cd ~/.scribe/scribe
-swift build -c release --swift-sdk x86_64-swift-linux-musl
-sudo cp .build/release/scribe /usr/local/bin/scribe
+ARCH=$(uname -m)   # x86_64 or aarch64
+swift build -c release --swift-sdk "${ARCH}-swift-linux-musl"
+install -m 755 .build/release/scribe ~/.local/bin/scribe
 ```
 
 ### Windows 
