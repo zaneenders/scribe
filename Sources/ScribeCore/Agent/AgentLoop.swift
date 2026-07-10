@@ -94,6 +94,21 @@ func runAgentLoop(
       emit(.lifecycle(.recovered(reason: reason)))
       emit(.boundary(.turnEnd(round: round, outcome: .completed)))
       continue
+    } catch let scribeError as ScribeError {
+      // Non-recoverable ScribeErrors (apiHTTPError, etc.) — propagate
+      // so callers can inspect the specific error type.
+      throw scribeError
+    } catch {
+      logger.error(
+        "agent.loop.error",
+        metadata: [
+          "round": "\(round)",
+          "partial_messages": "\(newMessages.count)",
+          "err": "\(String(describing: error))",
+        ])
+      emit(.boundary(.turnEnd(round: round, outcome: .error(String(describing: error)))))
+      outcome = .error(String(describing: error))
+      return (newMessages, outcome)
     }
 
     var roundBuffer: [Components.Schemas.ChatMessage] = [roundResult.assistantMessage]
