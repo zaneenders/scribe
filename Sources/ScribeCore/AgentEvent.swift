@@ -15,6 +15,7 @@ public enum TurnBoundaryOutcome: Sendable, Equatable {
   case completed
   case toolCalls(count: Int)
   case interrupted
+  case error(String)
 }
 
 public enum AgentEvent: Sendable {

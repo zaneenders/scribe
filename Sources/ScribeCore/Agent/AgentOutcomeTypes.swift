@@ -6,6 +6,7 @@ public enum TurnOutcome: Sendable, Equatable {
   case completed
   case interrupted
   case toolRoundLimit(rounds: Int)
+  case error(String)
 }
 
 public struct ToolInvocation: Sendable, Equatable, Hashable {
