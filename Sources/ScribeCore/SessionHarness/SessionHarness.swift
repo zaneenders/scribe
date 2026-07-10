@@ -239,6 +239,11 @@ public actor SessionHarness {
         "session.harness.turn.end",
         metadata: ["status": "tool-round-limit", "limit": "\(max)"])
       onEvent(.lifecycle(.interrupted))
+    case .error(let desc):
+      logger.error(
+        "session.harness.turn.end",
+        metadata: ["status": "error", "err": "\(desc)"])
+      onEvent(.lifecycle(.error(.generic(desc))))
     }
 
     return result.outcome

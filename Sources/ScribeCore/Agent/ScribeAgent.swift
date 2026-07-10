@@ -126,6 +126,9 @@ public struct ScribeAgent: Sendable {
           return TurnResult(newMessages: newMessages, outcome: .interrupted)
         case .toolRoundLimit(let rounds):
           return TurnResult(newMessages: newMessages, outcome: .toolRoundLimit(rounds: rounds))
+        case .error(let desc):
+          continuation.yield(.lifecycle(.error(.generic(desc))))
+          return TurnResult(newMessages: newMessages, outcome: .error(desc))
         }
       } catch is AgentTurnInterruptedError {
         continuation.yield(.lifecycle(.interrupted))

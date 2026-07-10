@@ -150,6 +150,13 @@ struct StreamProcessor<AO: AbortObserver> {
         }
         throw AgentTurnInterruptedError()
       }
+      logger.error(
+        "agent.stream.error",
+        metadata: [
+          "chunks": "\(decodedChunkCount)",
+          "had_visible_tokens": "\(streamStarted)",
+          "err": "\(String(describing: error))",
+        ])
       throw error
     }
 
