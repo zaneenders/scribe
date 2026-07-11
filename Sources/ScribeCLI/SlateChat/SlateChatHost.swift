@@ -675,6 +675,7 @@ internal final class SlateChatHost {
           transcriptState.usageTurnPrompt = 0
           transcriptState.usageTurnCompletion = 0
           transcriptState.usageTurnTotal = 0
+          transcriptState.providerCacheBustChecked = false
           if var u = transcriptState.usageHUD {
             u.roundPrompt = nil
             u.roundCompletion = nil

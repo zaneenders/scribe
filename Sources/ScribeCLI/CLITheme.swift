@@ -83,6 +83,8 @@ public struct CLITheme: Sendable {
 
   public var usageCtxPctDanger: TerminalRGB
 
+  public var cacheBustedLabel: TerminalRGB
+
   public func style(for section: AssistantStreamSection) -> (fg: TerminalRGB, bold: Bool) {
     switch section {
     case .reasoning: (reasoningBaseFG, false)
@@ -130,6 +132,7 @@ public struct CLITheme: Sendable {
     usageMuted: ScribePalette.usageMuted,
     usageCtxPctNormal: ScribePalette.usageLabel,
     usageCtxPctWarn: ScribePalette.yellow,
-    usageCtxPctDanger: ScribePalette.red
+    usageCtxPctDanger: ScribePalette.red,
+    cacheBustedLabel: ScribePalette.yellow
   )
 }

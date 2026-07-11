@@ -20,6 +20,9 @@ struct TranscriptState: Equatable {
   var usageSessionCompletion: Int = 0
   var usageSessionTotal: Int = 0
   var usageHUD: UsageHUDSnapshot? = nil
+
+  var previousTurnProviderCachedTokens: Int? = nil
+  var providerCacheBustChecked: Bool = false
 }
 
 struct TranscriptController {
@@ -61,7 +64,7 @@ struct TranscriptController {
       return Effects(needsRender: true)
 
     case .lifecycle(.usage(let usage, let tps)):
-      return applyUsage(usage, tokensPerSecond: tps, state: &state, contextWindow: contextWindow)
+      return applyUsage(usage, tokensPerSecond: tps, state: &state, contextWindow: contextWindow, theme: theme)
 
     case .lifecycle(.error(let error)):
       state.lines.append(
@@ -246,7 +249,8 @@ struct TranscriptController {
     _ usage: ScribeUsage,
     tokensPerSecond tps: Double?,
     state: inout TranscriptState,
-    contextWindow: Int?
+    contextWindow: Int?,
+    theme: CLITheme
   ) -> Effects {
     guard let triple = usage.scribeReportedPromptCompletionTotal else { return Effects(needsRender: false) }
     state.usageTurnPrompt += triple.prompt
@@ -259,6 +263,37 @@ struct TranscriptController {
       guard let cw = contextWindow, cw > 0, triple.prompt > 0 else { return nil }
       return min(100, Int(Double(triple.prompt) / Double(cw) * 100))
     }()
+
+    // Detect provider prompt-cache bust on the first usage event of each turn.
+    var effects = Effects(needsRender: false)
+    if let currentCached = usage.cachedPromptTokens,
+      !state.providerCacheBustChecked
+    {
+      state.providerCacheBustChecked = true
+
+      if let previousCached = state.previousTurnProviderCachedTokens,
+        previousCached > 0
+      {
+        let dropRatio = Double(currentCached) / Double(previousCached)
+        let absoluteDrop = previousCached - currentCached
+        // Cache bust if cached tokens dropped by >40% AND at least 500 tokens
+        if dropRatio < 0.6 && absoluteDrop > 500 {
+          let pctDrop = Int((1.0 - dropRatio) * 100)
+          state.lines.append(
+            TLine(spans: [
+              StyledSpan(
+                fg: theme.cacheBustedLabel, bg: theme.background,
+                bold: false,
+                text: "  ⚠ provider cache bust: ~\(pctDrop)% drop (\(previousCached) → \(currentCached) cached tokens)")
+            ]))
+          effects.needsRender = true
+        }
+      }
+
+      // Track for next turn comparison
+      state.previousTurnProviderCachedTokens = currentCached
+    }
+
     state.usageHUD = UsageHUDSnapshot(
       roundPrompt: triple.prompt,
       roundCompletion: triple.completion,
@@ -275,7 +310,8 @@ struct TranscriptController {
       contextWindow: contextWindow,
       contextWindowUsedPercent: pct
     )
-    return Effects(needsRender: true)
+    effects.needsRender = true
+    return effects
   }
 
   private static func applyToolInvocation(
