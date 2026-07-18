@@ -78,6 +78,11 @@ struct CodexStreamProcessor<AO: AbortObserver> {
               lastUsage = parseCodexUsage(usage)
             }
           }
+          if streamStarted || !turn.text.isEmpty || !turn.resolvedToolCalls().isEmpty {
+            onEvent(.output(.finalized))
+          } else {
+            onEvent(.output(.empty))
+          }
           return
 
         case "response.failed":
@@ -122,6 +127,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         case "response.function_call_arguments.delta":
           if let delta = json["delta"] as? String,
              let outputIndex = json["output_index"] as? Int {
+            markStreamStarted()
             emitToolCallDelta(outputIndex: outputIndex, delta: delta)
             turn.applyToolCallDelta(outputIndex: outputIndex, delta: delta)
           }
