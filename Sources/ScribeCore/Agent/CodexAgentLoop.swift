@@ -311,6 +311,31 @@ private func runSingleCodexRound(
   )
   emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
+  if let u = processor.lastUsage {
+    let genStart = processor.firstStreamContentAt ?? processor.streamWallStart
+    let genSec = (clock.now - genStart) / .seconds(1)
+    let tps: Double? = {
+      guard let c = u.outputTokens, c > 0 else { return nil }
+      return Double(c) / max(0.001, genSec)
+    }()
+    logger.debug(
+      "agent.stream.end.codex",
+      metadata: [
+        "chunks": "\(processor.decodedChunkCount)",
+        "prompt_tokens": "\(u.inputTokens.map(String.init(describing:)) ?? "nil")",
+        "completion_tokens": "\(u.outputTokens.map(String.init(describing:)) ?? "nil")",
+        "tps": "\(tps.map { String(format: "%.1f", $0) } ?? "nil")",
+      ])
+    let usage = ScribeUsage(
+      promptTokens: u.inputTokens,
+      completionTokens: u.outputTokens,
+      totalTokens: u.totalTokens,
+      reasoningTokens: u.outputTokensDetails?.reasoningTokens,
+      cachedPromptTokens: u.inputTokensDetails?.cachedTokens
+    )
+    emit(.lifecycle(.usage(usage, tokensPerSecond: tps)))
+  }
+
   if toolInvocations.isEmpty {
     if processor.isIncomplete {
       logger.warning("agent.assistant.incomplete.codex",
