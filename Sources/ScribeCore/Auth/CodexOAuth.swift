@@ -13,6 +13,28 @@ import NIOCore
 
 // MARK: - OAuth Flow
 
+private actor CallbackServerReadiness {
+  private var result: Result<Void, Error>?
+  private var continuation: CheckedContinuation<Void, Error>?
+
+  func wait() async throws {
+    if let result {
+      return try result.get()
+    }
+
+    try await withCheckedThrowingContinuation { continuation in
+      self.continuation = continuation
+    }
+  }
+
+  func resolve(_ result: Result<Void, Error>) {
+    guard self.result == nil else { return }
+    self.result = result
+    continuation?.resume(with: result)
+    continuation = nil
+  }
+}
+
 public enum CodexOAuth {
   /// Run the full OAuth login flow:
   /// 1. Generate PKCE pair
@@ -24,6 +46,19 @@ public enum CodexOAuth {
   ///
   /// - Returns: The newly created credential.
   public static func login() async throws -> CodexCredential {
+    try await login(
+      callbackHost: CodexOAuthConstants.callbackHost,
+      callbackPort: CodexOAuthConstants.callbackPort,
+      browserOpener: openBrowser
+    )
+  }
+
+  /// Internal entry point with injectable callback-server settings for testing.
+  static func login(
+    callbackHost: String,
+    callbackPort: UInt16,
+    browserOpener: @escaping @Sendable (URL) -> Void
+  ) async throws -> CodexCredential {
     // 1. PKCE
     let pkce = PKCE.generate()
     let state = generateState()
@@ -44,23 +79,27 @@ public enum CodexOAuth {
     ]
     let authURL = urlComponents.url!
 
-    // 3. Start server and open browser concurrently
-    let ready = DispatchSemaphore(value: 0)
+    // 3. Start the callback server. Its readiness callback carries startup
+    // failures, so login cannot get stuck waiting for a semaphore that is never
+    // signalled.
+    let readiness = CallbackServerReadiness()
     async let codeTask = CodexOAuthCallbackServer.waitForCode(
       expectedState: state,
-      host: CodexOAuthConstants.callbackHost,
-      port: CodexOAuthConstants.callbackPort,
-      ready: ready
+      host: callbackHost,
+      port: callbackPort,
+      onReady: { result in
+        Task { await readiness.resolve(result) }
+      }
     )
 
-    // Wait until the server is bound and listening, then open the browser.
-    await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-      DispatchQueue.global().async {
-        ready.wait()
-        c.resume()
-      }
+    do {
+      try await readiness.wait()
+    } catch {
+      // Observe and finish the server task before returning the startup error.
+      _ = try? await codeTask
+      throw error
     }
-    openBrowser(authURL)
+    browserOpener(authURL)
 
     let code = try await codeTask
 

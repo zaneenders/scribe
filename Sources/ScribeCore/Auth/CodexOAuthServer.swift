@@ -46,14 +46,14 @@ enum CodexOAuthCallbackServer {
   ///   - expectedState: CSRF state token to verify in the callback.
   ///   - host: Bind address (default 127.0.0.1).
   ///   - port: Bind port (default 1455).
-  ///   - ready: Optional semaphore signalled after bind+listen succeed so
-  ///     the caller can safely launch the browser.
+  ///   - onReady: Called with success after bind+listen, or with the startup
+  ///     error if the server cannot begin listening.
   /// - Returns: The authorization code.
   static func waitForCode(
     expectedState: String,
     host: String = CodexOAuthConstants.callbackHost,
     port: UInt16 = CodexOAuthConstants.callbackPort,
-    ready: DispatchSemaphore? = nil
+    onReady: (@Sendable (Result<Void, Error>) -> Void)? = nil
   ) async throws -> String {
     let box = SocketBox()
 
@@ -74,7 +74,7 @@ enum CodexOAuthCallbackServer {
                 port: port,
                 expectedState: expectedState,
                 continuation: continuation,
-                ready: ready,
+                onReady: onReady,
                 box: box
               )
             }.start()
@@ -102,13 +102,18 @@ enum CodexOAuthCallbackServer {
     port: UInt16,
     expectedState: String,
     continuation: CheckedContinuation<String, Error>,
-    ready: DispatchSemaphore?,
+    onReady: (@Sendable (Result<Void, Error>) -> Void)?,
     box: SocketBox
   ) {
+    func failStartup(_ error: CodexOAuthError) {
+      onReady?(.failure(error))
+      continuation.resume(throwing: error)
+    }
+
     // --- Create socket ---
     let sock = socket(AF_INET, SOCK_STREAM, 0)
     guard sock >= 0 else {
-      continuation.resume(throwing: CodexOAuthError.serverError("socket() failed: \(errno)"))
+      failStartup(.serverError("socket() failed: \(errno)"))
       return
     }
     box.fd = sock
@@ -121,7 +126,7 @@ enum CodexOAuthCallbackServer {
 
     // If the task was already cancelled before we created the socket, bail out.
     if box.closed {
-      continuation.resume(throwing: CodexOAuthError.loginCancelled)
+      failStartup(.loginCancelled)
       return
     }
 
@@ -144,19 +149,19 @@ enum CodexOAuthCallbackServer {
       }
     }
     guard bindResult >= 0 else {
-      continuation.resume(throwing: CodexOAuthError.serverError("bind() failed: \(errno)"))
+      failStartup(.serverError("bind() failed: \(errno)"))
       return
     }
 
     // --- Listen ---
     guard listen(sock, 1) >= 0 else {
-      continuation.resume(throwing: CodexOAuthError.serverError("listen() failed: \(errno)"))
+      failStartup(.serverError("listen() failed: \(errno)"))
       return
     }
 
     // --- Signal readiness ---
     // The caller can now safely launch the browser.
-    ready?.signal()
+    onReady?(.success(()))
 
     // --- Accept loop ---
     // Keep accepting connections until we get a valid OAuth callback.
