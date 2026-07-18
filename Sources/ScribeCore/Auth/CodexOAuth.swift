@@ -213,7 +213,15 @@ public enum CodexOAuth {
     let expiresIn: Int
   }
 
-  private static let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
+  /// Shared HTTP client with redirect following **disabled**.
+  /// OAuth token endpoints must never redirect a POST — if they do
+  /// (301/302), many clients silently change the method to GET and
+  /// drop the body, producing an empty or unrelated response.
+  private static let httpClient: HTTPClient = {
+    var config = HTTPClient.Configuration()
+    config.redirectConfiguration = .disallow
+    return HTTPClient(eventLoopGroupProvider: .singleton, configuration: config)
+  }()
 
   private static func exchangeCode(code: String, verifier: String) async throws -> TokenResponse {
     var components = URLComponents()
@@ -269,10 +277,31 @@ public enum CodexOAuth {
     let bytes = body.getBytes(at: 0, length: body.readableBytes) ?? []
     let data = Data(bytes)
 
-    guard
-      let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else {
-      throw CodexOAuthError.tokenExchangeFailed(status: 0, body: "Invalid JSON")
+    guard !data.isEmpty else {
+      throw CodexOAuthError.tokenExchangeFailed(
+        status: 0, body: "Empty response body — token endpoint may have redirected (try again).")
+    }
+
+    let json: [String: Any]
+    do {
+      guard
+        let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+      else {
+        throw CodexOAuthError.tokenExchangeFailed(
+          status: 0,
+          body:
+            "Response is not a JSON object: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "<non-utf8>")"
+        )
+      }
+      json = parsed
+    } catch let error as CodexOAuthError {
+      throw error
+    } catch {
+      throw CodexOAuthError.tokenExchangeFailed(
+        status: 0,
+        body:
+          "JSON parse error: \(error.localizedDescription) — body: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "<non-utf8>")"
+      )
     }
 
     guard let accessToken = json["access_token"] as? String else {
