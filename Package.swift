@@ -45,9 +45,24 @@ let package = Package(
       ]
     ),
     .target(
+      name: "ScribeLLMCodex",
+      dependencies: [
+        .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+        .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ],
+      plugins: [
+        .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
+      ]
+    ),
+    .target(
       name: "ScribeCore",
       dependencies: [
         "ScribeLLM",
+        "ScribeLLMCodex",
         .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
         .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "Configuration", package: "swift-configuration"),

@@ -27,6 +27,12 @@ import SystemPackage
   @Flag(name: .long, help: "List configured backends and exit.")
   var listProfiles = false
 
+  @Flag(name: .long, help: "Log in to a ChatGPT subscription account (Codex OAuth).")
+  var login = false
+
+  @Flag(name: .long, help: "Log out of the ChatGPT subscription account.")
+  var logout = false
+
   @Option(
     name: .long,
     help: "Use this named backend profile for this run (does not change the saved selection)."
@@ -61,6 +67,16 @@ import SystemPackage
 
     if listProfiles {
       printProfiles(loaded: loaded)
+      return
+    }
+
+    if login {
+      try await loginCodex()
+      return
+    }
+
+    if logout {
+      try await logoutCodex()
       return
     }
 
@@ -134,6 +150,7 @@ import SystemPackage
       contextWindowThreshold: loaded.scribeConfig.contextWindowThreshold,
       serverURL: loaded.scribeConfig.serverURL,
       apiKey: loaded.scribeConfig.apiKey,
+      apiType: loaded.apiType,
       tools: tools,
       workingDirectory: cwd,
       reasoningEnabled: loaded.scribeConfig.reasoningEnabled
@@ -322,5 +339,39 @@ extension ScribeCLI {
     let timeCol = when.padding(toLength: 9, withPad: " ", startingAt: 0)
     return
       "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m\(logFile)\u{001B}[0m  \u{001B}[2m(\(version))\u{001B}[0m"
+  }
+
+  // MARK: - Login / Logout
+
+  func loginCodex() async throws {
+    print("Opening browser for ChatGPT login...")
+    print("A browser window should open. Complete login to finish.")
+    print("")
+
+    do {
+      let credential = try await CodexOAuth.login()
+      print("")
+      print("✅ Authenticated successfully!")
+      print("   Account ID: \(credential.accountId)")
+      print("")
+      print("Add a codex profile to your config to use it:")
+      print("  api.type: \"codex\"")
+      print("  api.baseUrl: \"https://chatgpt.com/backend-api\"")
+      print("  agent.model: \"gpt-5.6-sol\"")
+    } catch {
+      print("")
+      print("❌ Login failed: \(error)")
+      throw error
+    }
+  }
+
+  func logoutCodex() async throws {
+    do {
+      try CodexOAuth.logout()
+      print("✅ Logged out of ChatGPT subscription.")
+    } catch {
+      print("❌ Logout failed: \(error)")
+      throw error
+    }
   }
 }

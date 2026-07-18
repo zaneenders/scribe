@@ -30,6 +30,7 @@ private struct ConfigManifest: Codable {
   struct APISection: Codable {
     var baseUrl: String
     var apiKey: String
+    var type: String?
   }
   struct AgentSection: Codable {
     var model: String
@@ -53,6 +54,7 @@ public struct LoadedConfig: Sendable {
   public var scribeConfig: ScribeConfig
   public var apiBaseURL: String
   public var apiKey: String?
+  public var apiType: String?
   public var logLevel: ScribeLogLevel
   public var chatSessionsDirectoryPath: String
   public var resolvedConfigurationPath: String
@@ -260,6 +262,8 @@ public enum ConfigLoader {
 
     let apiKeyTrimmed = profile.api.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
+    let apiType = profile.api.type?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedAPIType: String? = apiType.flatMap { $0.isEmpty ? nil : $0 }
 
     let levelRaw = profile.logging.level.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
@@ -284,6 +288,7 @@ public enum ConfigLoader {
       scribeConfig: scribeConfig,
       apiBaseURL: baseURL,
       apiKey: resolvedAPIKey,
+      apiType: resolvedAPIType,
       logLevel: logLevel,
       chatSessionsDirectoryPath: paths.sessionsDirectoryPath,
       resolvedConfigurationPath: configPath.string,

@@ -71,6 +71,7 @@ enum SessionSummarizer {
       contextWindowThreshold: configuration.contextWindowThreshold,
       serverURL: configuration.serverURL,
       apiKey: configuration.apiKey,
+      apiType: configuration.apiType,
       tools: [],
       workingDirectory: configuration.workingDirectory,
       reasoningEnabled: configuration.reasoningEnabled
