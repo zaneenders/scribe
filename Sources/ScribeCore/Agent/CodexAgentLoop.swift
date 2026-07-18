@@ -7,6 +7,28 @@ import SystemPackage
 
 // MARK: - Shared Helpers
 
+struct CodexToolCallIdentifiers: Equatable {
+  private static let separator: Character = "|"
+
+  let callID: String
+  let itemID: String
+
+  init(callID: String, itemID: String) {
+    self.callID = callID
+    self.itemID = itemID
+  }
+
+  init(encoded: String) {
+    let parts = encoded.split(separator: Self.separator, maxSplits: 1, omittingEmptySubsequences: false)
+    callID = String(parts[0])
+    itemID = parts.count == 2 ? String(parts[1]) : encoded
+  }
+
+  var encoded: String {
+    "\(callID)\(Self.separator)\(itemID)"
+  }
+}
+
 private func commit(
   _ context: inout [ScribeLLM.Components.Schemas.ChatMessage],
   _ newMessages: inout [ScribeLLM.Components.Schemas.ChatMessage],
@@ -325,10 +347,11 @@ private func convertChatMessagesToCodexInput(
       }
       if let toolCalls = msg.toolCalls {
         for tc in toolCalls {
+          let identifiers = CodexToolCallIdentifiers(encoded: tc.id ?? "")
           items.append(.functionCall(ScribeLLMCodex.Components.Schemas.CodexFunctionCall(
             _type: .functionCall,
-            id: tc.id ?? "",
-            callId: tc.id ?? "",
+            id: identifiers.itemID,
+            callId: identifiers.callID,
             name: tc.function?.name ?? "",
             arguments: tc.function?.arguments ?? "{}"
           )))
@@ -337,7 +360,7 @@ private func convertChatMessagesToCodexInput(
 
     case .tool:
       if let resultText = msgContentString(msg), let callId = msg.toolCallId {
-        let shortCallId = String(callId.split(separator: "|").first ?? Substring(callId))
+        let shortCallId = CodexToolCallIdentifiers(encoded: callId).callID
         items.append(.functionCallOutput(ScribeLLMCodex.Components.Schemas.CodexFunctionCallOutput(
           _type: .functionCallOutput,
           callId: shortCallId,

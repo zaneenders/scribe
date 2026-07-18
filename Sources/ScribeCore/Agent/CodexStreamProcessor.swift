@@ -132,10 +132,16 @@ struct CodexStreamProcessor<AO: AbortObserver> {
             if let itemType = item["type"] as? String {
               switch itemType {
               case "function_call":
+                let itemId = item["id"] as? String ?? ""
                 let callId = item["call_id"] as? String ?? ""
                 let name = item["name"] as? String ?? ""
                 let args = item["arguments"] as? String ?? "{}"
-                turn.finalizeToolCall(outputIndex: outputIndex, id: callId, name: name, arguments: args)
+                turn.finalizeToolCall(
+                  outputIndex: outputIndex,
+                  callID: callId,
+                  itemID: itemId,
+                  name: name,
+                  arguments: args)
               case "message":
                 // text is already captured via deltas
                 break
@@ -232,12 +238,19 @@ struct CodexAssistantTurn {
   private var toolCallsByIndex: [Int: PartialCodexToolCall] = [:]
 
   struct PartialCodexToolCall {
-    var id: String?
+    var callID: String?
+    var itemID: String?
     var name: String?
     var arguments: String
 
-    init(id: String? = nil, name: String? = nil, arguments: String = "") {
-      self.id = id
+    init(
+      callID: String? = nil,
+      itemID: String? = nil,
+      name: String? = nil,
+      arguments: String = ""
+    ) {
+      self.callID = callID
+      self.itemID = itemID
       self.name = name
       self.arguments = arguments
     }
@@ -249,9 +262,16 @@ struct CodexAssistantTurn {
     toolCallsByIndex[outputIndex] = acc
   }
 
-  mutating func finalizeToolCall(outputIndex: Int, id: String, name: String, arguments: String) {
+  mutating func finalizeToolCall(
+    outputIndex: Int,
+    callID: String,
+    itemID: String,
+    name: String,
+    arguments: String
+  ) {
     var acc = toolCallsByIndex[outputIndex] ?? PartialCodexToolCall()
-    acc.id = id
+    acc.callID = callID
+    acc.itemID = itemID
     acc.name = name
     // Use the final arguments if we didn't get deltas, or if the final is complete
     if acc.arguments.isEmpty || arguments.count > acc.arguments.count {
@@ -263,11 +283,11 @@ struct CodexAssistantTurn {
   func resolvedToolCalls() -> [ToolInvocation] {
     toolCallsByIndex.keys.sorted().compactMap { key in
       guard let t = toolCallsByIndex[key],
-            let id = t.id,
+            let callID = t.callID,
+            let itemID = t.itemID,
             let name = t.name else { return nil }
-      // Build composite ID: call_id|item_id
-      let compositeId = "\(id)|fc_\(key)"
-      return ToolInvocation(id: compositeId, name: name, arguments: t.arguments)
+      let identifiers = CodexToolCallIdentifiers(callID: callID, itemID: itemID)
+      return ToolInvocation(id: identifiers.encoded, name: name, arguments: t.arguments)
     }
   }
 }
