@@ -1,5 +1,16 @@
 import Foundation
 
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
+
+import AsyncHTTPClient
+import NIOCore
+
 // MARK: - OAuth Flow
 
 public enum CodexOAuth {
@@ -128,8 +139,7 @@ public enum CodexOAuth {
   // MARK: - Private
 
   private static func generateState() -> String {
-    var bytes = [UInt8](repeating: 0, count: 16)
-    _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    let bytes = secureRandomBytes(count: 16)
     return Data(bytes).map { String(format: "%02x", $0) }.joined()
   }
 
@@ -155,11 +165,9 @@ public enum CodexOAuth {
     let expiresIn: Int
   }
 
-  private static func exchangeCode(code: String, verifier: String) async throws -> TokenResponse {
-    var request = URLRequest(url: URL(string: CodexOAuthConstants.tokenURL)!)
-    request.httpMethod = "POST"
-    request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+  private static let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
 
+  private static func exchangeCode(code: String, verifier: String) async throws -> TokenResponse {
     var components = URLComponents()
     components.queryItems = [
       URLQueryItem(name: "grant_type", value: "authorization_code"),
@@ -168,44 +176,51 @@ public enum CodexOAuth {
       URLQueryItem(name: "code_verifier", value: verifier),
       URLQueryItem(name: "redirect_uri", value: CodexOAuthConstants.redirectURI),
     ]
-    request.httpBody = components.query?.data(using: .utf8)
 
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let httpResponse = response as! HTTPURLResponse
+    var request = HTTPClientRequest(url: CodexOAuthConstants.tokenURL)
+    request.method = .POST
+    request.headers.add(name: "Content-Type", value: "application/x-www-form-urlencoded")
+    request.body = .bytes(ByteBuffer(string: components.query ?? ""))
 
-    guard httpResponse.statusCode == 200 else {
-      let body = String(data: data, encoding: .utf8) ?? ""
-      throw CodexOAuthError.tokenExchangeFailed(status: httpResponse.statusCode, body: body)
+    let response = try await httpClient.execute(request, timeout: .seconds(30))
+    let body = try await response.body.collect(upTo: 1_048_576) // 1 MiB
+
+    guard response.status == .ok else {
+      let bodyString = String(buffer: body)
+      throw CodexOAuthError.tokenExchangeFailed(status: Int(response.status.code), body: bodyString)
     }
 
-    return try parseTokenResponse(data)
+    return try parseTokenResponse(body)
   }
 
   private static func refreshAccessToken(refreshToken: String) async throws -> TokenResponse {
-    var request = URLRequest(url: URL(string: CodexOAuthConstants.tokenURL)!)
-    request.httpMethod = "POST"
-    request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
     var components = URLComponents()
     components.queryItems = [
       URLQueryItem(name: "grant_type", value: "refresh_token"),
       URLQueryItem(name: "refresh_token", value: refreshToken),
       URLQueryItem(name: "client_id", value: CodexOAuthConstants.clientId),
     ]
-    request.httpBody = components.query?.data(using: .utf8)
 
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let httpResponse = response as! HTTPURLResponse
+    var request = HTTPClientRequest(url: CodexOAuthConstants.tokenURL)
+    request.method = .POST
+    request.headers.add(name: "Content-Type", value: "application/x-www-form-urlencoded")
+    request.body = .bytes(ByteBuffer(string: components.query ?? ""))
 
-    guard httpResponse.statusCode == 200 else {
-      let body = String(data: data, encoding: .utf8) ?? ""
-      throw CodexOAuthError.tokenExchangeFailed(status: httpResponse.statusCode, body: body)
+    let response = try await httpClient.execute(request, timeout: .seconds(30))
+    let body = try await response.body.collect(upTo: 1_048_576) // 1 MiB
+
+    guard response.status == .ok else {
+      let bodyString = String(buffer: body)
+      throw CodexOAuthError.tokenExchangeFailed(status: Int(response.status.code), body: bodyString)
     }
 
-    return try parseTokenResponse(data)
+    return try parseTokenResponse(body)
   }
 
-  private static func parseTokenResponse(_ data: Data) throws -> TokenResponse {
+  private static func parseTokenResponse(_ body: ByteBuffer) throws -> TokenResponse {
+    let bytes = body.getBytes(at: 0, length: body.readableBytes) ?? []
+    let data = Data(bytes)
+
     guard
       let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
@@ -269,3 +284,34 @@ public enum CodexOAuth {
     return result
   }
 }
+
+// MARK: - Secure Random Bytes (platform wrapper)
+
+#if canImport(Darwin)
+private func secureRandomBytes(count: Int) -> [UInt8] {
+  var bytes = [UInt8](repeating: 0, count: count)
+  _ = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
+  return bytes
+}
+#elseif canImport(Glibc)
+private func secureRandomBytes(count: Int) -> [UInt8] {
+  var bytes = [UInt8](repeating: 0, count: count)
+  let fd = open("/dev/urandom", O_RDONLY)
+  precondition(fd >= 0, "Cannot open /dev/urandom")
+  defer { close(fd) }
+  let bytesRead = read(fd, &bytes, count)
+  precondition(bytesRead == count, "Cannot read sufficient bytes from /dev/urandom")
+  return bytes
+}
+#elseif canImport(Musl)
+import Musl
+private func secureRandomBytes(count: Int) -> [UInt8] {
+  var bytes = [UInt8](repeating: 0, count: count)
+  let fd = open("/dev/urandom", O_RDONLY)
+  precondition(fd >= 0, "Cannot open /dev/urandom")
+  defer { close(fd) }
+  let bytesRead = read(fd, &bytes, count)
+  precondition(bytesRead == count, "Cannot read sufficient bytes from /dev/urandom")
+  return bytes
+}
+#endif

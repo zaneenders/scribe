@@ -28,6 +28,8 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-collections.git", from: "1.4.1"),
     .package(url: "https://github.com/apple/swift-profile-recorder.git", .upToNextMinor(from: "0.3.13")),
     .package(url: "https://github.com/apple/swift-nio.git", from: "2.100.0"),
+    .package(url: "https://github.com/apple/swift-crypto.git", from: "3.10.0"),
+    .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
   ],
   targets: [
     .target(
@@ -69,6 +71,9 @@ let package = Package(
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "_NIOFileSystem", package: "swift-nio"),
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "AsyncHTTPClient", package: "async-http-client"),
+        .product(name: "NIOCore", package: "swift-nio"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

@@ -1,5 +1,13 @@
 import Foundation
 
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
+
 // MARK: - OAuth Constants
 
 public enum CodexOAuthConstants {
@@ -66,7 +74,7 @@ enum CodexOAuthCallbackServer {
     addr.sin_addr.s_addr = inet_addr(host)
     let bindResult = withUnsafePointer(to: &addr) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-        Darwin.bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
       }
     }
     guard bindResult >= 0 else {
@@ -163,7 +171,7 @@ enum CodexOAuthCallbackServer {
       \(body)
       """
     _ = response.withCString {
-      Darwin.send(sock, $0, strlen($0), 0)
+      send(sock, $0, strlen($0), 0)
     }
   }
 
