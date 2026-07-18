@@ -45,14 +45,21 @@ public enum CodexOAuth {
     let authURL = urlComponents.url!
 
     // 3. Start server and open browser concurrently
+    let ready = DispatchSemaphore(value: 0)
     async let codeTask = CodexOAuthCallbackServer.waitForCode(
       expectedState: state,
       host: CodexOAuthConstants.callbackHost,
-      port: CodexOAuthConstants.callbackPort
+      port: CodexOAuthConstants.callbackPort,
+      ready: ready
     )
 
-    // Small delay to ensure server is listening before browser opens
-    try await Task.sleep(for: .milliseconds(300))
+    // Wait until the server is bound and listening, then open the browser.
+    await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+      DispatchQueue.global().async {
+        ready.wait()
+        c.resume()
+      }
+    }
     openBrowser(authURL)
 
     let code = try await codeTask

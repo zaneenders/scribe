@@ -24,26 +24,74 @@ public enum CodexOAuthConstants {
 
 // MARK: - Callback Server
 
-/// Minimal single-shot HTTP server for the OAuth callback.
+/// Minimal HTTP server for the OAuth callback.
 /// Uses a raw POSIX socket — no NIO dependency needed for this simple task.
+///
+/// The server keeps accepting connections until a valid OAuth callback arrives
+/// or the overall timeout expires.  Invalid or unrelated requests are answered
+/// with an appropriate HTTP error and the server continues listening.
 enum CodexOAuthCallbackServer {
 
+  /// Overall timeout for the login flow (seconds).
+  static let loginTimeout: TimeInterval = 300 // 5 minutes
+
+  /// Mutable box so the cancellation handler can reach the listening socket.
+  private final class SocketBox: @unchecked Sendable {
+    var fd: Int32 = -1
+    var closed = false
+  }
+
+  /// Start the callback server and wait for a valid authorization code.
+  /// - Parameters:
+  ///   - expectedState: CSRF state token to verify in the callback.
+  ///   - host: Bind address (default 127.0.0.1).
+  ///   - port: Bind port (default 1455).
+  ///   - ready: Optional semaphore signalled after bind+listen succeed so
+  ///     the caller can safely launch the browser.
+  /// - Returns: The authorization code.
   static func waitForCode(
     expectedState: String,
     host: String = CodexOAuthConstants.callbackHost,
-    port: UInt16 = CodexOAuthConstants.callbackPort
+    port: UInt16 = CodexOAuthConstants.callbackPort,
+    ready: DispatchSemaphore? = nil
   ) async throws -> String {
-    // The server runs synchronously on a background thread.
-    // We use a continuation to bridge to async/await.
-    try await withCheckedThrowingContinuation { continuation in
-      Thread {
-        runServer(
-          host: host,
-          port: port,
-          expectedState: expectedState,
-          continuation: continuation
-        )
-      }.start()
+    let box = SocketBox()
+
+    return try await withTaskCancellationHandler {
+      try await withThrowingTaskGroup(of: String.self) { group in
+        // Timeout task — fires after `loginTimeout` seconds.
+        group.addTask {
+          try await Task.sleep(for: .seconds(loginTimeout))
+          throw CodexOAuthError.loginTimeout
+        }
+
+        // Server task — blocks until a valid callback is received.
+        group.addTask {
+          try await withCheckedThrowingContinuation { continuation in
+            Thread {
+              runServer(
+                host: host,
+                port: port,
+                expectedState: expectedState,
+                continuation: continuation,
+                ready: ready,
+                box: box
+              )
+            }.start()
+          }
+        }
+
+        // Take the first completed child.
+        let code = try await group.next()!
+        group.cancelAll()
+        return code
+      }
+    } onCancel: {
+      // Close the listening socket so accept() unblocks (returns EBADF).
+      if !box.closed, box.fd >= 0 {
+        box.closed = true
+        close(box.fd)
+      }
     }
   }
 
@@ -53,21 +101,39 @@ enum CodexOAuthCallbackServer {
     host: String,
     port: UInt16,
     expectedState: String,
-    continuation: CheckedContinuation<String, Error>
+    continuation: CheckedContinuation<String, Error>,
+    ready: DispatchSemaphore?,
+    box: SocketBox
   ) {
-    // Create socket
+    // --- Create socket ---
     let sock = socket(AF_INET, SOCK_STREAM, 0)
     guard sock >= 0 else {
       continuation.resume(throwing: CodexOAuthError.serverError("socket() failed: \(errno)"))
       return
     }
-    defer { close(sock) }
+    box.fd = sock
+    defer {
+      if !box.closed {
+        box.closed = true
+        close(sock)
+      }
+    }
 
-    // Set SO_REUSEADDR
+    // If the task was already cancelled before we created the socket, bail out.
+    if box.closed {
+      continuation.resume(throwing: CodexOAuthError.loginCancelled)
+      return
+    }
+
+    // --- SO_REUSEADDR ---
     var reuse: Int32 = 1
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
 
-    // Bind
+    // --- Per-accept timeout so we can notice cancellation ---
+    var tv = timeval(tv_sec: 2, tv_usec: 0)
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+    // --- Bind ---
     var addr = sockaddr_in()
     addr.sin_family = sa_family_t(AF_INET)
     addr.sin_port = port.bigEndian
@@ -82,73 +148,110 @@ enum CodexOAuthCallbackServer {
       return
     }
 
-    // Listen
+    // --- Listen ---
     guard listen(sock, 1) >= 0 else {
       continuation.resume(throwing: CodexOAuthError.serverError("listen() failed: \(errno)"))
       return
     }
 
-    // Accept one connection
-    let client = accept(sock, nil, nil)
-    guard client >= 0 else {
-      continuation.resume(throwing: CodexOAuthError.serverError("accept() failed: \(errno)"))
-      return
-    }
-    defer { close(client) }
+    // --- Signal readiness ---
+    // The caller can now safely launch the browser.
+    ready?.signal()
 
-    // Read HTTP request
+    // --- Accept loop ---
+    // Keep accepting connections until we get a valid OAuth callback.
+    while true {
+      let client = accept(sock, nil, nil)
+      if client < 0 {
+        switch errno {
+        case EBADF, EINVAL:
+          // Socket was closed (cancellation).
+          continuation.resume(throwing: CodexOAuthError.loginCancelled)
+          return
+        case EAGAIN, EWOULDBLOCK, EINTR:
+          // SO_RCVTIMEO fired or a signal interrupted — retry.
+          continue
+        default:
+          continuation.resume(
+            throwing: CodexOAuthError.serverError("accept() failed: \(errno)"))
+          return
+        }
+      }
+
+      // Try to extract a valid authorization code from this connection.
+      if let code = handleConnection(client, expectedState: expectedState) {
+        close(client)
+        continuation.resume(returning: code)
+        return
+      }
+
+      close(client)
+      // Invalid request — loop and accept the next connection.
+    }
+  }
+
+  // MARK: - Connection Handling
+
+  /// Parse one HTTP connection.  Returns the authorization code on success,
+  /// or `nil` after sending an appropriate error response so the caller
+  /// can continue accepting.
+  private static func handleConnection(
+    _ client: Int32,
+    expectedState: String
+  ) -> String? {
+    // Read the request.
     var requestBuffer = [UInt8](repeating: 0, count: 4096)
     let bytesRead = read(client, &requestBuffer, requestBuffer.count)
-    guard bytesRead > 0 else {
-      continuation.resume(throwing: CodexOAuthError.serverError("read() returned \(bytesRead)"))
-      return
-    }
+    guard bytesRead > 0 else { return nil }
 
     let request = String(decoding: requestBuffer[0..<bytesRead], as: UTF8.self)
 
-    // Parse request line
+    // Parse the request line.
     guard let firstLine = request.split(separator: "\r\n").first.map(String.init) else {
       sendResponse(client, status: 400, body: htmlPage(title: "Error", body: "Bad request"))
-      continuation.resume(throwing: CodexOAuthError.serverError("Bad request"))
-      return
+      return nil
     }
 
     // GET /auth/callback?code=...&state=... HTTP/1.1
     let parts = firstLine.split(separator: " ")
     guard parts.count >= 2, let path = parts.dropFirst().first.map(String.init) else {
       sendResponse(client, status: 400, body: htmlPage(title: "Error", body: "Bad request"))
-      continuation.resume(throwing: CodexOAuthError.serverError("Bad request line"))
-      return
+      return nil
     }
 
-    // Parse the path
+    // Only the callback route is recognised.
     guard
       let urlComponents = URLComponents(string: path),
       urlComponents.path == "/auth/callback"
     else {
-      sendResponse(client, status: 404, body: htmlPage(title: "Not Found", body: "Callback route not found."))
-      continuation.resume(throwing: CodexOAuthError.serverError("Not found: \(path)"))
-      return
+      sendResponse(client, status: 404,
+                   body: htmlPage(title: "Not Found", body: "Callback route not found."))
+      return nil
     }
 
     let params = urlComponents.queryItems?.reduce(into: [String: String]()) { dict, item in
       dict[item.name] = item.value
     } ?? [:]
 
+    // Verify CSRF state.
     guard params["state"] == expectedState else {
-      sendResponse(client, status: 400, body: htmlPage(title: "Error", body: "State mismatch."))
-      continuation.resume(throwing: CodexOAuthError.stateMismatch)
-      return
+      sendResponse(client, status: 400,
+                   body: htmlPage(title: "Error", body: "State mismatch."))
+      return nil
     }
 
+    // Extract authorization code.
     guard let code = params["code"], !code.isEmpty else {
-      sendResponse(client, status: 400, body: htmlPage(title: "Error", body: "Missing authorization code."))
-      continuation.resume(throwing: CodexOAuthError.missingAuthorizationCode)
-      return
+      sendResponse(client, status: 400,
+                   body: htmlPage(title: "Error", body: "Missing authorization code."))
+      return nil
     }
 
-    sendResponse(client, status: 200, body: htmlPage(title: "Authenticated", body: "OpenAI authentication completed. You can close this window."))
-    continuation.resume(returning: code)
+    // Success — send the landing page and return the code.
+    sendResponse(client, status: 200,
+                 body: htmlPage(title: "Authenticated",
+                                body: "OpenAI authentication completed. You can close this window."))
+    return code
   }
 
   // MARK: - HTTP Response Helpers
@@ -194,6 +297,8 @@ public enum CodexOAuthError: Error, CustomStringConvertible {
   case invalidJWT
   case noAccountID
   case noCredentials
+  case loginTimeout
+  case loginCancelled
   case serverError(String)
 
   public var description: String {
@@ -212,6 +317,10 @@ public enum CodexOAuthError: Error, CustomStringConvertible {
       return "No chatgpt_account_id found in JWT payload."
     case .noCredentials:
       return "No stored Codex credentials. Run `scribe login` first."
+    case .loginTimeout:
+      return "Login timed out. Please try again."
+    case .loginCancelled:
+      return "Login was cancelled."
     case .serverError(let msg):
       return "Callback server error: \(msg)"
     }
