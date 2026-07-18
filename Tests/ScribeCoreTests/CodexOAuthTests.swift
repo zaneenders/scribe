@@ -50,4 +50,28 @@ struct CodexOAuthTests {
 
     #expect(start.duration(to: .now) < .seconds(2))
   }
+
+  @Test("waitForCode returns loginTimeout after the configured timeout", .timeLimit(.minutes(1)))
+  func loginTimeoutWithShortDeadline() async throws {
+    // Use a very short timeout and never send a callback request.
+    let start = ContinuousClock.now
+    do {
+      _ = try await CodexOAuth.login(
+        callbackHost: CodexOAuthConstants.callbackHost,
+        callbackPort: CodexOAuthConstants.callbackPort,
+        browserOpener: { _ in /* intentionally left hanging */ },
+        timeout: 2.0
+      )
+      Issue.record("Expected loginTimeout, but login succeeded unexpectedly")
+    } catch let error as CodexOAuthError {
+      guard case .loginTimeout = error else {
+        Issue.record("Expected loginTimeout, got \(error)")
+        return
+      }
+      // Confirm the error arrived close to the configured deadline.
+      let elapsed = start.duration(to: .now)
+      #expect(elapsed >= .seconds(2))
+      #expect(elapsed < .seconds(8)) // generous upper bound to avoid flakes
+    }
+  }
 }

@@ -39,6 +39,14 @@ enum CodexOAuthCallbackServer {
   private final class SocketBox: @unchecked Sendable {
     var fd: Int32 = -1
     var closed = false
+
+    /// Close the socket if it hasn't been closed yet.
+    func closeIfOpen() {
+      if !closed, fd >= 0 {
+        closed = true
+        close(fd)
+      }
+    }
   }
 
   /// Start the callback server and wait for a valid authorization code.
@@ -46,6 +54,7 @@ enum CodexOAuthCallbackServer {
   ///   - expectedState: CSRF state token to verify in the callback.
   ///   - host: Bind address (default 127.0.0.1).
   ///   - port: Bind port (default 1455).
+  ///   - timeout: Maximum time to wait (default 5 minutes).
   ///   - onReady: Called with success after bind+listen, or with the startup
   ///     error if the server cannot begin listening.
   /// - Returns: The authorization code.
@@ -53,45 +62,57 @@ enum CodexOAuthCallbackServer {
     expectedState: String,
     host: String = CodexOAuthConstants.callbackHost,
     port: UInt16 = CodexOAuthConstants.callbackPort,
+    timeout: TimeInterval = loginTimeout,
     onReady: (@Sendable (Result<Void, Error>) -> Void)? = nil
   ) async throws -> String {
     let box = SocketBox()
 
     return try await withTaskCancellationHandler {
       try await withThrowingTaskGroup(of: String.self) { group in
-        // Timeout task — fires after `loginTimeout` seconds.
+        // Timeout task — fires after `timeout` seconds.
         group.addTask {
-          try await Task.sleep(for: .seconds(loginTimeout))
+          try await Task.sleep(for: .seconds(timeout))
           throw CodexOAuthError.loginTimeout
         }
 
         // Server task — blocks until a valid callback is received.
         group.addTask {
-          try await withCheckedThrowingContinuation { continuation in
-            Thread {
-              runServer(
-                host: host,
-                port: port,
-                expectedState: expectedState,
-                continuation: continuation,
-                onReady: onReady,
-                box: box
-              )
-            }.start()
+          try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+              Thread {
+                runServer(
+                  host: host,
+                  port: port,
+                  expectedState: expectedState,
+                  continuation: continuation,
+                  onReady: onReady,
+                  box: box
+                )
+              }.start()
+            }
+          } onCancel: {
+            // When the server task is cancelled (e.g. timeout wins),
+            // close the socket so accept() unblocks with EBADF and
+            // the continuation is resumed rather than left dangling.
+            box.closeIfOpen()
           }
         }
 
         // Take the first completed child.
-        let code = try await group.next()!
+        // Wrap in do/catch so cancelAll runs on every exit path.
+        let code: String
+        do {
+          code = try await group.next()!
+        } catch {
+          group.cancelAll()
+          throw error
+        }
         group.cancelAll()
         return code
       }
     } onCancel: {
       // Close the listening socket so accept() unblocks (returns EBADF).
-      if !box.closed, box.fd >= 0 {
-        box.closed = true
-        close(box.fd)
-      }
+      box.closeIfOpen()
     }
   }
 

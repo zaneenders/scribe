@@ -57,7 +57,8 @@ public enum CodexOAuth {
   static func login(
     callbackHost: String,
     callbackPort: UInt16,
-    browserOpener: @escaping @Sendable (URL) -> Void
+    browserOpener: @escaping @Sendable (URL) -> Void,
+    timeout: TimeInterval = CodexOAuthCallbackServer.loginTimeout
   ) async throws -> CodexCredential {
     // 1. PKCE
     let pkce = PKCE.generate()
@@ -87,6 +88,7 @@ public enum CodexOAuth {
       expectedState: state,
       host: callbackHost,
       port: callbackPort,
+      timeout: timeout,
       onReady: { result in
         Task { await readiness.resolve(result) }
       }
