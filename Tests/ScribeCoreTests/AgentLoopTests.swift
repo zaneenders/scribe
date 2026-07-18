@@ -208,6 +208,7 @@ private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
 private func expectTermination(_ actual: TurnOutcome, _ expected: TurnOutcome) {
   switch (actual, expected) {
   case (.completed, .completed): return
+  case (.incomplete, .incomplete): return
   case (.interrupted, .interrupted): return
   case (.toolRoundLimit(let a), .toolRoundLimit(let b)) where a == b: return
   default:

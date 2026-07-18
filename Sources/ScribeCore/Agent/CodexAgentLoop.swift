@@ -116,6 +116,12 @@ func runCodexAgentLoop(
         outcome = .completed
         return (newMessages, outcome)
 
+      case .incomplete(let reason):
+        emit(.boundary(.turnEnd(round: round, outcome: .incomplete(reason: reason))))
+        commit(&currentContext.messages, &newMessages, roundBuffer)
+        outcome = .incomplete(reason: reason)
+        return (newMessages, outcome)
+
       case .toolCalls(let invocations):
         emit(.boundary(.turnEnd(round: round, outcome: .toolCalls(count: invocations.count))))
         if round >= config.maxToolRounds {
@@ -208,6 +214,7 @@ private struct CodexRoundResult: Sendable {
 
 private enum CodexRoundOutcome: Sendable, Equatable {
   case completed
+  case incomplete(reason: String?)
   case toolCalls([ToolInvocation])
 }
 
@@ -305,8 +312,21 @@ private func runSingleCodexRound(
   emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
   if toolInvocations.isEmpty {
+    if processor.isIncomplete {
+      logger.warning("agent.assistant.incomplete.codex",
+                     metadata: ["reason": "\(processor.incompleteReason ?? "unknown")",
+                                "answer_chars": "\(turn.text.count)"])
+      return CodexRoundResult(assistantMessage: assistantMessage,
+                              kind: .incomplete(reason: processor.incompleteReason))
+    }
     logger.info("agent.assistant.final.codex", metadata: ["answer_chars": "\(turn.text.count)"])
     return CodexRoundResult(assistantMessage: assistantMessage, kind: .completed)
+  }
+
+  if processor.isIncomplete {
+    logger.warning("agent.assistant.incomplete.codex",
+                   metadata: ["reason": "\(processor.incompleteReason ?? "unknown")",
+                              "tool_count": "\(toolInvocations.count)"])
   }
 
   return CodexRoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))

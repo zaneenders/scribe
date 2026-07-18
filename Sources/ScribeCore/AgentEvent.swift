@@ -13,6 +13,7 @@ public enum MessageBoundaryRole: Sendable, Equatable {
 
 public enum TurnBoundaryOutcome: Sendable, Equatable {
   case completed
+  case incomplete(reason: String?)
   case toolCalls(count: Int)
   case interrupted
   case error(String)

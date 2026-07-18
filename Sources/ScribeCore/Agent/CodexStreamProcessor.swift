@@ -17,6 +17,8 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   private(set) var streamSection: AssistantStreamSection?
   private(set) var firstStreamContentAt: ContinuousClock.Instant?
   private(set) var decodedChunkCount = 0
+  private(set) var isIncomplete = false
+  private(set) var incompleteReason: String?
   let streamWallStart: ContinuousClock.Instant
 
   init(
@@ -71,13 +73,31 @@ struct CodexStreamProcessor<AO: AbortObserver> {
 
         // Handle terminal events
         switch eventType {
-        case "response.completed", "response.incomplete":
+        case "response.completed":
           if let response = json["response"] as? [String: Any] {
             turn.responseId = response["id"] as? String
             if let usage = response["usage"] as? [String: Any] {
               lastUsage = parseCodexUsage(usage)
             }
           }
+          if streamStarted || !turn.text.isEmpty || !turn.resolvedToolCalls().isEmpty {
+            onEvent(.output(.finalized))
+          } else {
+            onEvent(.output(.empty))
+          }
+          return
+
+        case "response.incomplete":
+          if let response = json["response"] as? [String: Any] {
+            turn.responseId = response["id"] as? String
+            if let usage = response["usage"] as? [String: Any] {
+              lastUsage = parseCodexUsage(usage)
+            }
+            if let incompleteDetails = response["incomplete_details"] as? [String: Any] {
+              incompleteReason = incompleteDetails["reason"] as? String
+            }
+          }
+          isIncomplete = true
           if streamStarted || !turn.text.isEmpty || !turn.resolvedToolCalls().isEmpty {
             onEvent(.output(.finalized))
           } else {

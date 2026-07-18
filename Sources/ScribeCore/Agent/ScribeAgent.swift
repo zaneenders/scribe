@@ -221,6 +221,9 @@ public struct ScribeAgent: Sendable {
           switch result.termination {
           case .completed:
             return TurnResult(newMessages: newMessages, outcome: .completed)
+          case .incomplete(let reason):
+            continuation.yield(.lifecycle(.error(.generic("Response incomplete\(reason.map { ": \($0)" } ?? "")"))))
+            return TurnResult(newMessages: newMessages, outcome: .incomplete(reason: reason))
           case .interrupted:
             continuation.yield(.lifecycle(.interrupted))
             return TurnResult(newMessages: newMessages, outcome: .interrupted)
@@ -283,6 +286,9 @@ public struct ScribeAgent: Sendable {
         switch result.termination {
         case .completed:
           return TurnResult(newMessages: newMessages, outcome: .completed)
+        case .incomplete(let reason):
+          continuation.yield(.lifecycle(.error(.generic("Response incomplete\(reason.map { ": \($0)" } ?? "")"))))
+          return TurnResult(newMessages: newMessages, outcome: .incomplete(reason: reason))
         case .interrupted:
           continuation.yield(.lifecycle(.interrupted))
           return TurnResult(newMessages: newMessages, outcome: .interrupted)

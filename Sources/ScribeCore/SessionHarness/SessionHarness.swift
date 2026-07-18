@@ -232,6 +232,10 @@ public actor SessionHarness {
     case .completed:
       logger.info("session.harness.turn.end", metadata: ["status": "completed"])
       tokenTracker.logStatus(logger: logger)
+    case .incomplete(let reason):
+      logger.warning("session.harness.turn.end",
+                     metadata: ["status": "incomplete", "reason": "\(reason ?? "unknown")"])
+      onEvent(.lifecycle(.error(.generic("Response incomplete\(reason.map { ": \($0)" } ?? "")"))))
     case .interrupted:
       logger.notice("session.harness.turn.end", metadata: ["status": "interrupted"])
     case .toolRoundLimit(let max):
