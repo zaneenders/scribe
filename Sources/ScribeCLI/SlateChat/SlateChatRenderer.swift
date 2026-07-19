@@ -455,7 +455,7 @@ internal enum SlateChatRenderer {
     let profile = picker.currentProfile
     let position = "\(picker.cursor + 1)/\(picker.profileCount)"
     let marker = profile.name == picker.activeName ? "▸ " : "  "
-    let hint = "   ↑↓ move · Enter select · Esc cancel"
+    let hint = "   f/j move · Enter select · Esc cancel"
 
     let row0 = startRow
     if row0 >= 0, row0 < grid.count {
