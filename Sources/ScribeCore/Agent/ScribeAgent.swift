@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeLLM
+import ScribeLLMAnthropic
 import ScribeLLMCodex
 import SystemPackage
 
@@ -15,6 +16,9 @@ public struct ScribeAgent: Sendable {
   private let codexClient: ScribeLLMCodex.Client?
   private let codexAccessToken: String?
   private let codexAccountID: String?
+  private let anthropicClient: ScribeLLMAnthropic.Client?
+  private let anthropicSystemPrompt: String?
+  private let anthropicMaxTokens: Int
   private let workingDirectory: FilePath
   private let logger: Logger
   private let abortNotifier = AbortNotifier()
@@ -22,6 +26,10 @@ public struct ScribeAgent: Sendable {
   // Lazy codex init from config
   private let _isCodexConfig: Bool
   private let _codexServerURL: URL?
+
+  // Lazy anthropic init from config
+  private let _isAnthropicConfig: Bool
+  private let _anthropicServerURL: URL?
 
   /// Standard (OpenAI-compatible) initializer.
   public init(
@@ -37,12 +45,17 @@ public struct ScribeAgent: Sendable {
     self.codexClient = nil
     self.codexAccessToken = nil
     self.codexAccountID = nil
+    self.anthropicClient = nil
+    self.anthropicSystemPrompt = nil
+    self.anthropicMaxTokens = 8192
     self.workingDirectory = workingDirectory
     self.logger = logger
     self.model = model
     self.reasoningEnabled = reasoningEnabled
     self._isCodexConfig = false
     self._codexServerURL = nil
+    self._isAnthropicConfig = false
+    self._anthropicServerURL = nil
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -69,12 +82,17 @@ public struct ScribeAgent: Sendable {
     self.codexClient = codexClient
     self.codexAccessToken = accessToken
     self.codexAccountID = accountID
+    self.anthropicClient = nil
+    self.anthropicSystemPrompt = nil
+    self.anthropicMaxTokens = 8192
     self.workingDirectory = workingDirectory
     self.logger = logger
     self.model = model
     self.reasoningEnabled = reasoningEnabled
     self._isCodexConfig = false
     self._codexServerURL = nil
+    self._isAnthropicConfig = false
+    self._anthropicServerURL = nil
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -85,7 +103,44 @@ public struct ScribeAgent: Sendable {
     }
   }
 
-  /// Create from ScribeConfig, auto-detecting standard vs codex.
+  /// Anthropic Messages-compatible initializer (Anthropic, Kimi Coding, etc).
+  public init(
+    anthropicClient: ScribeLLMAnthropic.Client,
+    model: String,
+    tools: [any ScribeTool] = [],
+    toolExecutor: (any ToolExecutor)? = nil,
+    workingDirectory: FilePath,
+    reasoningEnabled: Bool?,
+    systemPrompt: String? = nil,
+    maxTokens: Int = 8192,
+    logger: Logger
+  ) {
+    self.client = nil
+    self.codexClient = nil
+    self.codexAccessToken = nil
+    self.codexAccountID = nil
+    self.anthropicClient = anthropicClient
+    self.anthropicSystemPrompt = systemPrompt
+    self.anthropicMaxTokens = maxTokens
+    self.workingDirectory = workingDirectory
+    self.logger = logger
+    self.model = model
+    self.reasoningEnabled = reasoningEnabled
+    self._isCodexConfig = false
+    self._codexServerURL = nil
+    self._isAnthropicConfig = false
+    self._anthropicServerURL = nil
+    if let customExecutor = toolExecutor {
+      self.toolExecutor = customExecutor
+      self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
+    } else {
+      let registry = ToolRegistry(tools: tools, logger: logger)
+      self.toolExecutor = registry
+      self.chatTools = registry.chatTools
+    }
+  }
+
+  /// Create from ScribeConfig, auto-detecting standard vs codex vs anthropic.
   /// Codex credentials are loaded lazily on first `run()`.
   public init(
     configuration: ScribeConfig,
@@ -98,6 +153,8 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
     self.model = configuration.agentModel
     self.reasoningEnabled = configuration.reasoningEnabled
+    self.anthropicSystemPrompt = nil
+    self.anthropicMaxTokens = configuration.maxTokens ?? 8192
 
     if configuration.apiType == "codex" {
       guard let serverURL = URL(string: configuration.serverURL) else {
@@ -109,8 +166,27 @@ public struct ScribeAgent: Sendable {
       self.codexClient = nil
       self.codexAccessToken = nil
       self.codexAccountID = nil
+      self.anthropicClient = nil
       self._isCodexConfig = true
       self._codexServerURL = serverURL
+      self._isAnthropicConfig = false
+      self._anthropicServerURL = nil
+    } else if configuration.apiType == "anthropic" {
+      guard let serverURL = URL(string: configuration.serverURL) else {
+        throw ScribeError.configuration(
+          key: "serverURL",
+          reason: "Invalid serverURL: \(configuration.serverURL)")
+      }
+      self.client = nil
+      self.codexClient = nil
+      self.codexAccessToken = nil
+      self.codexAccountID = nil
+      self.anthropicClient = AnthropicClient.make(
+        serverURL: serverURL, apiKey: configuration.apiKey)
+      self._isCodexConfig = false
+      self._codexServerURL = nil
+      self._isAnthropicConfig = false
+      self._anthropicServerURL = nil
     } else {
       guard let serverURL = URL(string: configuration.serverURL) else {
         throw ScribeError.configuration(
@@ -122,8 +198,11 @@ public struct ScribeAgent: Sendable {
       self.codexClient = nil
       self.codexAccessToken = nil
       self.codexAccountID = nil
+      self.anthropicClient = nil
       self._isCodexConfig = false
       self._codexServerURL = nil
+      self._isAnthropicConfig = false
+      self._anthropicServerURL = nil
     }
   }
 
@@ -180,10 +259,10 @@ public struct ScribeAgent: Sendable {
       effectiveAccountID = codexAccountID
     }
 
+    // Codex path
     if let codexClient = effectiveCodexClient,
        let accessToken = effectiveAccessToken,
        let accountID = effectiveAccountID {
-      // Codex path
       let task = Task<TurnResult, Error> {
         [
           toolExecutor, chatTools, codexClient, accessToken, accountID,
@@ -209,6 +288,66 @@ public struct ScribeAgent: Sendable {
 
         do {
           let result = try await runCodexAgentLoop(
+            promptMessages: wireMessages,
+            context: ctx,
+            config: config,
+            emit: { continuation.yield($0) },
+            logger: agentLogger,
+            abortObserver: abortNotifier
+          )
+
+          let newMessages = result.messages.toScribeMessages()
+          switch result.termination {
+          case .completed:
+            return TurnResult(newMessages: newMessages, outcome: .completed)
+          case .incomplete(let reason):
+            continuation.yield(.lifecycle(.error(.generic("Response incomplete\(reason.map { ": \($0)" } ?? "")"))))
+            return TurnResult(newMessages: newMessages, outcome: .incomplete(reason: reason))
+          case .interrupted:
+            continuation.yield(.lifecycle(.interrupted))
+            return TurnResult(newMessages: newMessages, outcome: .interrupted)
+          case .toolRoundLimit(let rounds):
+            return TurnResult(newMessages: newMessages, outcome: .toolRoundLimit(rounds: rounds))
+          case .error(let desc):
+            continuation.yield(.lifecycle(.error(.generic(desc))))
+            return TurnResult(newMessages: newMessages, outcome: .error(desc))
+          }
+        } catch is AgentTurnInterruptedError {
+          continuation.yield(.lifecycle(.interrupted))
+          return TurnResult(newMessages: [], outcome: .interrupted)
+        }
+      }
+
+      return TurnStream(events: stream, result: task)
+    }
+
+    // Anthropic path
+    if let anthropicClient = anthropicClient {
+      let task = Task<TurnResult, Error> {
+        [
+          toolExecutor, chatTools, anthropicClient, wireMessages, historyWire, options,
+          agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory,
+          anthropicSystemPrompt, anthropicMaxTokens
+        ] in
+        defer { continuation.finish() }
+
+        let ctx = AgentContext(messages: historyWire)
+
+        let config = AnthropicAgentLoopConfig(
+          model: model,
+          client: anthropicClient,
+          toolExecutor: toolExecutor,
+          chatTools: chatTools,
+          maxToolRounds: options.maxToolRounds,
+          workingDirectory: workingDirectory,
+          reasoningEnabled: reasoningEnabled,
+          hooks: .default,
+          systemPrompt: anthropicSystemPrompt,
+          maxTokens: anthropicMaxTokens
+        )
+
+        do {
+          let result = try await runAnthropicAgentLoop(
             promptMessages: wireMessages,
             context: ctx,
             config: config,

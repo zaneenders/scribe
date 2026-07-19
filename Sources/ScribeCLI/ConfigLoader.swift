@@ -37,6 +37,8 @@ private struct ConfigManifest: Codable {
     var contextWindow: Int
     var contextWindowThreshold: Double
     var reasoning: Bool?
+    var maxTokens: Int?
+    var systemPrompt: String?
   }
   struct LoggingSection: Codable {
     var level: String
@@ -281,8 +283,11 @@ public enum ConfigLoader {
       contextWindowThreshold: contextWindowThreshold,
       serverURL: baseURL,
       apiKey: resolvedAPIKey,
+      apiType: resolvedAPIType,
       workingDirectory: ".",
-      reasoningEnabled: profile.agent.reasoning
+      reasoningEnabled: profile.agent.reasoning,
+      maxTokens: profile.agent.maxTokens,
+      systemPrompt: profile.agent.systemPrompt
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,
