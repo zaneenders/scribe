@@ -415,8 +415,9 @@ private func runSingleCodexRound(
   emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
   if let u = processor.lastUsage {
-    let genStart = processor.firstStreamContentAt ?? processor.streamWallStart
-    let genSec = (clock.now - genStart) / .seconds(1)
+    // Usage output tokens include hidden reasoning, so measure from the start of the
+    // response stream rather than the first visible text/tool delta.
+    let genSec = (clock.now - processor.streamWallStart) / .seconds(1)
     let tps: Double? = {
       guard let c = u.outputTokens, c > 0 else { return nil }
       return Double(c) / max(0.001, genSec)

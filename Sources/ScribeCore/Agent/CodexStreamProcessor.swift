@@ -15,7 +15,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   private(set) var lastUsage: ScribeLLMCodex.Components.Schemas.CodexUsage?
   private(set) var streamStarted = false
   private(set) var streamSection: AssistantStreamSection?
-  private(set) var firstStreamContentAt: ContinuousClock.Instant?
   private(set) var decodedChunkCount = 0
   private(set) var isIncomplete = false
   private(set) var incompleteReason: String?
@@ -287,7 +286,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   }
 
   private mutating func markStreamStarted() {
-    if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
     streamStarted = true
   }
 
