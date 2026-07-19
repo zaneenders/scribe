@@ -290,13 +290,16 @@ enum ChatSessionStore {
     }
     let data = try Data(contentsOf: URL(fileURLWithPath: path.string))
     let lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
-    return lines.compactMap { line in
+    return try lines.map { line in
       let lineData = Data(line)
       if let persisted = try? dec.decode(PersistedMessage.self, from: lineData) {
-        return try? persisted.hydrated(in: directory)
+        return try persisted.hydrated(in: directory)
       }
       // Legacy sessions stored ScribeMessage directly, including inline data URIs.
-      return try? dec.decode(ScribeMessage.self, from: lineData)
+      guard let message = try? dec.decode(ScribeMessage.self, from: lineData) else {
+        throw ScribeError.sessionCorrupted(reason: "Unrecognized message format in session file")
+      }
+      return message
     }
   }
 
