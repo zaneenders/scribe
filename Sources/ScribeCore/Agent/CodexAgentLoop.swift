@@ -360,7 +360,7 @@ private func runSingleCodexRound(
 // MARK: - Message Conversion
 
 /// Convert standard ChatMessage array to Codex input items.
-private func convertChatMessagesToCodexInput(
+func convertChatMessagesToCodexInput(
   _ messages: [ScribeLLM.Components.Schemas.ChatMessage]
 ) -> [ScribeLLMCodex.Components.Schemas.CodexInputItem]? {
   var items: [ScribeLLMCodex.Components.Schemas.CodexInputItem] = []
@@ -373,11 +373,20 @@ private func convertChatMessagesToCodexInput(
       )))
 
     case .user:
-      if let text = msgContentString(msg) {
-        items.append(.user(ScribeLLMCodex.Components.Schemas.CodexUserMessage(
-          role: .user,
-          content: .case1(text)
-        )))
+      if let content = msg.content {
+        switch content {
+        case .case1(let text):
+          items.append(.user(ScribeLLMCodex.Components.Schemas.CodexUserMessage(
+            role: .user,
+            content: .case1(text)
+          )))
+        case .case2(let parts):
+          let codexParts = parts.map(convertChatContentPartToCodexInputContent)
+          items.append(.user(ScribeLLMCodex.Components.Schemas.CodexUserMessage(
+            role: .user,
+            content: .case2(codexParts)
+          )))
+        }
       }
 
     case .assistant:
@@ -422,6 +431,30 @@ private func msgContentString(_ msg: ScribeLLM.Components.Schemas.ChatMessage) -
   switch content {
   case .case1(let str): return str
   default: return nil
+  }
+}
+
+func convertChatContentPartToCodexInputContent(
+  _ part: ScribeLLM.Components.Schemas.ChatContentPart
+) -> ScribeLLMCodex.Components.Schemas.CodexInputContent {
+  switch part {
+  case .text(let textPart):
+    return .inputText(ScribeLLMCodex.Components.Schemas.CodexInputText(
+      _type: .inputText,
+      text: textPart.text
+    ))
+  case .imageUrl(let imagePart):
+    return .inputImage(ScribeLLMCodex.Components.Schemas.CodexInputImage(
+      _type: .inputImage,
+      imageUrl: imagePart.imageUrl.url,
+      detail: imagePart.imageUrl.detail.map { detail in
+        switch detail {
+        case .auto: return .auto
+        case .low: return .low
+        case .high: return .high
+        }
+      }
+    ))
   }
 }
 
