@@ -41,7 +41,7 @@ struct KimiK3SupportTests {
       apiKey: "sk-kimi-test",
       serverURL: KimiK3Support.kimiCodeBaseURL
     )
-    #expect(transport == .kimiCodeAnthropic)
+    #expect(transport == .kimiCodeOpenAI)
   }
 
   @Test func resolvesMoonshotTransport() throws {

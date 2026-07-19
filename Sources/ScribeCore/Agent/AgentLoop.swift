@@ -333,8 +333,8 @@ private func runSingleRound(
     }
     let hint: String = {
       let d = detail.lowercased()
-      if code == 401, config.requestProfile == .kimiK3 {
-        return " Kimi Code keys (sk-kimi-…) require api.baseUrl https://api.kimi.com/coding; Moonshot platform keys require https://api.moonshot.ai."
+      if code == 401, config.requestProfile == .moonshotK3 || config.requestProfile == .kimiCode {
+        return " Check your API key matches api.baseUrl: Kimi Code keys require https://api.kimi.com/coding; Moonshot platform keys require https://api.moonshot.ai."
       }
       if d.contains("model"), d.contains("not found") {
         return " The configured model was not found."
@@ -438,9 +438,10 @@ private func makeChatCompletionRequest(
       reasoning: config.reasoningEnabled == nil
         ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled),
       reasoningEffort: nil,
-      maxCompletionTokens: nil
+      maxCompletionTokens: nil,
+      thinking: nil
     )
-  case .kimiK3:
+  case .moonshotK3:
     try KimiK3Support.validateMessages(messages)
     return Components.Schemas.CreateChatCompletionRequest(
       model: config.model,
@@ -453,7 +454,24 @@ private func makeChatCompletionRequest(
       streamOptions: .init(includeUsage: true),
       reasoning: nil,
       reasoningEffort: .max,
-      maxCompletionTokens: config.maxCompletionTokens
+      maxCompletionTokens: config.maxCompletionTokens,
+      thinking: nil
+    )
+  case .kimiCode:
+    try KimiK3Support.validateMessages(messages)
+    return Components.Schemas.CreateChatCompletionRequest(
+      model: config.model,
+      messages: messages,
+      stream: true,
+      temperature: nil,
+      maxTokens: nil,
+      tools: tools,
+      toolChoice: nil,
+      streamOptions: .init(includeUsage: true),
+      reasoning: nil,
+      reasoningEffort: nil,
+      maxCompletionTokens: config.maxCompletionTokens,
+      thinking: .init(_type: .enabled, effort: "max", keep: nil)
     )
   }
 }

@@ -12,13 +12,17 @@ public enum OpenAICompatibleClient {
   }
 
   /// OpenAI-compatible client for Kimi Code (`api.kimi.com/coding`).
-  public static func makeForKimiCode(serverURL: URL, apiKey: String?) -> Client {
+  public static func makeForKimiCode(
+    serverURL: URL,
+    apiKey: String?,
+    headers: [String: String]
+  ) -> Client {
     Client(
       serverURL: serverURL,
       transport: AsyncHTTPClientTransport(),
       middlewares: [
         BearerTokenMiddleware(token: apiKey),
-        KimiCodeRequestMiddleware(headers: KimiCodeIdentity.requestHeaders()),
+        KimiCodeRequestMiddleware(headers: headers),
       ]
     )
   }

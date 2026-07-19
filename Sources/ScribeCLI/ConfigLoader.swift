@@ -269,7 +269,7 @@ public enum ConfigLoader {
 
     if resolvedAPIType == "kimi" {
       if resolvedAPIKey == nil,
-        let envKey = ProcessInfo.processInfo.environment["MOONSHOT_API_KEY"]?
+        let envKey = ProcessInfo.processInfo.environment["KIMI_API_KEY"]?
           .trimmingCharacters(in: .whitespacesAndNewlines),
         !envKey.isEmpty
       {

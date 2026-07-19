@@ -198,14 +198,17 @@ public struct ScribeAgent: Sendable {
         self.client = OpenAICompatibleClient.make(
           serverURL: serverURL, apiKey: configuration.apiKey)
         self.anthropicClient = nil
-        self._requestProfile = .kimiK3
+        self._requestProfile = .moonshotK3
         self._maxCompletionTokens = configuration.maxTokens
-      case .kimiCodeAnthropic:
-        self.client = nil
-        self.anthropicClient = KimiCodeClient.make(
-          serverURL: serverURL, token: configuration.apiKey)
-        self._requestProfile = .standard
-        self._maxCompletionTokens = nil
+      case .kimiCodeOpenAI:
+        self.client = OpenAICompatibleClient.makeForKimiCode(
+          serverURL: serverURL,
+          apiKey: configuration.apiKey,
+          headers: KimiCodeIdentity.requestHeaders())
+        self.anthropicClient = nil
+        try KimiK3Support.validateMaxCompletionTokens(configuration.maxTokens)
+        self._requestProfile = .kimiCode
+        self._maxCompletionTokens = configuration.maxTokens
       }
       self.codexClient = nil
       self.codexAccessToken = nil

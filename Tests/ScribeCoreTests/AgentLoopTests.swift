@@ -990,7 +990,7 @@ struct AgentLoopTests {
     #expect(stringContent(messages[2])?.contains("stopped") == true)
   }
 
-  @Test func kimiK3RequestUsesReasoningEffortAndOmitsSamplingParams() async throws {
+  @Test func moonshotK3RequestUsesReasoningEffortAndOmitsSamplingParams() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
@@ -1008,7 +1008,7 @@ struct AgentLoopTests {
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
       hooks: .default,
-      requestProfile: .kimiK3,
+      requestProfile: .moonshotK3,
       maxCompletionTokens: 8192
     )
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
@@ -1040,7 +1040,7 @@ struct AgentLoopTests {
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
       hooks: .default,
-      requestProfile: .kimiK3
+      requestProfile: .moonshotK3
     )
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let json = try #require(
@@ -1076,7 +1076,7 @@ struct AgentLoopTests {
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
       hooks: .default,
-      requestProfile: .kimiK3
+      requestProfile: .moonshotK3
     )
     await #expect(throws: ScribeError.self) {
       _ = try await runAgentLoop(
@@ -1120,7 +1120,7 @@ struct AgentLoopTests {
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
       hooks: .default,
-      requestProfile: .kimiK3
+      requestProfile: .moonshotK3
     )
     _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
     let bodies = transport.capturedRequestBodies()
@@ -1135,6 +1135,41 @@ struct AgentLoopTests {
     #expect(toolCalls[0]["id"] as? String == "c1")
     #expect(messages[2]["role"] as? String == "tool")
     #expect(messages[2]["tool_call_id"] as? String == "c1")
+  }
+
+  @Test func kimiCodeRequestUsesThinkingAndOmitsSamplingParams() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "k3",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      requestProfile: .kimiCode,
+      maxCompletionTokens: 8192
+    )
+    _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    let bodies = transport.capturedRequestBodies()
+    #expect(bodies.count == 1)
+    let json = try #require(JSONSerialization.jsonObject(with: bodies[0]) as? [String: Any])
+    let thinking = try #require(json["thinking"] as? [String: Any])
+    #expect(thinking["type"] as? String == "enabled")
+    #expect(thinking["effort"] as? String == "max")
+    #expect(json["max_completion_tokens"] as? Int == 8192)
+    #expect(json["temperature"] == nil)
+    #expect(json["reasoning_effort"] == nil)
+    #expect(json["reasoning"] == nil)
+    #expect(json["max_tokens"] == nil)
   }
 
 }

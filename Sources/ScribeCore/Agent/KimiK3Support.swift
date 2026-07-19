@@ -2,12 +2,13 @@ import ScribeLLM
 
 enum ChatCompletionRequestProfile: Sendable {
   case standard
-  case kimiK3
+  case moonshotK3
+  case kimiCode
 }
 
 enum KimiTransport: Sendable {
   case moonshotOpenAI
-  case kimiCodeAnthropic
+  case kimiCodeOpenAI
 }
 
 public enum KimiK3Support {
@@ -25,29 +26,31 @@ public enum KimiK3Support {
 
   static func resolveTransport(apiKey: String?, serverURL: String) throws -> KimiTransport {
     let base = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let apiKey, !apiKey.isEmpty {
-      if isKimiCodeAPIKey(apiKey) {
-        if base.contains("moonshot.ai") || base.contains("moonshot.cn") {
-          throw ScribeError.configuration(
-            key: "api.baseUrl",
-            reason:
-              "Kimi Code API keys (sk-kimi-…) only work with api.baseUrl \"\(kimiCodeBaseURL)\", not \"\(moonshotBaseURL)\". Use a Moonshot platform API key from platform.kimi.ai for the Moonshot endpoint, or change api.baseUrl."
-          )
-        }
-        return .kimiCodeAnthropic
+    if isKimiCodeBaseURL(base) {
+      guard let apiKey, !apiKey.isEmpty else {
+        throw ScribeError.configuration(
+          key: "api.apiKey",
+          reason: "api.baseUrl \"\(kimiCodeBaseURL)\" requires a Kimi Code API key."
+        )
       }
-      if isKimiCodeBaseURL(base) {
+      guard isKimiCodeAPIKey(apiKey) else {
         throw ScribeError.configuration(
           key: "api.apiKey",
           reason:
-            "api.baseUrl \"\(kimiCodeBaseURL)\" requires a Kimi Code API key (sk-kimi-…). Moonshot platform keys use \"\(moonshotBaseURL)\"."
+            "api.baseUrl \"\(kimiCodeBaseURL)\" requires a Kimi Code API key (sk-kimi-…); Moonshot platform keys use https://api.moonshot.ai."
         )
       }
-    } else if isKimiCodeBaseURL(base) {
-      throw ScribeError.configuration(
-        key: "api.apiKey",
-        reason: "api.baseUrl \"\(kimiCodeBaseURL)\" requires a Kimi Code API key (sk-kimi-…)."
-      )
+      return .kimiCodeOpenAI
+    }
+    if let apiKey, !apiKey.isEmpty, isKimiCodeAPIKey(apiKey) {
+      if base.contains("moonshot.ai") || base.contains("moonshot.cn") {
+        throw ScribeError.configuration(
+          key: "api.baseUrl",
+          reason:
+            "Kimi Code API keys only work with api.baseUrl \"\(kimiCodeBaseURL)\", not Moonshot platform URLs. Create a key at kimi.com/code or change api.baseUrl."
+        )
+      }
+      return .kimiCodeOpenAI
     }
     return .moonshotOpenAI
   }
@@ -62,7 +65,7 @@ public enum KimiK3Support {
       throw ScribeError.configuration(
         key: "agent.maxTokens",
         reason:
-          "Kimi K3 max_completion_tokens must be between 1 and \(maxCompletionTokensLimit); got \(value)."
+          "Kimi max_completion_tokens must be between 1 and \(maxCompletionTokensLimit); got \(value)."
       )
     }
   }
@@ -83,7 +86,7 @@ public enum KimiK3Support {
     if url.hasPrefix("ms://") { return }
     throw ScribeError.invalidInput(
       message:
-        "Kimi K3 vision input must use base64 data URIs or ms:// file references; public URLs are not supported."
+        "Kimi vision input must use base64 data URIs or ms:// file references; public URLs are not supported."
     )
   }
 }

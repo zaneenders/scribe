@@ -29,7 +29,7 @@ import SystemPackage
 
   @Option(
     name: .long,
-    help: "Log in to a provider: \"codex\" (ChatGPT), \"kimi\" (Kimi K3 API key), or \"anthropic\" (Anthropic API key)."
+    help: "Log in to a provider: \"codex\" (ChatGPT), \"kimi\" (Kimi Code API key), or \"anthropic\" (Anthropic API key)."
   )
   var login: String?
 
@@ -387,8 +387,8 @@ extension ScribeCLI {
   }
 
   func loginApiKey(provider: String, loaded: LoadedConfig) async throws {
-    let displayName = provider == "kimi" ? "Kimi K3" : "Anthropic"
-    let envVar = provider == "kimi" ? "MOONSHOT_API_KEY" : "ANTHROPIC_API_KEY"
+    let displayName = provider == "kimi" ? "Kimi Code" : "Anthropic"
+    let envVar = provider == "kimi" ? "KIMI_API_KEY" : "ANTHROPIC_API_KEY"
 
     print("Enter your \(displayName) API key.")
     print("(You can also set the \(envVar) environment variable.)")
