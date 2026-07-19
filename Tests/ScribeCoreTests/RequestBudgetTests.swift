@@ -1,3 +1,4 @@
+import Logging
 import ScribeLLM
 import Testing
 
@@ -23,6 +24,18 @@ func requestBudgetAllowsSmallRequests() throws {
 
   #expect(reason == nil)
   #expect(messages.count == 1)
+}
+
+@Test
+func requestBudgetSerializesOpenAPIToolParameters() throws {
+  let tool = ShellTool.toChatTool(logger: Logger(label: "test.request-budget"))
+
+  let estimate = try #require(estimateRequestBudget(
+    messages: [], tools: [tool], contextWindow: 4_000))
+
+  let metadataBytes =
+    tool.function.name.utf8.count + (tool.function.description ?? "").utf8.count
+  #expect(estimate.toolDefinitionBytes > metadataBytes)
 }
 
 @Test

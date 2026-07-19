@@ -55,10 +55,9 @@ func estimateRequestBudget(
   let toolDefinitionBytes: Int = tools.reduce(into: 0) { total, tool in
     total += tool.function.name.utf8.count
     total += (tool.function.description ?? "").utf8.count
-    if let data = try? JSONSerialization.data(
-      withJSONObject: tool.function.parameters.additionalProperties,
-      options: [.sortedKeys])
-    {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    if let data = try? encoder.encode(tool.function.parameters.additionalProperties) {
       total += data.count
     }
   }
