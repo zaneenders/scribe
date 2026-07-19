@@ -280,15 +280,35 @@ private func runSingleCodexRound(
     promptCacheKey: nil
   )
 
+  let requestMetrics = codexRequestMetrics(contextMessages)
   let httpStart = clock.now
-  logger.info("agent.http.request.codex", metadata: ["model": "\(config.model)"])
+  logger.info(
+    "agent.http.request.codex",
+    metadata: [
+      "model": "\(config.model)",
+      "round": "\(round)",
+      "messages": "\(contextMessages.count)",
+      "input_items": "\(input?.count ?? 0)",
+      "tools": "\(codexTools?.count ?? 0)",
+      "text_chars": "\(requestMetrics.textChars)",
+      "image_count": "\(requestMetrics.imageCount)",
+      "image_uri_chars": "\(requestMetrics.imageURIChars)",
+      "tool_call_count": "\(requestMetrics.toolCallCount)",
+      "tool_output_chars": "\(requestMetrics.toolOutputChars)",
+    ])
 
   let response = try await config.client.createCodexResponse(body: .json(requestBody))
 
   let httpBody: HTTPBody
   switch response {
   case .ok(let ok):
-    logger.debug("agent.http.response.codex", metadata: ["status": "200"])
+    logger.debug(
+      "agent.http.response.codex",
+      metadata: [
+        "status": "200",
+        "round": "\(round)",
+        "request_elapsed_ms": "\((clock.now - httpStart) / .milliseconds(1))",
+      ])
     httpBody = try ok.body.textEventStream
   case .undocumented(statusCode: let code, let payload):
     var detail = ""
@@ -382,6 +402,41 @@ private func runSingleCodexRound(
 }
 
 // MARK: - Message Conversion
+
+private struct CodexRequestMetrics {
+  var textChars = 0
+  var imageCount = 0
+  var imageURIChars = 0
+  var toolCallCount = 0
+  var toolOutputChars = 0
+}
+
+private func codexRequestMetrics(
+  _ messages: [ScribeLLM.Components.Schemas.ChatMessage]
+) -> CodexRequestMetrics {
+  var metrics = CodexRequestMetrics()
+  for message in messages {
+    if let content = message.content {
+      switch content {
+      case .case1(let text):
+        metrics.textChars += text.count
+        if message.role == .tool { metrics.toolOutputChars += text.count }
+      case .case2(let parts):
+        for part in parts {
+          switch part {
+          case .text(let text):
+            metrics.textChars += text.text.count
+          case .imageUrl(let image):
+            metrics.imageCount += 1
+            metrics.imageURIChars += image.imageUrl.url.count
+          }
+        }
+      }
+    }
+    metrics.toolCallCount += message.toolCalls?.count ?? 0
+  }
+  return metrics
+}
 
 func codexAttachmentMessage(
   _ attachment: ToolAttachment

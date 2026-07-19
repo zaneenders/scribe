@@ -235,9 +235,23 @@ struct CodexStreamProcessor<AO: AbortObserver> {
       description += " (\(details.joined(separator: ", ")))"
     }
 
-    if message == nil, let raw = compactJSON(event) {
-      description += " — event: \(raw)"
+    let rawEvent = compactJSON(event, limit: 4_000)
+    if message == nil, let rawEvent {
+      description += " — event: \(rawEvent)"
     }
+
+    logger.error(
+      "agent.stream.provider-error.codex",
+      metadata: [
+        "event_type": "\(event["type"] as? String ?? "unknown")",
+        "message": "\(message ?? "missing")",
+        "code": "\(code ?? "missing")",
+        "error_type": "\(errorType ?? "missing")",
+        "response_id": "\(responseID ?? "missing")",
+        "decoded_chunks": "\(decodedChunkCount)",
+        "stream_started": "\(streamStarted)",
+        "raw_event": "\(rawEvent ?? "unavailable")",
+      ])
     return .generic(description)
   }
 
@@ -249,12 +263,11 @@ struct CodexStreamProcessor<AO: AbortObserver> {
     }.first
   }
 
-  private func compactJSON(_ object: [String: Any]) -> String? {
+  private func compactJSON(_ object: [String: Any], limit: Int = 1_000) -> String? {
     guard JSONSerialization.isValidJSONObject(object),
           let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     else { return nil }
     let text = String(decoding: data, as: UTF8.self)
-    let limit = 1_000
     return text.count <= limit ? text : "\(text.prefix(limit))…"
   }
 

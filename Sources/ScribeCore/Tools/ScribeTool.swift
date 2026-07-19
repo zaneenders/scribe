@@ -42,6 +42,15 @@ public struct ToolResult: Sendable {
 
 public protocol AttachableToolResult {
   var toolAttachments: [ToolAttachment] { get }
+
+  /// Compact tool output sent back to the model alongside the attachments.
+  /// Use this to keep large attachment payloads (for example base64 image data)
+  /// out of ordinary tool messages, where they would otherwise be duplicated.
+  var attachmentToolResultText: String? { get }
+}
+
+extension AttachableToolResult {
+  public var attachmentToolResultText: String? { nil }
 }
 
 public protocol WarnableToolResult {

@@ -98,17 +98,21 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               attachments = []
             }
             let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
+            let modelOutput = (value as? AttachableToolResult)?.attachmentToolResultText
+              ?? encoded
             logger.debug(
               "agent.tool.completed",
               metadata: [
                 "tool": "\(name)",
                 "elapsed_ms": "\(elapsedMs)",
-                "output_chars": "\(encoded.count)",
+                "encoded_output_chars": "\(encoded.count)",
+                "model_output_chars": "\(modelOutput.count)",
+                "attachment_payload_omitted_from_model_output": "\(modelOutput.count != encoded.count)",
                 "attachments": "\(attachments.count)",
                 "warnings": "\(warnings.count)",
                 "args": "\(arguments.logSafe())",
               ])
-            return ToolResult(text: encoded, attachments: attachments, warnings: warnings)
+            return ToolResult(text: modelOutput, attachments: attachments, warnings: warnings)
           } catch {
             logger.warning(
               "agent.tool.encode_failed",

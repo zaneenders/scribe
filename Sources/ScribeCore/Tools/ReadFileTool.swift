@@ -25,6 +25,20 @@ struct ReadFileImageResult: Encodable, AttachableToolResult, Sendable {
   var toolAttachments: [ToolAttachment] {
     [ToolAttachment(mimeType: mimeType, base64: base64, sourcePath: path)]
   }
+
+  var attachmentToolResultText: String? {
+    let payload: [String: Any] = [
+      "ok": true,
+      "path": path,
+      "is_image": true,
+      "mime_type": mimeType,
+      "bytes": bytes,
+      "attached": true,
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+    else { return nil }
+    return String(decoding: data, as: UTF8.self)
+  }
 }
 
 struct ReadFileImageTooLargeResult: Encodable, WarnableToolResult, Sendable {
