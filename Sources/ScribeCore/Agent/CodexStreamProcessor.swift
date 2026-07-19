@@ -19,6 +19,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   private(set) var decodedChunkCount = 0
   private(set) var isIncomplete = false
   private(set) var incompleteReason: String?
+  private var receivedTerminalEvent = false
   let streamWallStart: ContinuousClock.Instant
 
   init(
@@ -75,6 +76,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         // Handle terminal events
         switch eventType {
         case "response.completed":
+          receivedTerminalEvent = true
           if let response = json["response"] as? [String: Any] {
             turn.responseId = response["id"] as? String
             if let usage = response["usage"] as? [String: Any] {
@@ -89,6 +91,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           return
 
         case "response.incomplete":
+          receivedTerminalEvent = true
           if let response = json["response"] as? [String: Any] {
             turn.responseId = response["id"] as? String
             if let usage = response["usage"] as? [String: Any] {
@@ -107,9 +110,11 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           return
 
         case "response.failed":
+          receivedTerminalEvent = true
           throw codexStreamError(from: json, fallback: "Codex response failed")
 
         case "error":
+          receivedTerminalEvent = true
           throw codexStreamError(from: json, fallback: "Codex stream error")
 
         // Content events
@@ -196,8 +201,14 @@ struct CodexStreamProcessor<AO: AbortObserver> {
       throw error
     }
 
+    if !receivedTerminalEvent {
+      isIncomplete = true
+      incompleteReason = "Stream ended without terminal event"
+    }
     if streamStarted {
       onEvent(.output(.finalized))
+    } else {
+      onEvent(.output(.empty))
     }
   }
 
