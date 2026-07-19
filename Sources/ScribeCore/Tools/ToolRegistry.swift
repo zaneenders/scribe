@@ -100,19 +100,26 @@ public struct ToolRegistry: Sendable, ToolExecutor {
             let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
             let modelOutput = (value as? AttachableToolResult)?.attachmentToolResultText
               ?? encoded
-            logger.debug(
+            let toolResult = ToolResult(
+              text: modelOutput, attachments: attachments, warnings: warnings)
+            let logLevel: Logger.Level = toolResult.textWasTruncated ? .warning : .debug
+            logger.log(
+              level: logLevel,
               "agent.tool.completed",
               metadata: [
                 "tool": "\(name)",
                 "elapsed_ms": "\(elapsedMs)",
                 "encoded_output_chars": "\(encoded.count)",
                 "model_output_chars": "\(modelOutput.count)",
+                "bounded_output_chars": "\(toolResult.text.count)",
+                "bounded_output_bytes": "\(toolResult.text.utf8.count)",
+                "global_output_truncated": "\(toolResult.textWasTruncated)",
                 "attachment_payload_omitted_from_model_output": "\(modelOutput.count != encoded.count)",
                 "attachments": "\(attachments.count)",
-                "warnings": "\(warnings.count)",
+                "warnings": "\(toolResult.warnings.count)",
                 "args": "\(arguments.logSafe())",
               ])
-            return ToolResult(text: modelOutput, attachments: attachments, warnings: warnings)
+            return toolResult
           } catch {
             logger.warning(
               "agent.tool.encode_failed",
