@@ -1,7 +1,8 @@
 import Foundation
 import Testing
 
-@testable import ScribeCore
+@testable import ScribeCodexAuth
+import ScribeCore
 
 @Suite
 struct CodexCredentialsTests {

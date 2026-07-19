@@ -88,8 +88,6 @@ private func codexOverflowConfig(transport: CodexOverflowTransport) -> CodexAgen
   CodexAgentLoopConfig(
     model: "test-codex",
     client: ScribeLLMCodex.Client(serverURL: URL(string: "http://test")!, transport: transport),
-    accessToken: "",
-    accountID: "",
     toolExecutor: CodexAttachingExecutor(),
     chatTools: [],
     maxToolRounds: .max,

@@ -44,8 +44,6 @@ private func commit(
 struct CodexAgentLoopConfig: Sendable {
   let model: String
   let client: ScribeLLMCodex.Client
-  let accessToken: String
-  let accountID: String
   let toolExecutor: any ToolExecutor
   let chatTools: [ScribeLLM.Components.Schemas.ChatTool]
   let maxToolRounds: Int
@@ -57,8 +55,6 @@ struct CodexAgentLoopConfig: Sendable {
   init(
     model: String,
     client: ScribeLLMCodex.Client,
-    accessToken: String,
-    accountID: String,
     toolExecutor: any ToolExecutor,
     chatTools: [ScribeLLM.Components.Schemas.ChatTool],
     maxToolRounds: Int,
@@ -69,8 +65,6 @@ struct CodexAgentLoopConfig: Sendable {
   ) {
     self.model = model
     self.client = client
-    self.accessToken = accessToken
-    self.accountID = accountID
     self.toolExecutor = toolExecutor
     self.chatTools = chatTools
     self.maxToolRounds = maxToolRounds

@@ -61,19 +61,29 @@ let package = Package(
       ]
     ),
     .target(
+      name: "ScribeCodexAuth",
+      dependencies: [
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "AsyncHTTPClient", package: "async-http-client"),
+        .product(name: "NIOCore", package: "swift-nio"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ]
+    ),
+    .target(
       name: "ScribeCore",
       dependencies: [
         "ScribeLLM",
         "ScribeLLMCodex",
+        "ScribeCodexAuth",
         .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
         .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "Configuration", package: "swift-configuration"),
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "_NIOFileSystem", package: "swift-nio"),
-        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
-        .product(name: "AsyncHTTPClient", package: "async-http-client"),
-        .product(name: "NIOCore", package: "swift-nio"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -84,6 +94,7 @@ let package = Package(
       name: "ScribeCLI",
       dependencies: [
         "ScribeCore",
+        "ScribeCodexAuth",
         .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
@@ -106,6 +117,7 @@ let package = Package(
       dependencies: [
         "ScribeCore",
         "ScribeLLM",
+        "ScribeCodexAuth",
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

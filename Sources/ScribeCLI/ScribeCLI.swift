@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import ProfileRecorderServer
+import ScribeCodexAuth
 import ScribeCore
 import SystemPackage
 
