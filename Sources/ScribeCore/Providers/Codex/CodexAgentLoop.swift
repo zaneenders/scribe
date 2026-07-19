@@ -259,6 +259,7 @@ func runCodexAgentLoop(
           newMessages: &newMessages,
           providerDetail: detail)
       else {
+        outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
         throw scribeError
       }
       attemptedRecovery = true

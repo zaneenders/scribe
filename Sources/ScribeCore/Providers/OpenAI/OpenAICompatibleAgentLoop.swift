@@ -134,6 +134,7 @@ func runAgentLoop(
           newMessages: &newMessages,
           providerDetail: detail)
       else {
+        outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
         throw scribeError
       }
       attemptedRecovery = true
@@ -144,6 +145,7 @@ func runAgentLoop(
     } catch let scribeError as ScribeError {
       // Non-recoverable ScribeErrors (apiHTTPError, etc.) — propagate
       // so callers can inspect the specific error type.
+      outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
       throw scribeError
     } catch {
       logger.error(
