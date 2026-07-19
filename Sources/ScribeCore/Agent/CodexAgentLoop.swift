@@ -215,9 +215,13 @@ func runCodexAgentLoop(
       outcome = .interrupted
       return (newMessages, outcome)
     } catch {
-      logger.error("agent.loop.error.codex", metadata: ["round": "\(round)", "err": "\(String(describing: error))"])
-      emit(.boundary(.turnEnd(round: round, outcome: .error(String(describing: error)))))
-      outcome = .error(String(describing: error))
+      let description = (error as? LocalizedError)?.errorDescription
+        ?? String(describing: error)
+      logger.error(
+        "agent.loop.error.codex",
+        metadata: ["round": "\(round)", "err": "\(description)"])
+      emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
+      outcome = .error(description)
       return (newMessages, outcome)
     }
   }

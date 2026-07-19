@@ -106,14 +106,10 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           return
 
         case "response.failed":
-          let resp = json["response"] as? [String: Any]
-          let error = resp?["error"] as? [String: Any]
-          let msg = error?["message"] as? String ?? "Codex response failed"
-          throw NSError(domain: "Codex", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
+          throw codexStreamError(from: json, fallback: "Codex response failed")
 
         case "error":
-          let msg = json["message"] as? String ?? "Codex error"
-          throw NSError(domain: "Codex", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
+          throw codexStreamError(from: json, fallback: "Codex stream error")
 
         // Content events
         case "response.output_text.delta":
@@ -203,6 +199,64 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   }
 
   // MARK: - Helpers
+
+  private func codexStreamError(
+    from event: [String: Any],
+    fallback: String
+  ) -> ScribeError {
+    let response = event["response"] as? [String: Any]
+    let nestedError = (response?["error"] as? [String: Any])
+      ?? (event["error"] as? [String: Any])
+
+    let message = firstNonEmptyString(
+      nestedError?["message"],
+      event["message"],
+      response?["message"]
+    )
+    let code = firstNonEmptyString(
+      nestedError?["code"],
+      event["code"],
+      response?["code"]
+    )
+    let errorType = firstNonEmptyString(
+      nestedError?["type"],
+      event["error_type"],
+      response?["error_type"]
+    )
+    let responseID = firstNonEmptyString(response?["id"], event["response_id"])
+
+    var description = message ?? fallback
+    let details = [
+      code.map { "code: \($0)" },
+      errorType.map { "type: \($0)" },
+      responseID.map { "response: \($0)" },
+    ].compactMap { $0 }
+    if !details.isEmpty {
+      description += " (\(details.joined(separator: ", ")))"
+    }
+
+    if message == nil, let raw = compactJSON(event) {
+      description += " — event: \(raw)"
+    }
+    return .generic(description)
+  }
+
+  private func firstNonEmptyString(_ values: Any?...) -> String? {
+    values.lazy.compactMap { value in
+      guard let string = value as? String else { return nil }
+      let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }.first
+  }
+
+  private func compactJSON(_ object: [String: Any]) -> String? {
+    guard JSONSerialization.isValidJSONObject(object),
+          let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    else { return nil }
+    let text = String(decoding: data, as: UTF8.self)
+    let limit = 1_000
+    return text.count <= limit ? text : "\(text.prefix(limit))…"
+  }
 
   private mutating func markStreamStarted() {
     if firstStreamContentAt == nil { firstStreamContentAt = clock.now }

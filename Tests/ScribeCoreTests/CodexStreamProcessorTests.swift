@@ -146,6 +146,54 @@ func codexStreamWithDoneSentinelStillFinalizes() async throws {
 }
 
 @Test
+func codexStreamSurfacesTopLevelErrorDetails() async throws {
+  let sse = makeSSE(
+    #"{"type":"error","code":"input_too_large","message":"Request payload exceeds the limit"}"#
+  )
+
+  do {
+    _ = try await driveProcessor(sse: sse)
+    Issue.record("Expected the Codex error event to throw")
+  } catch let error as ScribeError {
+    #expect(
+      error.errorDescription
+        == "Request payload exceeds the limit (code: input_too_large)")
+  }
+}
+
+@Test
+func codexStreamSurfacesNestedResponseErrorDetails() async throws {
+  let sse = makeSSE(
+    #"{"type":"response.failed","response":{"id":"resp_failed","error":{"code":"invalid_image","type":"invalid_request_error","message":"Image could not be processed"}}}"#
+  )
+
+  do {
+    _ = try await driveProcessor(sse: sse)
+    Issue.record("Expected the failed Codex response to throw")
+  } catch let error as ScribeError {
+    #expect(
+      error.errorDescription
+        == "Image could not be processed (code: invalid_image, type: invalid_request_error, response: resp_failed)")
+  }
+}
+
+@Test
+func codexStreamIncludesRawEventWhenErrorHasNoMessage() async throws {
+  let sse = makeSSE(
+    #"{"type":"error","code":"unknown","param":"input"}"#
+  )
+
+  do {
+    _ = try await driveProcessor(sse: sse)
+    Issue.record("Expected the Codex error event to throw")
+  } catch let error as ScribeError {
+    #expect(
+      error.errorDescription
+        == #"Codex stream error (code: unknown) — event: {"code":"unknown","param":"input","type":"error"}"#)
+  }
+}
+
+@Test
 func codexStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent() async throws {
   // If both response.completed and [DONE] appear, the early return
   // from response.completed must prevent a double-finalize from the

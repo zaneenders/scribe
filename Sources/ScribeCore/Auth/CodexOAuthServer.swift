@@ -89,7 +89,7 @@ enum CodexOAuthCallbackServer {
     timeout: TimeInterval = loginTimeout,
     onReady: (@Sendable (Result<Void, Error>) -> Void)? = nil
   ) async throws -> String {
-    let box = SocketBox()
+    let box = ListeningSocket()
 
     return try await withTaskCancellationHandler {
       try await withThrowingTaskGroup(of: String.self) { group in
@@ -148,7 +148,7 @@ enum CodexOAuthCallbackServer {
     expectedState: String,
     continuation: CheckedContinuation<String, Error>,
     onReady: (@Sendable (Result<Void, Error>) -> Void)?,
-    box: SocketBox
+    box: ListeningSocket
   ) {
     func failStartup(_ error: CodexOAuthError) {
       onReady?(.failure(error))
@@ -161,19 +161,14 @@ enum CodexOAuthCallbackServer {
       failStartup(.serverError("socket() failed: \(errno)"))
       return
     }
-    box.fd = sock
-    defer {
-      if !box.closed {
-        box.closed = true
-        close(sock)
-      }
-    }
-
-    // If the task was already cancelled before we created the socket, bail out.
-    if box.closed {
+    // Transfer ownership to the cancellation state. If cancellation arrived
+    // before socket creation, retain ownership here and close it immediately.
+    guard box.install(sock) else {
+      close(sock)
       failStartup(.loginCancelled)
       return
     }
+    defer { box.closeIfOpen() }
 
     // --- SO_REUSEADDR ---
     var reuse: Int32 = 1
