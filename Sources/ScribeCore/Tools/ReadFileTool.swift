@@ -17,6 +17,7 @@ struct ReadFileToolResult: Encodable, Sendable {
   let contentCharacters: Int
   let maxContentBytes: Int
   let maxContentCharacters: Int
+  let byteOffset: Int?
 }
 
 struct ReadFileImageResult: Encodable, AttachableToolResult, Sendable {
@@ -63,6 +64,8 @@ public struct ReadFileTool: ScribeTool {
       + "`bytes`, `total_lines`, `start_line`, `end_line`, and `truncated` so you can decide "
       + "whether to request another page (`offset = previous end_line + 1`). Text output is also "
       + "capped at 64 KiB and 64,000 characters, including when `limit` is `0`. "
+      + "When the cap lands inside a long line the result includes `byte_offset`; pass it back "
+      + "as the `byte_offset` parameter on the next call to continue reading from that byte position. "
       + "Image files are automatically detected by their contents (magic bytes) and returned "
       + "as base64-encoded data so the model can view them."
   }
@@ -86,12 +89,22 @@ public struct ReadFileTool: ScribeTool {
           + "content cap always applies. Response includes `total_lines`, `start_line`, `end_line`, "
           + "`truncated`, and `truncation_reason` so you can tell whether to fetch another page.",
         required: false),
+      ScribeToolParameter(
+        name: "byte_offset", type: .integer,
+        description:
+          "Byte offset into the file to start reading from. Use when a previous result included "
+          + "a `byte_offset` field (the cap hit inside a long line). When provided the read skips "
+          + "to this byte position and the `offset` parameter is ignored.",
+        required: false),
     ]
   }
   public static var promptHint: String? {
     "For `read_file`, prefer paginating large files: pass `offset` (1-indexed start line) "
       + "and `limit` (max lines, default 2000) and use the returned `end_line` + 1 as the "
-      + "next `offset` if `truncated` is true. This keeps the conversation history small."
+      + "next `offset` if `truncated` is true. If the result has a `byte_offset` field the cap "
+      + "landed inside a long line; pass it as the `byte_offset` parameter on the next call "
+      + "to continue reading (do not pass `offset` in that case). "
+      + "This keeps the conversation history small."
   }
 
   public init() {}
@@ -105,6 +118,7 @@ public struct ReadFileTool: ScribeTool {
     let path = try ToolArgumentParsing.string(obj["path"], field: "path")
     let offset = ToolArgumentParsing.optionalInt(obj["offset"])
     let limit = ToolArgumentParsing.optionalInt(obj["limit"])
+    let byteOffset = ToolArgumentParsing.optionalInt(obj["byte_offset"])
 
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
     let s = fp.string
@@ -133,7 +147,7 @@ public struct ReadFileTool: ScribeTool {
       return result
     }
 
-    let result = try Self.readFile(path: path, offset: offset, limit: limit, workingDirectory: workingDirectory)
+    let result = try Self.readFile(path: path, offset: offset, limit: limit, byteOffset: byteOffset, workingDirectory: workingDirectory)
     let returnedLines = max(0, result.endLine - result.startLine + 1)
     logger.debug(
       "agent.tool.read_file",
@@ -149,6 +163,7 @@ public struct ReadFileTool: ScribeTool {
         "content_chars": "\(result.content.count)",
         "truncated": "\(result.truncated)",
         "truncation_reason": "\(result.truncationReason ?? "nil")",
+        "byte_offset": "\(result.byteOffset.map(String.init) ?? "nil")",
       ])
     return ReadFileToolResult(
       path: result.absolutePath,
@@ -162,7 +177,8 @@ public struct ReadFileTool: ScribeTool {
       contentBytes: result.content.utf8.count,
       contentCharacters: result.content.count,
       maxContentBytes: Self.maxContentBytes,
-      maxContentCharacters: Self.maxContentCharacters
+      maxContentCharacters: Self.maxContentCharacters,
+      byteOffset: result.byteOffset
     )
   }
 
@@ -175,12 +191,14 @@ public struct ReadFileTool: ScribeTool {
     let endLine: Int
     let truncated: Bool
     let truncationReason: String?
+    let byteOffset: Int?
   }
 
   private static func readFile(
     path: String,
     offset: Int?,
     limit: Int?,
+    byteOffset: Int?,
     workingDirectory: FilePath
   ) throws -> ReadFileResult {
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
@@ -188,7 +206,29 @@ public struct ReadFileTool: ScribeTool {
     let text = try String(contentsOfFile: s, encoding: .utf8)
     let totalBytes = text.utf8.count
 
-    let parts = text.split(separator: "\n", omittingEmptySubsequences: false)
+    // When byte_offset is provided, skip to that byte position in the file.
+    let effectiveText: String
+    let byteOffsetBase: Int  // byte offset in original file where effectiveText starts
+    if let bo = byteOffset, bo > 0, bo < text.utf8.count {
+      guard let utf8Idx = text.utf8.index(text.utf8.startIndex, offsetBy: bo, limitedBy: text.utf8.endIndex)
+      else {
+        return ReadFileResult(
+          absolutePath: s, content: "", totalBytes: totalBytes, totalLines: 0,
+          startLine: 0, endLine: 0, truncated: false, truncationReason: nil, byteOffset: nil)
+      }
+      guard let strIdx = String.Index(utf8Idx, within: text) else {
+        return ReadFileResult(
+          absolutePath: s, content: "", totalBytes: totalBytes, totalLines: 0,
+          startLine: 0, endLine: 0, truncated: false, truncationReason: nil, byteOffset: nil)
+      }
+      effectiveText = String(text[strIdx...])
+      byteOffsetBase = bo
+    } else {
+      effectiveText = text
+      byteOffsetBase = 0
+    }
+
+    let parts = effectiveText.split(separator: "\n", omittingEmptySubsequences: false)
     let totalLines = parts.count
 
     let startIndex = max(0, (offset ?? 1) - 1)
@@ -198,7 +238,6 @@ public struct ReadFileTool: ScribeTool {
     } else if limit == nil {
       resolvedLimit = defaultLineLimit
     } else {
-
       resolvedLimit = totalLines
     }
 
@@ -211,18 +250,52 @@ public struct ReadFileTool: ScribeTool {
         startLine: totalLines + 1,
         endLine: totalLines,
         truncated: false,
-        truncationReason: nil
+        truncationReason: nil,
+        byteOffset: nil
       )
     }
 
     let endIndex = min(totalLines, startIndex + resolvedLimit)
     let requestedSlice = parts[startIndex..<endIndex].joined(separator: "\n")
+
+    // Compute the byte offset in the *original* file where requestedSlice starts.
+    // Each part's byte length + 1 for its \n separator (lines before startIndex).
+    let sliceStartByteOffset: Int = {
+      var off = byteOffsetBase
+      for i in 0..<startIndex {
+        off += parts[i].utf8.count + 1  // +1 for the \n that was split away
+      }
+      return off
+    }()
+
     let bounded = boundedContent(requestedSlice)
+
+    // Count lines in the bounded (possibly backtracked) content.
     let returnedLineCount = bounded.content.reduce(into: 1) { count, character in
       if character == "\n" { count += 1 }
     }
-    let returnedEndLine = min(endIndex, startIndex + returnedLineCount)
-    let lineTruncated = endIndex < totalLines
+
+    // Determine whether the bounded content ends at a clean line boundary.
+    let endsAtNewline = bounded.content.isEmpty || bounded.content.last == "\n"
+
+    let returnedEndLine: Int
+    let nextByteOffset: Int?
+
+    if bounded.reason != nil && !endsAtNewline {
+      // Content cap landed mid-line and we couldn't backtrack to a newline
+      // (single long line or the cap landed in the first line with no prior newline).
+      // Report only complete lines and provide a byte offset for continuation.
+      returnedEndLine = startIndex + max(0, returnedLineCount - 1)
+      nextByteOffset = sliceStartByteOffset + bounded.content.utf8.count
+    } else {
+      returnedEndLine = min(endIndex, startIndex + returnedLineCount)
+      nextByteOffset = nil
+    }
+
+    let lineTruncated = (bounded.reason == nil) && endIndex < totalLines
+    let truncated = bounded.reason != nil || lineTruncated
+    let truncationReason = bounded.reason ?? (lineTruncated ? "line_limit" : nil)
+
     return ReadFileResult(
       absolutePath: s,
       content: bounded.content,
@@ -230,8 +303,9 @@ public struct ReadFileTool: ScribeTool {
       totalLines: totalLines,
       startLine: startIndex + 1,
       endLine: returnedEndLine,
-      truncated: bounded.reason != nil || lineTruncated,
-      truncationReason: bounded.reason ?? (lineTruncated ? "line_limit" : nil)
+      truncated: truncated,
+      truncationReason: truncationReason,
+      byteOffset: nextByteOffset
     )
   }
 
@@ -251,6 +325,26 @@ public struct ReadFileTool: ScribeTool {
       characters += 1
       end = next
     }
+
+    // Backtrack to the last newline so we always end at a clean line boundary.
+    // The slice content[..<end] should either hit EOF or end with \n.
+    if end < content.endIndex {
+      let lastIncluded = content.index(before: end)
+      if content[lastIncluded] != "\n" {
+        var backtrack = lastIncluded
+        while backtrack > content.startIndex {
+          backtrack = content.index(before: backtrack)
+          if content[backtrack] == "\n" {
+            // Include the newline in the returned content
+            end = content.index(after: backtrack)
+            break
+          }
+        }
+        // If no newline found, keep the original truncation point (mid-line)
+      }
+      // else: last included char is already \n — clean boundary, nothing to do
+    }
+    // else: end == content.endIndex — consumed everything, no backtracking needed
 
     let reason: String
     if characters == maxContentCharacters && bytes == maxContentBytes {
