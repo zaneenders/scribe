@@ -175,6 +175,9 @@ func runCodexAgentLoop(
           let finalResult = afterDecision.result
           emit(.boundary(.toolExecutionEnd(name: resolvedInv.name, output: finalResult.text)))
           emit(.tool(.invocation(name: resolvedInv.name, arguments: resolvedInv.arguments, output: finalResult.text)))
+          for warning in finalResult.warnings {
+            emit(.tool(.warning(warning)))
+          }
 
           emit(.boundary(.messageStart(role: .tool, round: round)))
           roundBuffer.append(
@@ -182,6 +185,21 @@ func runCodexAgentLoop(
               role: .tool, content: .case1(finalResult.text),
               name: nil, toolCalls: nil, toolCallId: resolvedInv.id))
           emit(.boundary(.messageEnd(role: .tool, round: round)))
+
+          for attachment in finalResult.attachments {
+            logger.info(
+              "agent.tool.attachment.inject.codex",
+              metadata: [
+                "round": "\(round)",
+                "tool": "\(resolvedInv.name)",
+                "mime_type": "\(attachment.mimeType)",
+                "base64_chars": "\(attachment.base64.count)",
+                "source_path": "\(attachment.sourcePath ?? "nil")",
+              ])
+            emit(.boundary(.messageStart(role: .user, round: round)))
+            roundBuffer.append(codexAttachmentMessage(attachment))
+            emit(.boundary(.messageEnd(role: .user, round: round)))
+          }
 
           if afterDecision.terminate {
             commit(&currentContext.messages, &newMessages, roundBuffer)
@@ -360,6 +378,19 @@ private func runSingleCodexRound(
 }
 
 // MARK: - Message Conversion
+
+func codexAttachmentMessage(
+  _ attachment: ToolAttachment
+) -> ScribeLLM.Components.Schemas.ChatMessage {
+  let label = (attachment.sourcePath ?? attachment.filename).map { "\($0):" } ?? "Attached media:"
+  return ScribeMessage(
+    role: .user,
+    contentParts: [
+      .text(label),
+      .image(url: attachment.dataUri, detail: nil),
+    ]
+  ).toChatMessage()
+}
 
 /// Convert standard ChatMessage array to Codex input items.
 func convertChatMessagesToCodexInput(

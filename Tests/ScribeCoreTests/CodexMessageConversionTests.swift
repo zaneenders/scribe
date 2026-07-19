@@ -1,4 +1,5 @@
 import Foundation
+import SystemPackage
 import Testing
 
 @testable import ScribeCore
@@ -89,6 +90,55 @@ func codexUserMessageWithImageAndTextParts() {
   }
   #expect(codexImage.imageUrl == imageURL)
   #expect(codexImage.detail == .auto)
+}
+
+@Test
+func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
+  // A valid 3x2 RGBA PNG: six pixels total.
+  let pngBase64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAFUlEQVR4nGP4z8DwH4QZGBgYGBgAAEKFCf6R29pAAAAAAElFTkSuQmCC"
+  let png = try #require(Data(base64Encoded: pngBase64))
+  #expect(png.count > 24)
+  #expect(png[16..<24].elementsEqual([0, 0, 0, 3, 0, 0, 0, 2]))
+
+  try await withTemporaryDirectory { directory in
+    let imageURL = directory.appendingPathComponent("six-pixels.png")
+    try png.write(to: imageURL)
+    let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
+    let result = try await registry.run(
+      name: "read_file",
+      arguments: try jsonArguments(["path": imageURL.path]),
+      workingDirectory: FilePath(directory.path),
+      logger: toolRunnerTestLogger,
+      abortObserver: AbortNotifier()
+    )
+    let attachment = try #require(result.attachments.first)
+    let message = codexAttachmentMessage(attachment)
+
+    guard case let .case2(chatParts) = message.content else {
+      Issue.record("Image input must be an array of content objects")
+      return
+    }
+    #expect(chatParts.count == 2)
+    guard case let .imageUrl(chatImage) = chatParts[1] else {
+      Issue.record("Expected the second content object to be an image")
+      return
+    }
+    #expect(chatImage.imageUrl.url == "data:image/png;base64,\(pngBase64)")
+    try KimiK3Support.validateMessages([message])
+
+    let items = try #require(convertChatMessagesToCodexInput([message]))
+    guard case let .user(user) = items[0], case let .case2(codexParts) = user.content else {
+      Issue.record("Expected a Codex user message with an input content array")
+      return
+    }
+    #expect(codexParts.count == 2)
+    guard case let .inputImage(image) = codexParts[1] else {
+      Issue.record("Expected Codex input_image content")
+      return
+    }
+    #expect(image.imageUrl == "data:image/png;base64,\(pngBase64)")
+  }
 }
 
 @Test
