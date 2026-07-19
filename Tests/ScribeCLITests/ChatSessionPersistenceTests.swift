@@ -41,6 +41,78 @@ struct ChatSessionPersistenceTests {
     #expect(loadedMessages[1].content == "hello")
   }
 
+  @Test func inlineImageDataIsStoredAsExternalAttachment() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let imageData = Data([0x89, 0x50, 0x4E, 0x47, 0x01, 0x02, 0x03])
+    let dataURI = "data:image/png;base64,\(imageData.base64EncodedString())"
+    let message = ScribeMessage(
+      role: .user,
+      contentParts: [.text("image:"), .image(url: dataURI, detail: "high")])
+
+    try ChatSessionStore.appendMessages([message], to: FilePath(directory.path))
+
+    let messagesData = try Data(
+      contentsOf: directory.appendingPathComponent("messages.jsonl"))
+    let persisted = String(decoding: messagesData, as: UTF8.self)
+    #expect(persisted.contains(#""type":"image_ref""#))
+    #expect(persisted.contains(#""mime_type":"image\/png""#))
+    #expect(!persisted.contains("base64"))
+    #expect(!persisted.contains(imageData.base64EncodedString()))
+
+    let attachmentDirectory = directory.appendingPathComponent("attachments", isDirectory: true)
+    let attachmentNames = try FileManager.default.contentsOfDirectory(atPath: attachmentDirectory.path)
+    #expect(attachmentNames.count == 1)
+    let storedData = try Data(
+      contentsOf: attachmentDirectory.appendingPathComponent(attachmentNames[0]))
+    #expect(storedData == imageData)
+
+    let loaded = try ChatSessionStore.loadMessages(from: FilePath(directory.path))
+    #expect(loaded.count == 1)
+    #expect(loaded[0].contentParts == message.contentParts)
+  }
+
+  @Test func legacyInlineImageSessionsStillLoad() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let dataURI = "data:image/png;base64,AQID"
+    let message = ScribeMessage(
+      role: .user, contentParts: [.image(url: dataURI, detail: nil)])
+    var encoded = try JSONEncoder().encode(message)
+    encoded.append(UInt8(ascii: "\n"))
+    try encoded.write(to: directory.appendingPathComponent("messages.jsonl"))
+
+    let loaded = try ChatSessionStore.loadMessages(from: FilePath(directory.path))
+    #expect(loaded.count == 1)
+    #expect(loaded[0].contentParts == message.contentParts)
+  }
+
+  @Test func remoteImageURLsRemainInlineReferences() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let imageURL = "https://example.com/image.png"
+    let message = ScribeMessage(
+      role: .user, contentParts: [.image(url: imageURL, detail: "low")])
+    try ChatSessionStore.appendMessages([message], to: FilePath(directory.path))
+
+    let persisted = try String(
+      contentsOf: directory.appendingPathComponent("messages.jsonl"), encoding: .utf8)
+    #expect(persisted.contains("example.com"))
+    #expect(persisted.contains(#""type":"image_url""#))
+    #expect(!FileManager.default.fileExists(
+      atPath: directory.appendingPathComponent("attachments").path))
+
+    let loaded = try ChatSessionStore.loadMessages(from: FilePath(directory.path))
+    #expect(loaded[0].contentParts == message.contentParts)
+  }
+
   @Test func listSessionsReadsFromConfiguredDirectory() async throws {
     let tempRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)

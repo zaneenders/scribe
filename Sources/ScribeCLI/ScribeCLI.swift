@@ -281,7 +281,7 @@ private struct MoonshotCredential: Codable {
     print("Model:           \(loaded.scribeConfig.agentModel)")
     print("API base URL:    \(loaded.apiBaseURL)")
     print(
-      "Sessions:        \(abbreviate(p.sessionsDirectoryPath))  ({sessionId}/metadata.json, messages.jsonl, scribe.log)"
+      "Sessions:        \(abbreviate(p.sessionsDirectoryPath))  ({sessionId}/metadata.json, messages.jsonl, attachments/, scribe.log)"
     )
     if let env = scribeHomeEnv {
       print("SCRIBE_HOME:     \(env)")
