@@ -79,6 +79,7 @@ func runCodexAgentLoop(
 
   let clock = ContinuousClock()
   var round = 0
+  var attemptedRecovery = false
 
   while true {
     round += 1
@@ -90,7 +91,8 @@ func runCodexAgentLoop(
     emit(.boundary(.turnStart(round: round)))
 
     do {
-      let roundResult = try await abortObserver.race { [currentContext, config, emit, logger, clock, round, abortObserver] in
+      let roundResult = try await abortObserver.race {
+        [currentContext, config, emit, logger, clock, round, abortObserver] in
         try await runSingleCodexRound(
           contextMessages: currentContext.messages,
           config: config,
@@ -214,8 +216,26 @@ func runCodexAgentLoop(
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
       outcome = .interrupted
       return (newMessages, outcome)
+    } catch let scribeError as ScribeError
+      where !attemptedRecovery && isContextLengthError(scribeError)
+    {
+      let detail = scribeError.errorDescription ?? String(describing: scribeError)
+      guard
+        let reason = rollbackContextOverflow(
+          messages: &currentContext.messages,
+          newMessages: &newMessages,
+          providerDetail: detail)
+      else {
+        throw scribeError
+      }
+      attemptedRecovery = true
+      logger.notice("agent.recover.codex", metadata: ["round": "\(round)", "reason": "\(reason)"])
+      emit(.lifecycle(.recovered(reason: reason)))
+      emit(.boundary(.turnEnd(round: round, outcome: .completed)))
+      continue
     } catch {
-      let description = (error as? LocalizedError)?.errorDescription
+      let description =
+        (error as? LocalizedError)?.errorDescription
         ?? String(describing: error)
       logger.error(
         "agent.loop.error.codex",
@@ -269,10 +289,10 @@ private func runSingleCodexRound(
     temperature: nil,
     reasoning: config.reasoningEnabled == true
       ? {
-          var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()
-          r.effort = .medium
-          return r
-        }()
+        var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()
+        r.effort = .medium
+        return r
+      }()
       : nil,
     serviceTier: nil,
     text: nil,
@@ -382,20 +402,27 @@ private func runSingleCodexRound(
 
   if toolInvocations.isEmpty {
     if processor.isIncomplete {
-      logger.warning("agent.assistant.incomplete.codex",
-                     metadata: ["reason": "\(processor.incompleteReason ?? "unknown")",
-                                "answer_chars": "\(turn.text.count)"])
-      return CodexRoundResult(assistantMessage: assistantMessage,
-                              kind: .incomplete(reason: processor.incompleteReason))
+      logger.warning(
+        "agent.assistant.incomplete.codex",
+        metadata: [
+          "reason": "\(processor.incompleteReason ?? "unknown")",
+          "answer_chars": "\(turn.text.count)",
+        ])
+      return CodexRoundResult(
+        assistantMessage: assistantMessage,
+        kind: .incomplete(reason: processor.incompleteReason))
     }
     logger.info("agent.assistant.final.codex", metadata: ["answer_chars": "\(turn.text.count)"])
     return CodexRoundResult(assistantMessage: assistantMessage, kind: .completed)
   }
 
   if processor.isIncomplete {
-    logger.warning("agent.assistant.incomplete.codex",
-                   metadata: ["reason": "\(processor.incompleteReason ?? "unknown")",
-                              "tool_count": "\(toolInvocations.count)"])
+    logger.warning(
+      "agent.assistant.incomplete.codex",
+      metadata: [
+        "reason": "\(processor.incompleteReason ?? "unknown")",
+        "tool_count": "\(toolInvocations.count)",
+      ])
   }
 
   return CodexRoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
@@ -460,58 +487,70 @@ func convertChatMessagesToCodexInput(
     switch msg.role {
     case .system:
       let content = msgContentString(msg) ?? ""
-      items.append(.system(ScribeLLMCodex.Components.Schemas.CodexSystemMessage(
-        role: .system, content: content
-      )))
+      items.append(
+        .system(
+          ScribeLLMCodex.Components.Schemas.CodexSystemMessage(
+            role: .system, content: content
+          )))
 
     case .user:
       if let content = msg.content {
         switch content {
         case .case1(let text):
-          items.append(.user(ScribeLLMCodex.Components.Schemas.CodexUserMessage(
-            role: .user,
-            content: .case1(text)
-          )))
+          items.append(
+            .user(
+              ScribeLLMCodex.Components.Schemas.CodexUserMessage(
+                role: .user,
+                content: .case1(text)
+              )))
         case .case2(let parts):
           let codexParts = parts.map(convertChatContentPartToCodexInputContent)
-          items.append(.user(ScribeLLMCodex.Components.Schemas.CodexUserMessage(
-            role: .user,
-            content: .case2(codexParts)
-          )))
+          items.append(
+            .user(
+              ScribeLLMCodex.Components.Schemas.CodexUserMessage(
+                role: .user,
+                content: .case2(codexParts)
+              )))
         }
       }
 
     case .assistant:
       if let text = msgContentString(msg), !text.isEmpty {
-        items.append(.assistant(ScribeLLMCodex.Components.Schemas.CodexAssistantMessage(
-          role: .assistant,
-          content: .case1(text),
-          id: nil,
-          status: nil,
-          phase: nil
-        )))
+        items.append(
+          .assistant(
+            ScribeLLMCodex.Components.Schemas.CodexAssistantMessage(
+              role: .assistant,
+              content: .case1(text),
+              id: nil,
+              status: nil,
+              phase: nil
+            )))
       }
       if let toolCalls = msg.toolCalls {
         for tc in toolCalls {
           let identifiers = CodexToolCallIdentifiers(encoded: tc.id ?? "")
-          items.append(.functionCall(ScribeLLMCodex.Components.Schemas.CodexFunctionCall(
-            _type: .functionCall,
-            id: identifiers.itemID,
-            callId: identifiers.callID,
-            name: tc.function?.name ?? "",
-            arguments: tc.function?.arguments ?? "{}"
-          )))
+          items.append(
+            .functionCall(
+              ScribeLLMCodex.Components.Schemas.CodexFunctionCall(
+                _type: .functionCall,
+                id: identifiers.itemID,
+                callId: identifiers.callID,
+                name: tc.function?.name ?? "",
+                arguments: tc.function?.arguments ?? "{}"
+              )))
         }
       }
 
     case .tool:
       if let resultText = msgContentString(msg), let callId = msg.toolCallId {
         let shortCallId = CodexToolCallIdentifiers(encoded: callId).callID
-        items.append(.functionCallOutput(ScribeLLMCodex.Components.Schemas.CodexFunctionCallOutput(
-          _type: .functionCallOutput,
-          callId: shortCallId,
-          output: .case1(resultText)
-        )))
+        items.append(
+          .functionCallOutput(
+            ScribeLLMCodex.Components.Schemas.CodexFunctionCallOutput(
+              _type: .functionCallOutput,
+              callId: shortCallId,
+              output: .case1(resultText)
+            )))
       }
     }
   }
@@ -531,22 +570,24 @@ func convertChatContentPartToCodexInputContent(
 ) -> ScribeLLMCodex.Components.Schemas.CodexInputContent {
   switch part {
   case .text(let textPart):
-    return .inputText(ScribeLLMCodex.Components.Schemas.CodexInputText(
-      _type: .inputText,
-      text: textPart.text
-    ))
+    return .inputText(
+      ScribeLLMCodex.Components.Schemas.CodexInputText(
+        _type: .inputText,
+        text: textPart.text
+      ))
   case .imageUrl(let imagePart):
-    return .inputImage(ScribeLLMCodex.Components.Schemas.CodexInputImage(
-      _type: .inputImage,
-      imageUrl: imagePart.imageUrl.url,
-      detail: imagePart.imageUrl.detail.map { detail in
-        switch detail {
-        case .auto: return .auto
-        case .low: return .low
-        case .high: return .high
+    return .inputImage(
+      ScribeLLMCodex.Components.Schemas.CodexInputImage(
+        _type: .inputImage,
+        imageUrl: imagePart.imageUrl.url,
+        detail: imagePart.imageUrl.detail.map { detail in
+          switch detail {
+          case .auto: return .auto
+          case .low: return .low
+          case .high: return .high
+          }
         }
-      }
-    ))
+      ))
   }
 }
 

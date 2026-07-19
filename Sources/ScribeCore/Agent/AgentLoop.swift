@@ -106,11 +106,9 @@ func runAgentLoop(
       outcome = .interrupted
       return (newMessages, outcome)
     } catch let scribeError as ScribeError where !attemptedRecovery && isContextLengthError(scribeError) {
-      guard case .apiHTTPError(_, let detail, _) = scribeError else {
-        throw scribeError
-      }
+      let detail = scribeError.errorDescription ?? String(describing: scribeError)
       guard
-        let reason = rollbackAttachmentOverflow(
+        let reason = rollbackContextOverflow(
           messages: &currentContext.messages,
           newMessages: &newMessages,
           providerDetail: detail)
@@ -523,55 +521,121 @@ private func makeChatCompletionRequest(
 }
 
 func isContextLengthError(_ error: ScribeError) -> Bool {
-  guard case .apiHTTPError(let statusCode, let detail, _) = error, statusCode == 400 else {
+  let detail: String
+  switch error {
+  case .apiHTTPError(let statusCode, let message, _):
+    guard statusCode == 400 || statusCode == 413 else { return false }
+    detail = message
+  case .generic(let message):
+    detail = message
+  default:
     return false
   }
+
   let lower = detail.lowercased()
-  return lower.contains("context length")
+  return lower.contains("context_length_exceeded")
+    || lower.contains("input_too_large")
+    || lower.contains("context length")
+    || lower.contains("context window")
     || lower.contains("prompt is too long")
     || lower.contains("prompt too long")
     || lower.contains("maximum context")
+    || lower.contains("request payload exceeds the limit")
 }
 
-func rollbackAttachmentOverflow(
+func rollbackContextOverflow(
   messages: inout [Components.Schemas.ChatMessage],
   newMessages: inout [Components.Schemas.ChatMessage],
   providerDetail: String
 ) -> String? {
+  let newMessageStart = messages.count - newMessages.count
+  var toolIndexesToReplace = Set<Int>()
+  var attachmentIndexesToRemove = Set<Int>()
 
-  var droppedAttachments = 0
-  while let last = messages.last,
-    last.role == .user,
-    case .case2 = last.content
-  {
-    messages.removeLast()
-    if !newMessages.isEmpty, newMessages.last?.role == .user,
-      case .case2 = newMessages.last?.content
-    {
-      newMessages.removeLast()
-    }
-    droppedAttachments += 1
+  // Tool-generated attachments are inserted immediately after their tool result. Preserve
+  // ordinary multimodal user prompts, but discard attachment messages created by tools.
+  for index in messages.indices where isImageMessage(messages[index]) {
+    guard index > messages.startIndex, messages[index - 1].role == .tool else { continue }
+    attachmentIndexesToRemove.insert(index)
+    toolIndexesToReplace.insert(index - 1)
   }
-  guard droppedAttachments > 0 else { return nil }
 
-  guard let toolMsgIdx = messages.lastIndex(where: { $0.role == .tool }),
-    toolMsgIdx == messages.count - 1
-  else { return nil }
+  // Old sessions can contain tool output written before the global result ceiling existed.
+  // Compact every conspicuously large result so a single retry has the best chance to fit.
+  for index in messages.indices where messages[index].role == .tool {
+    if messageTextSize(messages[index]) > 32 * 1024 {
+      toolIndexesToReplace.insert(index)
+    }
+  }
 
-  let original = messages[toolMsgIdx]
+  // Providers do not report which input item crossed the limit. If no obvious attachment or
+  // oversized output exists, compact the largest tool result rather than retrying unchanged.
+  if toolIndexesToReplace.isEmpty,
+    let largest = messages.indices.filter({ messages[$0].role == .tool }).max(by: {
+      messageTextSize(messages[$0]) < messageTextSize(messages[$1])
+    })
+  {
+    toolIndexesToReplace.insert(largest)
+  }
+
+  guard !toolIndexesToReplace.isEmpty else { return nil }
+
+  let detail = providerDetail.count > 512
+    ? String(providerDetail.prefix(512)) + "…"
+    : providerDetail
+  for index in toolIndexesToReplace {
+    let original = messages[index]
+    messages[index] = contextOverflowReplacement(original: original, providerDetail: detail)
+  }
+
+  for index in attachmentIndexesToRemove.sorted(by: >) {
+    messages.remove(at: index)
+  }
+
+  // newMessages is the suffix accumulated during this turn. Mirror changes that landed in it
+  // so persistence and the retry context remain identical.
+  for contextIndex in toolIndexesToReplace where contextIndex >= newMessageStart {
+    let newIndex = contextIndex - newMessageStart
+    guard newMessages.indices.contains(newIndex) else { continue }
+    let original = newMessages[newIndex]
+    newMessages[newIndex] = contextOverflowReplacement(
+      original: original, providerDetail: detail)
+  }
+  for contextIndex in attachmentIndexesToRemove.sorted(by: >) where contextIndex >= newMessageStart {
+    let newIndex = contextIndex - newMessageStart
+    if newMessages.indices.contains(newIndex) { newMessages.remove(at: newIndex) }
+  }
+
+  return "model context overflow — compacted \(toolIndexesToReplace.count) tool result(s)"
+    + (attachmentIndexesToRemove.isEmpty
+      ? "" : " and dropped \(attachmentIndexesToRemove.count) attachment(s)")
+}
+
+private func isImageMessage(_ message: Components.Schemas.ChatMessage) -> Bool {
+  guard case .case2(let parts) = message.content else { return false }
+  return parts.contains { part in
+    if case .imageUrl = part { return true }
+    return false
+  }
+}
+
+private func messageTextSize(_ message: Components.Schemas.ChatMessage) -> Int {
+  guard case .case1(let text) = message.content else { return 0 }
+  return text.utf8.count
+}
+
+private func contextOverflowReplacement(
+  original: Components.Schemas.ChatMessage,
+  providerDetail: String
+) -> Components.Schemas.ChatMessage {
   let errorJSON = ToolRegistry.jsonError(
-    "tool output exceeded model context window — attachment(s) discarded. provider error: \(providerDetail)"
+    "tool output exceeded model context window and was removed. provider error: \(providerDetail)"
   )
-  let replacement = Components.Schemas.ChatMessage(
+  return Components.Schemas.ChatMessage(
     role: .tool,
     content: .case1(errorJSON),
     name: original.name,
     toolCalls: nil,
     toolCallId: original.toolCallId
   )
-  messages[toolMsgIdx] = replacement
-  if let newIdx = newMessages.lastIndex(where: { $0.role == .tool && $0.toolCallId == original.toolCallId }) {
-    newMessages[newIdx] = replacement
-  }
-  return "tool output exceeded model context — dropped \(droppedAttachments) attachment(s)"
 }
