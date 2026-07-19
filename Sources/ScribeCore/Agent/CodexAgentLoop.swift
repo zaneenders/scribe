@@ -245,11 +245,13 @@ private func runSingleCodexRound(
     toolChoice: .auto,
     parallelToolCalls: true,
     temperature: nil,
-    reasoning: config.reasoningEnabled.map { _ in
-      var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()
-      r.effort = .medium
-      return r
-    } ?? nil,
+    reasoning: config.reasoningEnabled == true
+      ? {
+          var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()
+          r.effort = .medium
+          return r
+        }()
+      : nil,
     serviceTier: nil,
     text: nil,
     include: ["reasoning.encrypted_content"],
