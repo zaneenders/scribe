@@ -202,7 +202,6 @@ public enum ConfigLoader {
 
     let activeName = try resolveActiveProfileName(
       summaries: summaries,
-      paths: paths,
       override: profileOverride)
 
     guard
@@ -334,7 +333,6 @@ public enum ConfigLoader {
 
   private static func resolveActiveProfileName(
     summaries: [ProfileSummary],
-    paths: ScribePaths,
     override: String?
   ) throws -> String {
     if let override {
@@ -355,21 +353,7 @@ public enum ConfigLoader {
       return trimmed
     }
 
-    if let stored = try ActiveProfileStore.read(from: paths) {
-      guard summaries.contains(where: { $0.name == stored }) else {
-        let available = summaries.map(\.name).joined(separator: ", ")
-        throw ScribeError.configuration(
-          key: "activeProfile",
-          reason:
-            "`active-profile.json` selects `\(stored)`, which is not listed in `\(configFileName)`. Available profiles: \(available)."
-        )
-      }
-      return stored
-    }
-
-    let first = summaries[0].name
-    try ActiveProfileStore.write(first, paths: paths)
-    return first
+    return summaries[0].name
   }
 
   private static func writeDefaultSetup(paths: ScribePaths) throws {
@@ -398,7 +382,6 @@ public enum ConfigLoader {
     let dir = url.deletingLastPathComponent()
     try createDirectoryWithIntermediates(FilePath(dir.path))
     try data.write(to: url, options: .atomic)
-    try ActiveProfileStore.write("local", paths: paths)
   }
 
   private static func readMoonshotStoredKey(paths: ScribePaths) throws -> String? {

@@ -7,7 +7,7 @@ import Testing
 
 @Suite(.serialized)
 struct ConfigLoaderTests {
-  @Test func loadsNamedProfileFromManifestAndActiveProfileFile() async throws {
+  @Test func loadsNamedProfileFromExplicitOverride() async throws {
     let root = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -46,9 +46,7 @@ struct ConfigLoaderTests {
       """
     try configJSON.write(
       toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
-    try ActiveProfileStore.write("cloud", paths: paths)
-
-    let loaded = try await ConfigLoader.load()
+    let loaded = try await ConfigLoader.load(profileOverride: "cloud")
     #expect(loaded.activeProfileName == "cloud")
     #expect(loaded.scribeConfig.agentModel == "big-model")
     #expect(loaded.scribeConfig.serverURL == "https://api.example.com")
@@ -90,7 +88,7 @@ struct ConfigLoaderTests {
     #expect(loaded.logLevel == .info)
   }
 
-  @Test func writesActiveProfileFileWhenMissing() async throws {
+  @Test func usesFirstProfileAsEphemeralDefault() async throws {
     let root = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -131,7 +129,53 @@ struct ConfigLoaderTests {
 
     let loaded = try await ConfigLoader.load()
     #expect(loaded.activeProfileName == "first")
-    #expect(try ActiveProfileStore.read(from: paths) == "first")
+    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("active-profile.json").path))
+  }
+
+  @Test func ignoresLegacyActiveProfileFile() async throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    setenv("SCRIBE_HOME", root.path, 1)
+    defer { unsetenv("SCRIBE_HOME") }
+
+    let paths = ScribePaths(dataHome: FilePath(root.path))
+    try createDirectoryWithIntermediates(paths.dataHome)
+    let configJSON = """
+      {
+        "profiles": [
+          {
+            "name": "first",
+            "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+            "agent": {
+              "model": "a",
+              "contextWindow": 128000,
+              "contextWindowThreshold": 0.8
+            },
+            "logging": { "level": "trace" }
+          },
+          {
+            "name": "second",
+            "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+            "agent": {
+              "model": "b",
+              "contextWindow": 128000,
+              "contextWindowThreshold": 0.8
+            },
+            "logging": { "level": "trace" }
+          }
+        ]
+      }
+      """
+    try configJSON.write(
+      toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+    try #"{"activeProfile":"second"}"#.write(
+      to: root.appendingPathComponent("active-profile.json"), atomically: true, encoding: .utf8)
+
+    let loaded = try await ConfigLoader.load()
+    #expect(loaded.activeProfileName == "first")
+    #expect(loaded.scribeConfig.agentModel == "a")
   }
 
   @Test func rejectsUnknownAPIType() async throws {

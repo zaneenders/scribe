@@ -118,7 +118,7 @@ internal final class SlateChatHost {
   private var profilePickerController = ProfilePickerController()
   private var profileCatalog: [ProfileSummary] = []
   private var activeProfileName: String = ""
-  private var scribePaths: ScribePaths = ScribePaths(dataHome: FilePath("/"))
+  private let selectProfileOnStart: Bool
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
 
@@ -158,7 +158,7 @@ internal final class SlateChatHost {
     sessionCreatedAt: Date,
     profileCatalog: [ProfileSummary],
     activeProfileName: String,
-    scribePaths: ScribePaths,
+    selectProfileOnStart: Bool,
     logger: Logger
   ) {
     self.configuration = configuration
@@ -169,7 +169,7 @@ internal final class SlateChatHost {
     self.sessionCreatedAt = sessionCreatedAt
     self.profileCatalog = profileCatalog
     self.activeProfileName = activeProfileName
-    self.scribePaths = scribePaths
+    self.selectProfileOnStart = selectProfileOnStart
     self.logger = logger
 
     pickerController.logger = logger
@@ -234,6 +234,13 @@ internal final class SlateChatHost {
           }
 
           self.installCoordinator()
+
+          if self.selectProfileOnStart {
+            _ = self.profilePickerController.open(
+              profiles: self.profileCatalog,
+              activeName: self.activeProfileName,
+              modelBusy: false)
+          }
 
           self.spinnerTask?.cancel()
           self.spinnerTask = Task { [weak self] in
@@ -926,8 +933,7 @@ extension SlateChatHost {
 
   private func applyModelProfile(_ name: String, previousName: String) async {
     do {
-      try ActiveProfileStore.write(name, paths: scribePaths)
-      let loaded = try await ConfigLoader.load()
+      let loaded = try await ConfigLoader.load(profileOverride: name)
       var newConfig = configuration
       newConfig.agentModel = loaded.scribeConfig.agentModel
       newConfig.contextWindow = loaded.scribeConfig.contextWindow

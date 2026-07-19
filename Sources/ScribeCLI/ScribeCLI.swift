@@ -48,7 +48,7 @@ private struct MoonshotCredential: Codable {
 
   @Option(
     name: .long,
-    help: "Use this named backend profile for this run (does not change the saved selection)."
+    help: "Use this named backend profile for this session and skip the startup profile picker."
   )
   var profile: String?
 
@@ -243,7 +243,7 @@ private struct MoonshotCredential: Codable {
       sessionId: sessionId,
       profileCatalog: loaded.profiles,
       activeProfileName: loaded.activeProfileName,
-      scribePaths: loaded.paths,
+      selectProfileOnStart: profile == nil,
       logger: logger
     )
     logger.notice("chat.session.end", metadata: ["status": "ok"])
@@ -277,8 +277,7 @@ private struct MoonshotCredential: Codable {
     print("Scribe version:  \(GitVersion.hash)")
     print("Data home:       \(abbreviate(p.dataHomePath))")
     print("Config:          \(abbreviate(loaded.resolvedConfigurationPath))")
-    print("Active profile:  \(loaded.activeProfileName)")
-    print("Selection file:  \(abbreviate(p.activeProfilePath.string))")
+    print("Default profile: \(loaded.activeProfileName)")
     print("Model:           \(loaded.scribeConfig.agentModel)")
     print("API base URL:    \(loaded.apiBaseURL)")
     print(
@@ -299,8 +298,8 @@ private struct MoonshotCredential: Codable {
       print("    api:   \(entry.baseURL)")
     }
     print("")
-    print("Saved selection: \(loaded.activeProfileName) (\(loaded.paths.activeProfilePath.string))")
-    print("Switch in chat with `/model`, or pass `--profile <name>` for one run.")
+    print("Choose at session startup or pass `--profile <name>` to skip the picker.")
+    print("Switch during a session with `/model`.")
   }
 }
 
