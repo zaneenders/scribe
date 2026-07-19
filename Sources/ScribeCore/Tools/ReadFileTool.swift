@@ -284,8 +284,10 @@ public struct ReadFileTool: ScribeTool {
     if bounded.reason != nil && !endsAtNewline {
       // Content cap landed mid-line and we couldn't backtrack to a newline
       // (single long line or the cap landed in the first line with no prior newline).
-      // Report only complete lines and provide a byte offset for continuation.
-      returnedEndLine = startIndex + max(0, returnedLineCount - 1)
+      // Don't include the partial line in the reported range, but ensure we never
+      // report an inverted range (e.g. startLine=1, endLine=0) when the partial line
+      // is the very first line being read.
+      returnedEndLine = max(startIndex + 1, startIndex + max(0, returnedLineCount - 1))
       nextByteOffset = sliceStartByteOffset + bounded.content.utf8.count
     } else {
       returnedEndLine = min(endIndex, startIndex + returnedLineCount)
