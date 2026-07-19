@@ -155,6 +155,12 @@ func runAgentLoop(
       outcome = .completed
       return (newMessages, outcome)
 
+    case .incomplete(let reason):
+      emit(.boundary(.turnEnd(round: round, outcome: .incomplete(reason: reason))))
+      commit(&currentContext.messages, &newMessages, roundBuffer)
+      outcome = .incomplete(reason: reason)
+      return (newMessages, outcome)
+
     case .toolCalls(let invocations):
       emit(.boundary(.turnEnd(round: round, outcome: .toolCalls(count: invocations.count))))
       if round >= config.maxToolRounds {
@@ -282,6 +288,7 @@ private struct RoundResult: Sendable {
 
 private enum RoundOutcome: Sendable, Equatable {
   case completed
+  case incomplete(reason: String?)
   case toolCalls([ToolInvocation])
 }
 
@@ -308,6 +315,8 @@ private func runSingleRound(
     metadata: [
       "messages": "\(requestBody.messages.count)",
       "reasoning_enabled": "\(String(describing: config.reasoningEnabled))",
+      "request_profile": "\(String(describing: config.requestProfile))",
+      "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
     ])
   let response = try await config.client.createChatCompletion(body: .json(requestBody))
 
@@ -401,22 +410,59 @@ private func runSingleRound(
         "skipped": "\(processor.skippedChunkCount)",
         "prompt_tokens": "\(u.promptTokens.map(String.init(describing:)) ?? "nil")",
         "completion_tokens": "\(u.completionTokens.map(String.init(describing:)) ?? "nil")",
+        "finish_reason": "\(turn.finishReason ?? "missing")",
+        "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
+        "answer_chars": "\(turn.text.count)",
+        "reasoning_chars": "\(turn.reasoningText.count)",
+        "tool_calls": "\(toolInvocations.count)",
         "tps": "\(tps.map { String(format: "%.1f", $0) } ?? "nil")",
       ])
     emit(.lifecycle(.usage(ScribeUsage(u), tokensPerSecond: tps)))
   }
 
+  let finishReason = turn.finishReason?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let normalizedFinishReason = finishReason?.lowercased()
+  let isIncomplete = normalizedFinishReason.map { reason in
+    reason != "stop" && reason != "tool_calls" && reason != "function_call"
+  } ?? false
+
   if toolInvocations.isEmpty {
-    logger.info(
-      "agent.assistant.final",
-      metadata: [
-        "answer_chars": "\(turn.text.count)",
-        "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
-      ])
+    let metadata: Logger.Metadata = [
+      "answer_chars": "\(turn.text.count)",
+      "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
+      "finish_reason": "\(finishReason ?? "missing")",
+      "completion_tokens": "\(processor.lastUsage?.completionTokens.map(String.init(describing:)) ?? "nil")",
+      "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
+    ]
+    if isIncomplete {
+      logger.warning("agent.assistant.incomplete", metadata: metadata)
+      return RoundResult(
+        assistantMessage: assistantMessage,
+        kind: .incomplete(reason: finishReason))
+    }
+    logger.info("agent.assistant.final", metadata: metadata)
     return RoundResult(assistantMessage: assistantMessage, kind: .completed)
   }
 
+  if isIncomplete {
+    logger.warning(
+      "agent.assistant.incomplete-with-tools",
+      metadata: [
+        "finish_reason": "\(finishReason ?? "missing")",
+        "tool_count": "\(toolInvocations.count)",
+      ])
+  }
+
   return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
+}
+
+private func effectiveMaxCompletionTokens(_ config: AgentLoopConfig) -> Int? {
+  switch config.requestProfile {
+  case .standard:
+    return nil
+  case .moonshotK3, .kimiCode:
+    return KimiK3Support.effectiveMaxCompletionTokens(config.maxCompletionTokens)
+  }
 }
 
 private func makeChatCompletionRequest(
@@ -454,7 +500,7 @@ private func makeChatCompletionRequest(
       streamOptions: .init(includeUsage: true),
       reasoning: nil,
       reasoningEffort: .max,
-      maxCompletionTokens: config.maxCompletionTokens,
+      maxCompletionTokens: effectiveMaxCompletionTokens(config),
       thinking: nil
     )
   case .kimiCode:
@@ -470,8 +516,8 @@ private func makeChatCompletionRequest(
       streamOptions: .init(includeUsage: true),
       reasoning: nil,
       reasoningEffort: nil,
-      maxCompletionTokens: config.maxCompletionTokens,
-      thinking: .init(_type: .enabled, effort: "max", keep: nil)
+      maxCompletionTokens: effectiveMaxCompletionTokens(config),
+      thinking: .init(_type: .enabled, effort: "max", keep: "all")
     )
   }
 }

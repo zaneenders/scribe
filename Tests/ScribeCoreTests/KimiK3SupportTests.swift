@@ -4,6 +4,21 @@ import Testing
 @Suite
 struct KimiK3SupportTests {
 
+  @Test func usesDocumentedDefaultMaxCompletionTokens() {
+    #expect(
+      KimiK3Support.effectiveMaxCompletionTokens(nil)
+        == KimiK3Support.defaultMaxCompletionTokens)
+    #expect(KimiK3Support.effectiveMaxCompletionTokens(8192) == 8192)
+  }
+
+  @Test func validatesDocumentedMaxCompletionTokensLimit() throws {
+    try KimiK3Support.validateMaxCompletionTokens(KimiK3Support.maxCompletionTokensLimit)
+    #expect(throws: ScribeError.self) {
+      try KimiK3Support.validateMaxCompletionTokens(
+        KimiK3Support.maxCompletionTokensLimit + 1)
+    }
+  }
+
   @Test func rejectsKimiCodeKeyWithMoonshotBaseURL() {
     #expect(throws: ScribeError.self) {
       try KimiK3Support.validateEndpoint(

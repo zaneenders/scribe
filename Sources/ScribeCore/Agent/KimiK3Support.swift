@@ -13,7 +13,12 @@ enum KimiTransport: Sendable {
 }
 
 public enum KimiK3Support {
+  public static let defaultMaxCompletionTokens = 131_072
   public static let maxCompletionTokensLimit = 1_048_576
+
+  public static func effectiveMaxCompletionTokens(_ configured: Int?) -> Int {
+    configured ?? defaultMaxCompletionTokens
+  }
   public static let moonshotBaseURL = "https://api.moonshot.ai"
   public static let kimiCodeBaseURL = "https://api.kimi.com/coding"
 

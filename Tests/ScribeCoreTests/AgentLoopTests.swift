@@ -277,6 +277,30 @@ struct AgentLoopTests {
     #expect(stringContent(messages[1]) == "reply")
   }
 
+  @Test func reportsLengthLimitedResponseAsIncomplete() async throws {
+    let chunks = [
+      sseChunk(
+        #"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"unfinished"},"finish_reason":"length"}],"usage":{"prompt_tokens":10,"completion_tokens":8192,"total_tokens":8202}}"#
+      ),
+      doneChunk(),
+    ]
+    let (messages, termination) = try await runLoop(
+      prompt: "hello", config: makeConfig(chunks: chunks), abortNotifier: AbortNotifier())
+    expectTermination(termination, .incomplete(reason: "length"))
+    #expect(messages.count == 2)
+    #expect(messages[1].reasoningContent == "unfinished")
+  }
+
+  @Test func missingFinishReasonRemainsCompatible() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
+      doneChunk(),
+    ]
+    let (_, termination) = try await runLoop(
+      prompt: "hello", config: makeConfig(chunks: chunks), abortNotifier: AbortNotifier())
+    expectTermination(termination, .completed)
+  }
+
   @Test func completesWithEmptyAssistantText() async throws {
 
     let chunks = [
@@ -1018,11 +1042,15 @@ struct AgentLoopTests {
     #expect(json["reasoning_effort"] as? String == "max")
     #expect(json["max_completion_tokens"] as? Int == 8192)
     #expect(json["temperature"] == nil)
+    #expect(json["top_p"] == nil)
+    #expect(json["n"] == nil)
+    #expect(json["presence_penalty"] == nil)
+    #expect(json["frequency_penalty"] == nil)
     #expect(json["reasoning"] == nil)
     #expect(json["max_tokens"] == nil)
   }
 
-  @Test func kimiK3RequestOmitsMaxCompletionTokensWhenUnset() async throws {
+  @Test func kimiK3RequestUsesDocumentedMaxCompletionTokensDefaultWhenUnset() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
@@ -1045,7 +1073,8 @@ struct AgentLoopTests {
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let json = try #require(
       JSONSerialization.jsonObject(with: transport.capturedRequestBodies()[0]) as? [String: Any])
-    #expect(json["max_completion_tokens"] == nil)
+    #expect(
+      json["max_completion_tokens"] as? Int == KimiK3Support.defaultMaxCompletionTokens)
   }
 
   @Test func kimiK3RejectsPublicImageURLs() async throws {
@@ -1165,8 +1194,13 @@ struct AgentLoopTests {
     let thinking = try #require(json["thinking"] as? [String: Any])
     #expect(thinking["type"] as? String == "enabled")
     #expect(thinking["effort"] as? String == "max")
+    #expect(thinking["keep"] as? String == "all")
     #expect(json["max_completion_tokens"] as? Int == 8192)
     #expect(json["temperature"] == nil)
+    #expect(json["top_p"] == nil)
+    #expect(json["n"] == nil)
+    #expect(json["presence_penalty"] == nil)
+    #expect(json["frequency_penalty"] == nil)
     #expect(json["reasoning_effort"] == nil)
     #expect(json["reasoning"] == nil)
     #expect(json["max_tokens"] == nil)
