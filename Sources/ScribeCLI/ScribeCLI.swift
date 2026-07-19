@@ -27,8 +27,11 @@ import SystemPackage
   @Flag(name: .long, help: "List configured backends and exit.")
   var listProfiles = false
 
-  @Flag(name: .long, help: "Log in to a ChatGPT subscription account (Codex OAuth).")
-  var login = false
+  @Option(
+    name: .long,
+    help: "Log in to a provider: \"codex\" (ChatGPT), \"kimi\" (Kimi K3 API key), or \"anthropic\" (Anthropic API key)."
+  )
+  var login: String?
 
   @Flag(name: .long, help: "Log out of the ChatGPT subscription account.")
   var logout = false
@@ -70,8 +73,25 @@ import SystemPackage
       return
     }
 
-    if login {
-      try await loginCodex()
+    if let loginProvider = login {
+      switch loginProvider {
+      case "codex":
+        try await loginCodex()
+      case "kimi", "anthropic":
+        try await loginApiKey(provider: loginProvider, loaded: loaded)
+      default:
+        // If the active profile has a type, use that to decide
+        if loaded.apiType == "codex" {
+          try await loginCodex()
+        } else if loaded.apiType == "anthropic" {
+          try await loginApiKey(provider: "anthropic", loaded: loaded)
+        } else if loaded.apiType == "kimi" {
+          try await loginApiKey(provider: "kimi", loaded: loaded)
+        } else {
+          print("Unknown provider \"\(loginProvider)\". Use \"codex\", \"kimi\", or \"anthropic\".")
+          print("Or set api.type in your config and run just --login.")
+        }
+      }
       return
     }
 
@@ -153,7 +173,8 @@ import SystemPackage
       apiType: loaded.apiType,
       tools: tools,
       workingDirectory: cwd,
-      reasoningEnabled: loaded.scribeConfig.reasoningEnabled
+      reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
+      maxTokens: loaded.scribeConfig.maxTokens
     )
 
     let sessionDirectory: FilePath
@@ -363,6 +384,56 @@ extension ScribeCLI {
       print("❌ Login failed: \(error)")
       throw error
     }
+  }
+
+  func loginApiKey(provider: String, loaded: LoadedConfig) async throws {
+    let displayName = provider == "kimi" ? "Kimi K3" : "Anthropic"
+    let envVar = provider == "kimi" ? "MOONSHOT_API_KEY" : "ANTHROPIC_API_KEY"
+
+    print("Enter your \(displayName) API key.")
+    print("(You can also set the \(envVar) environment variable.)")
+    print("")
+
+    guard let apiKey = readLine(strippingNewline: true), !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
+      print("❌ No key provided.")
+      return
+    }
+
+    try writeApiKeyToConfig(apiKey, loaded: loaded)
+
+    print("")
+    print("✅ API key saved to profile \"\(loaded.activeProfileName)\"")
+    print("")
+    print("Run scribe to start using it:")
+    print("  scribe --profile \(loaded.activeProfileName)")
+  }
+
+  func writeApiKeyToConfig(_ apiKey: String, loaded: LoadedConfig) throws {
+    let configPath = loaded.resolvedConfigurationPath
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
+          var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          var profiles = json["profiles"] as? [[String: Any]] else {
+      print("❌ Could not read config at \(configPath)")
+      return
+    }
+
+    let activeProfile = loaded.activeProfileName
+    guard let profileIdx = profiles.firstIndex(where: {
+      ($0["name"] as? String)?.trimmingCharacters(in: .whitespaces) == activeProfile
+    }) else {
+      print("❌ Active profile \"\(activeProfile)\" not found in config.")
+      return
+    }
+
+    var profile = profiles[profileIdx]
+    var api = profile["api"] as? [String: Any] ?? [:]
+    api["apiKey"] = apiKey
+    profile["api"] = api
+    profiles[profileIdx] = profile
+    json["profiles"] = profiles
+
+    let newData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+    try newData.write(to: URL(fileURLWithPath: configPath))
   }
 
   func logoutCodex() async throws {

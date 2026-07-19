@@ -421,6 +421,23 @@ struct ScribeAgentTests {
     let toolMessage = result.newMessages.first { $0.role == .tool }
     #expect(stringContent(toolMessage) == recorder.canned)
   }
+
+  @Test func configurationRejectsInvalidKimiMaxTokens() throws {
+    let config = ScribeConfig(
+      agentModel: "kimi-k3",
+      contextWindow: 1_048_576,
+      contextWindowThreshold: 0.8,
+      serverURL: "https://api.moonshot.ai",
+      apiKey: "test-key",
+      apiType: "kimi",
+      workingDirectory: ".",
+      reasoningEnabled: nil,
+      maxTokens: 2_000_000
+    )
+    #expect(throws: ScribeError.self) {
+      _ = try ScribeAgent(configuration: config, logger: testLogger)
+    }
+  }
 }
 
 private func stringContent(_ msg: ScribeMessage?) -> String? {

@@ -31,6 +31,9 @@ public struct ScribeAgent: Sendable {
   private let _isAnthropicConfig: Bool
   private let _anthropicServerURL: URL?
 
+  private let _requestProfile: ChatCompletionRequestProfile
+  private let _maxCompletionTokens: Int?
+
   /// Standard (OpenAI-compatible) initializer.
   public init(
     client: ScribeLLM.Client,
@@ -56,6 +59,8 @@ public struct ScribeAgent: Sendable {
     self._codexServerURL = nil
     self._isAnthropicConfig = false
     self._anthropicServerURL = nil
+    self._requestProfile = .standard
+    self._maxCompletionTokens = nil
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -93,6 +98,8 @@ public struct ScribeAgent: Sendable {
     self._codexServerURL = nil
     self._isAnthropicConfig = false
     self._anthropicServerURL = nil
+    self._requestProfile = .standard
+    self._maxCompletionTokens = nil
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -103,7 +110,7 @@ public struct ScribeAgent: Sendable {
     }
   }
 
-  /// Anthropic Messages-compatible initializer (Anthropic, Kimi Coding, etc).
+  /// Anthropic Messages-compatible initializer.
   public init(
     anthropicClient: ScribeLLMAnthropic.Client,
     model: String,
@@ -130,6 +137,8 @@ public struct ScribeAgent: Sendable {
     self._codexServerURL = nil
     self._isAnthropicConfig = false
     self._anthropicServerURL = nil
+    self._requestProfile = .standard
+    self._maxCompletionTokens = nil
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -140,7 +149,7 @@ public struct ScribeAgent: Sendable {
     }
   }
 
-  /// Create from ScribeConfig, auto-detecting standard vs codex vs anthropic.
+  /// Create from ScribeConfig, auto-detecting standard vs codex vs anthropic vs kimi.
   /// Codex credentials are loaded lazily on first `run()`.
   public init(
     configuration: ScribeConfig,
@@ -171,6 +180,40 @@ public struct ScribeAgent: Sendable {
       self._codexServerURL = serverURL
       self._isAnthropicConfig = false
       self._anthropicServerURL = nil
+      self._requestProfile = .standard
+      self._maxCompletionTokens = nil
+    } else if configuration.apiType == "kimi" {
+      guard let serverURL = URL(string: configuration.serverURL) else {
+        throw ScribeError.configuration(
+          key: "serverURL",
+          reason: "Invalid serverURL: \(configuration.serverURL)")
+      }
+      let transport = try KimiK3Support.resolveTransport(
+        apiKey: configuration.apiKey,
+        serverURL: configuration.serverURL
+      )
+      switch transport {
+      case .moonshotOpenAI:
+        try KimiK3Support.validateMaxCompletionTokens(configuration.maxTokens)
+        self.client = OpenAICompatibleClient.make(
+          serverURL: serverURL, apiKey: configuration.apiKey)
+        self.anthropicClient = nil
+        self._requestProfile = .kimiK3
+        self._maxCompletionTokens = configuration.maxTokens
+      case .kimiCodeAnthropic:
+        self.client = nil
+        self.anthropicClient = KimiCodeClient.make(
+          serverURL: serverURL, token: configuration.apiKey)
+        self._requestProfile = .standard
+        self._maxCompletionTokens = nil
+      }
+      self.codexClient = nil
+      self.codexAccessToken = nil
+      self.codexAccountID = nil
+      self._isCodexConfig = false
+      self._codexServerURL = nil
+      self._isAnthropicConfig = false
+      self._anthropicServerURL = nil
     } else if configuration.apiType == "anthropic" {
       guard let serverURL = URL(string: configuration.serverURL) else {
         throw ScribeError.configuration(
@@ -187,6 +230,8 @@ public struct ScribeAgent: Sendable {
       self._codexServerURL = nil
       self._isAnthropicConfig = false
       self._anthropicServerURL = nil
+      self._requestProfile = .standard
+      self._maxCompletionTokens = nil
     } else {
       guard let serverURL = URL(string: configuration.serverURL) else {
         throw ScribeError.configuration(
@@ -203,6 +248,8 @@ public struct ScribeAgent: Sendable {
       self._codexServerURL = nil
       self._isAnthropicConfig = false
       self._anthropicServerURL = nil
+      self._requestProfile = .standard
+      self._maxCompletionTokens = nil
     }
   }
 
@@ -408,7 +455,9 @@ public struct ScribeAgent: Sendable {
         maxToolRounds: options.maxToolRounds,
         workingDirectory: workingDirectory,
         reasoningEnabled: reasoningEnabled,
-        hooks: .default
+        hooks: .default,
+        requestProfile: _requestProfile,
+        maxCompletionTokens: _maxCompletionTokens
       )
 
       do {

@@ -1,0 +1,89 @@
+import ScribeLLM
+
+enum ChatCompletionRequestProfile: Sendable {
+  case standard
+  case kimiK3
+}
+
+enum KimiTransport: Sendable {
+  case moonshotOpenAI
+  case kimiCodeAnthropic
+}
+
+public enum KimiK3Support {
+  public static let maxCompletionTokensLimit = 1_048_576
+  public static let moonshotBaseURL = "https://api.moonshot.ai"
+  public static let kimiCodeBaseURL = "https://api.kimi.com/coding"
+
+  public static func isKimiCodeAPIKey(_ apiKey: String) -> Bool {
+    apiKey.hasPrefix("sk-kimi-")
+  }
+
+  public static func isKimiCodeBaseURL(_ serverURL: String) -> Bool {
+    serverURL.trimmingCharacters(in: .whitespacesAndNewlines).contains("kimi.com/coding")
+  }
+
+  static func resolveTransport(apiKey: String?, serverURL: String) throws -> KimiTransport {
+    let base = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let apiKey, !apiKey.isEmpty {
+      if isKimiCodeAPIKey(apiKey) {
+        if base.contains("moonshot.ai") || base.contains("moonshot.cn") {
+          throw ScribeError.configuration(
+            key: "api.baseUrl",
+            reason:
+              "Kimi Code API keys (sk-kimi-…) only work with api.baseUrl \"\(kimiCodeBaseURL)\", not \"\(moonshotBaseURL)\". Use a Moonshot platform API key from platform.kimi.ai for the Moonshot endpoint, or change api.baseUrl."
+          )
+        }
+        return .kimiCodeAnthropic
+      }
+      if isKimiCodeBaseURL(base) {
+        throw ScribeError.configuration(
+          key: "api.apiKey",
+          reason:
+            "api.baseUrl \"\(kimiCodeBaseURL)\" requires a Kimi Code API key (sk-kimi-…). Moonshot platform keys use \"\(moonshotBaseURL)\"."
+        )
+      }
+    } else if isKimiCodeBaseURL(base) {
+      throw ScribeError.configuration(
+        key: "api.apiKey",
+        reason: "api.baseUrl \"\(kimiCodeBaseURL)\" requires a Kimi Code API key (sk-kimi-…)."
+      )
+    }
+    return .moonshotOpenAI
+  }
+
+  public static func validateEndpoint(apiKey: String?, serverURL: String) throws {
+    _ = try resolveTransport(apiKey: apiKey, serverURL: serverURL)
+  }
+
+  public static func validateMaxCompletionTokens(_ value: Int?) throws {
+    guard let value else { return }
+    guard (1...maxCompletionTokensLimit).contains(value) else {
+      throw ScribeError.configuration(
+        key: "agent.maxTokens",
+        reason:
+          "Kimi K3 max_completion_tokens must be between 1 and \(maxCompletionTokensLimit); got \(value)."
+      )
+    }
+  }
+
+  public static func validateMessages(_ messages: [Components.Schemas.ChatMessage]) throws {
+    for message in messages {
+      guard let content = message.content else { continue }
+      guard case .case2(let parts) = content else { continue }
+      for part in parts {
+        guard case .imageUrl(let payload) = part else { continue }
+        try validateImageURL(payload.imageUrl.url)
+      }
+    }
+  }
+
+  public static func validateImageURL(_ url: String) throws {
+    if url.hasPrefix("data:") { return }
+    if url.hasPrefix("ms://") { return }
+    throw ScribeError.invalidInput(
+      message:
+        "Kimi K3 vision input must use base64 data URIs or ms:// file references; public URLs are not supported."
+    )
+  }
+}

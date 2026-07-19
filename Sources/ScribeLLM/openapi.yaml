@@ -68,6 +68,35 @@ components:
           $ref: "#/components/schemas/ChatCompletionStreamOptions"
         reasoning:
           $ref: "#/components/schemas/ChatCompletionReasoning"
+        reasoning_effort:
+          type: string
+          enum: [max]
+          description: >
+            Kimi K3 top-level reasoning level; only "max" is supported. Do not use the
+            nested `reasoning` object for Kimi K3.
+        max_completion_tokens:
+          type: integer
+          minimum: 1
+          maximum: 1048576
+          description: >
+            Kimi K3 max output tokens; omit to use the provider default (131072).
+        thinking:
+          $ref: "#/components/schemas/ChatCompletionThinking"
+    ChatCompletionThinking:
+      type: object
+      description: >
+        Kimi Code thinking configuration (Moonshot proprietary extension to chat/completions).
+        Use this on api.kimi.com/coding instead of reasoning_effort.
+      properties:
+        type:
+          type: string
+          enum: [enabled, disabled]
+        effort:
+          type: string
+          description: Thinking effort level, e.g. "max" for Kimi Code K3.
+        keep:
+          description: Preserved thinking mode; Kimi Code uses "all" for tool-call loops.
+      additionalProperties: true
     ChatCompletionStreamOptions:
       type: object
       description: OpenAI-style streaming options

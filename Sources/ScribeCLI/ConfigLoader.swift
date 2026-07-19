@@ -263,9 +263,21 @@ public enum ConfigLoader {
     }
 
     let apiKeyTrimmed = profile.api.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
+    var resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
     let apiType = profile.api.type?.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedAPIType: String? = apiType.flatMap { $0.isEmpty ? nil : $0 }
+
+    if resolvedAPIType == "kimi" {
+      if resolvedAPIKey == nil,
+        let envKey = ProcessInfo.processInfo.environment["MOONSHOT_API_KEY"]?
+          .trimmingCharacters(in: .whitespacesAndNewlines),
+        !envKey.isEmpty
+      {
+        resolvedAPIKey = envKey
+      }
+      try KimiK3Support.validateMaxCompletionTokens(profile.agent.maxTokens)
+      try KimiK3Support.validateEndpoint(apiKey: resolvedAPIKey, serverURL: baseURL)
+    }
 
     let levelRaw = profile.logging.level.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
