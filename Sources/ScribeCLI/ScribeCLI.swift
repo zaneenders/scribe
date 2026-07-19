@@ -29,7 +29,7 @@ import SystemPackage
 
   @Option(
     name: .long,
-    help: "Log in to a provider: \"codex\" (ChatGPT), \"kimi\" (Kimi Code API key), or \"anthropic\" (Anthropic API key)."
+    help: "Log in to a provider: \"codex\" (ChatGPT) or \"kimi\" (Kimi Code API key)."
   )
   var login: String?
 
@@ -77,18 +77,16 @@ import SystemPackage
       switch loginProvider {
       case "codex":
         try await loginCodex()
-      case "kimi", "anthropic":
-        try await loginApiKey(provider: loginProvider, loaded: loaded)
+      case "kimi":
+        try await loginKimiApiKey(loaded: loaded)
       default:
         // If the active profile has a type, use that to decide
         if loaded.apiType == "codex" {
           try await loginCodex()
-        } else if loaded.apiType == "anthropic" {
-          try await loginApiKey(provider: "anthropic", loaded: loaded)
         } else if loaded.apiType == "kimi" {
-          try await loginApiKey(provider: "kimi", loaded: loaded)
+          try await loginKimiApiKey(loaded: loaded)
         } else {
-          print("Unknown provider \"\(loginProvider)\". Use \"codex\", \"kimi\", or \"anthropic\".")
+          print("Unknown provider \"\(loginProvider)\". Use \"codex\" or \"kimi\".")
           print("Or set api.type in your config and run just --login.")
         }
       }
@@ -386,12 +384,9 @@ extension ScribeCLI {
     }
   }
 
-  func loginApiKey(provider: String, loaded: LoadedConfig) async throws {
-    let displayName = provider == "kimi" ? "Kimi Code" : "Anthropic"
-    let envVar = provider == "kimi" ? "KIMI_API_KEY" : "ANTHROPIC_API_KEY"
-
-    print("Enter your \(displayName) API key.")
-    print("(You can also set the \(envVar) environment variable.)")
+  func loginKimiApiKey(loaded: LoadedConfig) async throws {
+    print("Enter your Kimi Code API key.")
+    print("(You can also set the KIMI_API_KEY environment variable.)")
     print("")
 
     guard let apiKey = readLine(strippingNewline: true), !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
