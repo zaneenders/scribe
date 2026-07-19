@@ -86,7 +86,7 @@ private struct MoonshotCredential: Codable {
     if let provider = login {
       switch provider {
       case .openai:
-        try await loginCodex()
+        try await loginCodex(loaded: loaded)
       case .moonshot:
         try await loginMoonshotApiKey(loaded: loaded)
       }
@@ -94,7 +94,7 @@ private struct MoonshotCredential: Codable {
     }
 
     if logout {
-      try await logoutCodex()
+      try await logoutCodex(loaded: loaded)
       return
     }
 
@@ -362,13 +362,15 @@ extension ScribeCLI {
 
   // MARK: - Login / Logout
 
-  func loginCodex() async throws {
+  func loginCodex(loaded: LoadedConfig) async throws {
     print("Opening browser for ChatGPT login...")
     print("A browser window should open. Complete login to finish.")
     print("")
 
     do {
-      let credential = try await CodexOAuth.login()
+      let credential = try await CodexOAuth.login(
+        baseDirectory: URL(fileURLWithPath: loaded.paths.dataHomePath, isDirectory: true)
+      )
       print("")
       print("✅ Authenticated successfully!")
       print("   Account ID: \(credential.accountId)")
@@ -384,9 +386,11 @@ extension ScribeCLI {
     }
   }
 
-  func logoutCodex() async throws {
+  func logoutCodex(loaded: LoadedConfig) async throws {
     do {
-      try CodexOAuth.logout()
+      try CodexOAuth.logout(
+        baseDirectory: URL(fileURLWithPath: loaded.paths.dataHomePath, isDirectory: true)
+      )
       print("✅ Logged out of ChatGPT subscription.")
     } catch {
       print("❌ Logout failed: \(error)")

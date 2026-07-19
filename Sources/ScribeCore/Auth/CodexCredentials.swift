@@ -32,7 +32,10 @@ public struct CodexCredential: Sendable, Codable {
 
 // MARK: - Credential Storage
 
-/// Persists Codex credentials to a JSON file under `~/.scribe/`.
+/// Persists Codex credentials to a JSON file under the Scribe data directory.
+///
+/// The data directory is resolved from the `SCRIBE_HOME` environment variable
+/// (falling back to `~/.scribe/`) unless an explicit `baseDirectory` is supplied.
 ///
 /// The file and its containing directory are locked down to owner-only
 /// access (0o600 / 0o700) so a long-lived OAuth refresh token cannot
@@ -40,12 +43,36 @@ public struct CodexCredential: Sendable, Codable {
 public enum CodexCredentialStore {
   private static let credentialsFileName = "codex-credentials.json"
 
+  // MARK: - Base directory resolution
+
+  /// Resolves the Scribe data home directory.
+  ///
+  /// When `SCRIBE_HOME` is set it is used verbatim (after tilde expansion);
+  /// otherwise the default `~/.scribe/` is used.
+  public static func resolveBaseDirectory() -> URL {
+    if let raw = ProcessInfo.processInfo.environment["SCRIBE_HOME"] {
+      let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        return URL(
+          fileURLWithPath: NSString(string: trimmed).expandingTildeInPath,
+          isDirectory: true
+        ).standardizedFileURL
+      }
+    }
+    return URL(
+      fileURLWithPath: NSString(string: "~/.scribe").expandingTildeInPath,
+      isDirectory: true
+    ).standardizedFileURL
+  }
+
   // MARK: - Paths
 
   /// Path to the credentials file.
-  public static func credentialsPath() -> URL {
-    let base = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".scribe")
+  ///
+  /// - Parameter baseDirectory: Explicit data-home override.  Pass `nil`
+  ///   (the default) to use the `SCRIBE_HOME`-aware default.
+  public static func credentialsPath(baseDirectory: URL? = nil) -> URL {
+    let base = baseDirectory ?? resolveBaseDirectory()
     ensureSecureDirectory(at: base)
     return base.appendingPathComponent(credentialsFileName)
   }
@@ -56,8 +83,10 @@ public enum CodexCredentialStore {
   ///
   /// If the file exists but has overly permissive POSIX permissions they
   /// are tightened to 0o600 before the read proceeds.
-  public static func read() throws -> CodexCredential? {
-    let path = credentialsPath()
+  ///
+  /// - Parameter baseDirectory: Explicit data-home override.
+  public static func read(baseDirectory: URL? = nil) throws -> CodexCredential? {
+    let path = credentialsPath(baseDirectory: baseDirectory)
     guard FileManager.default.fileExists(atPath: path.path) else { return nil }
 
     // Tighten permissions if the file was created by an older version.
@@ -71,17 +100,22 @@ public enum CodexCredentialStore {
   ///
   /// The file is written atomically and then the POSIX mode is set
   /// explicitly so the process umask cannot accidentally broaden access.
-  public static func write(_ credential: CodexCredential) throws {
+  ///
+  /// - Parameter baseDirectory: Explicit data-home override.
+  public static func write(_ credential: CodexCredential, baseDirectory: URL? = nil) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(credential)
-    try data.write(to: credentialsPath(), options: .atomic)
-    try setSecureFilePermissions(at: credentialsPath())
+    let path = credentialsPath(baseDirectory: baseDirectory)
+    try data.write(to: path, options: .atomic)
+    try setSecureFilePermissions(at: path)
   }
 
   /// Remove stored credentials (logout).
-  public static func delete() throws {
-    let path = credentialsPath()
+  ///
+  /// - Parameter baseDirectory: Explicit data-home override.
+  public static func delete(baseDirectory: URL? = nil) throws {
+    let path = credentialsPath(baseDirectory: baseDirectory)
     if FileManager.default.fileExists(atPath: path.path) {
       try FileManager.default.removeItem(at: path)
     }

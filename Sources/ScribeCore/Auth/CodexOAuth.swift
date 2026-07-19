@@ -44,12 +44,15 @@ public enum CodexOAuth {
   /// 5. Exchange code for access/refresh tokens
   /// 6. Persist credentials to disk
   ///
+  /// - Parameter baseDirectory: Explicit data-home directory for credential
+  ///   storage.  Pass `nil` (the default) to use the `SCRIBE_HOME`-aware default.
   /// - Returns: The newly created credential.
-  public static func login() async throws -> CodexCredential {
+  public static func login(baseDirectory: URL? = nil) async throws -> CodexCredential {
     try await login(
       callbackHost: CodexOAuthConstants.callbackHost,
       callbackPort: CodexOAuthConstants.callbackPort,
-      browserOpener: openBrowser
+      browserOpener: openBrowser,
+      baseDirectory: baseDirectory
     )
   }
 
@@ -58,7 +61,8 @@ public enum CodexOAuth {
     callbackHost: String,
     callbackPort: UInt16,
     browserOpener: @escaping @Sendable (URL) -> Void,
-    timeout: TimeInterval = CodexOAuthCallbackServer.loginTimeout
+    timeout: TimeInterval = CodexOAuthCallbackServer.loginTimeout,
+    baseDirectory: URL? = nil
   ) async throws -> CodexCredential {
     // 1. PKCE
     let pkce = PKCE.generate()
@@ -122,14 +126,17 @@ public enum CodexOAuth {
     )
 
     // 7. Persist
-    try CodexCredentialStore.write(credential)
+    try CodexCredentialStore.write(credential, baseDirectory: baseDirectory)
 
     return credential
   }
 
   /// Refresh an expired (or about-to-expire) access token.
   /// Returns a new credential with updated tokens.
-  public static func refresh(_ credential: CodexCredential) async throws -> CodexCredential {
+  ///
+  /// - Parameter baseDirectory: Explicit data-home directory for credential
+  ///   storage.  Pass `nil` to use the `SCRIBE_HOME`-aware default.
+  public static func refresh(_ credential: CodexCredential, baseDirectory: URL? = nil) async throws -> CodexCredential {
     let tokenResponse = try await refreshAccessToken(refreshToken: credential.refresh)
     let accountId = try extractAccountID(from: tokenResponse.accessToken)
 
@@ -142,25 +149,31 @@ public enum CodexOAuth {
       accountId: accountId
     )
 
-    try CodexCredentialStore.write(newCredential)
+    try CodexCredentialStore.write(newCredential, baseDirectory: baseDirectory)
     return newCredential
   }
 
   /// Get valid credentials, refreshing if necessary.
   /// Throws `CodexOAuthError.noCredentials` if not logged in.
-  public static func getValidCredentials() async throws -> CodexCredential {
-    guard let credential = try CodexCredentialStore.read() else {
+  ///
+  /// - Parameter baseDirectory: Explicit data-home directory for credential
+  ///   storage.  Pass `nil` to use the `SCRIBE_HOME`-aware default.
+  public static func getValidCredentials(baseDirectory: URL? = nil) async throws -> CodexCredential {
+    guard let credential = try CodexCredentialStore.read(baseDirectory: baseDirectory) else {
       throw CodexOAuthError.noCredentials
     }
     if credential.isExpired {
-      return try await refresh(credential)
+      return try await refresh(credential, baseDirectory: baseDirectory)
     }
     return credential
   }
 
   /// Logout — delete stored credentials.
-  public static func logout() throws {
-    try CodexCredentialStore.delete()
+  ///
+  /// - Parameter baseDirectory: Explicit data-home directory for credential
+  ///   storage.  Pass `nil` to use the `SCRIBE_HOME`-aware default.
+  public static func logout(baseDirectory: URL? = nil) throws {
+    try CodexCredentialStore.delete(baseDirectory: baseDirectory)
   }
 
   // MARK: - Private
