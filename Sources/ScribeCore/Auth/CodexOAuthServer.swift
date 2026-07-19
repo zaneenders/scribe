@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 #if canImport(Darwin)
 import Darwin
@@ -35,16 +36,39 @@ enum CodexOAuthCallbackServer {
   /// Overall timeout for the login flow (seconds).
   static let loginTimeout: TimeInterval = 300 // 5 minutes
 
-  /// Mutable box so the cancellation handler can reach the listening socket.
-  private final class SocketBox: @unchecked Sendable {
-    var fd: Int32 = -1
-    var closed = false
+  /// Thread-safe ownership of the listening socket.
+  ///
+  /// Cancellation may arrive before or after the server creates its socket.
+  /// `install` transfers ownership into this state unless cancellation already
+  /// won; `closeIfOpen` atomically takes ownership before closing so the file
+  /// descriptor is closed exactly once.
+  private final class ListeningSocket: Sendable {
+    private struct State: ~Copyable {
+      var descriptor: Int32?
+      var cancelled = false
+    }
 
-    /// Close the socket if it hasn't been closed yet.
+    private let state = Mutex(State())
+
+    /// Install a newly created descriptor, returning false if cancellation won.
+    func install(_ descriptor: Int32) -> Bool {
+      state.withLock { state in
+        guard !state.cancelled else { return false }
+        precondition(state.descriptor == nil, "Listening socket installed more than once")
+        state.descriptor = descriptor
+        return true
+      }
+    }
+
+    /// Close the descriptor once and prevent any later descriptor installation.
     func closeIfOpen() {
-      if !closed, fd >= 0 {
-        closed = true
-        close(fd)
+      let descriptor = state.withLock { state -> Int32? in
+        state.cancelled = true
+        defer { state.descriptor = nil }
+        return state.descriptor
+      }
+      if let descriptor {
+        close(descriptor)
       }
     }
   }
