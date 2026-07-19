@@ -625,6 +625,7 @@ internal final class SlateChatHost {
     self.sessionId = newId
     self.sessionCreatedAt = Date()
     self.modelBusy = false
+    transcriptState.resetUsage()
     queueTrayDispatch = nil
     queueBatchTotal = 0
     steeringLineOutstanding = false
@@ -679,21 +680,7 @@ internal final class SlateChatHost {
       case .modelTurnRunning(let running):
         modelBusy = running
         if running {
-          transcriptState.usageTurnPrompt = 0
-          transcriptState.usageTurnCompletion = 0
-          transcriptState.usageTurnTotal = 0
-          if var u = transcriptState.usageHUD {
-            u.roundPrompt = nil
-            u.roundCompletion = nil
-            u.roundTotal = nil
-            u.turnPrompt = 0
-            u.turnCompletion = 0
-            u.turnTotal = 0
-            u.outputTokensPerSecond = nil
-            u.reasoningTokens = nil
-            u.cachedPromptTokens = nil
-            transcriptState.usageHUD = u
-          }
+          transcriptState.beginModelTurn()
         } else {
           if let wake = renderWake {
             Task.detached(priority: .userInitiated) {
@@ -946,6 +933,7 @@ extension SlateChatHost {
       try await harness.reconfigure(configuration: newConfig)
       configuration = newConfig
       contextWindow = newConfig.contextWindow
+      transcriptState.updateUsageContextWindow(contextWindow)
       activeProfileName = loaded.activeProfileName
       profileCatalog = loaded.profiles
       pickerController.configuration = newConfig
