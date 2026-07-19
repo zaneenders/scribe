@@ -267,6 +267,11 @@ func runCodexAgentLoop(
       emit(.lifecycle(.recovered(reason: reason)))
       emit(.boundary(.turnEnd(round: round, outcome: .completed)))
       continue
+    } catch let scribeError as ScribeError {
+      // Non-recoverable ScribeErrors (apiHTTPError, etc.) — propagate
+      // so callers can inspect the specific error type.
+      outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
+      throw scribeError
     } catch {
       let description =
         (error as? LocalizedError)?.errorDescription
