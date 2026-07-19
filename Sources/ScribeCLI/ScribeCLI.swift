@@ -4,6 +4,10 @@ import ProfileRecorderServer
 import ScribeCore
 import SystemPackage
 
+enum LoginProvider: String, ExpressibleByArgument {
+  case openai
+}
+
 @main struct ScribeCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "scribe",
@@ -29,9 +33,9 @@ import SystemPackage
 
   @Option(
     name: .long,
-    help: "Log in to a provider: \"codex\" (ChatGPT) or \"kimi\" (Kimi Code API key)."
+    help: "Log in to a provider: \"openai\" (ChatGPT subscription) or \"moonshot\" (Kimi Code API key)."
   )
-  var login: String?
+  var login: LoginProvider?
 
   @Flag(name: .long, help: "Log out of the ChatGPT subscription account.")
   var logout = false
@@ -73,22 +77,12 @@ import SystemPackage
       return
     }
 
-    if let loginProvider = login {
-      switch loginProvider {
-      case "codex":
+    if let provider = login {
+      switch provider {
+      case .openai:
         try await loginCodex()
-      case "kimi":
-        try await loginKimiApiKey(loaded: loaded)
-      default:
-        // If the active profile has a type, use that to decide
-        if loaded.apiType == "codex" {
-          try await loginCodex()
-        } else if loaded.apiType == "kimi" {
-          try await loginKimiApiKey(loaded: loaded)
-        } else {
-          print("Unknown provider \"\(loginProvider)\". Use \"codex\" or \"kimi\".")
-          print("Or set api.type in your config and run just --login.")
-        }
+      case .moonshot:
+        try await loginMoonshotApiKey(loaded: loaded)
       }
       return
     }
@@ -382,53 +376,6 @@ extension ScribeCLI {
       print("❌ Login failed: \(error)")
       throw error
     }
-  }
-
-  func loginKimiApiKey(loaded: LoadedConfig) async throws {
-    print("Enter your Kimi Code API key.")
-    print("(You can also set the KIMI_API_KEY environment variable.)")
-    print("")
-
-    guard let apiKey = readLine(strippingNewline: true), !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
-      print("❌ No key provided.")
-      return
-    }
-
-    try writeApiKeyToConfig(apiKey, loaded: loaded)
-
-    print("")
-    print("✅ API key saved to profile \"\(loaded.activeProfileName)\"")
-    print("")
-    print("Run scribe to start using it:")
-    print("  scribe --profile \(loaded.activeProfileName)")
-  }
-
-  func writeApiKeyToConfig(_ apiKey: String, loaded: LoadedConfig) throws {
-    let configPath = loaded.resolvedConfigurationPath
-    guard let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
-          var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          var profiles = json["profiles"] as? [[String: Any]] else {
-      print("❌ Could not read config at \(configPath)")
-      return
-    }
-
-    let activeProfile = loaded.activeProfileName
-    guard let profileIdx = profiles.firstIndex(where: {
-      ($0["name"] as? String)?.trimmingCharacters(in: .whitespaces) == activeProfile
-    }) else {
-      print("❌ Active profile \"\(activeProfile)\" not found in config.")
-      return
-    }
-
-    var profile = profiles[profileIdx]
-    var api = profile["api"] as? [String: Any] ?? [:]
-    api["apiKey"] = apiKey
-    profile["api"] = api
-    profiles[profileIdx] = profile
-    json["profiles"] = profiles
-
-    let newData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
-    try newData.write(to: URL(fileURLWithPath: configPath))
   }
 
   func logoutCodex() async throws {

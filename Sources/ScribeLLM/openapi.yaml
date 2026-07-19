@@ -95,6 +95,7 @@ components:
           type: string
           description: Thinking effort level, e.g. "max" for Kimi Code K3.
         keep:
+          type: string
           description: Preserved thinking mode; Kimi Code uses "all" for tool-call loops.
       additionalProperties: true
     ChatCompletionStreamOptions:

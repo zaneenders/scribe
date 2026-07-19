@@ -17,7 +17,9 @@ struct KimiCodeRequestMiddleware: ClientMiddleware, Sendable {
     operationID: String,
     next: (HTTPRequest, HTTPBody?, URL) async throws -> (HTTPResponse, HTTPBody?)
   ) async throws -> (HTTPResponse, HTTPBody?) {
-    guard baseURL.host()?.contains("kimi.com") == true else {
+    guard let host = baseURL.host()?.lowercased(),
+      host == "kimi.com" || host.hasSuffix(".kimi.com")
+    else {
       return try await next(request, body, baseURL)
     }
     var req = request

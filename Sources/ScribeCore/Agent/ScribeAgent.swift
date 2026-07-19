@@ -211,7 +211,7 @@ public struct ScribeAgent: Sendable {
       } catch {
         let task = Task<TurnResult, Error> {
           defer { continuation.finish() }
-          continuation.yield(.lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login` first."))))
+          continuation.yield(.lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login openai` first."))))
           return TurnResult(newMessages: [], outcome: .error("Not logged in"))
         }
         return TurnStream(events: stream, result: task)

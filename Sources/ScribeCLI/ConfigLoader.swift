@@ -7,6 +7,7 @@ import SystemPackage
 public enum ScribeConfigBinding {
   public static let apiBaseURL = "api.baseUrl"
   public static let apiKey = "api.apiKey"
+  public static let apiType = "api.type"
   public static let agentModel = "agent.model"
   public static let contextWindow = "agent.contextWindow"
   public static let contextWindowThreshold = "agent.contextWindowThreshold"
@@ -265,6 +266,16 @@ public enum ConfigLoader {
     var resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
     let apiType = profile.api.type?.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedAPIType: String? = apiType.flatMap { $0.isEmpty ? nil : $0 }
+
+    if let resolvedAPIType {
+      guard resolvedAPIType == "codex" || resolvedAPIType == "kimi" else {
+        throw ScribeError.configuration(
+          key: ScribeConfigBinding.apiType,
+          reason:
+            "Unknown `\(ScribeConfigBinding.apiType)` value \"\(resolvedAPIType)\" for profile `\(profileName)`; use \"codex\", \"kimi\", or omit it for OpenAI-compatible providers."
+        )
+      }
+    }
 
     if resolvedAPIType == "kimi" {
       if resolvedAPIKey == nil,

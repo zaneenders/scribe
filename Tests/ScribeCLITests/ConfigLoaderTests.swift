@@ -133,4 +133,38 @@ struct ConfigLoaderTests {
     #expect(loaded.activeProfileName == "first")
     #expect(try ActiveProfileStore.read(from: paths) == "first")
   }
+
+  @Test func rejectsUnknownAPIType() async throws {
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    setenv("SCRIBE_HOME", root.path, 1)
+    defer { unsetenv("SCRIBE_HOME") }
+
+    let paths = ScribePaths(dataHome: FilePath(root.path))
+    try createDirectoryWithIntermediates(paths.dataHome)
+    let configJSON = """
+      {
+        "profiles": [
+          {
+            "name": "legacy",
+            "api": { "baseUrl": "https://api.anthropic.com", "apiKey": "secret", "type": "anthropic" },
+            "agent": {
+              "model": "some-model",
+              "contextWindow": 200000,
+              "contextWindowThreshold": 0.8
+            },
+            "logging": { "level": "info" }
+          }
+        ]
+      }
+      """
+    try configJSON.write(
+      toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+
+    await #expect(throws: ScribeError.self) {
+      _ = try await ConfigLoader.load()
+    }
+  }
 }

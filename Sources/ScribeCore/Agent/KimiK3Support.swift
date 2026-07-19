@@ -1,3 +1,4 @@
+import Foundation
 import ScribeLLM
 
 enum ChatCompletionRequestProfile: Sendable {
@@ -21,7 +22,11 @@ public enum KimiK3Support {
   }
 
   public static func isKimiCodeBaseURL(_ serverURL: String) -> Bool {
-    serverURL.trimmingCharacters(in: .whitespacesAndNewlines).contains("kimi.com/coding")
+    let trimmed = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let components = URLComponents(string: trimmed),
+      let host = components.host?.lowercased()
+    else { return false }
+    return host == "api.kimi.com" && components.path.hasPrefix("/coding")
   }
 
   static func resolveTransport(apiKey: String?, serverURL: String) throws -> KimiTransport {
