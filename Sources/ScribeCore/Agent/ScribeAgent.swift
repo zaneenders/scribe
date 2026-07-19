@@ -8,6 +8,7 @@ public struct ScribeAgent: Sendable {
 
   private let model: String
   private let reasoningEnabled: Bool?
+  private let contextWindow: Int
 
   internal let chatTools: [ScribeLLM.Components.Schemas.ChatTool]
   private let toolExecutor: any ToolExecutor
@@ -34,6 +35,7 @@ public struct ScribeAgent: Sendable {
     toolExecutor: (any ToolExecutor)? = nil,
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
+    contextWindow: Int = 0,
     logger: Logger
   ) {
     self.client = client
@@ -44,6 +46,7 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
     self.model = model
     self.reasoningEnabled = reasoningEnabled
+    self.contextWindow = contextWindow
     self._isCodexConfig = false
     self._codexServerURL = nil
     self._requestProfile = .standard
@@ -68,6 +71,7 @@ public struct ScribeAgent: Sendable {
     toolExecutor: (any ToolExecutor)? = nil,
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
+    contextWindow: Int = 0,
     logger: Logger
   ) {
     self.client = nil
@@ -78,6 +82,7 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
     self.model = model
     self.reasoningEnabled = reasoningEnabled
+    self.contextWindow = contextWindow
     self._isCodexConfig = false
     self._codexServerURL = nil
     self._requestProfile = .standard
@@ -105,6 +110,7 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
     self.model = configuration.agentModel
     self.reasoningEnabled = configuration.reasoningEnabled
+    self.contextWindow = configuration.contextWindow
 
     if configuration.apiType == "codex" {
       guard let serverURL = URL(string: configuration.serverURL) else {
@@ -198,7 +204,7 @@ public struct ScribeAgent: Sendable {
       let task = Task<TurnResult, Error> {
         [
           toolExecutor, chatTools, serverURL, wireMessages, historyWire, options,
-          agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory
+          agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory, contextWindow
         ] in
         defer { continuation.finish() }
 
@@ -229,7 +235,8 @@ public struct ScribeAgent: Sendable {
           maxToolRounds: options.maxToolRounds,
           workingDirectory: workingDirectory,
           reasoningEnabled: reasoningEnabled,
-          hooks: .default
+          hooks: .default,
+          contextWindow: contextWindow
         )
 
         do {
@@ -276,7 +283,7 @@ public struct ScribeAgent: Sendable {
         [
           toolExecutor, chatTools, codexClient, accessToken, accountID,
           wireMessages, historyWire, options, agentLogger, abortNotifier,
-          model, reasoningEnabled, workingDirectory
+          model, reasoningEnabled, workingDirectory, contextWindow
         ] in
         defer { continuation.finish() }
 
@@ -292,7 +299,8 @@ public struct ScribeAgent: Sendable {
           maxToolRounds: options.maxToolRounds,
           workingDirectory: workingDirectory,
           reasoningEnabled: reasoningEnabled,
-          hooks: .default
+          hooks: .default,
+          contextWindow: contextWindow
         )
 
         do {
@@ -342,7 +350,7 @@ public struct ScribeAgent: Sendable {
     let task = Task<TurnResult, Error> {
       [
         toolExecutor, chatTools, client, wireMessages, historyWire, options,
-        agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory
+        agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory, contextWindow
       ] in
       defer { continuation.finish() }
 
@@ -359,7 +367,8 @@ public struct ScribeAgent: Sendable {
         reasoningEnabled: reasoningEnabled,
         hooks: .default,
         requestProfile: _requestProfile,
-        maxCompletionTokens: _maxCompletionTokens
+        maxCompletionTokens: _maxCompletionTokens,
+        contextWindow: contextWindow
       )
 
       do {

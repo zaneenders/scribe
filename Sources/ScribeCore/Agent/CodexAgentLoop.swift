@@ -52,6 +52,33 @@ struct CodexAgentLoopConfig: Sendable {
   let workingDirectory: FilePath
   let reasoningEnabled: Bool?
   let hooks: AgentLoopHooks
+  let contextWindow: Int
+
+  init(
+    model: String,
+    client: ScribeLLMCodex.Client,
+    accessToken: String,
+    accountID: String,
+    toolExecutor: any ToolExecutor,
+    chatTools: [ScribeLLM.Components.Schemas.ChatTool],
+    maxToolRounds: Int,
+    workingDirectory: FilePath,
+    reasoningEnabled: Bool?,
+    hooks: AgentLoopHooks,
+    contextWindow: Int = 0
+  ) {
+    self.model = model
+    self.client = client
+    self.accessToken = accessToken
+    self.accountID = accountID
+    self.toolExecutor = toolExecutor
+    self.chatTools = chatTools
+    self.maxToolRounds = maxToolRounds
+    self.workingDirectory = workingDirectory
+    self.reasoningEnabled = reasoningEnabled
+    self.hooks = hooks
+    self.contextWindow = contextWindow
+  }
 }
 
 /// Runs the agent loop against the Codex (ChatGPT subscription) API.
@@ -91,6 +118,18 @@ func runCodexAgentLoop(
     emit(.boundary(.turnStart(round: round)))
 
     do {
+      if let reason = try enforceRequestBudget(
+        messages: &currentContext.messages,
+        newMessages: &newMessages,
+        tools: config.chatTools,
+        contextWindow: config.contextWindow)
+      {
+        logger.notice(
+          "agent.request.preflight.compacted.codex",
+          metadata: ["round": "\(round)", "reason": "\(reason)"])
+        emit(.lifecycle(.recovered(reason: reason)))
+      }
+
       let roundResult = try await abortObserver.race {
         [currentContext, config, emit, logger, clock, round, abortObserver] in
         try await runSingleCodexRound(

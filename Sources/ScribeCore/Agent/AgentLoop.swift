@@ -22,6 +22,7 @@ struct AgentLoopConfig: Sendable {
   let hooks: AgentLoopHooks
   let requestProfile: ChatCompletionRequestProfile
   let maxCompletionTokens: Int?
+  let contextWindow: Int
 
   init(
     model: String,
@@ -34,7 +35,8 @@ struct AgentLoopConfig: Sendable {
     reasoningEnabled: Bool?,
     hooks: AgentLoopHooks,
     requestProfile: ChatCompletionRequestProfile = .standard,
-    maxCompletionTokens: Int? = nil
+    maxCompletionTokens: Int? = nil,
+    contextWindow: Int = 0
   ) {
     self.model = model
     self.client = client
@@ -47,6 +49,7 @@ struct AgentLoopConfig: Sendable {
     self.hooks = hooks
     self.requestProfile = requestProfile
     self.maxCompletionTokens = maxCompletionTokens
+    self.contextWindow = contextWindow
   }
 }
 
@@ -85,6 +88,24 @@ func runAgentLoop(
     }
 
     emit(.boundary(.turnStart(round: round)))
+
+    do {
+      if let reason = try enforceRequestBudget(
+        messages: &currentContext.messages,
+        newMessages: &newMessages,
+        tools: config.chatTools,
+        contextWindow: config.contextWindow)
+      {
+        logger.notice("agent.request.preflight.compacted", metadata: ["round": "\(round)", "reason": "\(reason)"])
+        emit(.lifecycle(.recovered(reason: reason)))
+      }
+    } catch {
+      let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+      logger.warning("agent.request.preflight.rejected", metadata: ["round": "\(round)", "err": "\(description)"])
+      emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
+      outcome = .error(description)
+      return (newMessages, outcome)
+    }
 
     let roundResult: RoundResult
     do {
@@ -573,7 +594,9 @@ func rollbackContextOverflow(
   // Providers do not report which input item crossed the limit. If no obvious attachment or
   // oversized output exists, compact the largest tool result rather than retrying unchanged.
   if toolIndexesToReplace.isEmpty,
-    let largest = messages.indices.filter({ messages[$0].role == .tool }).max(by: {
+    let largest = messages.indices.filter({
+      messages[$0].role == .tool && !isContextOverflowReplacement(messages[$0])
+    }).max(by: {
       messageTextSize(messages[$0]) < messageTextSize(messages[$1])
     })
   {
@@ -625,6 +648,11 @@ private func isImageMessage(_ message: Components.Schemas.ChatMessage) -> Bool {
 private func messageTextSize(_ message: Components.Schemas.ChatMessage) -> Int {
   guard case .case1(let text) = message.content else { return 0 }
   return text.utf8.count
+}
+
+private func isContextOverflowReplacement(_ message: Components.Schemas.ChatMessage) -> Bool {
+  guard case .case1(let text) = message.content else { return false }
+  return text.contains("tool output exceeded model context window and was removed")
 }
 
 private func contextOverflowReplacement(
