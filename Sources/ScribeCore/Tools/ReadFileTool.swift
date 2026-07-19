@@ -12,6 +12,11 @@ struct ReadFileToolResult: Encodable, Sendable {
   let startLine: Int
   let endLine: Int
   let truncated: Bool
+  let truncationReason: String?
+  let contentBytes: Int
+  let contentCharacters: Int
+  let maxContentBytes: Int
+  let maxContentCharacters: Int
 }
 
 struct ReadFileImageResult: Encodable, AttachableToolResult, Sendable {
@@ -56,7 +61,8 @@ public struct ReadFileTool: ScribeTool {
       + "Supports line-based pagination via `offset` and `limit` so very large files can be "
       + "fetched in sections without bloating the conversation history. The result includes "
       + "`bytes`, `total_lines`, `start_line`, `end_line`, and `truncated` so you can decide "
-      + "whether to request another page (`offset = previous end_line + 1`). "
+      + "whether to request another page (`offset = previous end_line + 1`). Text output is also "
+      + "capped at 64 KiB and 64,000 characters, including when `limit` is `0`. "
       + "Image files are automatically detected by their contents (magic bytes) and returned "
       + "as base64-encoded data so the model can view them."
   }
@@ -76,8 +82,9 @@ public struct ReadFileTool: ScribeTool {
         name: "limit", type: .integer,
         description:
           "Maximum number of lines to return (default 2000). Pass a smaller value when only a "
-          + "section is needed; pass `0` to read to end of file. Response includes `total_lines`, "
-          + "`start_line`, `end_line`, and `truncated` so you can tell whether to fetch another page.",
+          + "section is needed; pass `0` to remove the line cap. The hard 64 KiB / 64,000-character "
+          + "content cap always applies. Response includes `total_lines`, `start_line`, `end_line`, "
+          + "`truncated`, and `truncation_reason` so you can tell whether to fetch another page.",
         required: false),
     ]
   }
@@ -90,6 +97,8 @@ public struct ReadFileTool: ScribeTool {
   public init() {}
 
   static let defaultLineLimit = 2000
+  static let maxContentBytes = 64 * 1024
+  static let maxContentCharacters = 64_000
 
   public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
     let obj = try ToolArgumentParsing.parseJSONObject(arguments)
@@ -136,8 +145,10 @@ public struct ReadFileTool: ScribeTool {
         "start_line": "\(result.startLine)",
         "end_line": "\(result.endLine)",
         "returned_lines": "\(returnedLines)",
+        "content_bytes": "\(result.content.utf8.count)",
         "content_chars": "\(result.content.count)",
         "truncated": "\(result.truncated)",
+        "truncation_reason": "\(result.truncationReason ?? "nil")",
       ])
     return ReadFileToolResult(
       path: result.absolutePath,
@@ -146,7 +157,12 @@ public struct ReadFileTool: ScribeTool {
       totalLines: result.totalLines,
       startLine: result.startLine,
       endLine: result.endLine,
-      truncated: result.truncated
+      truncated: result.truncated,
+      truncationReason: result.truncationReason,
+      contentBytes: result.content.utf8.count,
+      contentCharacters: result.content.count,
+      maxContentBytes: Self.maxContentBytes,
+      maxContentCharacters: Self.maxContentCharacters
     )
   }
 
@@ -158,6 +174,7 @@ public struct ReadFileTool: ScribeTool {
     let startLine: Int
     let endLine: Int
     let truncated: Bool
+    let truncationReason: String?
   }
 
   private static func readFile(
@@ -193,21 +210,57 @@ public struct ReadFileTool: ScribeTool {
         totalLines: totalLines,
         startLine: totalLines + 1,
         endLine: totalLines,
-        truncated: false
+        truncated: false,
+        truncationReason: nil
       )
     }
 
     let endIndex = min(totalLines, startIndex + resolvedLimit)
-    let slice = parts[startIndex..<endIndex].joined(separator: "\n")
+    let requestedSlice = parts[startIndex..<endIndex].joined(separator: "\n")
+    let bounded = boundedContent(requestedSlice)
+    let returnedLineCount = bounded.content.reduce(into: 1) { count, character in
+      if character == "\n" { count += 1 }
+    }
+    let returnedEndLine = min(endIndex, startIndex + returnedLineCount)
+    let lineTruncated = endIndex < totalLines
     return ReadFileResult(
       absolutePath: s,
-      content: slice,
+      content: bounded.content,
       totalBytes: totalBytes,
       totalLines: totalLines,
       startLine: startIndex + 1,
-      endLine: endIndex,
-      truncated: endIndex < totalLines
+      endLine: returnedEndLine,
+      truncated: bounded.reason != nil || lineTruncated,
+      truncationReason: bounded.reason ?? (lineTruncated ? "line_limit" : nil)
     )
+  }
+
+  private static func boundedContent(_ content: String) -> (content: String, reason: String?) {
+    guard content.count > maxContentCharacters || content.utf8.count > maxContentBytes else {
+      return (content, nil)
+    }
+
+    var end = content.startIndex
+    var bytes = 0
+    var characters = 0
+    while end < content.endIndex, characters < maxContentCharacters {
+      let next = content.index(after: end)
+      let characterBytes = content[end..<next].utf8.count
+      guard bytes + characterBytes <= maxContentBytes else { break }
+      bytes += characterBytes
+      characters += 1
+      end = next
+    }
+
+    let reason: String
+    if characters == maxContentCharacters && bytes == maxContentBytes {
+      reason = "byte_and_character_limit"
+    } else if characters == maxContentCharacters {
+      reason = "character_limit"
+    } else {
+      reason = "byte_limit"
+    }
+    return (String(content[..<end]), reason)
   }
 
   private static func readImage(path: String) async throws -> ReadFileImageResult {

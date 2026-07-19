@@ -28,6 +28,11 @@ struct ReadPayload: Decodable {
   let startLine: Int?
   let endLine: Int?
   let truncated: Bool?
+  let truncationReason: String?
+  let contentBytes: Int?
+  let contentCharacters: Int?
+  let maxContentBytes: Int?
+  let maxContentCharacters: Int?
 }
 
 struct WritePayload: Decodable {
