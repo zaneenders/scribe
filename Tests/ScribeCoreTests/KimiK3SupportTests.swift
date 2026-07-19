@@ -1,5 +1,6 @@
-@testable import ScribeCore
 import Testing
+
+@testable import ScribeCore
 
 @Suite
 struct KimiK3SupportTests {

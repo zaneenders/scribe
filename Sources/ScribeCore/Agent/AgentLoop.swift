@@ -341,7 +341,8 @@ private func runSingleRound(
     let hint: String = {
       let d = detail.lowercased()
       if code == 401, config.requestProfile == .moonshotK3 || config.requestProfile == .kimiCode {
-        return " Check your API key matches api.baseUrl: Kimi Code keys require https://api.kimi.com/coding; Moonshot platform keys require https://api.moonshot.ai."
+        return
+          " Check your API key matches api.baseUrl: Kimi Code keys require https://api.kimi.com/coding; Moonshot platform keys require https://api.moonshot.ai."
       }
       if d.contains("model"), d.contains("not found") {
         return " The configured model was not found."
@@ -420,9 +421,10 @@ private func runSingleRound(
 
   let finishReason = turn.finishReason?.trimmingCharacters(in: .whitespacesAndNewlines)
   let normalizedFinishReason = finishReason?.lowercased()
-  let isIncomplete = normalizedFinishReason.map { reason in
-    reason != "stop" && reason != "tool_calls" && reason != "function_call"
-  } ?? false
+  let isIncomplete =
+    normalizedFinishReason.map { reason in
+      reason != "stop" && reason != "tool_calls" && reason != "function_call"
+    } ?? false
 
   if toolInvocations.isEmpty {
     let metadata: Logger.Metadata = [
@@ -580,7 +582,8 @@ func rollbackContextOverflow(
 
   guard !toolIndexesToReplace.isEmpty else { return nil }
 
-  let detail = providerDetail.count > 512
+  let detail =
+    providerDetail.count > 512
     ? String(providerDetail.prefix(512)) + "…"
     : providerDetail
   for index in toolIndexesToReplace {

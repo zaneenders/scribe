@@ -151,7 +151,7 @@ public enum CodexCredentialStore {
   /// If the file has broader-than-0o600 permissions, tighten them.
   private static func tightenFilePermissions(at url: URL) {
     guard let current = try? FileManager.default.attributesOfItem(atPath: url.path),
-          let mode = current[.posixPermissions] as? NSNumber
+      let mode = current[.posixPermissions] as? NSNumber
     else { return }
 
     let mask = 0o077  // bits other than owner
@@ -163,7 +163,7 @@ public enum CodexCredentialStore {
   /// If the directory has broader-than-0o700 permissions, tighten them.
   private static func tightenDirectoryPermissions(at url: URL) {
     guard let current = try? FileManager.default.attributesOfItem(atPath: url.path),
-          let mode = current[.posixPermissions] as? NSNumber
+      let mode = current[.posixPermissions] as? NSNumber
     else { return }
 
     let mask = 0o077  // bits other than owner

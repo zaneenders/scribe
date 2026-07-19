@@ -58,8 +58,8 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         if raw == "[DONE]" { break }
 
         guard let data = raw.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let eventType = json["type"] as? String
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let eventType = json["type"] as? String
         else {
           logger.warning("agent.stream.unreadable-codex-chunk", metadata: ["raw_prefix": "\(raw.prefix(120))"])
           continue
@@ -68,7 +68,8 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         decodedChunkCount += 1
         if !loggedFirstChunk {
           loggedFirstChunk = true
-          logger.debug("agent.stream.first-chunk-codex", metadata: ["ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"])
+          logger.debug(
+            "agent.stream.first-chunk-codex", metadata: ["ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"])
         }
 
         // Handle terminal events
@@ -142,7 +143,8 @@ struct CodexStreamProcessor<AO: AbortObserver> {
 
         case "response.function_call_arguments.delta":
           if let delta = json["delta"] as? String,
-             let outputIndex = json["output_index"] as? Int {
+            let outputIndex = json["output_index"] as? Int
+          {
             markStreamStarted()
             emitToolCallDelta(outputIndex: outputIndex, delta: delta)
             turn.applyToolCallDelta(outputIndex: outputIndex, delta: delta)
@@ -150,7 +152,8 @@ struct CodexStreamProcessor<AO: AbortObserver> {
 
         case "response.output_item.done":
           if let item = json["item"] as? [String: Any],
-             let outputIndex = json["output_index"] as? Int {
+            let outputIndex = json["output_index"] as? Int
+          {
             if let itemType = item["type"] as? String {
               switch itemType {
               case "function_call":
@@ -205,7 +208,8 @@ struct CodexStreamProcessor<AO: AbortObserver> {
     fallback: String
   ) -> ScribeError {
     let response = event["response"] as? [String: Any]
-    let nestedError = (response?["error"] as? [String: Any])
+    let nestedError =
+      (response?["error"] as? [String: Any])
       ?? (event["error"] as? [String: Any])
 
     let message = firstNonEmptyString(
@@ -265,7 +269,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
 
   private func compactJSON(_ object: [String: Any], limit: Int = 1_000) -> String? {
     guard JSONSerialization.isValidJSONObject(object),
-          let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+      let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     else { return nil }
     let text = String(decoding: data, as: UTF8.self)
     return text.count <= limit ? text : "\(text.prefix(limit))…"
@@ -376,9 +380,10 @@ struct CodexAssistantTurn {
   func resolvedToolCalls() -> [ToolInvocation] {
     toolCallsByIndex.keys.sorted().compactMap { key in
       guard let t = toolCallsByIndex[key],
-            let callID = t.callID,
-            let itemID = t.itemID,
-            let name = t.name else { return nil }
+        let callID = t.callID,
+        let itemID = t.itemID,
+        let name = t.name
+      else { return nil }
       let identifiers = CodexToolCallIdentifiers(callID: callID, itemID: itemID)
       return ToolInvocation(id: identifiers.encoded, name: name, arguments: t.arguments)
     }

@@ -1,9 +1,10 @@
+import Foundation
+
 #if canImport(CryptoKit)
 import CryptoKit
 #else
 import Crypto
 #endif
-import Foundation
 
 // MARK: - Secure Random Bytes (platform wrapper)
 

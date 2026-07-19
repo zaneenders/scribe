@@ -1,4 +1,6 @@
+import AsyncHTTPClient
 import Foundation
+import NIOCore
 
 #if canImport(Darwin)
 import Darwin
@@ -7,9 +9,6 @@ import Glibc
 #elseif canImport(Musl)
 import Musl
 #endif
-
-import AsyncHTTPClient
-import NIOCore
 
 // MARK: - OAuth Flow
 
@@ -116,7 +115,8 @@ public enum CodexOAuth {
     let accountId = try extractAccountID(from: tokenResponse.accessToken)
 
     // 6. Build credential
-    let expiresMs = Int64(Date().timeIntervalSince1970 * 1000)
+    let expiresMs =
+      Int64(Date().timeIntervalSince1970 * 1000)
       + Int64(tokenResponse.expiresIn) * 1000
     let credential = CodexCredential(
       access: tokenResponse.accessToken,
@@ -140,7 +140,8 @@ public enum CodexOAuth {
     let tokenResponse = try await refreshAccessToken(refreshToken: credential.refresh)
     let accountId = try extractAccountID(from: tokenResponse.accessToken)
 
-    let expiresMs = Int64(Date().timeIntervalSince1970 * 1000)
+    let expiresMs =
+      Int64(Date().timeIntervalSince1970 * 1000)
       + Int64(tokenResponse.expiresIn) * 1000
     let newCredential = CodexCredential(
       access: tokenResponse.accessToken,
@@ -231,7 +232,7 @@ public enum CodexOAuth {
     request.body = .bytes(ByteBuffer(string: components.query ?? ""))
 
     let response = try await httpClient.execute(request, timeout: .seconds(30))
-    let body = try await response.body.collect(upTo: 1_048_576) // 1 MiB
+    let body = try await response.body.collect(upTo: 1_048_576)  // 1 MiB
 
     guard response.status == .ok else {
       let bodyString = String(buffer: body)
@@ -255,7 +256,7 @@ public enum CodexOAuth {
     request.body = .bytes(ByteBuffer(string: components.query ?? ""))
 
     let response = try await httpClient.execute(request, timeout: .seconds(30))
-    let body = try await response.body.collect(upTo: 1_048_576) // 1 MiB
+    let body = try await response.body.collect(upTo: 1_048_576)  // 1 MiB
 
     guard response.status == .ok else {
       let bodyString = String(buffer: body)
@@ -344,7 +345,8 @@ public enum CodexOAuth {
   }
 
   private static func padBase64(_ base64: String) -> String {
-    var result = base64
+    var result =
+      base64
       .replacingOccurrences(of: "-", with: "+")
       .replacingOccurrences(of: "_", with: "/")
     while result.count % 4 != 0 {

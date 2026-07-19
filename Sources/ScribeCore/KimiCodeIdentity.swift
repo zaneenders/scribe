@@ -17,7 +17,8 @@ enum KimiCodeIdentity {
   }
 
   private static func deviceID() -> String {
-    let home = ProcessInfo.processInfo.environment["SCRIBE_HOME"]
+    let home =
+      ProcessInfo.processInfo.environment["SCRIBE_HOME"]
       .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
       .flatMap { $0.isEmpty ? nil : NSString(string: $0).expandingTildeInPath }
       ?? NSString(string: "~/.scribe").expandingTildeInPath

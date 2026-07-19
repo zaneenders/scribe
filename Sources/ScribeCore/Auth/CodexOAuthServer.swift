@@ -34,7 +34,7 @@ public enum CodexOAuthConstants {
 enum CodexOAuthCallbackServer {
 
   /// Overall timeout for the login flow (seconds).
-  static let loginTimeout: TimeInterval = 300 // 5 minutes
+  static let loginTimeout: TimeInterval = 300  // 5 minutes
 
   /// Thread-safe ownership of the listening socket.
   ///
@@ -269,33 +269,39 @@ enum CodexOAuthCallbackServer {
       let urlComponents = URLComponents(string: path),
       urlComponents.path == "/auth/callback"
     else {
-      sendResponse(client, status: 404,
-                   body: htmlPage(title: "Not Found", body: "Callback route not found."))
+      sendResponse(
+        client, status: 404,
+        body: htmlPage(title: "Not Found", body: "Callback route not found."))
       return nil
     }
 
-    let params = urlComponents.queryItems?.reduce(into: [String: String]()) { dict, item in
-      dict[item.name] = item.value
-    } ?? [:]
+    let params =
+      urlComponents.queryItems?.reduce(into: [String: String]()) { dict, item in
+        dict[item.name] = item.value
+      } ?? [:]
 
     // Verify CSRF state.
     guard params["state"] == expectedState else {
-      sendResponse(client, status: 400,
-                   body: htmlPage(title: "Error", body: "State mismatch."))
+      sendResponse(
+        client, status: 400,
+        body: htmlPage(title: "Error", body: "State mismatch."))
       return nil
     }
 
     // Extract authorization code.
     guard let code = params["code"], !code.isEmpty else {
-      sendResponse(client, status: 400,
-                   body: htmlPage(title: "Error", body: "Missing authorization code."))
+      sendResponse(
+        client, status: 400,
+        body: htmlPage(title: "Error", body: "Missing authorization code."))
       return nil
     }
 
     // Success — send the landing page and return the code.
-    sendResponse(client, status: 200,
-                 body: htmlPage(title: "Authenticated",
-                                body: "OpenAI authentication completed. You can close this window."))
+    sendResponse(
+      client, status: 200,
+      body: htmlPage(
+        title: "Authenticated",
+        body: "OpenAI authentication completed. You can close this window."))
     return code
   }
 

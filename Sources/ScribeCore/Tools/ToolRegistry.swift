@@ -98,7 +98,8 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               attachments = []
             }
             let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
-            let modelOutput = (value as? AttachableToolResult)?.attachmentToolResultText
+            let modelOutput =
+              (value as? AttachableToolResult)?.attachmentToolResultText
               ?? encoded
             let toolResult = ToolResult(
               text: modelOutput, attachments: attachments, warnings: warnings)

@@ -134,9 +134,10 @@ func codexStreamEmitsEmptyWhenNoContentBeforeResponseCompleted() async throws {
 func codexStreamWithDoneSentinelStillFinalizes() async throws {
   // When only [DONE] terminates the stream (no response.completed event),
   // the post-loop finalization should still kick in.
-  let sse = makeSSE(
-    #"{"type":"response.output_text.delta","delta":"Hi"}"#
-  ) + "data: [DONE]\n\n"
+  let sse =
+    makeSSE(
+      #"{"type":"response.output_text.delta","delta":"Hi"}"#
+    ) + "data: [DONE]\n\n"
 
   let (events, turn, _) = try await driveProcessor(sse: sse)
 
@@ -198,10 +199,11 @@ func codexStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent() a
   // If both response.completed and [DONE] appear, the early return
   // from response.completed must prevent a double-finalize from the
   // post-loop path.
-  let sse = makeSSE(
-    #"{"type":"response.output_text.delta","delta":"One and only one"}"#,
-    #"{"type":"response.completed","response":{"id":"resp_once"}}"#
-  ) + "data: [DONE]\n\n"
+  let sse =
+    makeSSE(
+      #"{"type":"response.output_text.delta","delta":"One and only one"}"#,
+      #"{"type":"response.completed","response":{"id":"resp_once"}}"#
+    ) + "data: [DONE]\n\n"
 
   let (events, _, _) = try await driveProcessor(sse: sse)
 

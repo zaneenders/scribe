@@ -74,7 +74,8 @@ private var codexToolCallResponse: String {
 
 private var codexContextErrorResponse: String {
   codexSSE(
-    #"{"type":"error","error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model.","type":"invalid_request_error"}}"#)
+    #"{"type":"error","error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model.","type":"invalid_request_error"}}"#
+  )
 }
 
 private var codexCompletedResponse: String {
@@ -117,10 +118,11 @@ func codexContextOverflowDropsToolAttachmentAndRetries() async throws {
 
   #expect(termination == .completed)
   #expect(transport.requests().count == 3)
-  #expect(messages.filter { message in
-    guard case .case2 = message.content else { return false }
-    return true
-  }.isEmpty)
+  #expect(
+    messages.filter { message in
+      guard case .case2 = message.content else { return false }
+      return true
+    }.isEmpty)
   let toolMessage = try #require(messages.first { $0.role == .tool })
   guard case .case1(let toolText) = toolMessage.content else {
     Issue.record("Expected compacted text tool result")
@@ -174,9 +176,13 @@ func codexContextOverflowRecoveryRunsOnlyOnce() async throws {
 
 @Test
 func contextLengthRecognitionIncludesCodexStreamErrors() {
-  #expect(isContextLengthError(.generic(
-    "Your input exceeds the context window (code: context_length_exceeded)")))
-  #expect(isContextLengthError(.generic(
-    "Request payload exceeds the limit (code: input_too_large)")))
+  #expect(
+    isContextLengthError(
+      .generic(
+        "Your input exceeds the context window (code: context_length_exceeded)")))
+  #expect(
+    isContextLengthError(
+      .generic(
+        "Request payload exceeds the limit (code: input_too_large)")))
   #expect(!isContextLengthError(.generic("Image could not be processed")))
 }

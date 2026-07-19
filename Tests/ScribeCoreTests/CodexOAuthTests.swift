@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 
+@testable import ScribeCore
+
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -8,8 +10,6 @@ import Glibc
 #elseif canImport(Musl)
 import Musl
 #endif
-
-@testable import ScribeCore
 
 @Suite(.serialized)
 struct CodexOAuthTests {
@@ -71,7 +71,7 @@ struct CodexOAuthTests {
       // Confirm the error arrived close to the configured deadline.
       let elapsed = start.duration(to: .now)
       #expect(elapsed >= .seconds(2))
-      #expect(elapsed < .seconds(8)) // generous upper bound to avoid flakes
+      #expect(elapsed < .seconds(8))  // generous upper bound to avoid flakes
     }
   }
 }

@@ -206,7 +206,8 @@ public struct ScribeAgent: Sendable {
         do {
           cred = try await CodexOAuth.getValidCredentials()
         } catch {
-          continuation.yield(.lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login openai` first."))))
+          continuation.yield(
+            .lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login openai` first."))))
           return TurnResult(newMessages: [], outcome: .error("Not logged in"))
         }
 
@@ -268,8 +269,9 @@ public struct ScribeAgent: Sendable {
 
     // Codex path (pre-resolved client)
     if let codexClient = codexClient,
-       let accessToken = codexAccessToken,
-       let accountID = codexAccountID {
+      let accessToken = codexAccessToken,
+      let accountID = codexAccountID
+    {
       let task = Task<TurnResult, Error> {
         [
           toolExecutor, chatTools, codexClient, accessToken, accountID,

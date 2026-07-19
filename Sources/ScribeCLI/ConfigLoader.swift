@@ -121,7 +121,7 @@ public enum ConfigLoader {
     try writeDefaultSetup(paths: paths)
     if let data =
       "scribe: no config found — wrote default \(configFileName) to \(paths.dataHomePath)\n"
-        .data(using: .utf8)
+      .data(using: .utf8)
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }

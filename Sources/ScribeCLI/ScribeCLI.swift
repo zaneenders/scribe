@@ -400,7 +400,7 @@ extension ScribeCLI {
   func loginMoonshotApiKey(loaded: LoadedConfig) async throws {
     print("Enter your Kimi Code API key (starts with sk-kimi-):")
     guard let apiKey = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines),
-          !apiKey.isEmpty
+      !apiKey.isEmpty
     else {
       print("❌ No API key entered.")
       throw ScribeError.invalidInput(message: "No API key entered.")
