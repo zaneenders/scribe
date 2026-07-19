@@ -52,6 +52,11 @@ private struct ConfigManifest: Codable {
   var profiles: [ProfileEntry]
 }
 
+/// Credential model for reading stored Moonshot/Kimi API keys.
+private struct MoonshotStoredCredential: Codable {
+  let apiKey: String
+}
+
 public struct LoadedConfig: Sendable {
   public var scribeConfig: ScribeConfig
   public var apiBaseURL: String
@@ -285,6 +290,9 @@ public enum ConfigLoader {
       {
         resolvedAPIKey = envKey
       }
+      if resolvedAPIKey == nil {
+        resolvedAPIKey = try? Self.readMoonshotStoredKey(paths: paths)
+      }
       try KimiK3Support.validateMaxCompletionTokens(profile.agent.maxTokens)
       try KimiK3Support.validateEndpoint(apiKey: resolvedAPIKey, serverURL: baseURL)
     }
@@ -391,5 +399,15 @@ public enum ConfigLoader {
     try createDirectoryWithIntermediates(FilePath(dir.path))
     try data.write(to: url, options: .atomic)
     try ActiveProfileStore.write("local", paths: paths)
+  }
+
+  private static func readMoonshotStoredKey(paths: ScribePaths) throws -> String? {
+    let url = URL(fileURLWithPath: paths.dataHomePath)
+      .appendingPathComponent("moonshot-api-key.json")
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let data = try Data(contentsOf: url)
+    let decoded = try JSONDecoder().decode(MoonshotStoredCredential.self, from: data)
+    let trimmed = decoded.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }
