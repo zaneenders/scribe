@@ -193,39 +193,83 @@ public struct ScribeAgent: Sendable {
 
     let agentLogger = logger
 
-    // Resolve effective codex client (lazy init from config)
-    let effectiveCodexClient: ScribeLLMCodex.Client?
-    let effectiveAccessToken: String?
-    let effectiveAccountID: String?
-
+    // Codex lazy-init path: resolve credentials asynchronously inside the turn task
     if _isCodexConfig, let serverURL = _codexServerURL {
-      do {
-        let cred = try CodexOAuth.loadCredentialsSync()
-        effectiveCodexClient = OpenAICodexClient.make(
+      let task = Task<TurnResult, Error> {
+        [
+          toolExecutor, chatTools, serverURL, wireMessages, historyWire, options,
+          agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory
+        ] in
+        defer { continuation.finish() }
+
+        let cred: CodexCredential
+        do {
+          cred = try await CodexOAuth.getValidCredentials()
+        } catch {
+          continuation.yield(.lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login openai` first."))))
+          return TurnResult(newMessages: [], outcome: .error("Not logged in"))
+        }
+
+        let effectiveCodexClient = OpenAICodexClient.make(
           serverURL: serverURL,
           accessToken: cred.access,
           accountID: cred.accountId
         )
-        effectiveAccessToken = cred.access
-        effectiveAccountID = cred.accountId
-      } catch {
-        let task = Task<TurnResult, Error> {
-          defer { continuation.finish() }
-          continuation.yield(.lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login openai` first."))))
-          return TurnResult(newMessages: [], outcome: .error("Not logged in"))
+
+        let ctx = AgentContext(messages: historyWire)
+
+        let config = CodexAgentLoopConfig(
+          model: model,
+          client: effectiveCodexClient,
+          accessToken: cred.access,
+          accountID: cred.accountId,
+          toolExecutor: toolExecutor,
+          chatTools: chatTools,
+          maxToolRounds: options.maxToolRounds,
+          workingDirectory: workingDirectory,
+          reasoningEnabled: reasoningEnabled,
+          hooks: .default
+        )
+
+        do {
+          let result = try await runCodexAgentLoop(
+            promptMessages: wireMessages,
+            context: ctx,
+            config: config,
+            emit: { continuation.yield($0) },
+            logger: agentLogger,
+            abortObserver: abortNotifier
+          )
+
+          let newMessages = result.messages.toScribeMessages()
+          switch result.termination {
+          case .completed:
+            return TurnResult(newMessages: newMessages, outcome: .completed)
+          case .incomplete(let reason):
+            continuation.yield(.lifecycle(.error(.generic("Response incomplete\(reason.map { ": \($0)" } ?? "")"))))
+            return TurnResult(newMessages: newMessages, outcome: .incomplete(reason: reason))
+          case .interrupted:
+            continuation.yield(.lifecycle(.interrupted))
+            return TurnResult(newMessages: newMessages, outcome: .interrupted)
+          case .toolRoundLimit(let rounds):
+            return TurnResult(newMessages: newMessages, outcome: .toolRoundLimit(rounds: rounds))
+          case .error(let desc):
+            continuation.yield(.lifecycle(.error(.generic(desc))))
+            return TurnResult(newMessages: newMessages, outcome: .error(desc))
+          }
+        } catch is AgentTurnInterruptedError {
+          continuation.yield(.lifecycle(.interrupted))
+          return TurnResult(newMessages: [], outcome: .interrupted)
         }
-        return TurnStream(events: stream, result: task)
       }
-    } else {
-      effectiveCodexClient = codexClient
-      effectiveAccessToken = codexAccessToken
-      effectiveAccountID = codexAccountID
+
+      return TurnStream(events: stream, result: task)
     }
 
-    // Codex path
-    if let codexClient = effectiveCodexClient,
-       let accessToken = effectiveAccessToken,
-       let accountID = effectiveAccountID {
+    // Codex path (pre-resolved client)
+    if let codexClient = codexClient,
+       let accessToken = codexAccessToken,
+       let accountID = codexAccountID {
       let task = Task<TurnResult, Error> {
         [
           toolExecutor, chatTools, codexClient, accessToken, accountID,

@@ -163,27 +163,6 @@ public enum CodexOAuth {
     try CodexCredentialStore.delete()
   }
 
-  /// Synchronous credential loader for init-time use.
-  public static func loadCredentialsSync() throws -> CodexCredential {
-    let semaphore = DispatchSemaphore(value: 0)
-    nonisolated(unsafe) var result: Result<CodexCredential, Error>?
-    Task {
-      do {
-        let cred = try await getValidCredentials()
-        result = .success(cred)
-      } catch {
-        result = .failure(error)
-      }
-      semaphore.signal()
-    }
-    semaphore.wait()
-    switch result {
-    case .success(let cred): return cred
-    case .failure(let err): throw err
-    case .none: throw CodexOAuthError.noCredentials
-    }
-  }
-
   // MARK: - Private
 
   private static func generateState() -> String {
