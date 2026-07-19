@@ -4,6 +4,16 @@ import ProfileRecorderServer
 import ScribeCore
 import SystemPackage
 
+enum LoginProvider: String, ExpressibleByArgument {
+  case openai
+  case moonshot
+}
+
+/// Simple API key credential for Moonshot/Kimi Code.
+private struct MoonshotCredential: Codable {
+  let apiKey: String
+}
+
 @main struct ScribeCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "scribe",
@@ -27,8 +37,11 @@ import SystemPackage
   @Flag(name: .long, help: "List configured backends and exit.")
   var listProfiles = false
 
-  @Flag(name: .long, help: "Log in to a ChatGPT subscription account (Codex OAuth).")
-  var login = false
+  @Option(
+    name: .long,
+    help: "Log in to a provider: \"openai\" (ChatGPT subscription) or \"moonshot\" (Kimi Code API key)."
+  )
+  var login: LoginProvider?
 
   @Flag(name: .long, help: "Log out of the ChatGPT subscription account.")
   var logout = false
@@ -70,8 +83,13 @@ import SystemPackage
       return
     }
 
-    if login {
-      try await loginCodex()
+    if let provider = login {
+      switch provider {
+      case .openai:
+        try await loginCodex()
+      case .moonshot:
+        try await loginMoonshotApiKey(loaded: loaded)
+      }
       return
     }
 
@@ -153,7 +171,8 @@ import SystemPackage
       apiType: loaded.apiType,
       tools: tools,
       workingDirectory: cwd,
-      reasoningEnabled: loaded.scribeConfig.reasoningEnabled
+      reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
+      maxTokens: loaded.scribeConfig.maxTokens
     )
 
     let sessionDirectory: FilePath
@@ -373,5 +392,48 @@ extension ScribeCLI {
       print("❌ Logout failed: \(error)")
       throw error
     }
+  }
+
+  func loginMoonshotApiKey(loaded: LoadedConfig) async throws {
+    print("Enter your Kimi Code API key (starts with sk-kimi-):")
+    guard let apiKey = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !apiKey.isEmpty
+    else {
+      print("❌ No API key entered.")
+      throw ScribeError.invalidInput(message: "No API key entered.")
+    }
+
+    guard KimiK3Support.isKimiCodeAPIKey(apiKey) else {
+      print("")
+      print("❌ That doesn't look like a Kimi Code API key.")
+      print("   Kimi Code keys start with \"sk-kimi-\".")
+      print("   Moonshot platform keys should be used with api.moonshot.ai in your config.")
+      print("   Get a key at: https://kimi.com/code")
+      throw ScribeError.invalidInput(message: "Invalid Kimi Code API key format.")
+    }
+
+    // Store the API key in a credential file
+    let storeURL = URL(fileURLWithPath: loaded.paths.dataHomePath)
+      .appendingPathComponent("moonshot-api-key.json")
+    let credential = MoonshotCredential(apiKey: apiKey)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let data = try encoder.encode(credential)
+    try data.write(to: storeURL, options: .atomic)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: NSNumber(value: 0o600)],
+      ofItemAtPath: storeURL.path
+    )
+
+    print("")
+    print("✅ Kimi Code API key saved!")
+    print("   Stored at: \(storeURL.path)")
+    print("")
+    print("Add a kimi profile to your config to use it:")
+    print("  api.type: \"kimi\"")
+    print("  api.baseUrl: \"https://api.kimi.com/coding\"")
+    print("  agent.model: \"kimi-k3-thinking\"")
+    print("")
+    print("Or the key will be auto-detected for profiles with api.type: \"kimi\".")
   }
 }

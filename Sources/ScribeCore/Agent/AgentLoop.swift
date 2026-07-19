@@ -20,6 +20,34 @@ struct AgentLoopConfig: Sendable {
   let workingDirectory: FilePath
   let reasoningEnabled: Bool?
   let hooks: AgentLoopHooks
+  let requestProfile: ChatCompletionRequestProfile
+  let maxCompletionTokens: Int?
+
+  init(
+    model: String,
+    client: Client,
+    toolExecutor: any ToolExecutor,
+    chatTools: [Components.Schemas.ChatTool],
+    temperature: Double,
+    maxToolRounds: Int,
+    workingDirectory: FilePath,
+    reasoningEnabled: Bool?,
+    hooks: AgentLoopHooks,
+    requestProfile: ChatCompletionRequestProfile = .standard,
+    maxCompletionTokens: Int? = nil
+  ) {
+    self.model = model
+    self.client = client
+    self.toolExecutor = toolExecutor
+    self.chatTools = chatTools
+    self.temperature = temperature
+    self.maxToolRounds = maxToolRounds
+    self.workingDirectory = workingDirectory
+    self.reasoningEnabled = reasoningEnabled
+    self.hooks = hooks
+    self.requestProfile = requestProfile
+    self.maxCompletionTokens = maxCompletionTokens
+  }
 }
 
 func runAgentLoop(
@@ -269,17 +297,9 @@ private func runSingleRound(
 
   emit(.boundary(.messageStart(role: .assistant, round: round)))
 
-  let requestBody = Components.Schemas.CreateChatCompletionRequest(
-    model: config.model,
-    messages: contextMessages,
-    stream: true,
-    temperature: Float(config.temperature),
-    maxTokens: nil,
-    tools: config.chatTools,
-    toolChoice: nil,
-    streamOptions: .init(includeUsage: true),
-    reasoning: config.reasoningEnabled == nil
-      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled)
+  let requestBody = try makeChatCompletionRequest(
+    config: config,
+    messages: contextMessages
   )
 
   let httpStart = clock.now
@@ -313,6 +333,9 @@ private func runSingleRound(
     }
     let hint: String = {
       let d = detail.lowercased()
+      if code == 401, config.requestProfile == .moonshotK3 || config.requestProfile == .kimiCode {
+        return " Check your API key matches api.baseUrl: Kimi Code keys require https://api.kimi.com/coding; Moonshot platform keys require https://api.moonshot.ai."
+      }
       if d.contains("model"), d.contains("not found") {
         return " The configured model was not found."
       }
@@ -394,6 +417,63 @@ private func runSingleRound(
   }
 
   return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
+}
+
+private func makeChatCompletionRequest(
+  config: AgentLoopConfig,
+  messages: [Components.Schemas.ChatMessage]
+) throws -> Components.Schemas.CreateChatCompletionRequest {
+  let tools = config.chatTools.isEmpty ? nil : config.chatTools
+  switch config.requestProfile {
+  case .standard:
+    return Components.Schemas.CreateChatCompletionRequest(
+      model: config.model,
+      messages: messages,
+      stream: true,
+      temperature: Float(config.temperature),
+      maxTokens: nil,
+      tools: tools,
+      toolChoice: nil,
+      streamOptions: .init(includeUsage: true),
+      reasoning: config.reasoningEnabled == nil
+        ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled),
+      reasoningEffort: nil,
+      maxCompletionTokens: nil,
+      thinking: nil
+    )
+  case .moonshotK3:
+    try KimiK3Support.validateMessages(messages)
+    return Components.Schemas.CreateChatCompletionRequest(
+      model: config.model,
+      messages: messages,
+      stream: true,
+      temperature: nil,
+      maxTokens: nil,
+      tools: tools,
+      toolChoice: nil,
+      streamOptions: .init(includeUsage: true),
+      reasoning: nil,
+      reasoningEffort: .max,
+      maxCompletionTokens: config.maxCompletionTokens,
+      thinking: nil
+    )
+  case .kimiCode:
+    try KimiK3Support.validateMessages(messages)
+    return Components.Schemas.CreateChatCompletionRequest(
+      model: config.model,
+      messages: messages,
+      stream: true,
+      temperature: nil,
+      maxTokens: nil,
+      tools: tools,
+      toolChoice: nil,
+      streamOptions: .init(includeUsage: true),
+      reasoning: nil,
+      reasoningEffort: nil,
+      maxCompletionTokens: config.maxCompletionTokens,
+      thinking: .init(_type: .enabled, effort: "max", keep: nil)
+    )
+  }
 }
 
 func isContextLengthError(_ error: ScribeError) -> Bool {

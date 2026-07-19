@@ -7,6 +7,7 @@ import SystemPackage
 public enum ScribeConfigBinding {
   public static let apiBaseURL = "api.baseUrl"
   public static let apiKey = "api.apiKey"
+  public static let apiType = "api.type"
   public static let agentModel = "agent.model"
   public static let contextWindow = "agent.contextWindow"
   public static let contextWindowThreshold = "agent.contextWindowThreshold"
@@ -37,6 +38,7 @@ private struct ConfigManifest: Codable {
     var contextWindow: Int
     var contextWindowThreshold: Double
     var reasoning: Bool?
+    var maxTokens: Int?
   }
   struct LoggingSection: Codable {
     var level: String
@@ -48,6 +50,11 @@ private struct ConfigManifest: Codable {
     var logging: LoggingSection
   }
   var profiles: [ProfileEntry]
+}
+
+/// Credential model for reading stored Moonshot/Kimi API keys.
+private struct MoonshotStoredCredential: Codable {
+  let apiKey: String
 }
 
 public struct LoadedConfig: Sendable {
@@ -261,9 +268,34 @@ public enum ConfigLoader {
     }
 
     let apiKeyTrimmed = profile.api.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
+    var resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
     let apiType = profile.api.type?.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedAPIType: String? = apiType.flatMap { $0.isEmpty ? nil : $0 }
+
+    if let resolvedAPIType {
+      guard resolvedAPIType == "codex" || resolvedAPIType == "kimi" else {
+        throw ScribeError.configuration(
+          key: ScribeConfigBinding.apiType,
+          reason:
+            "Unknown `\(ScribeConfigBinding.apiType)` value \"\(resolvedAPIType)\" for profile `\(profileName)`; use \"codex\", \"kimi\", or omit it for OpenAI-compatible providers."
+        )
+      }
+    }
+
+    if resolvedAPIType == "kimi" {
+      if resolvedAPIKey == nil,
+        let envKey = ProcessInfo.processInfo.environment["KIMI_API_KEY"]?
+          .trimmingCharacters(in: .whitespacesAndNewlines),
+        !envKey.isEmpty
+      {
+        resolvedAPIKey = envKey
+      }
+      if resolvedAPIKey == nil {
+        resolvedAPIKey = try? Self.readMoonshotStoredKey(paths: paths)
+      }
+      try KimiK3Support.validateMaxCompletionTokens(profile.agent.maxTokens)
+      try KimiK3Support.validateEndpoint(apiKey: resolvedAPIKey, serverURL: baseURL)
+    }
 
     let levelRaw = profile.logging.level.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
@@ -281,8 +313,10 @@ public enum ConfigLoader {
       contextWindowThreshold: contextWindowThreshold,
       serverURL: baseURL,
       apiKey: resolvedAPIKey,
+      apiType: resolvedAPIType,
       workingDirectory: ".",
-      reasoningEnabled: profile.agent.reasoning
+      reasoningEnabled: profile.agent.reasoning,
+      maxTokens: profile.agent.maxTokens
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,
@@ -365,5 +399,15 @@ public enum ConfigLoader {
     try createDirectoryWithIntermediates(FilePath(dir.path))
     try data.write(to: url, options: .atomic)
     try ActiveProfileStore.write("local", paths: paths)
+  }
+
+  private static func readMoonshotStoredKey(paths: ScribePaths) throws -> String? {
+    let url = URL(fileURLWithPath: paths.dataHomePath)
+      .appendingPathComponent("moonshot-api-key.json")
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let data = try Data(contentsOf: url)
+    let decoded = try JSONDecoder().decode(MoonshotStoredCredential.self, from: data)
+    let trimmed = decoded.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

@@ -23,6 +23,9 @@ public struct ScribeAgent: Sendable {
   private let _isCodexConfig: Bool
   private let _codexServerURL: URL?
 
+  private let _requestProfile: ChatCompletionRequestProfile
+  private let _maxCompletionTokens: Int?
+
   /// Standard (OpenAI-compatible) initializer.
   public init(
     client: ScribeLLM.Client,
@@ -43,6 +46,8 @@ public struct ScribeAgent: Sendable {
     self.reasoningEnabled = reasoningEnabled
     self._isCodexConfig = false
     self._codexServerURL = nil
+    self._requestProfile = .standard
+    self._maxCompletionTokens = nil
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -75,6 +80,8 @@ public struct ScribeAgent: Sendable {
     self.reasoningEnabled = reasoningEnabled
     self._isCodexConfig = false
     self._codexServerURL = nil
+    self._requestProfile = .standard
+    self._maxCompletionTokens = nil
     if let customExecutor = toolExecutor {
       self.toolExecutor = customExecutor
       self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
@@ -85,7 +92,7 @@ public struct ScribeAgent: Sendable {
     }
   }
 
-  /// Create from ScribeConfig, auto-detecting standard vs codex.
+  /// Create from ScribeConfig, auto-detecting standard vs codex vs kimi.
   /// Codex credentials are loaded lazily on first `run()`.
   public init(
     configuration: ScribeConfig,
@@ -111,6 +118,39 @@ public struct ScribeAgent: Sendable {
       self.codexAccountID = nil
       self._isCodexConfig = true
       self._codexServerURL = serverURL
+      self._requestProfile = .standard
+      self._maxCompletionTokens = nil
+    } else if configuration.apiType == "kimi" {
+      guard let serverURL = URL(string: configuration.serverURL) else {
+        throw ScribeError.configuration(
+          key: "serverURL",
+          reason: "Invalid serverURL: \(configuration.serverURL)")
+      }
+      let transport = try KimiK3Support.resolveTransport(
+        apiKey: configuration.apiKey,
+        serverURL: configuration.serverURL
+      )
+      switch transport {
+      case .moonshotOpenAI:
+        try KimiK3Support.validateMaxCompletionTokens(configuration.maxTokens)
+        self.client = OpenAICompatibleClient.make(
+          serverURL: serverURL, apiKey: configuration.apiKey)
+        self._requestProfile = .moonshotK3
+        self._maxCompletionTokens = configuration.maxTokens
+      case .kimiCodeOpenAI:
+        try KimiK3Support.validateMaxCompletionTokens(configuration.maxTokens)
+        self.client = OpenAICompatibleClient.makeForKimiCode(
+          serverURL: serverURL,
+          apiKey: configuration.apiKey,
+          headers: KimiCodeIdentity.requestHeaders())
+        self._requestProfile = .kimiCode
+        self._maxCompletionTokens = configuration.maxTokens
+      }
+      self.codexClient = nil
+      self.codexAccessToken = nil
+      self.codexAccountID = nil
+      self._isCodexConfig = false
+      self._codexServerURL = nil
     } else {
       guard let serverURL = URL(string: configuration.serverURL) else {
         throw ScribeError.configuration(
@@ -124,6 +164,8 @@ public struct ScribeAgent: Sendable {
       self.codexAccountID = nil
       self._isCodexConfig = false
       self._codexServerURL = nil
+      self._requestProfile = .standard
+      self._maxCompletionTokens = nil
     }
   }
 
@@ -169,7 +211,7 @@ public struct ScribeAgent: Sendable {
       } catch {
         let task = Task<TurnResult, Error> {
           defer { continuation.finish() }
-          continuation.yield(.lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login` first."))))
+          continuation.yield(.lifecycle(.error(.generic("Codex credentials not found. Run `scribe --login openai` first."))))
           return TurnResult(newMessages: [], outcome: .error("Not logged in"))
         }
         return TurnStream(events: stream, result: task)
@@ -180,10 +222,10 @@ public struct ScribeAgent: Sendable {
       effectiveAccountID = codexAccountID
     }
 
+    // Codex path
     if let codexClient = effectiveCodexClient,
        let accessToken = effectiveAccessToken,
        let accountID = effectiveAccountID {
-      // Codex path
       let task = Task<TurnResult, Error> {
         [
           toolExecutor, chatTools, codexClient, accessToken, accountID,
@@ -269,7 +311,9 @@ public struct ScribeAgent: Sendable {
         maxToolRounds: options.maxToolRounds,
         workingDirectory: workingDirectory,
         reasoningEnabled: reasoningEnabled,
-        hooks: .default
+        hooks: .default,
+        requestProfile: _requestProfile,
+        maxCompletionTokens: _maxCompletionTokens
       )
 
       do {

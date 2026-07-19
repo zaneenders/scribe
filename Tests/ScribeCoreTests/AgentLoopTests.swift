@@ -50,6 +50,49 @@ private final class FakeClientTransport: ClientTransport, Sendable {
   }
 }
 
+private final class CapturingClientTransport: ClientTransport, Sendable {
+  private let inner: FakeClientTransport
+  private let capturedBodies: Mutex<[Data]>
+
+  init(statusCode: Int, responseBodyChunks: [HTTPBody.ByteChunk]) {
+    self.inner = FakeClientTransport(statusCode: statusCode, responseBodyChunks: responseBodyChunks)
+    self.capturedBodies = Mutex([])
+  }
+
+  init(statusCode: Int, responseBodyChunksForCall: [[HTTPBody.ByteChunk]]) {
+    self.inner = FakeClientTransport(
+      statusCode: statusCode, responseBodyChunksForCall: responseBodyChunksForCall)
+    self.capturedBodies = Mutex([])
+  }
+
+  func capturedRequestBodies() -> [Data] {
+    capturedBodies.withLock { $0 }
+  }
+
+  func send(
+    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
+  ) async throws -> (HTTPResponse, HTTPBody?) {
+    let replayBody: HTTPBody?
+    if let body {
+      var data = Data()
+      for try await chunk in body {
+        data.append(contentsOf: chunk)
+      }
+      capturedBodies.withLock { $0.append(data) }
+      replayBody = HTTPBody(
+        AsyncStream { continuation in
+          continuation.yield(ArraySlice(data))
+          continuation.finish()
+        },
+        length: .known(Int64(data.count))
+      )
+    } else {
+      replayBody = nil
+    }
+    return try await inner.send(request, body: replayBody, baseURL: baseURL, operationID: operationID)
+  }
+}
+
 private final class HangingClientTransport: ClientTransport, Sendable {
   func send(
     _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
@@ -945,6 +988,188 @@ struct AgentLoopTests {
     #expect(messages.count == 3)
     #expect(messages[2].role == .tool)
     #expect(stringContent(messages[2])?.contains("stopped") == true)
+  }
+
+  @Test func moonshotK3RequestUsesReasoningEffortAndOmitsSamplingParams() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "kimi-k3",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      requestProfile: .moonshotK3,
+      maxCompletionTokens: 8192
+    )
+    _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    let bodies = transport.capturedRequestBodies()
+    #expect(bodies.count == 1)
+    let json = try #require(JSONSerialization.jsonObject(with: bodies[0]) as? [String: Any])
+    #expect(json["reasoning_effort"] as? String == "max")
+    #expect(json["max_completion_tokens"] as? Int == 8192)
+    #expect(json["temperature"] == nil)
+    #expect(json["reasoning"] == nil)
+    #expect(json["max_tokens"] == nil)
+  }
+
+  @Test func kimiK3RequestOmitsMaxCompletionTokensWhenUnset() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "kimi-k3",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      requestProfile: .moonshotK3
+    )
+    _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    let json = try #require(
+      JSONSerialization.jsonObject(with: transport.capturedRequestBodies()[0]) as? [String: Any])
+    #expect(json["max_completion_tokens"] == nil)
+  }
+
+  @Test func kimiK3RejectsPublicImageURLs() async throws {
+    let imageMessage = Components.Schemas.ChatMessage(
+      role: .user,
+      content: .case2([
+        .text(.init(_type: .text, text: "look at this")),
+        .imageUrl(
+          .init(
+            _type: .imageUrl,
+            imageUrl: .init(url: "https://example.com/a.png", detail: nil))),
+      ])
+    )
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "kimi-k3",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: .default,
+      requestProfile: .moonshotK3
+    )
+    await #expect(throws: ScribeError.self) {
+      _ = try await runAgentLoop(
+        promptMessages: [],
+        context: AgentContext(messages: [imageMessage]),
+        config: config,
+        emit: { _ in },
+        logger: testLogger,
+        abortObserver: AbortNotifier()
+      )
+    }
+  }
+
+  @Test func kimiK3AllowsBase64AndMsImageReferences() throws {
+    try KimiK3Support.validateImageURL("data:image/png;base64,abc")
+    try KimiK3Support.validateImageURL("ms://file-id")
+  }
+
+  @Test func kimiK3ReplaysAssistantMessageOnToolRound() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"reasoning_content":"think","tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let replyChunks = [
+      sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = CapturingClientTransport(
+      statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [FakeTool()], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "kimi-k3",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: .default,
+      requestProfile: .moonshotK3
+    )
+    _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
+    let bodies = transport.capturedRequestBodies()
+    #expect(bodies.count == 2)
+    let round2 = try #require(JSONSerialization.jsonObject(with: bodies[1]) as? [String: Any])
+    let messages = try #require(round2["messages"] as? [[String: Any]])
+    #expect(messages.count == 3)
+    let assistant = messages[1]
+    #expect(assistant["role"] as? String == "assistant")
+    #expect(assistant["reasoning_content"] as? String == "think")
+    let toolCalls = try #require(assistant["tool_calls"] as? [[String: Any]])
+    #expect(toolCalls[0]["id"] as? String == "c1")
+    #expect(messages[2]["role"] as? String == "tool")
+    #expect(messages[2]["tool_call_id"] as? String == "c1")
+  }
+
+  @Test func kimiCodeRequestUsesThinkingAndOmitsSamplingParams() async throws {
+    let chunks = [
+      sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "k3",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      requestProfile: .kimiCode,
+      maxCompletionTokens: 8192
+    )
+    _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    let bodies = transport.capturedRequestBodies()
+    #expect(bodies.count == 1)
+    let json = try #require(JSONSerialization.jsonObject(with: bodies[0]) as? [String: Any])
+    let thinking = try #require(json["thinking"] as? [String: Any])
+    #expect(thinking["type"] as? String == "enabled")
+    #expect(thinking["effort"] as? String == "max")
+    #expect(json["max_completion_tokens"] as? Int == 8192)
+    #expect(json["temperature"] == nil)
+    #expect(json["reasoning_effort"] == nil)
+    #expect(json["reasoning"] == nil)
+    #expect(json["max_tokens"] == nil)
   }
 
 }
