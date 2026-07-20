@@ -2,6 +2,7 @@ import Foundation
 import Logging
 import ScribeCore
 import SlateCore
+import Subprocess
 import Synchronization
 import SystemPackage
 
@@ -219,7 +220,7 @@ internal final class SlateChatHost {
           let version = GitVersion.hash
           let sid = self.sessionId.uuidString
           Task.detached(priority: .background) { [weak self] in
-            if let branch = SlateChatHost.detectGitBranch(cwd: cwd) {
+            if let branch = await SlateChatHost.detectGitBranch(cwd: cwd) {
               await MainActor.run {
                 self?.banner = BannerSnapshot(
                   profileName: profileName,
@@ -791,22 +792,18 @@ internal final class SlateChatHost {
     }
   }
 
-  private nonisolated static func detectGitBranch(cwd: String) -> String? {
-
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process.arguments = ["branch", "--show-current"]
-    process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = FileHandle.nullDevice
+  private nonisolated static func detectGitBranch(cwd: String) async -> String? {
     do {
-      try process.run()
-      process.waitUntilExit()
-      guard process.terminationStatus == 0 else { return nil }
-      let data = try pipe.fileHandleForReading.readToEnd() ?? Data()
-      let branch = String(data: data, encoding: .utf8)?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let result = try await Subprocess.run(
+        .path("/usr/bin/git"),
+        arguments: ["branch", "--show-current"],
+        workingDirectory: SubprocessFilePathBridge.workingDirectory(FilePath(cwd)),
+        output: .string(limit: 4096),
+        error: .discarded
+      )
+      guard result.terminationStatus.isSuccess else { return nil }
+      let branch: String? = result.standardOutput?
+        .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
       return branch?.isEmpty == true ? nil : branch
     } catch {
       return nil

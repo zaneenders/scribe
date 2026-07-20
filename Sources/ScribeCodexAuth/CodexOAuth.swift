@@ -1,6 +1,7 @@
 import AsyncHTTPClient
 import Foundation
 import NIOCore
+import Subprocess
 
 #if canImport(Darwin)
 import Darwin
@@ -59,7 +60,7 @@ public enum CodexOAuth {
   static func login(
     callbackHost: String,
     callbackPort: UInt16,
-    browserOpener: @escaping @Sendable (URL) -> Void,
+    browserOpener: @escaping @Sendable (URL) async -> Void,
     timeout: TimeInterval = CodexOAuthCallbackServer.loginTimeout,
     baseDirectory: URL? = nil
   ) async throws -> CodexCredential {
@@ -104,7 +105,7 @@ public enum CodexOAuth {
       _ = try? await codeTask
       throw error
     }
-    browserOpener(authURL)
+    await browserOpener(authURL)
 
     let code = try await codeTask
 
@@ -184,16 +185,20 @@ public enum CodexOAuth {
     return Data(bytes).map { String(format: "%02x", $0) }.joined()
   }
 
-  private static func openBrowser(_ url: URL) {
+  private static func openBrowser(_ url: URL) async {
     #if os(macOS)
-    _ = try? Process.run(
-      URL(fileURLWithPath: "/usr/bin/open"),
-      arguments: [url.absoluteString]
+    _ = try? await Subprocess.run(
+      .path("/usr/bin/open"),
+      arguments: [url.absoluteString],
+      output: .discarded,
+      error: .discarded
     )
     #elseif os(Linux)
-    _ = try? Process.run(
-      URL(fileURLWithPath: "/usr/bin/xdg-open"),
-      arguments: [url.absoluteString]
+    _ = try? await Subprocess.run(
+      .path("/usr/bin/xdg-open"),
+      arguments: [url.absoluteString],
+      output: .discarded,
+      error: .discarded
     )
     #endif
   }

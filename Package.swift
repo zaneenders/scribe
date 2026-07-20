@@ -66,6 +66,7 @@ let package = Package(
         .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
         .product(name: "AsyncHTTPClient", package: "async-http-client"),
         .product(name: "NIOCore", package: "swift-nio"),
+        .product(name: "Subprocess", package: "swift-subprocess"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
@@ -96,6 +97,7 @@ let package = Package(
         "ScribeCore",
         "ScribeCodexAuth",
         .product(name: "SystemPackage", package: "swift-system"),
+        .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "Markdown", package: "swift-markdown"),
