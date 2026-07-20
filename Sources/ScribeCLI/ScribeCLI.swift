@@ -34,7 +34,8 @@ enum LoginProvider: String, ExpressibleByArgument {
 
   @Option(
     name: .long,
-    help: "Log in to ChatGPT (browser-based OAuth). Sets api.type to \"codex\"."
+    help:
+      "Log in to ChatGPT (browser-based OAuth) and create or update the \"codex\" profile."
   )
   var login: LoginProvider?
 
@@ -363,14 +364,18 @@ extension ScribeCLI {
       let credential = try await CodexOAuth.login(
         baseDirectory: URL(fileURLWithPath: loaded.paths.dataHomePath, isDirectory: true)
       )
+      let upsert = try ConfigLoader.upsertCodexProfile(
+        at: FilePath(loaded.resolvedConfigurationPath))
       print("")
       print("✅ Authenticated successfully!")
       print("   Account ID: \(credential.accountId)")
       print("")
-      print("Add a codex profile to your config to use it:")
-      print("  api.type: \"codex\"")
-      print("  api.baseUrl: \"https://chatgpt.com/backend-api\"")
-      print("  agent.model: \"gpt-5.6-sol\"")
+      if upsert.created {
+        print("✅ Added profile \"\(upsert.profileName)\" to \(loaded.resolvedConfigurationPath)")
+      } else {
+        print("✅ Updated profile \"\(upsert.profileName)\" in \(loaded.resolvedConfigurationPath)")
+      }
+      print("   Use it with `scribe --profile \(upsert.profileName)` or pick it at session startup.")
     } catch {
       print("")
       print("❌ Login failed: \(error)")

@@ -86,8 +86,22 @@ public struct LoadedConfig: Sendable {
   }
 }
 
+public struct CodexProfileUpsert: Sendable, Equatable {
+  public var profileName: String
+  public var created: Bool
+
+  public init(profileName: String, created: Bool) {
+    self.profileName = profileName
+    self.created = created
+  }
+}
+
 public enum ConfigLoader {
   private static let configFileName = "scribe.config.json"
+
+  public static let codexProfileName = "codex"
+  public static let codexProfileBaseURL = "https://chatgpt.com/backend-api"
+  public static let codexProfileModel = "gpt-5.6-sol"
 
   public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
     let paths = ScribePaths.resolve()
@@ -349,6 +363,68 @@ public enum ConfigLoader {
     }
 
     return summaries[0].name
+  }
+
+  /// Adds the ChatGPT/Codex profile to the config file, or repairs the `api`
+  /// section of an existing profile with the same name. Called after a
+  /// successful `scribe --login` so the login leaves behind a runnable profile.
+  @discardableResult
+  public static func upsertCodexProfile(at configPath: FilePath) throws -> CodexProfileUpsert {
+    let url = URL(fileURLWithPath: configPath.string)
+    let data: Data
+    do {
+      data = try Data(contentsOf: url)
+    } catch {
+      throw ScribeError.configuration(
+        key: nil,
+        reason:
+          "Could not read `\(configPath.string)` to add the `\(codexProfileName)` profile. (\(error))")
+    }
+
+    let manifest: ConfigManifest
+    do {
+      manifest = try JSONDecoder().decode(ConfigManifest.self, from: data)
+    } catch {
+      throw ScribeError.configuration(
+        key: "profiles",
+        reason:
+          "Could not decode `\(configPath.string)` to add the `\(codexProfileName)` profile. (\(error))")
+    }
+
+    var profiles = manifest.profiles
+    var created = false
+    if let index = profiles.firstIndex(where: {
+      $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == codexProfileName
+    }) {
+      // Keep the user's model/logging/apiKey; only repoint the API section.
+      profiles[index].api.type = "codex"
+      profiles[index].api.baseUrl = codexProfileBaseURL
+    } else {
+      profiles.append(
+        ConfigManifest.ProfileEntry(
+          name: codexProfileName,
+          api: ConfigManifest.APISection(
+            baseUrl: codexProfileBaseURL,
+            apiKey: "",
+            type: "codex"
+          ),
+          agent: ConfigManifest.AgentSection(
+            model: codexProfileModel,
+            contextWindow: 400000,
+            contextWindowThreshold: 0.8,
+            reasoning: true
+          ),
+          logging: ConfigManifest.LoggingSection(level: "trace")
+        ))
+      created = true
+    }
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    let encoded = try encoder.encode(ConfigManifest(profiles: profiles))
+    try encoded.write(to: url, options: .atomic)
+
+    return CodexProfileUpsert(profileName: codexProfileName, created: created)
   }
 
   private static func writeDefaultSetup(paths: ScribePaths) throws {

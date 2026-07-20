@@ -40,7 +40,7 @@ struct CodexProvider: AgentProvider {
         do {
           credential = try await CodexOAuth.getValidCredentials()
         } catch {
-          let message = "Codex credentials not found. Run `scribe --login openai` first."
+          let message = "Codex credentials not found. Run `scribe --login codex` first."
           continuation.yield(.lifecycle(.error(.generic(message))))
           return TurnResult(newMessages: [], outcome: .error("Not logged in"))
         }
