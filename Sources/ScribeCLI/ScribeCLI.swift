@@ -94,7 +94,7 @@ enum LoginProvider: String, ExpressibleByArgument {
 
     let cwd = FilePath.currentDirectory.string
 
-    ShellCaptureDirectory.setup(dataHome: loaded.paths.dataHomePath)
+    try ShellCaptureDirectory.setup(dataHome: loaded.paths.dataHomePath)
     defer { ShellCaptureDirectory.teardown() }
 
     if listSessions {

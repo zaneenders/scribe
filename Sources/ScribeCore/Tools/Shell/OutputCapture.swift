@@ -28,33 +28,32 @@ struct OutputCapture: Sendable {
 
   private static let _sessionCaptureDir = Mutex<URL?>(nil)
 
-  /// Sets the per-session capture directory. Files from any previous session are
-  /// removed, and subsequent `create` calls will place files inside this directory
-  /// instead of the OS temporary directory.
-  static func setupSessionCaptureDir(dataHome: String) {
-    let dir = URL(fileURLWithPath: dataHome, isDirectory: true)
+  /// Creates a process-specific subdirectory under
+  /// `\(dataHome)/tmp/shell/<UUID>/` so that concurrent Scribe processes do not
+  /// interfere with each other's capture files.
+  ///
+  /// Throws if the directory cannot be created.
+  static func setupSessionCaptureDir(dataHome: String) throws {
+    let processUUID = UUID()
+    let baseDir = URL(fileURLWithPath: dataHome, isDirectory: true)
       .appendingPathComponent("tmp", isDirectory: true)
       .appendingPathComponent("shell", isDirectory: true)
-    cleanupDirectory(dir)
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dir = baseDir.appendingPathComponent(
+      processUUID.uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: dir, withIntermediateDirectories: true)
     _sessionCaptureDir.withLock { $0 = dir }
   }
 
-  /// Removes the per-session capture directory and all contained files.
+  /// Removes only this process's capture subdirectory.
   static func teardownSessionCaptureDir() {
     let dir = _sessionCaptureDir.withLock {
       let d = $0
       $0 = nil
       return d
     }
-    if let dir { cleanupDirectory(dir) }
-  }
-
-  private static func cleanupDirectory(_ dir: URL) {
-    if let entries = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
-      for url in entries {
-        try? FileManager.default.removeItem(at: url)
-      }
+    if let dir {
+      try? FileManager.default.removeItem(at: dir)
     }
   }
 
@@ -279,13 +278,15 @@ struct DrainBytes: Sendable {
 
 /// Public surface for managing the per-session shell output capture directory.
 public enum ShellCaptureDirectory {
-  /// Creates (or reuses) a per-session capture directory under
-  /// `\(dataHome)/tmp/shell/`. Any files from a previous session are removed.
-  public static func setup(dataHome: String) {
-    OutputCapture.setupSessionCaptureDir(dataHome: dataHome)
+  /// Creates a process-specific capture directory under
+  /// `\(dataHome)/tmp/shell/<UUID>/`.
+  ///
+  /// Throws if the directory cannot be created.
+  public static func setup(dataHome: String) throws {
+    try OutputCapture.setupSessionCaptureDir(dataHome: dataHome)
   }
 
-  /// Removes the per-session capture directory and all contained files.
+  /// Removes this process's capture directory and all contained files.
   public static func teardown() {
     OutputCapture.teardownSessionCaptureDir()
   }
