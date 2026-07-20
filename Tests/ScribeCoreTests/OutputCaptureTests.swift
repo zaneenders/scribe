@@ -106,7 +106,7 @@ struct OutputCaptureTests {
     let subdirsBefore = try FileManager.default.contentsOfDirectory(
       at: shellDir, includingPropertiesForKeys: nil)
     #expect(!subdirsBefore.isEmpty, "Session capture directory should be created")
-    let sessionDir = subdirsBefore.first!
+    let sessionDir = try #require(subdirsBefore.first)
 
     // Teardown twice — must be idempotent
     ShellCaptureDirectory.teardown()

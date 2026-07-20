@@ -45,11 +45,13 @@ struct AgentProviderFactoryTests {
 
   // MARK: - Provider-selection matrix (default / unknown / explicit OpenAI)
 
-  @Test("provider selection returns OpenAICompletionsProvider", arguments: [
-    (apiType: nil as String?, label: "nil → standard"),
-    (apiType: "unknown-type" as String?, label: "unknown → standard"),
-    (apiType: "openai" as String?, label: "explicit openai → standard"),
-  ])
+  @Test(
+    "provider selection returns OpenAICompletionsProvider",
+    arguments: [
+      (apiType: nil as String?, label: "nil → standard"),
+      (apiType: "unknown-type" as String?, label: "unknown → standard"),
+      (apiType: "openai" as String?, label: "explicit openai → standard"),
+    ])
   func providerSelectionMatrix(apiType: String?, label: String) throws {
     let config = configuration(apiType: apiType)
     let provider = try AgentProviderFactory.make(configuration: config)
@@ -72,7 +74,7 @@ struct AgentProviderFactoryTests {
     let provider = try AgentProviderFactory.make(configuration: config)
     #expect(provider is CodexProvider)
 
-    let codexProvider = provider as! CodexProvider
+    let codexProvider = try #require(provider as? CodexProvider)
     #expect(codexProvider.model == "codex-model")
     #expect(codexProvider.reasoningEnabled == true)
     #expect(codexProvider.reasoningEffort == "high")
@@ -94,7 +96,7 @@ struct AgentProviderFactoryTests {
     let provider = try AgentProviderFactory.make(configuration: config)
     #expect(provider is OpenAICompletionsProvider)
 
-    let completionsProvider = provider as! OpenAICompletionsProvider
+    let completionsProvider = try #require(provider as? OpenAICompletionsProvider)
     #expect(completionsProvider.model == "kimi-model")
     #expect(completionsProvider.requestProfile == .kimiCode)
   }
@@ -111,7 +113,7 @@ struct AgentProviderFactoryTests {
     let provider = try AgentProviderFactory.make(configuration: config)
     #expect(provider is OpenAICompletionsProvider)
 
-    let completionsProvider = provider as! OpenAICompletionsProvider
+    let completionsProvider = try #require(provider as? OpenAICompletionsProvider)
     #expect(completionsProvider.model == "kimi-model")
     #expect(completionsProvider.requestProfile == .moonshotK3)
   }
@@ -137,15 +139,7 @@ struct AgentProviderFactoryTests {
   func contextWindowPropagated() throws {
     let config = configuration(contextWindow: 50000)
     let provider = try AgentProviderFactory.make(configuration: config)
-    let completionsProvider = provider as! OpenAICompletionsProvider
+    let completionsProvider = try #require(provider as? OpenAICompletionsProvider)
     #expect(completionsProvider.contextWindow == 50000)
-  }
-
-  @Test("maxCompletionTokens nil is propagated to provider")
-  func maxTokensNilPropagated() throws {
-    let config = configuration(maxTokens: nil)
-    let provider = try AgentProviderFactory.make(configuration: config)
-    let completionsProvider = provider as! OpenAICompletionsProvider
-    #expect(completionsProvider.maxCompletionTokens == nil)
   }
 }

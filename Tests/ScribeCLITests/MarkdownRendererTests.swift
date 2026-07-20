@@ -53,13 +53,13 @@ struct MarkdownRendererTests {
     #expect(lines.allSatisfy { $0.spans.allSatisfy { $0.text.trimmingCharacters(in: .whitespaces).isEmpty } })
   }
 
-  @Test func debugStreamingConsistency() {
+  @Test func debugStreamingConsistency() throws {
     let md =
       "### 4. O(n²) re-parsing on every SSE chunk\n\n`SwiftMarkdownRenderer.render()` calls `Document(parsing: text)` on the entire accumulated buffer every time a chunk arrives. For a 10,000-character response arriving in 100-character chunks, that’s ~100 full document parses.\n\n1. Set assistantSectionStartIndex = sink.lines.count when the answer section starts\n2. On each chunk: sink.lines.removeLast(count - startIdx) then re-append all rendered lines\n3. Clear it on finalize/interrupt\n\n### 7. &+= overflow operator is surprising\n\n```swift\nsink.lineGeneration &+= 1\n```\n\nThis wraps on overflow rather than trapping.\n\n---\n\n## 🟢 Nit / Style\n\n### 8. Comment typo: \"Vibrate Spring\"\n\n```swift\n// MARK: - Markdown styling (Vibrate Spring)\n```\n\n→ \"Vibrant Spring\" or \"Vibrant Spectrum\"?\n\n### 9. Root directory clutter\n\n`fuzz.md`, `table.md`, `swift-summary.md` at the repo root.\n\n### 10. Reasoning color change: yellowBright → grayLight\n\n```swift\n- case .reasoning: (ScribePalette.yellowBright, true)\n+ case .reasoning: (ScribePalette.grayLight, false)\n```\n\nThis de-emphasizes reasoning text.\n\n### 11. Duplicate guard + if in visitTable\n\nThe guard `!allRows.isEmpty` and guard `columnCount > 0` are immediately followed by `let columnCount = allRows.map { $0.count }.max() ?? 0` which already handles the empty case.\n\n### 12. swift-markdown minimum version\n\nNo Package.resolved pin for swift-markdown.\n"
     let oneShot = render(md)
     let chunks = md.map(String.init)
     let snapshots = renderIncremental(chunks: chunks)
-    let final = snapshots.last!
+    let final = try #require(snapshots.last)
     if oneShot != final {
       print("MISMATCH!")
       print("One-shot lines: \(oneShot.count)")
@@ -124,42 +124,46 @@ struct MarkdownRendererTests {
     #expect(plainLines(lines) == ["x"])
   }
 
-  @Test func streamingSingleCharChunks() {
+  @Test func streamingSingleCharChunks() throws {
     let text = "Hello **world** with `code`"
     let chunks = text.map { String($0) }
     let snapshots = renderIncremental(chunks: chunks)
-    let final = snapshots.last!
+    let final = try #require(snapshots.last)
     let oneShot = render(text)
     #expect(final == oneShot)
   }
 
-  @Test func streamingWordByWord() {
+  @Test func streamingWordByWord() throws {
     let words = "The quick **brown** fox *jumps* over the `lazy` dog"
       .split(separator: " ").map { String($0) + " " }
     let snapshots = renderIncremental(chunks: words)
     let oneShot = render(words.joined())
-    #expect(snapshots.last! == oneShot)
+    let final = try #require(snapshots.last)
+    #expect(final == oneShot)
   }
 
-  @Test func streamingSplitMidDelimiter() {
+  @Test func streamingSplitMidDelimiter() throws {
 
     let chunks = ["Hello **bo", "ld** world"]
     let snapshots = renderIncremental(chunks: chunks)
     let oneShot = render("Hello **bold** world")
-    #expect(snapshots.last! == oneShot)
+    let final = try #require(snapshots.last)
+    #expect(final == oneShot)
   }
 
-  @Test func streamingSplitMidBacktick() {
+  @Test func streamingSplitMidBacktick() throws {
     let chunks = ["`co", "de`"]
     let snapshots = renderIncremental(chunks: chunks)
     let oneShot = render("`code`")
-    #expect(snapshots.last! == oneShot)
+    let final = try #require(snapshots.last)
+    #expect(final == oneShot)
   }
 
-  @Test func streamingCodeBlockArrivesInChunks() {
+  @Test func streamingCodeBlockArrivesInChunks() throws {
     let chunks = ["```swift\nlet x", " = 1\nprint(x)\n```"]
     let snapshots = renderIncremental(chunks: chunks)
-    #expect(!snapshots.last!.isEmpty)
+    let final = try #require(snapshots.last)
+    #expect(!final.isEmpty)
   }
 
   @Test func headingsAllLevels() {
@@ -387,12 +391,13 @@ struct MarkdownRendererTests {
     #expect(p.contains { $0.contains("z") })
   }
 
-  @Test func tableStreaming() {
+  @Test func tableStreaming() throws {
     let md = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n"
     let chunks = md.map(String.init)
     let snapshots = renderIncremental(chunks: chunks)
     let oneShot = render(md)
-    #expect(snapshots.last! == oneShot)
+    let final = try #require(snapshots.last)
+    #expect(final == oneShot)
   }
 
   @Test func tableHeaderOnly() {
@@ -485,7 +490,8 @@ struct MarkdownRendererTests {
     #expect(plainLines(lines).count >= 2)
   }
 
-  @Test("malformed inline markup preserves source text exactly",
+  @Test(
+    "malformed inline markup preserves source text exactly",
     arguments: [
       "This is a * literal asterisk",
       "Hello **world",
@@ -496,18 +502,20 @@ struct MarkdownRendererTests {
     #expect(renderedPlainText(markdown) == markdown)
   }
 
-  @Test("malformed inline markup matches one-shot when streamed",
+  @Test(
+    "malformed inline markup matches one-shot when streamed",
     arguments: [
       "This is a * literal asterisk",
       "Hello **world",
       "Hello `world",
       "Hello *world",
     ])
-  func malformedInlineMarkupStreamingMatchesOneShot(_ markdown: String) {
+  func malformedInlineMarkupStreamingMatchesOneShot(_ markdown: String) throws {
     let chars = markdown.map(String.init)
     let snapshots = renderIncremental(chunks: chars)
     let oneShot = render(markdown)
-    #expect(snapshots.last! == oneShot)
+    let final = try #require(snapshots.last)
+    #expect(final == oneShot)
   }
 
   @Test func asteriskThenBold() {
@@ -560,11 +568,12 @@ struct MarkdownRendererTests {
     #expect(allSpans.contains { $0.bold && $0.text.contains("bold") })
   }
 
-  @Test func boldAcrossMultipleTextNodes() {
+  @Test func boldAcrossMultipleTextNodes() throws {
     let chunks = ["**bo", "ld", "**"]
     let snapshots = renderIncremental(chunks: chunks)
     let oneShot = render("**bold**")
-    #expect(snapshots.last! == oneShot)
+    let final = try #require(snapshots.last)
+    #expect(final == oneShot)
   }
 
   @Test func emojiInBold() {
@@ -721,7 +730,7 @@ struct MarkdownRendererTests {
     #expect(p.contains("---"))
   }
 
-  @Test func streamingMatchesOneShot_everything() {
+  @Test func streamingMatchesOneShot_everything() throws {
     let md = """
       # Title
 
@@ -739,15 +748,17 @@ struct MarkdownRendererTests {
     let chars = md.map(String.init)
     let snapshots = renderIncremental(chunks: chars)
     let oneShot = render(md)
-    #expect(snapshots.last! == oneShot)
+    let finalEverything = try #require(snapshots.last)
+    #expect(finalEverything == oneShot)
   }
 
-  @Test func streamingMatchesOneShot_complexPatterns() {
+  @Test func streamingMatchesOneShot_complexPatterns() throws {
     let md = "**a** *b* `c` **d** *e* `f` **g** *h* `i`"
     let chunks = md.map(String.init)
     let snapshots = renderIncremental(chunks: chunks)
     let oneShot = render(md)
-    #expect(snapshots.last! == oneShot)
+    let finalComplex = try #require(snapshots.last)
+    #expect(finalComplex == oneShot)
   }
 
   @Test func spanMergingPreservesText() {

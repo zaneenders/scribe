@@ -64,12 +64,18 @@ struct CodexProviderTests {
     let result: TurnResult = try await stream.result.value
 
     // Then: the transport was called
-    let bodies = transport.requestBodies
-    #expect(bodies.count == 1, "Expected exactly one HTTP request")
+    let requests = transport.capturedRequests
+    #expect(requests.count == 1, "Expected exactly one HTTP request")
+
+    // Then: the request targets the correct endpoint
+    let req = requests[0]
+    #expect(req.method == .post)
+    #expect(req.baseURL == serverURL)
 
     // Then: the request body carries the expected model and input
+    let bodyData = try #require(req.body)
     let json = try #require(
-      JSONSerialization.jsonObject(with: bodies[0]) as? [String: Any])
+      JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
     #expect(json["model"] as? String == "codex-test-model")
     #expect(json["stream"] as? Bool == true)
 

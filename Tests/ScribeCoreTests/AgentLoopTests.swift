@@ -9,7 +9,6 @@ import Testing
 
 @testable import ScribeCore
 
-
 private func withTimeout<T: Sendable>(
   seconds: Double,
   _ operation: @escaping @Sendable () async throws -> T
@@ -673,10 +672,12 @@ struct AgentLoopTests {
 
     let toolMsg = messages.first { $0.role == .tool }
     #expect(toolMsg?.toolCallId == "c1")
-    #expect(stringContent(toolMsg!)?.contains("exceeded model context") == true)
+    let foundToolMsg = try #require(toolMsg)
+    #expect(stringContent(foundToolMsg)?.contains("exceeded model context") == true)
 
     #expect(messages.last?.role == .assistant)
-    #expect(stringContent(messages.last!) == "done")
+    let lastMsg = try #require(messages.last)
+    #expect(stringContent(lastMsg) == "done")
   }
 
   @Test func contextOverflowRecoveryRunsAtMostOncePerTurn() async throws {

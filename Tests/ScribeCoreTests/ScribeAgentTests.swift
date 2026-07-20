@@ -32,6 +32,18 @@ private func makeAgent(
   )
 }
 
+/// Drains the event stream of a `TurnStream` while awaiting its result.
+/// Ensures events are fully consumed *before* the result is returned,
+/// preventing unstructured tasks from outliving the test.
+private func consume(_ ts: TurnStream) async throws -> TurnResult {
+  let eventTask = Task {
+    for await _ in ts.events {}
+  }
+  let result = try await ts.result.value
+  await eventTask.value
+  return result
+}
+
 // MARK: -
 
 @Suite
@@ -46,8 +58,7 @@ struct ScribeAgentTests {
     ]
     let agent = makeAgent(chunks: chunks)
     let ts = agent.run("hello", history: defaultHistory)
-    Task { for await _ in ts.events {} }
-    let result = try await ts.result.value
+    let result = try await consume(ts)
 
     #expect(result.outcome == .completed)
     #expect(result.newMessages.first(where: { $0.role == .user })?.content == "hello")
@@ -61,8 +72,7 @@ struct ScribeAgentTests {
     let agent = makeAgent(chunks: chunks)
     let userMsg = ScribeMessage(role: .user, content: "from array")
     let ts = agent.run([userMsg], history: defaultHistory)
-    Task { for await _ in ts.events {} }
-    let result = try await ts.result.value
+    let result = try await consume(ts)
     #expect(result.outcome == .completed)
     #expect(result.newMessages.last?.role == .assistant)
     #expect(result.newMessages.last?.content == "ack")
@@ -78,8 +88,7 @@ struct ScribeAgentTests {
     let agent = makeAgent(chunks: chunks)
     agent.abort()
     let ts = agent.run("test", history: defaultHistory)
-    Task { for await _ in ts.events {} }
-    let result = try await ts.result.value
+    let result = try await consume(ts)
     #expect(result.outcome == .completed)
   }
 
@@ -145,8 +154,7 @@ struct ScribeAgentTests {
     )
     let history: [ScribeMessage] = [ScribeMessage(role: .system, content: "system")]
     let ts = agent.run("call the tool", history: history)
-    Task { for await _ in ts.events {} }
-    let result = try await ts.result.value
+    let result = try await consume(ts)
     #expect(result.outcome == .completed)
 
     let recorded = recorder.invocations.withLock { $0 }
