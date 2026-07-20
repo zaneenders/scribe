@@ -96,6 +96,17 @@ public struct CodexProfileUpsert: Sendable, Equatable {
   }
 }
 
+/// Lightweight result that only resolves paths and config file location.
+/// Does NOT parse the manifest or validate any profile — safe for use by
+/// `--login`, `--logout`, and `--list-sessions` even when a profile is broken.
+public struct ResolvedPaths: Sendable {
+  public var paths: ScribePaths
+  public var configPath: FilePath
+
+  public var dataHomePath: String { paths.dataHomePath }
+  public var resolvedConfigurationPath: String { configPath.string }
+}
+
 public enum ConfigLoader {
   private static let configFileName = "scribe.config.json"
 
@@ -103,11 +114,21 @@ public enum ConfigLoader {
   public static let codexProfileBaseURL = "https://chatgpt.com/backend-api"
   public static let codexProfileModel = "gpt-5.6-sol"
 
-  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
+  /// Resolve Scribe data home and the config file path (creating a default
+  /// config when none exists).  No profile is selected or validated.
+  public static func resolvePaths() throws -> ResolvedPaths {
     let paths = ScribePaths.resolve()
     let configPath = try resolveConfigurationPath(paths: paths)
+    return ResolvedPaths(paths: paths, configPath: configPath)
+  }
+
+  /// Fully load and validate the active profile (or the named override).
+  /// Throws when the config is missing, malformed, or the active profile fails
+  /// validation — use `resolvePaths()` for operations that only need paths.
+  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
+    let resolved = try resolvePaths()
     return try await loadConfiguration(
-      at: configPath, paths: paths, profileOverride: profileOverride)
+      at: resolved.configPath, paths: resolved.paths, profileOverride: profileOverride)
   }
 
   private static func resolveConfigurationPath(paths: ScribePaths) throws -> FilePath {
