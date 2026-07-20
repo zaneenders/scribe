@@ -1,65 +1,59 @@
 import Foundation
 import Logging
-import OpenAPIRuntime
 import ScribeLLM
 import SystemPackage
 
+// MARK: - Shared Types
+
+/// Conversation state threaded through the agent loop: prior history plus everything
+/// committed during this turn.
 struct AgentContext: Sendable {
   var messages: [Components.Schemas.ChatMessage]
 }
 
-struct AgentLoopConfig: Sendable {
-  let model: String
-  let client: Client
-
-  let toolExecutor: any ToolExecutor
-
-  let chatTools: [Components.Schemas.ChatTool]
-  let temperature: Double
-  let maxToolRounds: Int
-  let workingDirectory: FilePath
-  let reasoningEnabled: Bool?
-  let hooks: AgentLoopHooks
-  let requestProfile: ChatCompletionRequestProfile
-  let maxCompletionTokens: Int?
-  let contextWindow: Int
-
-  init(
-    model: String,
-    client: Client,
-    toolExecutor: any ToolExecutor,
-    chatTools: [Components.Schemas.ChatTool],
-    temperature: Double,
-    maxToolRounds: Int,
-    workingDirectory: FilePath,
-    reasoningEnabled: Bool?,
-    hooks: AgentLoopHooks,
-    requestProfile: ChatCompletionRequestProfile = .standard,
-    maxCompletionTokens: Int? = nil,
-    contextWindow: Int = 0
-  ) {
-    self.model = model
-    self.client = client
-    self.toolExecutor = toolExecutor
-    self.chatTools = chatTools
-    self.temperature = temperature
-    self.maxToolRounds = maxToolRounds
-    self.workingDirectory = workingDirectory
-    self.reasoningEnabled = reasoningEnabled
-    self.hooks = hooks
-    self.requestProfile = requestProfile
-    self.maxCompletionTokens = maxCompletionTokens
-    self.contextWindow = contextWindow
-  }
+/// The provider-neutral configuration the shared agent loop relies on. Provider configs
+/// (`AgentLoopConfig`, `CodexAgentLoopConfig`) already carry these fields, so conformance
+/// is a one-line extension and the loop stays agnostic of HTTP specifics.
+protocol AgentLoopConfigFields: Sendable {
+  var toolExecutor: any ToolExecutor { get }
+  var chatTools: [Components.Schemas.ChatTool] { get }
+  var maxToolRounds: Int { get }
+  var workingDirectory: FilePath { get }
+  var hooks: AgentLoopHooks { get }
+  var contextWindow: Int { get }
 }
 
-func runAgentLoop(
+/// The result of a single provider round trip: the assistant message to commit and how
+/// the round ended.
+struct RoundResult: Sendable {
+  let assistantMessage: Components.Schemas.ChatMessage
+  let kind: RoundOutcome
+}
+
+enum RoundOutcome: Sendable, Equatable {
+  case completed
+  case incomplete(reason: String?)
+  case toolCalls([ToolInvocation])
+}
+
+// MARK: - Agent Loop Core
+
+/// Runs the provider-neutral agent orchestration: prompt injection, per-round request
+/// budget enforcement, abort checks, context-overflow recovery, tool dispatch with
+/// hooks, and attachment injection. Providers supply only `runRound`, which performs a
+/// single HTTP round trip and stream decode.
+///
+/// `logTag` is appended to every log event name (e.g. ".codex") so provider logs remain
+/// distinguishable while the orchestration stays identical.
+func runAgentLoopCore(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
-  config: AgentLoopConfig,
+  config: some AgentLoopConfigFields,
+  logTag: String,
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
-  abortObserver: some AbortObserver
+  abortObserver: some AbortObserver,
+  runRound: @escaping @Sendable ([Components.Schemas.ChatMessage], Int) async throws -> RoundResult
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
@@ -75,14 +69,13 @@ func runAgentLoop(
     emit(.boundary(.messageEnd(role: .user, round: 0)))
   }
 
-  let clock = ContinuousClock()
   var round = 0
   var attemptedRecovery = false
 
   while true {
     round += 1
     if abortObserver.isAborted() {
-      logger.debug("agent.abort", metadata: ["where": "before-http", "round": "\(round)"])
+      logger.debug("agent.abort\(logTag)", metadata: ["where": "before-http", "round": "\(round)"])
       outcome = .interrupted
       return (newMessages, outcome)
     }
@@ -96,12 +89,16 @@ func runAgentLoop(
         tools: config.chatTools,
         contextWindow: config.contextWindow)
       {
-        logger.notice("agent.request.preflight.compacted", metadata: ["round": "\(round)", "reason": "\(reason)"])
+        logger.notice(
+          "agent.request.preflight.compacted\(logTag)",
+          metadata: ["round": "\(round)", "reason": "\(reason)"])
         emit(.lifecycle(.recovered(reason: reason)))
       }
     } catch {
       let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
-      logger.warning("agent.request.preflight.rejected", metadata: ["round": "\(round)", "err": "\(description)"])
+      logger.warning(
+        "agent.request.preflight.rejected\(logTag)",
+        metadata: ["round": "\(round)", "err": "\(description)"])
       emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
       outcome = .error(description)
       return (newMessages, outcome)
@@ -109,20 +106,11 @@ func runAgentLoop(
 
     let roundResult: RoundResult
     do {
-      roundResult = try await abortObserver.race {
-        [currentContext, config, emit, logger, round, abortObserver] in
-        try await runSingleRound(
-          contextMessages: currentContext.messages,
-          config: config,
-          emit: emit,
-          logger: logger,
-          clock: clock,
-          round: round,
-          abortObserver: abortObserver
-        )
+      roundResult = try await abortObserver.race { [currentContext, round] in
+        try await runRound(currentContext.messages, round)
       }
     } catch is AgentTurnInterruptedError {
-      logger.notice("agent.abort", metadata: ["where": "mid-stream", "round": "\(round)"])
+      logger.notice("agent.abort\(logTag)", metadata: ["where": "mid-stream", "round": "\(round)"])
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
       outcome = .interrupted
       return (newMessages, outcome)
@@ -138,32 +126,50 @@ func runAgentLoop(
         throw scribeError
       }
       attemptedRecovery = true
-      logger.notice("agent.recover", metadata: ["reason": "\(reason)"])
+      logger.notice("agent.recover\(logTag)", metadata: ["round": "\(round)", "reason": "\(reason)"])
       emit(.lifecycle(.recovered(reason: reason)))
       emit(.boundary(.turnEnd(round: round, outcome: .completed)))
       continue
+    } catch let scribeError as ScribeError
+      where attemptedRecovery && isContextLengthError(scribeError) && scribeError.isInBandStreamError
+    {
+      // The provider still reports context overflow after one compaction retry. End the
+      // turn gracefully for in-band stream errors; HTTP-level failures keep propagating
+      // so callers can inspect the status code.
+      let description = scribeError.errorDescription ?? String(describing: scribeError)
+      logger.error(
+        "agent.loop.error\(logTag)",
+        metadata: [
+          "round": "\(round)",
+          "partial_messages": "\(newMessages.count)",
+          "err": "\(description)",
+        ])
+      emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
+      outcome = .error(description)
+      return (newMessages, outcome)
     } catch let scribeError as ScribeError {
       // Non-recoverable ScribeErrors (apiHTTPError, etc.) — propagate
       // so callers can inspect the specific error type.
       outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
       throw scribeError
     } catch {
+      let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
       logger.error(
-        "agent.loop.error",
+        "agent.loop.error\(logTag)",
         metadata: [
           "round": "\(round)",
           "partial_messages": "\(newMessages.count)",
-          "err": "\(String(describing: error))",
+          "err": "\(description)",
         ])
-      emit(.boundary(.turnEnd(round: round, outcome: .error(String(describing: error)))))
-      outcome = .error(String(describing: error))
+      emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
+      outcome = .error(description)
       return (newMessages, outcome)
     }
 
     var roundBuffer: [Components.Schemas.ChatMessage] = [roundResult.assistantMessage]
 
     if abortObserver.isAborted() {
-      logger.debug("agent.abort", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
+      logger.debug("agent.abort\(logTag)", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
       outcome = .interrupted
       return (newMessages, outcome)
@@ -185,13 +191,13 @@ func runAgentLoop(
     case .toolCalls(let invocations):
       emit(.boundary(.turnEnd(round: round, outcome: .toolCalls(count: invocations.count))))
       if round >= config.maxToolRounds {
-        logger.notice("agent.turn.tool-round-limit", metadata: ["max": "\(config.maxToolRounds)"])
+        logger.notice("agent.turn.tool-round-limit\(logTag)", metadata: ["max": "\(config.maxToolRounds)"])
         outcome = .toolRoundLimit(rounds: config.maxToolRounds)
         return (newMessages, outcome)
       }
 
       logger.info(
-        "agent.tool.round",
+        "agent.tool.round\(logTag)",
         metadata: [
           "round": "\(round)", "tool_count": "\(invocations.count)",
           "tools": "\(invocations.map(\.name).joined(separator: ","))",
@@ -200,7 +206,7 @@ func runAgentLoop(
       for inv in invocations {
         if abortObserver.isAborted() {
           logger.notice(
-            "agent.abort",
+            "agent.abort\(logTag)",
             metadata: ["where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)"])
           outcome = .interrupted
           return (newMessages, outcome)
@@ -234,11 +240,11 @@ func runAgentLoop(
             outcome = .interrupted
             return (newMessages, outcome)
           } catch let ScribeError.toolUnknown(name) {
-            logger.warning("agent.tool.unknown", metadata: ["tool": "\(name)", "round": "\(round)"])
+            logger.warning("agent.tool.unknown\(logTag)", metadata: ["tool": "\(name)", "round": "\(round)"])
             result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
           } catch {
             logger.warning(
-              "agent.tool.executor.error",
+              "agent.tool.executor.error\(logTag)",
               metadata: [
                 "tool": "\(resolvedInv.name)", "round": "\(round)",
                 "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
@@ -264,7 +270,7 @@ func runAgentLoop(
 
         for attachment in finalResult.attachments {
           logger.info(
-            "agent.tool.attachment.inject",
+            "agent.tool.attachment.inject\(logTag)",
             metadata: [
               "round": "\(round)",
               "tool": "\(resolvedInv.name)",
@@ -272,12 +278,8 @@ func runAgentLoop(
               "base64_chars": "\(attachment.base64.count)",
               "source_path": "\(attachment.sourcePath ?? "nil")",
             ])
-          let parts: [ScribeContentPart] = [
-            .text((attachment.sourcePath ?? attachment.filename).map { "\($0):" } ?? "Attached media:"),
-            .image(url: attachment.dataUri, detail: nil),
-          ]
           emit(.boundary(.messageStart(role: .user, round: round)))
-          roundBuffer.append(ScribeMessage(role: .user, contentParts: parts).toChatMessage())
+          roundBuffer.append(toolAttachmentMessage(attachment))
           emit(.boundary(.messageEnd(role: .user, round: round)))
         }
 
@@ -302,249 +304,24 @@ private func commit(
   newMessages.append(contentsOf: buffer)
 }
 
-private struct RoundResult: Sendable {
-  let assistantMessage: Components.Schemas.ChatMessage
-  let kind: RoundOutcome
-}
+// MARK: - Attachments
 
-private enum RoundOutcome: Sendable, Equatable {
-  case completed
-  case incomplete(reason: String?)
-  case toolCalls([ToolInvocation])
-}
-
-private func runSingleRound(
-  contextMessages: [Components.Schemas.ChatMessage],
-  config: AgentLoopConfig,
-  emit: @escaping @Sendable (AgentEvent) -> Void,
-  logger: Logger,
-  clock: ContinuousClock,
-  round: Int,
-  abortObserver: some AbortObserver
-) async throws -> RoundResult {
-
-  emit(.boundary(.messageStart(role: .assistant, round: round)))
-
-  let requestBody = try makeChatCompletionRequest(
-    config: config,
-    messages: contextMessages
-  )
-
-  let httpStart = clock.now
-  logger.info(
-    "agent.http.request",
-    metadata: [
-      "messages": "\(requestBody.messages.count)",
-      "reasoning_enabled": "\(String(describing: config.reasoningEnabled))",
-      "request_profile": "\(String(describing: config.requestProfile))",
-      "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
-    ])
-  let response = try await config.client.createChatCompletion(body: .json(requestBody))
-
-  let httpBody: HTTPBody
-  switch response {
-  case .ok(let ok):
-    logger.debug(
-      "agent.http.response",
-      metadata: [
-        "status": "200",
-        "elapsed": "\(clock.now - httpStart)",
-      ])
-    httpBody = try ok.body.textEventStream
-  case .undocumented(statusCode: let code, let payload):
-    var detail = ""
-    if let body = payload.body {
-      do {
-        let chunk = try await HTTPBody.ByteChunk(collecting: body, upTo: 4096)
-        detail = String(decoding: chunk, as: UTF8.self)
-      } catch {
-        detail = "(response body exceeds 4096 bytes — truncated)"
-      }
-    }
-    let hint: String = {
-      let d = detail.lowercased()
-      if code == 401, config.requestProfile == .moonshotK3 || config.requestProfile == .kimiCode {
-        return
-          " Check your API key matches api.baseUrl: Kimi Code keys require https://api.kimi.com/coding; Moonshot platform keys require https://api.moonshot.ai."
-      }
-      if d.contains("model"), d.contains("not found") {
-        return " The configured model was not found."
-      }
-      if code == 404 {
-        return " Set api.baseUrl to the host only (no /v1)."
-      }
-      return ""
-    }()
-    let detailSnippet = detail.count > 512 ? String(detail.prefix(512)) + "…(\(detail.count) chars)" : detail
-    let level: Logger.Level = code >= 500 ? .error : .warning
-    logger.log(
-      level: level,
-      "agent.http.response",
-      metadata: [
-        "status": "\(code)",
-        "body_snippet": "\(detailSnippet.replacingOccurrences(of: "\"", with: "\\\""))",
-      ])
-    throw ScribeError.apiHTTPError(statusCode: code, detail: detail, hint: hint.isEmpty ? nil : hint)
-  }
-
-  var turn = StreamedAssistantTurn()
-  var processor = StreamProcessor(
-    onEvent: emit,
-    logger: logger,
-    abortObserver: abortObserver,
-    streamWallStart: clock.now
-  )
-  try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
-
-  let toolInvocations = turn.resolvedToolCalls()
-  let assistantContent: Components.Schemas.ChatMessage.ContentPayload? =
-    turn.text.isEmpty ? nil : .case1(turn.text)
-  let assistantReasoning = turn.reasoningText.isEmpty ? nil : turn.reasoningText
-
-  let assistantMessage = Components.Schemas.ChatMessage(
-    role: .assistant,
-    content: assistantContent,
-    name: nil,
-    toolCalls: toolInvocations.isEmpty
-      ? nil
-      : toolInvocations.map { inv in
-        .init(
-          id: inv.id,
-          _type: "function",
-          function: .init(name: inv.name, arguments: inv.arguments))
-      },
-    toolCallId: nil,
-    reasoningContent: assistantReasoning
-  )
-  emit(.boundary(.messageEnd(role: .assistant, round: round)))
-
-  if let u = processor.lastUsage {
-    // Usage completion tokens can include hidden reasoning, so measure from the
-    // start of the response stream rather than the first visible content delta.
-    let genSec = (clock.now - processor.streamWallStart) / .seconds(1)
-    let tps: Double? = {
-      guard let c = u.completionTokens, c > 0 else { return nil }
-      return Double(c) / max(0.001, genSec)
-    }()
-    logger.debug(
-      "agent.stream.end",
-      metadata: [
-        "chunks": "\(processor.decodedChunkCount)",
-        "skipped": "\(processor.skippedChunkCount)",
-        "prompt_tokens": "\(u.promptTokens.map(String.init(describing:)) ?? "nil")",
-        "completion_tokens": "\(u.completionTokens.map(String.init(describing:)) ?? "nil")",
-        "finish_reason": "\(turn.finishReason ?? "missing")",
-        "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
-        "answer_chars": "\(turn.text.count)",
-        "reasoning_chars": "\(turn.reasoningText.count)",
-        "tool_calls": "\(toolInvocations.count)",
-        "tps": "\(tps.map { String(format: "%.1f", $0) } ?? "nil")",
-      ])
-    emit(.lifecycle(.usage(ScribeUsage(u), tokensPerSecond: tps)))
-  }
-
-  let finishReason = turn.finishReason?.trimmingCharacters(in: .whitespacesAndNewlines)
-  let normalizedFinishReason = finishReason?.lowercased()
-  let isIncomplete =
-    normalizedFinishReason.map { reason in
-      reason != "stop" && reason != "tool_calls" && reason != "function_call"
-    } ?? false
-
-  if toolInvocations.isEmpty {
-    let metadata: Logger.Metadata = [
-      "answer_chars": "\(turn.text.count)",
-      "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
-      "finish_reason": "\(finishReason ?? "missing")",
-      "completion_tokens": "\(processor.lastUsage?.completionTokens.map(String.init(describing:)) ?? "nil")",
-      "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
+/// Builds the synthetic user message that carries a tool-produced attachment into the
+/// conversation. Shared by every provider so multimodal injection stays identical.
+func toolAttachmentMessage(
+  _ attachment: ToolAttachment
+) -> Components.Schemas.ChatMessage {
+  let label = (attachment.sourcePath ?? attachment.filename).map { "\($0):" } ?? "Attached media:"
+  return ScribeMessage(
+    role: .user,
+    contentParts: [
+      .text(label),
+      .image(url: attachment.dataUri, detail: nil),
     ]
-    if isIncomplete {
-      logger.warning("agent.assistant.incomplete", metadata: metadata)
-      return RoundResult(
-        assistantMessage: assistantMessage,
-        kind: .incomplete(reason: finishReason))
-    }
-    logger.info("agent.assistant.final", metadata: metadata)
-    return RoundResult(assistantMessage: assistantMessage, kind: .completed)
-  }
-
-  if isIncomplete {
-    logger.warning(
-      "agent.assistant.incomplete-with-tools",
-      metadata: [
-        "finish_reason": "\(finishReason ?? "missing")",
-        "tool_count": "\(toolInvocations.count)",
-      ])
-  }
-
-  return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
+  ).toChatMessage()
 }
 
-private func effectiveMaxCompletionTokens(_ config: AgentLoopConfig) -> Int? {
-  switch config.requestProfile {
-  case .standard:
-    return nil
-  case .moonshotK3, .kimiCode:
-    return KimiK3Support.effectiveMaxCompletionTokens(config.maxCompletionTokens)
-  }
-}
-
-private func makeChatCompletionRequest(
-  config: AgentLoopConfig,
-  messages: [Components.Schemas.ChatMessage]
-) throws -> Components.Schemas.CreateChatCompletionRequest {
-  let tools = config.chatTools.isEmpty ? nil : config.chatTools
-  switch config.requestProfile {
-  case .standard:
-    return Components.Schemas.CreateChatCompletionRequest(
-      model: config.model,
-      messages: messages,
-      stream: true,
-      temperature: Float(config.temperature),
-      maxTokens: nil,
-      tools: tools,
-      toolChoice: nil,
-      streamOptions: .init(includeUsage: true),
-      reasoning: config.reasoningEnabled == nil
-        ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled),
-      reasoningEffort: nil,
-      maxCompletionTokens: nil,
-      thinking: nil
-    )
-  case .moonshotK3:
-    try KimiK3Support.validateMessages(messages)
-    return Components.Schemas.CreateChatCompletionRequest(
-      model: config.model,
-      messages: messages,
-      stream: true,
-      temperature: nil,
-      maxTokens: nil,
-      tools: tools,
-      toolChoice: nil,
-      streamOptions: .init(includeUsage: true),
-      reasoning: nil,
-      reasoningEffort: .max,
-      maxCompletionTokens: effectiveMaxCompletionTokens(config),
-      thinking: nil
-    )
-  case .kimiCode:
-    try KimiK3Support.validateMessages(messages)
-    return Components.Schemas.CreateChatCompletionRequest(
-      model: config.model,
-      messages: messages,
-      stream: true,
-      temperature: nil,
-      maxTokens: nil,
-      tools: tools,
-      toolChoice: nil,
-      streamOptions: .init(includeUsage: true),
-      reasoning: nil,
-      reasoningEffort: nil,
-      maxCompletionTokens: effectiveMaxCompletionTokens(config),
-      thinking: .init(_type: .enabled, effort: "max", keep: "all")
-    )
-  }
-}
+// MARK: - Context Overflow Recovery
 
 func isContextLengthError(_ error: ScribeError) -> Bool {
   let detail: String
@@ -672,4 +449,14 @@ private func contextOverflowReplacement(
     toolCalls: nil,
     toolCallId: original.toolCallId
   )
+}
+
+extension ScribeError {
+  /// True for failures reported inside the provider's event stream, which surface as
+  /// `.generic`. HTTP-level failures remain `.apiHTTPError` so callers can inspect the
+  /// status code.
+  fileprivate var isInBandStreamError: Bool {
+    if case .generic = self { return true }
+    return false
+  }
 }

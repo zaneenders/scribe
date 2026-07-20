@@ -27,7 +27,7 @@ public struct ScribeAgent: Sendable {
     let prepared = Self.prepareTools(tools, executor: toolExecutor, logger: logger)
     self.toolExecutor = prepared.executor
     self.chatTools = prepared.chatTools
-    self.provider = OpenAICompatibleProvider.openAICompatible(
+    self.provider = OpenAICompletionsProvider.openAICompletions(
       client: client,
       model: model,
       reasoningEnabled: reasoningEnabled,

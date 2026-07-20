@@ -2,7 +2,7 @@ import Logging
 import ScribeLLM
 import SystemPackage
 
-struct OpenAICompatibleProvider: AgentProvider {
+struct OpenAICompletionsProvider: AgentProvider {
   let client: ScribeLLM.Client
   let model: String
   let reasoningEnabled: Bool?

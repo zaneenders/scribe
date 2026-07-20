@@ -114,7 +114,7 @@ func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
       abortObserver: AbortNotifier()
     )
     let attachment = try #require(result.attachments.first)
-    let message = codexAttachmentMessage(attachment)
+    let message = toolAttachmentMessage(attachment)
 
     guard case .case2(let chatParts) = message.content else {
       Issue.record("Image input must be an array of content objects")

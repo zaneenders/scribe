@@ -1,14 +1,14 @@
 import Foundation
 import ScribeLLM
 
-extension AgentProvider where Self == OpenAICompatibleProvider {
-  static func openAICompatible(
+extension AgentProvider where Self == OpenAICompletionsProvider {
+  static func openAICompletions(
     client: ScribeLLM.Client,
     model: String,
     reasoningEnabled: Bool?,
     contextWindow: Int = 0
   ) -> Self {
-    OpenAICompatibleProvider(
+    OpenAICompletionsProvider(
       client: client,
       model: model,
       reasoningEnabled: reasoningEnabled,
@@ -55,7 +55,7 @@ enum AgentProviderFactory {
           headers: KimiCodeIdentity.requestHeaders())
         profile = .kimiCode
       }
-      return OpenAICompatibleProvider(
+      return OpenAICompletionsProvider(
         client: client,
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
@@ -64,7 +64,7 @@ enum AgentProviderFactory {
         maxCompletionTokens: configuration.maxTokens)
 
     default:
-      return OpenAICompatibleProvider(
+      return OpenAICompletionsProvider(
         client: OpenAICompatibleClient.make(
           serverURL: serverURL,
           apiKey: configuration.apiKey),

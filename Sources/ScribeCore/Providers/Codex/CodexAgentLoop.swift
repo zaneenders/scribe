@@ -29,19 +29,10 @@ struct CodexToolCallIdentifiers: Equatable {
   }
 }
 
-private func commit(
-  _ context: inout [ScribeLLM.Components.Schemas.ChatMessage],
-  _ newMessages: inout [ScribeLLM.Components.Schemas.ChatMessage],
-  _ buffer: [ScribeLLM.Components.Schemas.ChatMessage]
-) {
-  context.append(contentsOf: buffer)
-  newMessages.append(contentsOf: buffer)
-}
-
 // MARK: - Codex Agent Loop
 
 /// Configuration for the Codex agent loop.
-struct CodexAgentLoopConfig: Sendable {
+struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let model: String
   let client: ScribeLLMCodex.Client
   let toolExecutor: any ToolExecutor
@@ -75,7 +66,9 @@ struct CodexAgentLoopConfig: Sendable {
   }
 }
 
-/// Runs the agent loop against the Codex (ChatGPT subscription) API.
+/// Runs the agent loop against the Codex (ChatGPT subscription) API. The orchestration
+/// lives in `runAgentLoopCore`; this entry point only supplies the provider-specific
+/// HTTP round.
 func runCodexAgentLoop(
   promptMessages: [ScribeLLM.Components.Schemas.ChatMessage],
   context: AgentContext,
@@ -84,230 +77,37 @@ func runCodexAgentLoop(
   logger: Logger,
   abortObserver: some AbortObserver
 ) async throws -> (messages: [ScribeLLM.Components.Schemas.ChatMessage], termination: TurnOutcome) {
-  var currentContext = context
-  var newMessages: [ScribeLLM.Components.Schemas.ChatMessage] = []
-  var outcome: TurnOutcome = .completed
-
-  emit(.boundary(.agentStart))
-  defer { emit(.boundary(.agentEnd(outcome))) }
-
-  for msg in promptMessages {
-    emit(.boundary(.messageStart(role: .user, round: 0)))
-    currentContext.messages.append(msg)
-    newMessages.append(msg)
-    emit(.boundary(.messageEnd(role: .user, round: 0)))
-  }
-
-  let clock = ContinuousClock()
-  var round = 0
-  var attemptedRecovery = false
-
-  while true {
-    round += 1
-    if abortObserver.isAborted() {
-      outcome = .interrupted
-      return (newMessages, outcome)
-    }
-
-    emit(.boundary(.turnStart(round: round)))
-
-    do {
-      if let reason = try enforceRequestBudget(
-        messages: &currentContext.messages,
-        newMessages: &newMessages,
-        tools: config.chatTools,
-        contextWindow: config.contextWindow)
-      {
-        logger.notice(
-          "agent.request.preflight.compacted.codex",
-          metadata: ["round": "\(round)", "reason": "\(reason)"])
-        emit(.lifecycle(.recovered(reason: reason)))
-      }
-
-      let roundResult = try await abortObserver.race {
-        [currentContext, config, emit, logger, clock, round, abortObserver] in
-        try await runSingleCodexRound(
-          contextMessages: currentContext.messages,
-          config: config,
-          emit: emit,
-          logger: logger,
-          clock: clock,
-          round: round,
-          abortObserver: abortObserver
-        )
-      }
-
-      var roundBuffer: [ScribeLLM.Components.Schemas.ChatMessage] = [roundResult.assistantMessage]
-
-      if abortObserver.isAborted() {
-        outcome = .interrupted
-        return (newMessages, outcome)
-      }
-
-      switch roundResult.kind {
-      case .completed:
-        emit(.boundary(.turnEnd(round: round, outcome: .completed)))
-        commit(&currentContext.messages, &newMessages, roundBuffer)
-        outcome = .completed
-        return (newMessages, outcome)
-
-      case .incomplete(let reason):
-        emit(.boundary(.turnEnd(round: round, outcome: .incomplete(reason: reason))))
-        commit(&currentContext.messages, &newMessages, roundBuffer)
-        outcome = .incomplete(reason: reason)
-        return (newMessages, outcome)
-
-      case .toolCalls(let invocations):
-        emit(.boundary(.turnEnd(round: round, outcome: .toolCalls(count: invocations.count))))
-        if round >= config.maxToolRounds {
-          outcome = .toolRoundLimit(rounds: config.maxToolRounds)
-          return (newMessages, outcome)
-        }
-
-        logger.info("agent.tool.round.codex", metadata: ["round": "\(round)", "tool_count": "\(invocations.count)"])
-
-        for inv in invocations {
-          if abortObserver.isAborted() {
-            outcome = .interrupted
-            return (newMessages, outcome)
-          }
-
-          let beforeDecision = await config.hooks.beforeToolCall(inv)
-          let resolvedInv: ToolInvocation
-          let preflightResult: ToolResult?
-          switch beforeDecision {
-          case .proceed(let rewritten):
-            resolvedInv = rewritten
-            preflightResult = nil
-          case .block(let reason):
-            resolvedInv = inv
-            preflightResult = ToolResult.text(ToolRegistry.jsonError(reason))
-          }
-
-          emit(.boundary(.toolExecutionStart(name: resolvedInv.name, arguments: resolvedInv.arguments)))
-
-          let result: ToolResult
-          if let preflightResult {
-            result = preflightResult
-          } else {
-            do {
-              result = try await config.toolExecutor.execute(
-                resolvedInv,
-                workingDirectory: config.workingDirectory,
-                logger: logger,
-                abort: abortObserver)
-            } catch is AgentTurnInterruptedError {
-              outcome = .interrupted
-              return (newMessages, outcome)
-            } catch let ScribeError.toolUnknown(name) {
-              result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
-            } catch {
-              result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
-            }
-          }
-
-          let afterDecision = await config.hooks.afterToolCall(resolvedInv, result)
-          let finalResult = afterDecision.result
-          emit(.boundary(.toolExecutionEnd(name: resolvedInv.name, output: finalResult.text)))
-          emit(.tool(.invocation(name: resolvedInv.name, arguments: resolvedInv.arguments, output: finalResult.text)))
-          for warning in finalResult.warnings {
-            emit(.tool(.warning(warning)))
-          }
-
-          emit(.boundary(.messageStart(role: .tool, round: round)))
-          roundBuffer.append(
-            ScribeLLM.Components.Schemas.ChatMessage(
-              role: .tool, content: .case1(finalResult.text),
-              name: nil, toolCalls: nil, toolCallId: resolvedInv.id))
-          emit(.boundary(.messageEnd(role: .tool, round: round)))
-
-          for attachment in finalResult.attachments {
-            logger.info(
-              "agent.tool.attachment.inject.codex",
-              metadata: [
-                "round": "\(round)",
-                "tool": "\(resolvedInv.name)",
-                "mime_type": "\(attachment.mimeType)",
-                "base64_chars": "\(attachment.base64.count)",
-                "source_path": "\(attachment.sourcePath ?? "nil")",
-              ])
-            emit(.boundary(.messageStart(role: .user, round: round)))
-            roundBuffer.append(codexAttachmentMessage(attachment))
-            emit(.boundary(.messageEnd(role: .user, round: round)))
-          }
-
-          if afterDecision.terminate {
-            commit(&currentContext.messages, &newMessages, roundBuffer)
-            outcome = .completed
-            return (newMessages, outcome)
-          }
-        }
-
-        commit(&currentContext.messages, &newMessages, roundBuffer)
-      }
-    } catch is AgentTurnInterruptedError {
-      emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
-      outcome = .interrupted
-      return (newMessages, outcome)
-    } catch let scribeError as ScribeError
-      where !attemptedRecovery && isContextLengthError(scribeError)
-    {
-      let detail = scribeError.errorDescription ?? String(describing: scribeError)
-      guard
-        let reason = rollbackContextOverflow(
-          messages: &currentContext.messages,
-          newMessages: &newMessages,
-          providerDetail: detail)
-      else {
-        outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
-        throw scribeError
-      }
-      attemptedRecovery = true
-      logger.notice("agent.recover.codex", metadata: ["round": "\(round)", "reason": "\(reason)"])
-      emit(.lifecycle(.recovered(reason: reason)))
-      emit(.boundary(.turnEnd(round: round, outcome: .completed)))
-      continue
-    } catch let scribeError as ScribeError {
-      // Non-recoverable ScribeErrors (apiHTTPError, etc.) — propagate
-      // so callers can inspect the specific error type.
-      outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
-      throw scribeError
-    } catch {
-      let description =
-        (error as? LocalizedError)?.errorDescription
-        ?? String(describing: error)
-      logger.error(
-        "agent.loop.error.codex",
-        metadata: ["round": "\(round)", "err": "\(description)"])
-      emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
-      outcome = .error(description)
-      return (newMessages, outcome)
-    }
+  try await runAgentLoopCore(
+    promptMessages: promptMessages,
+    context: context,
+    config: config,
+    logTag: ".codex",
+    emit: emit,
+    logger: logger,
+    abortObserver: abortObserver
+  ) { contextMessages, round in
+    try await runSingleCodexRound(
+      contextMessages: contextMessages,
+      config: config,
+      emit: emit,
+      logger: logger,
+      round: round,
+      abortObserver: abortObserver
+    )
   }
 }
 
 // MARK: - Single Round
-
-private struct CodexRoundResult: Sendable {
-  let assistantMessage: ScribeLLM.Components.Schemas.ChatMessage
-  let kind: CodexRoundOutcome
-}
-
-private enum CodexRoundOutcome: Sendable, Equatable {
-  case completed
-  case incomplete(reason: String?)
-  case toolCalls([ToolInvocation])
-}
 
 private func runSingleCodexRound(
   contextMessages: [ScribeLLM.Components.Schemas.ChatMessage],
   config: CodexAgentLoopConfig,
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
-  clock: ContinuousClock,
   round: Int,
   abortObserver: some AbortObserver
-) async throws -> CodexRoundResult {
+) async throws -> RoundResult {
+  let clock = ContinuousClock()
 
   emit(.boundary(.messageStart(role: .assistant, round: round)))
 
@@ -448,12 +248,12 @@ private func runSingleCodexRound(
           "reason": "\(processor.incompleteReason ?? "unknown")",
           "answer_chars": "\(turn.text.count)",
         ])
-      return CodexRoundResult(
+      return RoundResult(
         assistantMessage: assistantMessage,
         kind: .incomplete(reason: processor.incompleteReason))
     }
     logger.info("agent.assistant.final.codex", metadata: ["answer_chars": "\(turn.text.count)"])
-    return CodexRoundResult(assistantMessage: assistantMessage, kind: .completed)
+    return RoundResult(assistantMessage: assistantMessage, kind: .completed)
   }
 
   if processor.isIncomplete {
@@ -465,7 +265,7 @@ private func runSingleCodexRound(
       ])
   }
 
-  return CodexRoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
+  return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
 }
 
 // MARK: - Message Conversion
@@ -503,19 +303,6 @@ private func codexRequestMetrics(
     metrics.toolCallCount += message.toolCalls?.count ?? 0
   }
   return metrics
-}
-
-func codexAttachmentMessage(
-  _ attachment: ToolAttachment
-) -> ScribeLLM.Components.Schemas.ChatMessage {
-  let label = (attachment.sourcePath ?? attachment.filename).map { "\($0):" } ?? "Attached media:"
-  return ScribeMessage(
-    role: .user,
-    contentParts: [
-      .text(label),
-      .image(url: attachment.dataUri, detail: nil),
-    ]
-  ).toChatMessage()
 }
 
 /// Convert standard ChatMessage array to Codex input items.
