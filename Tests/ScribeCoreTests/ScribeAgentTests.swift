@@ -10,56 +10,6 @@ import Testing
 
 // MARK: - Shared helpers (kept minimal — loop-level tests own detailed behaviour)
 
-private final class FakeClientTransport: ClientTransport, Sendable {
-  let statusCode: Int
-  private let chunksForCall: [[HTTPBody.ByteChunk]]
-  private let state: Mutex<State>
-
-  private struct State {
-    var callIndex = 0
-  }
-
-  init(statusCode: Int, responseBodyChunks: [HTTPBody.ByteChunk]) {
-    self.statusCode = statusCode
-    self.chunksForCall = [responseBodyChunks]
-    self.state = Mutex(State())
-  }
-
-  init(statusCode: Int, responseBodyChunksForCall: [[HTTPBody.ByteChunk]]) {
-    self.statusCode = statusCode
-    self.chunksForCall = responseBodyChunksForCall
-    self.state = Mutex(State())
-  }
-
-  func send(
-    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
-  ) async throws -> (HTTPResponse, HTTPBody?) {
-    let chunks: [HTTPBody.ByteChunk] = state.withLock { state in
-      let idx = state.callIndex
-      state.callIndex += 1
-      if idx < chunksForCall.count { return chunksForCall[idx] }
-      return chunksForCall.last ?? []
-    }
-    let response = HTTPResponse(status: .init(code: statusCode))
-    if chunks.isEmpty { return (response, nil) }
-    let body = HTTPBody(
-      AsyncStream { continuation in
-        for chunk in chunks { continuation.yield(chunk) }
-        continuation.finish()
-      }, length: .unknown)
-    return (response, body)
-  }
-}
-
-private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
-  ArraySlice("data: \(json)\n\n".utf8)
-}
-private func doneChunk() -> HTTPBody.ByteChunk {
-  ArraySlice("data: [DONE]\n\n".utf8)
-}
-
-private let testLogger = Logger(label: "test")
-
 private let defaultHistory: [ScribeMessage] = [
   ScribeMessage(role: .system, content: "You are a test agent.")
 ]
@@ -70,7 +20,7 @@ private func makeAgent(
   model: String = "test-model",
   tools: [any ScribeTool] = []
 ) -> ScribeAgent {
-  let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
+  let transport = ScriptedTransport(status: statusCode, chunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
   return ScribeAgent(
     client: client,
@@ -178,10 +128,10 @@ struct ScribeAgentTests {
       sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"all done"}}]}"#),
       doneChunk(),
     ]
-    let transport = FakeClientTransport(
-      statusCode: 200,
-      responseBodyChunksForCall: [toolChunks, replyChunks]
-    )
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let recorder = RecordingExecutor()
     let agent = ScribeAgent(

@@ -9,161 +9,6 @@ import Testing
 
 @testable import ScribeCore
 
-private final class FakeClientTransport: ClientTransport, Sendable {
-  let statusCode: Int
-  private let chunksForCall: [[HTTPBody.ByteChunk]]
-  private let state: Mutex<State>
-
-  private struct State {
-    var callIndex = 0
-  }
-
-  init(statusCode: Int, responseBodyChunks: [HTTPBody.ByteChunk]) {
-    self.statusCode = statusCode
-    self.chunksForCall = [responseBodyChunks]
-    self.state = Mutex(State())
-  }
-
-  init(statusCode: Int, responseBodyChunksForCall: [[HTTPBody.ByteChunk]]) {
-    self.statusCode = statusCode
-    self.chunksForCall = responseBodyChunksForCall
-    self.state = Mutex(State())
-  }
-
-  func send(
-    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
-  ) async throws -> (HTTPResponse, HTTPBody?) {
-    let chunks: [HTTPBody.ByteChunk] = state.withLock { state in
-      let idx = state.callIndex
-      state.callIndex += 1
-      if idx < chunksForCall.count { return chunksForCall[idx] }
-      return chunksForCall.last ?? []
-    }
-    let response = HTTPResponse(status: .init(code: statusCode))
-    if chunks.isEmpty { return (response, nil) }
-    let body = HTTPBody(
-      AsyncStream { continuation in
-        for chunk in chunks { continuation.yield(chunk) }
-        continuation.finish()
-      }, length: .unknown)
-    return (response, body)
-  }
-}
-
-private final class CapturingClientTransport: ClientTransport, Sendable {
-  private let inner: FakeClientTransport
-  private let capturedBodies: Mutex<[Data]>
-
-  init(statusCode: Int, responseBodyChunks: [HTTPBody.ByteChunk]) {
-    self.inner = FakeClientTransport(statusCode: statusCode, responseBodyChunks: responseBodyChunks)
-    self.capturedBodies = Mutex([])
-  }
-
-  init(statusCode: Int, responseBodyChunksForCall: [[HTTPBody.ByteChunk]]) {
-    self.inner = FakeClientTransport(
-      statusCode: statusCode, responseBodyChunksForCall: responseBodyChunksForCall)
-    self.capturedBodies = Mutex([])
-  }
-
-  func capturedRequestBodies() -> [Data] {
-    capturedBodies.withLock { $0 }
-  }
-
-  func send(
-    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
-  ) async throws -> (HTTPResponse, HTTPBody?) {
-    let replayBody: HTTPBody?
-    if let body {
-      var data = Data()
-      for try await chunk in body {
-        data.append(contentsOf: chunk)
-      }
-      capturedBodies.withLock { $0.append(data) }
-      replayBody = HTTPBody(
-        AsyncStream { continuation in
-          continuation.yield(ArraySlice(data))
-          continuation.finish()
-        },
-        length: .known(Int64(data.count))
-      )
-    } else {
-      replayBody = nil
-    }
-    return try await inner.send(request, body: replayBody, baseURL: baseURL, operationID: operationID)
-  }
-}
-
-private final class HangingClientTransport: ClientTransport, Sendable {
-  func send(
-    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
-  ) async throws -> (HTTPResponse, HTTPBody?) {
-
-    try await Task.sleep(for: .seconds(3600))
-    return (HTTPResponse(status: .init(code: 200)), nil)
-  }
-}
-
-private final class VariedStatusTransport: ClientTransport, Sendable {
-  private let callPlan: [(Int, [HTTPBody.ByteChunk])]
-  private let state: Mutex<Int> = Mutex(0)
-
-  init(callPlan: [(Int, [HTTPBody.ByteChunk])]) {
-    self.callPlan = callPlan
-  }
-
-  func send(
-    _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
-  ) async throws -> (HTTPResponse, HTTPBody?) {
-    let (statusCode, chunks) = state.withLock { idx -> (Int, [HTTPBody.ByteChunk]) in
-      let i = min(idx, callPlan.count - 1)
-      idx += 1
-      return callPlan[i]
-    }
-    let response = HTTPResponse(status: .init(code: statusCode))
-    if chunks.isEmpty { return (response, nil) }
-    let body = HTTPBody(
-      AsyncStream { continuation in
-        for chunk in chunks { continuation.yield(chunk) }
-        continuation.finish()
-      }, length: .unknown)
-    return (response, body)
-  }
-}
-
-private struct FakeTool: ScribeTool {
-  static var name: String { "fake_tool" }
-  static var description: String { "A fake tool for testing." }
-  static var parameters: [ScribeToolParameter] { [] }
-  static var promptHint: String? { nil }
-  struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
-    _ = logger
-    return Result()
-  }
-}
-
-private struct FailingTool: ScribeTool {
-  static var name: String { "failing_tool" }
-  static var description: String { "Throws a generic error." }
-  static var parameters: [ScribeToolParameter] { [] }
-  static var promptHint: String? { nil }
-  struct Result: Encodable { let ok = true }
-  func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
-    _ = logger
-    struct GenericError: Error {}
-    throw GenericError()
-  }
-}
-
-private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
-  ArraySlice("data: \(json)\n\n".utf8)
-}
-
-private func doneChunk() -> HTTPBody.ByteChunk {
-  ArraySlice("data: [DONE]\n\n".utf8)
-}
-
-private let testLogger = Logger(label: "test.agentloop")
 
 private func withTimeout<T: Sendable>(
   seconds: Double,
@@ -192,7 +37,7 @@ private func makeConfig(
   maxToolRounds: Int = .max,
   hooks: AgentLoopHooks = .default
 ) -> AgentLoopConfig {
-  let transport = FakeClientTransport(statusCode: statusCode, responseBodyChunks: chunks)
+  let transport = ScriptedTransport(status: statusCode, chunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
   let registry = ToolRegistry(tools: tools, logger: testLogger)
   return AgentLoopConfig(
@@ -343,8 +188,10 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
       doneChunk(),
     ]
-    let transport = FakeClientTransport(
-      statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [FakeTool()], logger: toolRunnerTestLogger)
     let config = AgentLoopConfig(
@@ -485,8 +332,10 @@ struct AgentLoopTests {
         sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"all good"}}]}"#),
         doneChunk(),
       ]
-      let transport = FakeClientTransport(
-        statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
+      let transport = ScriptedTransport(responses: [
+        ScriptedTransport.Response(status: 200, chunks: toolChunks),
+        ScriptedTransport.Response(status: 200, chunks: replyChunks),
+      ])
       let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
       let registry = ToolRegistry(tools: [FakeTool()], logger: toolRunnerTestLogger)
       let config = AgentLoopConfig(
@@ -678,8 +527,10 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"all done"}}]}"#),
       doneChunk(),
     ]
-    let transport = FakeClientTransport(
-      statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [FakeTool()], logger: toolRunnerTestLogger)
     let config = AgentLoopConfig(
@@ -718,8 +569,10 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"recovered"}}]}"#),
       doneChunk(),
     ]
-    let transport = FakeClientTransport(
-      statusCode: 200, responseBodyChunksForCall: [chunks, replyChunks])
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: chunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [FailingTool()], logger: toolRunnerTestLogger)
     let config = AgentLoopConfig(
@@ -775,10 +628,10 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"3","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
       doneChunk(),
     ]
-    let transport = VariedStatusTransport(callPlan: [
-      (200, toolChunks),
-      (400, [overflowBody]),
-      (200, recoveryChunks),
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 400, chunks: [overflowBody]),
+      ScriptedTransport.Response(status: 200, chunks: recoveryChunks),
     ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [AttachingTool()], logger: testLogger)
@@ -836,10 +689,10 @@ struct AgentLoopTests {
     let overflowBody: HTTPBody.ByteChunk = ArraySlice(
       #"{"error":{"message":"The prompt is too long: 798932, model maximum context length: 262143"}}"#
         .utf8)
-    let transport = VariedStatusTransport(callPlan: [
-      (200, toolChunks),
-      (400, [overflowBody]),
-      (400, [overflowBody]),
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 400, chunks: [overflowBody]),
+      ScriptedTransport.Response(status: 400, chunks: [overflowBody]),
     ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [AttachingTool()], logger: testLogger)
@@ -949,8 +802,10 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
-    let transport = FakeClientTransport(
-      statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [FakeTool()], logger: testLogger)
     let hooks = AgentLoopHooks(
@@ -984,7 +839,7 @@ struct AgentLoopTests {
       ),
       doneChunk(),
     ]
-    let transport = FakeClientTransport(statusCode: 200, responseBodyChunks: toolChunks)
+    let transport = ScriptedTransport(status: 200, chunks: toolChunks)
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [FakeTool()], logger: testLogger)
     let hooks = AgentLoopHooks(
@@ -1020,7 +875,7 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
-    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let transport = ScriptedTransport(status: 200, chunks: chunks)
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [], logger: testLogger)
     let config = AgentLoopConfig(
@@ -1037,7 +892,7 @@ struct AgentLoopTests {
       maxCompletionTokens: 8192
     )
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
-    let bodies = transport.capturedRequestBodies()
+    let bodies = transport.requestBodies
     #expect(bodies.count == 1)
     let json = try #require(JSONSerialization.jsonObject(with: bodies[0]) as? [String: Any])
     #expect(json["reasoning_effort"] as? String == "max")
@@ -1056,7 +911,7 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
-    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let transport = ScriptedTransport(status: 200, chunks: chunks)
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [], logger: testLogger)
     let config = AgentLoopConfig(
@@ -1073,7 +928,7 @@ struct AgentLoopTests {
     )
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let json = try #require(
-      JSONSerialization.jsonObject(with: transport.capturedRequestBodies()[0]) as? [String: Any])
+      JSONSerialization.jsonObject(with: transport.requestBodies[0]) as? [String: Any])
     #expect(
       json["max_completion_tokens"] as? Int == KimiK3Support.defaultMaxCompletionTokens)
   }
@@ -1093,7 +948,7 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
-    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let transport = ScriptedTransport(status: 200, chunks: chunks)
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [], logger: testLogger)
     let config = AgentLoopConfig(
@@ -1136,8 +991,10 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
       doneChunk(),
     ]
-    let transport = CapturingClientTransport(
-      statusCode: 200, responseBodyChunksForCall: [toolChunks, replyChunks])
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [FakeTool()], logger: testLogger)
     let config = AgentLoopConfig(
@@ -1153,7 +1010,7 @@ struct AgentLoopTests {
       requestProfile: .moonshotK3
     )
     _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
-    let bodies = transport.capturedRequestBodies()
+    let bodies = transport.requestBodies
     #expect(bodies.count == 2)
     let round2 = try #require(JSONSerialization.jsonObject(with: bodies[1]) as? [String: Any])
     let messages = try #require(round2["messages"] as? [[String: Any]])
@@ -1172,7 +1029,7 @@ struct AgentLoopTests {
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
     ]
-    let transport = CapturingClientTransport(statusCode: 200, responseBodyChunks: chunks)
+    let transport = ScriptedTransport(status: 200, chunks: chunks)
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
     let registry = ToolRegistry(tools: [], logger: testLogger)
     let config = AgentLoopConfig(
@@ -1189,7 +1046,7 @@ struct AgentLoopTests {
       maxCompletionTokens: 8192
     )
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
-    let bodies = transport.capturedRequestBodies()
+    let bodies = transport.requestBodies
     #expect(bodies.count == 1)
     let json = try #require(JSONSerialization.jsonObject(with: bodies[0]) as? [String: Any])
     let thinking = try #require(json["thinking"] as? [String: Any])

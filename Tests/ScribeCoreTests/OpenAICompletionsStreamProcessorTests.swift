@@ -7,16 +7,6 @@ import Testing
 
 // MARK: - Test Helpers
 
-private struct NoOpAbortObserver: AbortObserver {
-  func isAborted() -> Bool { false }
-  func signals() -> AsyncStream<Void> { AsyncStream { $0.finish() } }
-}
-
-/// Builds an SSE string from data payloads.
-private func makeSSE(_ events: String...) -> String {
-  events.map { "data: \($0)\n\n" }.joined()
-}
-
 /// Drives a StreamProcessor with the given SSE string and returns the events and turn state.
 private func driveProcessor(
   sse: String
@@ -33,20 +23,6 @@ private func driveProcessor(
   var turn = StreamedAssistantTurn()
   try await processor.process(httpBody: body, httpStart: .now, turn: &turn)
   return (events, turn, processor)
-}
-
-private func finalizedEvents(in events: [AgentEvent]) -> [AgentEvent] {
-  events.filter {
-    if case .output(.finalized) = $0 { return true }
-    return false
-  }
-}
-
-private func emptyEvents(in events: [AgentEvent]) -> [AgentEvent] {
-  events.filter {
-    if case .output(.empty) = $0 { return true }
-    return false
-  }
 }
 
 // MARK: - Terminal Event Finalization

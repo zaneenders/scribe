@@ -16,7 +16,7 @@ struct CodexProviderTests {
 
   @Test("ClientSource.configured stores client")
   func configuredSourceStoresClient() {
-    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
+    let transport = ScriptedTransport(status: 200, chunks: [])
     let client = ScribeLLMCodex.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport,
@@ -47,7 +47,7 @@ struct CodexProviderTests {
 
   @Test("provider stores all configuration properties")
   func providerStoresProperties() {
-    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
+    let transport = ScriptedTransport(status: 200, chunks: [])
     let client = ScribeLLMCodex.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport,
@@ -70,7 +70,7 @@ struct CodexProviderTests {
 
   @Test("provider stores nil reasoning fields")
   func providerStoresNilReasoning() {
-    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
+    let transport = ScriptedTransport(status: 200, chunks: [])
     let client = ScribeLLMCodex.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport,
@@ -97,7 +97,7 @@ struct CodexProviderTests {
     let sse =
       "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\"}}\n\n"
     let chunkData = HTTPBody.ByteChunk(sse.utf8)
-    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [chunkData])
+    let transport = ScriptedTransport(status: 200, chunks: [chunkData])
     let client = ScribeLLMCodex.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport,
@@ -146,7 +146,7 @@ struct CodexProviderTests {
   func runWithConfiguredSourceUsesClient() async throws {
     let sse =
       "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from configured\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cfg\"}}\n\n"
-    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [.init(sse.utf8)])
+    let transport = ScriptedTransport(status: 200, chunks: [.init(sse.utf8)])
     let client = ScribeLLMCodex.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport,
@@ -174,46 +174,5 @@ struct CodexProviderTests {
 
     let result: TurnResult = try await stream.result.value
     #expect(result.outcome == TurnOutcome.completed)
-  }
-}
-
-// MARK: - Test Helpers
-
-/// A fake Codex transport that returns pre-configured response bodies.
-private final class FakeCodexTransport: ClientTransport, Sendable {
-  let statusCode: Int
-  private let chunks: [HTTPBody.ByteChunk]
-
-  init(statusCode: Int, responseBodyChunks: [HTTPBody.ByteChunk]) {
-    self.statusCode = statusCode
-    self.chunks = responseBodyChunks
-  }
-
-  func send(
-    _ request: HTTPRequest,
-    body: HTTPBody?,
-    baseURL: URL,
-    operationID: String
-  ) async throws -> (HTTPResponse, HTTPBody?) {
-    let response = HTTPResponse(status: .init(code: statusCode))
-    if chunks.isEmpty { return (response, nil) }
-    let body = HTTPBody(
-      AsyncStream { continuation in
-        for chunk in chunks { continuation.yield(chunk) }
-        continuation.finish()
-      }, length: .unknown)
-    return (response, body)
-  }
-}
-
-/// A no-op tool executor for testing.
-private struct NoOpToolExecutor: ToolExecutor {
-  func execute(
-    _ invocation: ToolInvocation,
-    workingDirectory: FilePath,
-    logger: Logger,
-    abort: any AbortObserver
-  ) async throws -> ToolResult {
-    ToolResult(text: "")
   }
 }

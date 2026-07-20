@@ -7,17 +7,6 @@ import Testing
 
 // MARK: - Test Helpers
 
-private struct NoOpAbortObserver: AbortObserver {
-  func isAborted() -> Bool { false }
-  func signals() -> AsyncStream<Void> { AsyncStream { $0.finish() } }
-}
-
-/// Builds an SSE string from data payloads. Each payload is a JSON string
-/// that becomes the `data:` field of an SSE event, terminated with `\n\n`.
-private func makeSSE(_ events: String...) -> String {
-  events.map { "data: \($0)\n\n" }.joined()
-}
-
 /// Drives a CodexStreamProcessor with the given SSE string and returns the
 /// events emitted and the final turn state.
 private func driveProcessor(
@@ -35,22 +24,6 @@ private func driveProcessor(
   var turn = CodexAssistantTurn()
   try await processor.process(httpBody: body, httpStart: .now, turn: &turn)
   return (events, turn, processor)
-}
-
-/// Returns only the `.output(.finalized)` events from the list.
-private func finalizedEvents(in events: [AgentEvent]) -> [AgentEvent] {
-  events.filter {
-    if case .output(.finalized) = $0 { return true }
-    return false
-  }
-}
-
-/// Returns only the `.output(.empty)` events from the list.
-private func emptyEvents(in events: [AgentEvent]) -> [AgentEvent] {
-  events.filter {
-    if case .output(.empty) = $0 { return true }
-    return false
-  }
 }
 
 // MARK: - Terminal Event Finalization Tests
