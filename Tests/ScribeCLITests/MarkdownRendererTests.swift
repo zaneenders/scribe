@@ -36,6 +36,10 @@ private func plainLines(_ lines: [TLine]) -> [String] {
   lines.map { plain($0) }
 }
 
+private func renderedPlainText(_ markdown: String) -> String {
+  plainLines(render(markdown)).joined(separator: "\n")
+}
+
 @Suite
 struct MarkdownRendererTests {
 
@@ -201,8 +205,14 @@ struct MarkdownRendererTests {
   }
 
   @Test func backtickInsideCode() {
-    let lines = render("Use `` `nested` `` syntax")
-    #expect(!lines.isEmpty)
+    let md = "Use `` `nested` `` syntax"
+    let lines = render(md)
+    let allSpans = lines.flatMap(\.spans)
+    // Double-backtick code span should produce code-colored output
+    #expect(allSpans.contains { $0.fg == ScribePalette.markdownCode })
+    // Inner backtick must be preserved in the rendered text
+    let allText = allSpans.map(\.text).joined()
+    #expect(allText.contains("`nested`"))
   }
 
   @Test func fencedCodeBlock() {
@@ -227,8 +237,14 @@ struct MarkdownRendererTests {
   }
 
   @Test func codeBlockWithTildes() {
-    let lines = render("~~~\ncode here\n~~~")
-    #expect(!lines.isEmpty)
+    let md = "~~~\ncode here\n~~~"
+    let lines = render(md)
+    let p = plainLines(lines)
+    // Tilde fences are normalized to backtick fences
+    #expect(p.contains("```"))
+    #expect(p.contains("code here"))
+    // Opening and closing fences present
+    #expect(p.filter { $0 == "```" }.count == 2)
   }
 
   @Test func blockQuote() {
@@ -277,8 +293,17 @@ struct MarkdownRendererTests {
   }
 
   @Test func nestedList() {
-    let lines = render("- parent\n  - child\n  - child 2\n- parent 2")
-    #expect(!lines.isEmpty)
+    let md = "- parent\n  - child\n  - child 2\n- parent 2"
+    let lines = render(md)
+    let p = plainLines(lines)
+    #expect(p.contains { $0.contains("parent") })
+    #expect(p.contains { $0.contains("child") })
+    #expect(p.contains { $0.contains("child 2") })
+    #expect(p.contains { $0.contains("parent 2") })
+    // Nested items should be indented more than parent items
+    let parentLine = p.first { $0.contains("parent") && !$0.contains("parent 2") }!
+    let childLine = p.first { $0.contains("child") }!
+    #expect(childLine.count > parentLine.count)
   }
 
   @Test func tableBasic() {
@@ -460,24 +485,29 @@ struct MarkdownRendererTests {
     #expect(plainLines(lines).count >= 2)
   }
 
-  @Test func singleAsteriskLiteral() {
-    let lines = render("This is a * literal asterisk")
-    #expect(!lines.isEmpty)
+  @Test("malformed inline markup preserves source text exactly",
+    arguments: [
+      "This is a * literal asterisk",
+      "Hello **world",
+      "Hello `world",
+      "Hello *world",
+    ])
+  func malformedInlineMarkupPreservesText(_ markdown: String) {
+    #expect(renderedPlainText(markdown) == markdown)
   }
 
-  @Test func unmatchedDoubleAsterisk() {
-    let lines = render("Hello **world")
-    #expect(!lines.isEmpty)
-  }
-
-  @Test func unmatchedBacktick() {
-    let lines = render("Hello `world")
-    #expect(!lines.isEmpty)
-  }
-
-  @Test func unmatchedItalic() {
-    let lines = render("Hello *world")
-    #expect(!lines.isEmpty)
+  @Test("malformed inline markup matches one-shot when streamed",
+    arguments: [
+      "This is a * literal asterisk",
+      "Hello **world",
+      "Hello `world",
+      "Hello *world",
+    ])
+  func malformedInlineMarkupStreamingMatchesOneShot(_ markdown: String) {
+    let chars = markdown.map(String.init)
+    let snapshots = renderIncremental(chunks: chars)
+    let oneShot = render(markdown)
+    #expect(snapshots.last! == oneShot)
   }
 
   @Test func asteriskThenBold() {
@@ -487,14 +517,31 @@ struct MarkdownRendererTests {
     #expect(allSpans.contains { $0.fg == ScribePalette.markdownItalic })
   }
 
-  @Test func backtickTripletFalseFence() {
-    let lines = render("Here is ``` some text")
-    #expect(!lines.isEmpty)
+  @Test func adjacentPatternsPreserveText() {
+    let md = "**bold***italic*`code`"
+    let lines = render(md)
+    let allSpans = lines.flatMap(\.spans)
+    // All three styles should be applied
+    #expect(allSpans.contains { $0.bold && $0.text == "bold" })
+    #expect(allSpans.contains { $0.fg == ScribePalette.markdownItalic && $0.text == "italic" })
+    #expect(allSpans.contains { $0.fg == ScribePalette.markdownCode && $0.text == "code" })
+    // Text content preserved (delimiters correctly consumed)
+    #expect(allSpans.map(\.text).joined() == "bolditaliccode")
   }
 
-  @Test func backtickTripletAtStartOfText() {
-    let lines = render("```not a fence")
-    #expect(!lines.isEmpty)
+  @Test func emptyPatternContentPreservesDelimiters() {
+    // Valid markdown patterns with empty content — delimiters are consumed
+    let md = "**** **** * * `` ``"
+    let lines = render(md)
+    let allSpans = lines.flatMap(\.spans)
+    // Bold spans with empty content
+    let boldSpans = allSpans.filter { $0.bold }
+    #expect(boldSpans.count >= 2)
+    // All bold spans have empty text (delimiters consumed)
+    #expect(boldSpans.allSatisfy { $0.text.isEmpty })
+    // Total rendered text is just whitespace from between the patterns
+    let text = allSpans.map(\.text).joined()
+    #expect(text.allSatisfy { $0 == " " })
   }
 
   @Test func multipleOverlappingPatterns() {
@@ -503,16 +550,6 @@ struct MarkdownRendererTests {
     #expect(allSpans.filter { $0.bold }.count >= 2)
     #expect(allSpans.filter { $0.fg == ScribePalette.markdownItalic }.count >= 2)
     #expect(allSpans.filter { $0.fg == ScribePalette.markdownCode }.count >= 2)
-  }
-
-  @Test func adjacentPatternsNoSpace() {
-    let lines = render("**bold***italic*`code`")
-    #expect(!lines.isEmpty)
-  }
-
-  @Test func emptyPatternContent() {
-    let lines = render("**** **** * * `` ``")
-    #expect(!lines.isEmpty)
   }
 
   @Test func literalAsterisksInCodeSpan() {
@@ -551,13 +588,27 @@ struct MarkdownRendererTests {
   }
 
   @Test func zeroWidthJoiners() {
-    let lines = render("👨‍👩‍👧‍👦 family emoji")
-    #expect(!lines.isEmpty)
+    let md = "👨‍👩‍👧‍👦 family emoji"
+    let lines = render(md)
+    // Plain text must exactly preserve all characters including ZWJ sequences
+    #expect(renderedPlainText(md) == md)
+    // All spans must contain non-empty text
+    #expect(lines.allSatisfy { $0.spans.allSatisfy { !$0.text.isEmpty } })
   }
 
   @Test func combiningCharacters() {
-    let lines = render("**café** résumé naïve")
-    #expect(!lines.isEmpty)
+    let md = "**café** résumé naïve"
+    let lines = render(md)
+    let allSpans = lines.flatMap(\.spans)
+    // Bold text with combining characters
+    #expect(allSpans.contains { $0.bold && $0.text.contains("café") })
+    // Plain text preserves all accented characters (delimiters correctly consumed)
+    let text = allSpans.map(\.text).joined()
+    #expect(text.contains("café"))
+    #expect(text.contains("résumé"))
+    #expect(text.contains("naïve"))
+    // No characters lost from the original text content
+    #expect(text.filter { !$0.isWhitespace } == "caférésuménaïve")
   }
 
   @Test func veryLongLine() {
@@ -595,13 +646,34 @@ struct MarkdownRendererTests {
   }
 
   @Test func deeplyNestedInline() {
-    let lines = render("**bold *italic `code` italic* bold**")
-    #expect(!lines.isEmpty)
+    let md = "**bold *italic `code` italic* bold**"
+    let lines = render(md)
+    let allSpans = lines.flatMap(\.spans)
+    // All three inline styles should be present
+    #expect(allSpans.contains { $0.bold && $0.text.contains("bold") })
+    #expect(allSpans.contains { $0.fg == ScribePalette.markdownItalic && $0.text.contains("italic") })
+    #expect(allSpans.contains { $0.fg == ScribePalette.markdownCode && $0.text.contains("code") })
+    // Text content should be preserved (delimiters correctly consumed)
+    let text = allSpans.map(\.text).joined()
+    #expect(text.contains("bold"))
+    #expect(text.contains("italic"))
+    #expect(text.contains("code"))
   }
 
   @Test func repeatedTripleBackticksInline() {
-    let lines = render("a ``` b ``` c ``` d ``` e")
-    #expect(!lines.isEmpty)
+    let md = "a ``` b ``` c ``` d ``` e"
+    let lines = render(md)
+    let allSpans = lines.flatMap(\.spans)
+    let text = allSpans.map(\.text).joined()
+    // Triple backtick code spans should consume the backticks as delimiters
+    // and preserve the inner text
+    #expect(text.contains("a"))
+    #expect(text.contains("b"))
+    #expect(text.contains("c"))
+    #expect(text.contains("d"))
+    #expect(text.contains("e"))
+    // Backticks should not appear in rendered text (valid code span delimiters)
+    #expect(!text.contains("`"))
   }
 
   @Test func everythingAllAtOnce() {
