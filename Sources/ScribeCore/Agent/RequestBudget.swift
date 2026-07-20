@@ -87,8 +87,9 @@ func enforceRequestBudget(
   tools: [Components.Schemas.ChatTool],
   contextWindow: Int
 ) throws -> String? {
-  guard var estimate = estimateRequestBudget(
-    messages: messages, tools: tools, contextWindow: contextWindow)
+  guard
+    var estimate = estimateRequestBudget(
+      messages: messages, tools: tools, contextWindow: contextWindow)
   else { return nil }
   guard estimate.exceedsLimit else { return nil }
 
@@ -97,16 +98,18 @@ func enforceRequestBudget(
 
   while estimate.exceedsLimit {
     let before = estimate.estimatedInputTokens
-    guard let reason = rollbackContextOverflow(
-      messages: &messages,
-      newMessages: &newMessages,
-      providerDetail:
-        "local preflight estimate \(before) tokens exceeds input budget \(estimate.inputTokenLimit)")
+    guard
+      let reason = rollbackContextOverflow(
+        messages: &messages,
+        newMessages: &newMessages,
+        providerDetail:
+          "local preflight estimate \(before) tokens exceeds input budget \(estimate.inputTokenLimit)")
     else { break }
     compactions.append(reason)
 
-    guard let next = estimateRequestBudget(
-      messages: messages, tools: tools, contextWindow: contextWindow)
+    guard
+      let next = estimateRequestBudget(
+        messages: messages, tools: tools, contextWindow: contextWindow)
     else { break }
     estimate = next
     // Avoid repeatedly replacing an already compact replacement when no meaningful space remains.

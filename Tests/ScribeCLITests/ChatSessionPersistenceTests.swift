@@ -106,8 +106,9 @@ struct ChatSessionPersistenceTests {
       contentsOf: directory.appendingPathComponent("messages.jsonl"), encoding: .utf8)
     #expect(persisted.contains("example.com"))
     #expect(persisted.contains(#""type":"image_url""#))
-    #expect(!FileManager.default.fileExists(
-      atPath: directory.appendingPathComponent("attachments").path))
+    #expect(
+      !FileManager.default.fileExists(
+        atPath: directory.appendingPathComponent("attachments").path))
 
     let loaded = try ChatSessionStore.loadMessages(from: FilePath(directory.path))
     #expect(loaded[0].contentParts == message.contentParts)

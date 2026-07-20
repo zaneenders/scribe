@@ -132,7 +132,8 @@ private func runSingleCodexRound(
     reasoning: config.reasoningEnabled == true
       ? {
         var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()
-        r.effort = config.reasoningEffort
+        r.effort =
+          config.reasoningEffort
           .flatMap { ScribeLLMCodex.Components.Schemas.CodexReasoning.EffortPayload(rawValue: $0) }
           ?? .medium
         return r

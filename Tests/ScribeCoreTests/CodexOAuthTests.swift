@@ -1,8 +1,8 @@
 import Foundation
+import ScribeCore
 import Testing
 
 @testable import ScribeCodexAuth
-import ScribeCore
 
 #if canImport(Darwin)
 import Darwin

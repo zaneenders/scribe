@@ -30,8 +30,9 @@ func requestBudgetAllowsSmallRequests() throws {
 func requestBudgetSerializesOpenAPIToolParameters() throws {
   let tool = ShellTool.toChatTool(logger: Logger(label: "test.request-budget"))
 
-  let estimate = try #require(estimateRequestBudget(
-    messages: [], tools: [tool], contextWindow: 4_000))
+  let estimate = try #require(
+    estimateRequestBudget(
+      messages: [], tools: [tool], contextWindow: 4_000))
 
   let metadataBytes =
     tool.function.name.utf8.count + (tool.function.description ?? "").utf8.count
@@ -94,8 +95,9 @@ func requestBudgetDoesNotChargeBase64AsText() throws {
     ]
   ).toChatMessage()
 
-  let estimate = try #require(estimateRequestBudget(
-    messages: [image], tools: [], contextWindow: 8_000))
+  let estimate = try #require(
+    estimateRequestBudget(
+      messages: [image], tools: [], contextWindow: 8_000))
 
   #expect(estimate.textBytes == 5)
   #expect(estimate.imageCount == 1)
@@ -107,9 +109,10 @@ func requestBudgetDisabledWithoutKnownContextWindow() throws {
   var messages = [budgetMessage(role: .user, text: String(repeating: "x", count: 50_000))]
   var newMessages = messages
 
-  #expect(try enforceRequestBudget(
-    messages: &messages,
-    newMessages: &newMessages,
-    tools: [],
-    contextWindow: 0) == nil)
+  #expect(
+    try enforceRequestBudget(
+      messages: &messages,
+      newMessages: &newMessages,
+      tools: [],
+      contextWindow: 0) == nil)
 }

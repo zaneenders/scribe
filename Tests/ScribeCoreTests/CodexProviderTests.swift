@@ -12,202 +12,208 @@ import Testing
 @Suite
 struct CodexProviderTests {
 
-    // MARK: - ClientSource
+  // MARK: - ClientSource
 
-    @Test("ClientSource.configured stores client")
-    func configuredSourceStoresClient() {
-        let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
-        let client = ScribeLLMCodex.Client(
-            serverURL: URL(string: "https://codex.example.com")!,
-            transport: transport,
-            middlewares: []
-        )
-        let source = CodexProvider.ClientSource.configured(client)
+  @Test("ClientSource.configured stores client")
+  func configuredSourceStoresClient() {
+    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport,
+      middlewares: []
+    )
+    let source = CodexProvider.ClientSource.configured(client)
 
-        if case .configured = source {
-            // Success — the client is wrapped
-        } else {
-            Issue.record("Expected .configured source")
-        }
+    if case .configured = source {
+      // Success — the client is wrapped
+    } else {
+      Issue.record("Expected .configured source")
+    }
+  }
+
+  @Test("ClientSource.credentials stores serverURL")
+  func credentialsSourceStoresURL() {
+    let url = URL(string: "https://codex.example.com")!
+    let source = CodexProvider.ClientSource.credentials(serverURL: url)
+
+    if case .credentials(let storedURL) = source {
+      #expect(storedURL == url)
+    } else {
+      Issue.record("Expected .credentials source")
+    }
+  }
+
+  // MARK: - Provider properties
+
+  @Test("provider stores all configuration properties")
+  func providerStoresProperties() {
+    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport,
+      middlewares: []
+    )
+
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "codex-model-v2",
+      reasoningEnabled: true,
+      reasoningEffort: "medium",
+      contextWindow: 200_000
+    )
+
+    #expect(provider.model == "codex-model-v2")
+    #expect(provider.reasoningEnabled == true)
+    #expect(provider.reasoningEffort == "medium")
+    #expect(provider.contextWindow == 200_000)
+  }
+
+  @Test("provider stores nil reasoning fields")
+  func providerStoresNilReasoning() {
+    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport,
+      middlewares: []
+    )
+
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "codex-model",
+      reasoningEnabled: nil,
+      reasoningEffort: nil,
+      contextWindow: 128_000
+    )
+
+    #expect(provider.reasoningEnabled == nil)
+    #expect(provider.reasoningEffort == nil)
+  }
+
+  // MARK: - run method structure
+
+  @Test("run returns a TurnStream with events and result")
+  func runReturnsTurnStream() async throws {
+    // A minimal SSE response — mimics Codex SSE format
+    let sse =
+      "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\"}}\n\n"
+    let chunkData = HTTPBody.ByteChunk(sse.utf8)
+    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [chunkData])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport,
+      middlewares: []
+    )
+
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "codex-model",
+      reasoningEnabled: nil,
+      reasoningEffort: nil,
+      contextWindow: 128_000
+    )
+
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: Logger(label: "test.codex-provider"),
+      abortNotifier: AbortNotifier()
+    )
+
+    // Collect events
+    var events: [AgentEvent] = []
+    for await event in stream.events {
+      events.append(event)
     }
 
-    @Test("ClientSource.credentials stores serverURL")
-    func credentialsSourceStoresURL() {
-        let url = URL(string: "https://codex.example.com")!
-        let source = CodexProvider.ClientSource.credentials(serverURL: url)
+    // Get result
+    let result: TurnResult = try await stream.result.value
 
-        if case .credentials(let storedURL) = source {
-            #expect(storedURL == url)
-        } else {
-            Issue.record("Expected .credentials source")
-        }
-    }
+    // Should have completed with new messages
+    #expect(result.outcome == TurnOutcome.completed)
+    #expect(!result.newMessages.isEmpty)
+    #expect(
+      events.contains {
+        if case .output(.finalized) = $0 { return true }
+        return false
+      })
+  }
 
-    // MARK: - Provider properties
+  @Test("run with configured source uses pre-configured client")
+  func runWithConfiguredSourceUsesClient() async throws {
+    let sse =
+      "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from configured\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cfg\"}}\n\n"
+    let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [.init(sse.utf8)])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport,
+      middlewares: []
+    )
 
-    @Test("provider stores all configuration properties")
-    func providerStoresProperties() {
-        let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
-        let client = ScribeLLMCodex.Client(
-            serverURL: URL(string: "https://codex.example.com")!,
-            transport: transport,
-            middlewares: []
-        )
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "codex-model",
+      reasoningEnabled: nil,
+      reasoningEffort: nil,
+      contextWindow: 128_000
+    )
 
-        let provider = CodexProvider(
-            source: .configured(client),
-            model: "codex-model-v2",
-            reasoningEnabled: true,
-            reasoningEffort: "medium",
-            contextWindow: 200_000
-        )
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("test"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: Logger(label: "test.configured"),
+      abortNotifier: AbortNotifier()
+    )
 
-        #expect(provider.model == "codex-model-v2")
-        #expect(provider.reasoningEnabled == true)
-        #expect(provider.reasoningEffort == "medium")
-        #expect(provider.contextWindow == 200_000)
-    }
-
-    @Test("provider stores nil reasoning fields")
-    func providerStoresNilReasoning() {
-        let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [])
-        let client = ScribeLLMCodex.Client(
-            serverURL: URL(string: "https://codex.example.com")!,
-            transport: transport,
-            middlewares: []
-        )
-
-        let provider = CodexProvider(
-            source: .configured(client),
-            model: "codex-model",
-            reasoningEnabled: nil,
-            reasoningEffort: nil,
-            contextWindow: 128_000
-        )
-
-        #expect(provider.reasoningEnabled == nil)
-        #expect(provider.reasoningEffort == nil)
-    }
-
-    // MARK: - run method structure
-
-    @Test("run returns a TurnStream with events and result")
-    func runReturnsTurnStream() async throws {
-        // A minimal SSE response — mimics Codex SSE format
-        let sse = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\"}}\n\n"
-        let chunkData = HTTPBody.ByteChunk(sse.utf8)
-        let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [chunkData])
-        let client = ScribeLLMCodex.Client(
-            serverURL: URL(string: "https://codex.example.com")!,
-            transport: transport,
-            middlewares: []
-        )
-
-        let provider = CodexProvider(
-            source: .configured(client),
-            model: "codex-model",
-            reasoningEnabled: nil,
-            reasoningEffort: nil,
-            contextWindow: 128_000
-        )
-
-        let stream = provider.run(
-            promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))],
-            history: [],
-            options: AgentRunOptions(),
-            toolExecutor: NoOpToolExecutor(),
-            chatTools: [],
-            workingDirectory: FilePath("/tmp"),
-            logger: Logger(label: "test.codex-provider"),
-            abortNotifier: AbortNotifier()
-        )
-
-        // Collect events
-        var events: [AgentEvent] = []
-        for await event in stream.events {
-            events.append(event)
-        }
-
-        // Get result
-        let result: TurnResult = try await stream.result.value
-
-        // Should have completed with new messages
-        #expect(result.outcome == TurnOutcome.completed)
-        #expect(!result.newMessages.isEmpty)
-        #expect(events.contains { if case .output(.finalized) = $0 { return true }; return false })
-    }
-
-    @Test("run with configured source uses pre-configured client")
-    func runWithConfiguredSourceUsesClient() async throws {
-        let sse = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from configured\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cfg\"}}\n\n"
-        let transport = FakeCodexTransport(statusCode: 200, responseBodyChunks: [.init(sse.utf8)])
-        let client = ScribeLLMCodex.Client(
-            serverURL: URL(string: "https://codex.example.com")!,
-            transport: transport,
-            middlewares: []
-        )
-
-        let provider = CodexProvider(
-            source: .configured(client),
-            model: "codex-model",
-            reasoningEnabled: nil,
-            reasoningEffort: nil,
-            contextWindow: 128_000
-        )
-
-        let stream = provider.run(
-            promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("test"))],
-            history: [],
-            options: AgentRunOptions(),
-            toolExecutor: NoOpToolExecutor(),
-            chatTools: [],
-            workingDirectory: FilePath("/tmp"),
-            logger: Logger(label: "test.configured"),
-            abortNotifier: AbortNotifier()
-        )
-
-        let result: TurnResult = try await stream.result.value
-        #expect(result.outcome == TurnOutcome.completed)
-    }
+    let result: TurnResult = try await stream.result.value
+    #expect(result.outcome == TurnOutcome.completed)
+  }
 }
 
 // MARK: - Test Helpers
 
 /// A fake Codex transport that returns pre-configured response bodies.
 private final class FakeCodexTransport: ClientTransport, Sendable {
-    let statusCode: Int
-    private let chunks: [HTTPBody.ByteChunk]
+  let statusCode: Int
+  private let chunks: [HTTPBody.ByteChunk]
 
-    init(statusCode: Int, responseBodyChunks: [HTTPBody.ByteChunk]) {
-        self.statusCode = statusCode
-        self.chunks = responseBodyChunks
-    }
+  init(statusCode: Int, responseBodyChunks: [HTTPBody.ByteChunk]) {
+    self.statusCode = statusCode
+    self.chunks = responseBodyChunks
+  }
 
-    func send(
-        _ request: HTTPRequest,
-        body: HTTPBody?,
-        baseURL: URL,
-        operationID: String
-    ) async throws -> (HTTPResponse, HTTPBody?) {
-        let response = HTTPResponse(status: .init(code: statusCode))
-        if chunks.isEmpty { return (response, nil) }
-        let body = HTTPBody(
-            AsyncStream { continuation in
-                for chunk in chunks { continuation.yield(chunk) }
-                continuation.finish()
-            }, length: .unknown)
-        return (response, body)
-    }
+  func send(
+    _ request: HTTPRequest,
+    body: HTTPBody?,
+    baseURL: URL,
+    operationID: String
+  ) async throws -> (HTTPResponse, HTTPBody?) {
+    let response = HTTPResponse(status: .init(code: statusCode))
+    if chunks.isEmpty { return (response, nil) }
+    let body = HTTPBody(
+      AsyncStream { continuation in
+        for chunk in chunks { continuation.yield(chunk) }
+        continuation.finish()
+      }, length: .unknown)
+    return (response, body)
+  }
 }
 
 /// A no-op tool executor for testing.
 private struct NoOpToolExecutor: ToolExecutor {
-    func execute(
-        _ invocation: ToolInvocation,
-        workingDirectory: FilePath,
-        logger: Logger,
-        abort: any AbortObserver
-    ) async throws -> ToolResult {
-        ToolResult(text: "")
-    }
+  func execute(
+    _ invocation: ToolInvocation,
+    workingDirectory: FilePath,
+    logger: Logger,
+    abort: any AbortObserver
+  ) async throws -> ToolResult {
+    ToolResult(text: "")
+  }
 }
