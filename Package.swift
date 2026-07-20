@@ -119,6 +119,7 @@ let package = Package(
       dependencies: [
         "ScribeCore",
         "ScribeLLM",
+        "ScribeLLMCodex",
         "ScribeCodexAuth",
       ],
       swiftSettings: [
