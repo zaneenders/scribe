@@ -8,207 +8,197 @@ import Testing
 @Suite(.serialized)
 struct ConfigLoaderTests {
   @Test func loadsNamedProfileFromExplicitOverride() async throws {
-    let root = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: root) }
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
 
-    setenv("SCRIBE_HOME", root.path, 1)
-    defer { unsetenv("SCRIBE_HOME") }
-
-    let paths = ScribePaths(dataHome: FilePath(root.path))
-    try createDirectoryWithIntermediates(paths.dataHome)
-    let configJSON = """
-      {
-        "profiles": [
-          {
-            "name": "local",
-            "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
-            "agent": {
-              "model": "gemma4:e2b",
-              "contextWindow": 128000,
-              "contextWindowThreshold": 0.8,
-              "reasoning": false
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        {
+          "profiles": [
+            {
+              "name": "local",
+              "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+              "agent": {
+                "model": "gemma4:e2b",
+                "contextWindow": 128000,
+                "contextWindowThreshold": 0.8,
+                "reasoning": false
+              },
+              "logging": { "level": "trace" }
             },
-            "logging": { "level": "trace" }
-          },
-          {
-            "name": "cloud",
-            "api": { "baseUrl": "https://api.example.com", "apiKey": "secret" },
-            "agent": {
-              "model": "big-model",
-              "contextWindow": 256000,
-              "contextWindowThreshold": 0.9
-            },
-            "logging": { "level": "trace" }
-          }
-        ]
-      }
-      """
-    try configJSON.write(
-      toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
-    let loaded = try await ConfigLoader.load(profileOverride: "cloud")
-    #expect(loaded.activeProfileName == "cloud")
-    #expect(loaded.scribeConfig.agentModel == "big-model")
-    #expect(loaded.scribeConfig.serverURL == "https://api.example.com")
-    #expect(loaded.profiles.map(\.name) == ["local", "cloud"])
-    #expect(loaded.resolvedConfigurationPath == paths.profileManifestPath.string)
+            {
+              "name": "cloud",
+              "api": { "baseUrl": "https://api.example.com", "apiKey": "secret" },
+              "agent": {
+                "model": "big-model",
+                "contextWindow": 256000,
+                "contextWindowThreshold": 0.9
+              },
+              "logging": { "level": "trace" }
+            }
+          ]
+        }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+      let loaded = try await ConfigLoader.load(profileOverride: "cloud")
+      #expect(loaded.activeProfileName == "cloud")
+      #expect(loaded.scribeConfig.agentModel == "big-model")
+      #expect(loaded.scribeConfig.serverURL == "https://api.example.com")
+      #expect(loaded.profiles.map(\.name) == ["local", "cloud"])
+      #expect(loaded.resolvedConfigurationPath == paths.profileManifestPath.string)
+    }
   }
 
   @Test func profileOverrideDoesNotRequireActiveProfileFile() async throws {
-    let root = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: root) }
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
 
-    setenv("SCRIBE_HOME", root.path, 1)
-    defer { unsetenv("SCRIBE_HOME") }
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        {
+          "profiles": [
+            {
+              "name": "only",
+              "api": { "baseUrl": "http://127.0.0.1:11434", "apiKey": "" },
+              "agent": {
+                "model": "m",
+                "contextWindow": 1000,
+                "contextWindowThreshold": 0.5
+              },
+              "logging": { "level": "info" }
+            }
+          ]
+        }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
 
-    let paths = ScribePaths(dataHome: FilePath(root.path))
-    try createDirectoryWithIntermediates(paths.dataHome)
-    let configJSON = """
-      {
-        "profiles": [
-          {
-            "name": "only",
-            "api": { "baseUrl": "http://127.0.0.1:11434", "apiKey": "" },
-            "agent": {
-              "model": "m",
-              "contextWindow": 1000,
-              "contextWindowThreshold": 0.5
-            },
-            "logging": { "level": "info" }
-          }
-        ]
-      }
-      """
-    try configJSON.write(
-      toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
-
-    let loaded = try await ConfigLoader.load(profileOverride: "only")
-    #expect(loaded.activeProfileName == "only")
-    #expect(loaded.logLevel == .info)
+      let loaded = try await ConfigLoader.load(profileOverride: "only")
+      #expect(loaded.activeProfileName == "only")
+      #expect(loaded.logLevel == .info)
+    }
   }
 
   @Test func usesFirstProfileAsEphemeralDefault() async throws {
-    let root = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: root) }
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
 
-    setenv("SCRIBE_HOME", root.path, 1)
-    defer { unsetenv("SCRIBE_HOME") }
-
-    let paths = ScribePaths(dataHome: FilePath(root.path))
-    try createDirectoryWithIntermediates(paths.dataHome)
-    let configJSON = """
-      {
-        "profiles": [
-          {
-            "name": "first",
-            "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
-            "agent": {
-              "model": "a",
-              "contextWindow": 128000,
-              "contextWindowThreshold": 0.8
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        {
+          "profiles": [
+            {
+              "name": "first",
+              "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+              "agent": {
+                "model": "a",
+                "contextWindow": 128000,
+                "contextWindowThreshold": 0.8
+              },
+              "logging": { "level": "trace" }
             },
-            "logging": { "level": "trace" }
-          },
-          {
-            "name": "second",
-            "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
-            "agent": {
-              "model": "b",
-              "contextWindow": 128000,
-              "contextWindowThreshold": 0.8
-            },
-            "logging": { "level": "trace" }
-          }
-        ]
-      }
-      """
-    try configJSON.write(
-      toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+            {
+              "name": "second",
+              "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+              "agent": {
+                "model": "b",
+                "contextWindow": 128000,
+                "contextWindowThreshold": 0.8
+              },
+              "logging": { "level": "trace" }
+            }
+          ]
+        }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
 
-    let loaded = try await ConfigLoader.load()
-    #expect(loaded.activeProfileName == "first")
-    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("active-profile.json").path))
+      let loaded = try await ConfigLoader.load()
+      #expect(loaded.activeProfileName == "first")
+      #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("active-profile.json").path))
+    }
   }
 
   @Test func ignoresLegacyActiveProfileFile() async throws {
-    let root = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: root) }
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
 
-    setenv("SCRIBE_HOME", root.path, 1)
-    defer { unsetenv("SCRIBE_HOME") }
-
-    let paths = ScribePaths(dataHome: FilePath(root.path))
-    try createDirectoryWithIntermediates(paths.dataHome)
-    let configJSON = """
-      {
-        "profiles": [
-          {
-            "name": "first",
-            "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
-            "agent": {
-              "model": "a",
-              "contextWindow": 128000,
-              "contextWindowThreshold": 0.8
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        {
+          "profiles": [
+            {
+              "name": "first",
+              "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+              "agent": {
+                "model": "a",
+                "contextWindow": 128000,
+                "contextWindowThreshold": 0.8
+              },
+              "logging": { "level": "trace" }
             },
-            "logging": { "level": "trace" }
-          },
-          {
-            "name": "second",
-            "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
-            "agent": {
-              "model": "b",
-              "contextWindow": 128000,
-              "contextWindowThreshold": 0.8
-            },
-            "logging": { "level": "trace" }
-          }
-        ]
-      }
-      """
-    try configJSON.write(
-      toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
-    try #"{"activeProfile":"second"}"#.write(
-      to: root.appendingPathComponent("active-profile.json"), atomically: true, encoding: .utf8)
+            {
+              "name": "second",
+              "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+              "agent": {
+                "model": "b",
+                "contextWindow": 128000,
+                "contextWindowThreshold": 0.8
+              },
+              "logging": { "level": "trace" }
+            }
+          ]
+        }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+      try #"{"activeProfile":"second"}"#.write(
+        to: root.appendingPathComponent("active-profile.json"), atomically: true, encoding: .utf8)
 
-    let loaded = try await ConfigLoader.load()
-    #expect(loaded.activeProfileName == "first")
-    #expect(loaded.scribeConfig.agentModel == "a")
+      let loaded = try await ConfigLoader.load()
+      #expect(loaded.activeProfileName == "first")
+      #expect(loaded.scribeConfig.agentModel == "a")
+    }
   }
 
   @Test func rejectsUnknownAPIType() async throws {
-    let root = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: root) }
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
 
-    setenv("SCRIBE_HOME", root.path, 1)
-    defer { unsetenv("SCRIBE_HOME") }
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        {
+          "profiles": [
+            {
+              "name": "legacy",
+              "api": { "baseUrl": "https://api.anthropic.com", "apiKey": "secret", "type": "anthropic" },
+              "agent": {
+                "model": "some-model",
+                "contextWindow": 200000,
+                "contextWindowThreshold": 0.8
+              },
+              "logging": { "level": "info" }
+            }
+          ]
+        }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
 
-    let paths = ScribePaths(dataHome: FilePath(root.path))
-    try createDirectoryWithIntermediates(paths.dataHome)
-    let configJSON = """
-      {
-        "profiles": [
-          {
-            "name": "legacy",
-            "api": { "baseUrl": "https://api.anthropic.com", "apiKey": "secret", "type": "anthropic" },
-            "agent": {
-              "model": "some-model",
-              "contextWindow": 200000,
-              "contextWindowThreshold": 0.8
-            },
-            "logging": { "level": "info" }
-          }
-        ]
+      await #expect(throws: ScribeError.self) {
+        _ = try await ConfigLoader.load()
       }
-      """
-    try configJSON.write(
-      toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
-
-    await #expect(throws: ScribeError.self) {
-      _ = try await ConfigLoader.load()
     }
   }
 }

@@ -14,51 +14,43 @@ struct OutputCaptureTests {
     // Ensure no leftover session capture dir interferes
     ShellCaptureDirectory.teardown()
 
-    let tmpDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("scribe-capture-test-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    try withTemporaryDirectory { tmpDir in
+      let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
 
-    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+      // Files should exist on disk
+      #expect(FileManager.default.fileExists(atPath: capture.stdoutFile.string))
+      #expect(FileManager.default.fileExists(atPath: capture.stderrFile.string))
 
-    let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
+      // Files should be empty initially
+      let stdoutSize = try FileManager.default.attributesOfItem(atPath: capture.stdoutFile.string)[.size] as? Int
+      let stderrSize = try FileManager.default.attributesOfItem(atPath: capture.stderrFile.string)[.size] as? Int
+      #expect(stdoutSize == 0)
+      #expect(stderrSize == 0)
 
-    // Files should exist on disk
-    #expect(FileManager.default.fileExists(atPath: capture.stdoutFile.string))
-    #expect(FileManager.default.fileExists(atPath: capture.stderrFile.string))
-
-    // Files should be empty initially
-    let stdoutSize = try FileManager.default.attributesOfItem(atPath: capture.stdoutFile.string)[.size] as? Int
-    let stderrSize = try FileManager.default.attributesOfItem(atPath: capture.stderrFile.string)[.size] as? Int
-    #expect(stdoutSize == 0)
-    #expect(stderrSize == 0)
-
-    capture.closeHandles()
+      capture.closeHandles()
+    }
   }
 
   @Test("create with different IDs produces unique file names")
   func createProducesUniqueNames() throws {
     ShellCaptureDirectory.teardown()
 
-    let tmpDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("scribe-capture-unique-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    try withTemporaryDirectory { tmpDir in
+      let id1 = UUID()
+      let id2 = UUID()
 
-    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+      let c1 = try OutputCapture.create(id: id1, in: tmpDir)
+      let c2 = try OutputCapture.create(id: id2, in: tmpDir)
+      defer {
+        c1.closeHandles()
+        c2.closeHandles()
+      }
 
-    let id1 = UUID()
-    let id2 = UUID()
-
-    let c1 = try OutputCapture.create(id: id1, in: tmpDir)
-    let c2 = try OutputCapture.create(id: id2, in: tmpDir)
-    defer {
-      c1.closeHandles()
-      c2.closeHandles()
+      #expect(c1.stdoutFile != c2.stdoutFile)
+      #expect(c1.stderrFile != c2.stderrFile)
+      #expect(c1.id == id1)
+      #expect(c2.id == id2)
     }
-
-    #expect(c1.stdoutFile != c2.stdoutFile)
-    #expect(c1.stderrFile != c2.stderrFile)
-    #expect(c1.id == id1)
-    #expect(c2.id == id2)
   }
 
   // MARK: - diskSizes
@@ -67,39 +59,31 @@ struct OutputCaptureTests {
   func diskSizesReturnsZeroForEmpty() throws {
     ShellCaptureDirectory.teardown()
 
-    let tmpDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("scribe-capture-size-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    try withTemporaryDirectory { tmpDir in
+      let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
+      defer { capture.closeHandles() }
 
-    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-
-    let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
-    defer { capture.closeHandles() }
-
-    let sizes = capture.diskSizes()
-    #expect(sizes.out == 0)
-    #expect(sizes.err == 0)
+      let sizes = capture.diskSizes()
+      #expect(sizes.out == 0)
+      #expect(sizes.err == 0)
+    }
   }
 
   @Test("diskSizes reflects written data")
   func diskSizesReflectsWrittenData() throws {
     ShellCaptureDirectory.teardown()
 
-    let tmpDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("scribe-capture-size2-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    try withTemporaryDirectory { tmpDir in
+      let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
+      defer { capture.closeHandles() }
 
-    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+      // Write data directly to the stdout file
+      try "Hello, World!".write(to: capture.stdoutURL, atomically: false, encoding: .utf8)
 
-    let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
-    defer { capture.closeHandles() }
-
-    // Write data directly to the stdout file
-    try "Hello, World!".write(to: capture.stdoutURL, atomically: false, encoding: .utf8)
-
-    let sizes = capture.diskSizes()
-    #expect(sizes.out > 0)
-    #expect(sizes.err == 0)
+      let sizes = capture.diskSizes()
+      #expect(sizes.out > 0)
+      #expect(sizes.err == 0)
+    }
   }
 
   // MARK: - closeHandles
@@ -108,16 +92,12 @@ struct OutputCaptureTests {
   func closeHandlesDoesNotCrash() throws {
     ShellCaptureDirectory.teardown()
 
-    let tmpDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("scribe-capture-close-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-
-    let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
-    capture.closeHandles()
-    // Second close should not crash either
-    capture.closeHandles()
+    try withTemporaryDirectory { tmpDir in
+      let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
+      capture.closeHandles()
+      // Second close should not crash either
+      capture.closeHandles()
+    }
   }
 
   // MARK: - Session capture directory lifecycle
@@ -167,16 +147,12 @@ struct OutputCaptureTests {
   func stdoutURLAndFileConsistent() throws {
     ShellCaptureDirectory.teardown()
 
-    let tmpDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("scribe-capture-consistency-\(UUID().uuidString)", isDirectory: true)
-    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    try withTemporaryDirectory { tmpDir in
+      let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
+      defer { capture.closeHandles() }
 
-    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-
-    let capture = try OutputCapture.create(id: UUID(), in: tmpDir)
-    defer { capture.closeHandles() }
-
-    #expect(capture.stdoutURL.path == capture.stdoutFile.string)
-    #expect(capture.stderrURL.path == capture.stderrFile.string)
+      #expect(capture.stdoutURL.path == capture.stdoutFile.string)
+      #expect(capture.stderrURL.path == capture.stderrFile.string)
+    }
   }
 }
