@@ -33,6 +33,7 @@ struct ReadPayload: Decodable {
   let contentCharacters: Int?
   let maxContentBytes: Int?
   let maxContentCharacters: Int?
+  let byteOffset: Int?
 }
 
 struct WritePayload: Decodable {

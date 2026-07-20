@@ -100,6 +100,105 @@ struct ToolRunnerReadFileTests {
     }
   }
 
+  @Test func unlimitedLimitWithOffsetReturnsRemainderWithoutOverflow() async throws {
+    let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
+    try await withTemporaryDirectory { dir in
+      let fileURL = dir.appendingPathComponent("unlimited-offset.txt")
+      try "one\ntwo\nthree".write(to: fileURL, atomically: true, encoding: .utf8)
+
+      let args = try jsonArguments(["path": fileURL.path, "offset": 2, "limit": 0])
+      let json = try! await registry.run(
+        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger,
+        abortObserver: AbortNotifier()
+      ).text
+      let payload = try decodeRead(json)
+
+      #expect(payload.content == "two\nthree")
+      #expect(payload.startLine == 2)
+      #expect(payload.endLine == 3)
+      #expect(payload.truncated == false)
+    }
+  }
+
+  @Test func byteOffsetIgnoresLineOffsetAndContinuesLongLine() async throws {
+    let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
+    try await withTemporaryDirectory { dir in
+      let fileURL = dir.appendingPathComponent("byte-offset.txt")
+      let prefix = String(repeating: "a", count: ReadFileTool.maxContentBytes + 32)
+      try "\(prefix)\ntail".write(to: fileURL, atomically: true, encoding: .utf8)
+
+      let firstArgs = try jsonArguments(["path": fileURL.path, "limit": 0])
+      let firstJSON = try! await registry.run(
+        name: "read_file", arguments: firstArgs, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger,
+        abortObserver: AbortNotifier()
+      ).text
+      let first = try decodeRead(firstJSON)
+      #expect(first.byteOffset == ReadFileTool.maxContentCharacters)
+
+      let secondArgs = try jsonArguments([
+        "path": fileURL.path,
+        "offset": 99,
+        "limit": 1,
+        "byte_offset": first.byteOffset!,
+      ])
+      let secondJSON = try! await registry.run(
+        name: "read_file", arguments: secondArgs, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger,
+        abortObserver: AbortNotifier()
+      ).text
+      let second = try decodeRead(secondJSON)
+
+      #expect(
+        second.content
+          == String(repeating: "a", count: ReadFileTool.maxContentBytes + 32 - ReadFileTool.maxContentCharacters))
+      #expect(second.startLine == 1)
+      #expect(second.endLine == 1)
+      #expect(second.truncated == true)
+      #expect(second.truncationReason == "line_limit")
+    }
+  }
+
+  @Test func cappedReadHandlesUtf8ScalarSplitAtReadBoundary() async throws {
+    let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
+    try await withTemporaryDirectory { dir in
+      let fileURL = dir.appendingPathComponent("split-scalar.txt")
+      // maxContentBytes + 4 lands two bytes into the final four-byte scalar.
+      let body = String(repeating: "a", count: ReadFileTool.maxContentBytes + 2) + "😀"
+      try body.write(to: fileURL, atomically: true, encoding: .utf8)
+
+      let args = try jsonArguments(["path": fileURL.path, "limit": 0])
+      let json = try! await registry.run(
+        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger,
+        abortObserver: AbortNotifier()
+      ).text
+      let payload = try decodeRead(json)
+
+      #expect(payload.content?.utf8.count == ReadFileTool.maxContentCharacters)
+      #expect(payload.truncated == true)
+      #expect(payload.truncationReason == "character_limit")
+      #expect(payload.byteOffset == ReadFileTool.maxContentCharacters)
+    }
+  }
+
+  @Test func preservesTrailingNewlineWhenRangeReachesEndOfFile() async throws {
+    let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
+    try await withTemporaryDirectory { dir in
+      let fileURL = dir.appendingPathComponent("trailing-newline.txt")
+      try "one\ntwo\n".write(to: fileURL, atomically: true, encoding: .utf8)
+
+      let args = try jsonArguments(["path": fileURL.path, "offset": 2, "limit": 2])
+      let json = try! await registry.run(
+        name: "read_file", arguments: args, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger,
+        abortObserver: AbortNotifier()
+      ).text
+      let payload = try decodeRead(json)
+
+      #expect(payload.content == "two\n")
+      #expect(payload.startLine == 2)
+      #expect(payload.endLine == 3)
+      #expect(payload.truncated == false)
+    }
+  }
+
   @Test func hardCapsOneVeryLongLineByBytes() async throws {
     let registry = ToolRegistry(
       tools: [ReadFileTool()], logger: toolRunnerTestLogger)

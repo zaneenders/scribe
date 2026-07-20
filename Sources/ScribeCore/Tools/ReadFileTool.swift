@@ -147,7 +147,8 @@ public struct ReadFileTool: ScribeTool {
       return result
     }
 
-    let result = try Self.readFile(path: path, offset: offset, limit: limit, byteOffset: byteOffset, workingDirectory: workingDirectory)
+    let result = try await Self.readFile(
+      path: path, offset: offset, limit: limit, byteOffset: byteOffset, workingDirectory: workingDirectory)
     let returnedLines = max(0, result.endLine - result.startLine + 1)
     logger.debug(
       "agent.tool.read_file",
@@ -200,115 +201,184 @@ public struct ReadFileTool: ScribeTool {
     limit: Int?,
     byteOffset: Int?,
     workingDirectory: FilePath
-  ) throws -> ReadFileResult {
+  ) async throws -> ReadFileResult {
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
     let s = fp.string
-    let text = try String(contentsOfFile: s, encoding: .utf8)
-    let totalBytes = text.utf8.count
 
-    // When byte_offset is provided, skip to that byte position in the file.
-    let effectiveText: String
-    let byteOffsetBase: Int  // byte offset in original file where effectiveText starts
-    if let bo = byteOffset, bo > 0, bo < text.utf8.count {
-      guard let utf8Idx = text.utf8.index(text.utf8.startIndex, offsetBy: bo, limitedBy: text.utf8.endIndex)
-      else {
-        return ReadFileResult(
-          absolutePath: s, content: "", totalBytes: totalBytes, totalLines: 0,
-          startLine: 0, endLine: 0, truncated: false, truncationReason: nil, byteOffset: nil)
+    // Use withFileHandle for scoped access — the handle is auto-closed.
+    return try await FileSystem.shared.withFileHandle(forReadingAt: fp, options: .init()) { fh in
+      let info = try await fh.info()
+      let totalBytes = Int(info.size)
+
+      // Determine starting byte position in the file. A valid byte offset takes
+      // precedence over line-based pagination, as documented by the tool schema.
+      let startByte: Int
+      let usesByteOffset: Bool
+      if let bo = byteOffset, bo > 0, bo < totalBytes {
+        startByte = bo
+        usesByteOffset = true
+      } else {
+        startByte = 0
+        usesByteOffset = false
       }
-      guard let strIdx = String.Index(utf8Idx, within: text) else {
-        return ReadFileResult(
-          absolutePath: s, content: "", totalBytes: totalBytes, totalLines: 0,
-          startLine: 0, endLine: 0, truncated: false, truncationReason: nil, byteOffset: nil)
+
+      let startLineIndex = usesByteOffset ? 0 : max(0, (offset ?? 1) - 1)  // 0-indexed
+      // nil means that no line limit applies. Avoid using Int.max as a sentinel:
+      // adding a positive line offset to it would overflow.
+      let resolvedLimit: Int?
+      if let limit, limit > 0 {
+        resolvedLimit = limit
+      } else if limit == nil {
+        resolvedLimit = defaultLineLimit
+      } else {
+        resolvedLimit = nil
       }
-      effectiveText = String(text[strIdx...])
-      byteOffsetBase = bo
-    } else {
-      effectiveText = text
-      byteOffsetBase = 0
-    }
 
-    let parts = effectiveText.split(separator: "\n", omittingEmptySubsequences: false)
-    let totalLines = parts.count
+      // ---- Phase 1: streaming scan via async chunks ----
+      // readChunks(in:) returns an AsyncSequence of ByteBuffer slices over the
+      // requested byte range.  No seeking — we specify the range directly.
+      // Because 0x0A never appears inside a multi-byte UTF-8 sequence, scanning
+      // raw bytes is safe.
 
-    let startIndex = max(0, (offset ?? 1) - 1)
-    let resolvedLimit: Int
-    if let limit, limit > 0 {
-      resolvedLimit = limit
-    } else if limit == nil {
-      resolvedLimit = defaultLineLimit
-    } else {
-      resolvedLimit = totalLines
-    }
+      enum ScanState {
+        case skipping, collecting, countingOnly
+      }
 
-    if startIndex >= totalLines {
+      var state: ScanState = (startLineIndex == 0) ? .collecting : .skipping
+      var currentLine = 0
+      var totalLines = 1  // match split(…omittingEmptySubsequences:false) semantics
+      var bytePos = startByte
+      var contentStartByte = startByte
+      // Exclusive end offset for the requested line range.
+      var contentEndByte = startByte
+      var collectedLineCount = 0
+
+      let chunks = fh.readChunks(in: Int64(startByte)..., chunkLength: .bytes(16384))
+      for try await chunk in chunks {
+        let chunkStart = bytePos
+        for (idx, byte) in chunk.readableBytesView.enumerated() {
+          if byte == 0x0A {
+            let newlineByte = chunkStart + idx
+            totalLines += 1
+
+            switch state {
+            case .skipping:
+              currentLine += 1
+              if currentLine == startLineIndex {
+                state = .collecting
+                contentStartByte = newlineByte + 1
+              }
+            case .collecting:
+              collectedLineCount += 1
+              if let resolvedLimit, collectedLineCount >= resolvedLimit {
+                // The newline terminates the final requested line; don't include
+                // it in the result, matching ArraySlice.joined(separator: "\n").
+                contentEndByte = newlineByte
+                state = .countingOnly
+              }
+            case .countingOnly:
+              break
+            }
+          }
+        }
+        bytePos = chunkStart + chunk.readableBytes
+      }
+
+      // If we never found the start line, return empty.
+      if state == .skipping {
+        return ReadFileResult(
+          absolutePath: s,
+          content: "",
+          totalBytes: totalBytes,
+          totalLines: totalLines,
+          startLine: totalLines + 1,
+          endLine: totalLines,
+          truncated: false,
+          truncationReason: nil,
+          byteOffset: nil
+        )
+      }
+
+      // If the requested range reaches EOF, use the file size as its exclusive
+      // end. This preserves a real trailing newline when the final empty line is
+      // part of the requested range.
+      if state == .collecting {
+        contentEndByte = totalBytes
+        if totalBytes > contentStartByte {
+          collectedLineCount += 1
+        }
+      }
+
+      // ---- Phase 2: read a capped prefix of the collected byte range ----
+      let rangeLen = max(0, contentEndByte - contentStartByte)
+      let sliceStartByteOffset = contentStartByte
+
+      let rawSlice: String
+      if rangeLen > 0 {
+        // Four extra bytes guarantee that boundedContent can observe the byte
+        // cap even when the read ends in the middle of a four-byte UTF-8 scalar.
+        let readLength = min(rangeLen, maxContentBytes + 4)
+        let contentChunk = try await fh.readChunk(
+          fromAbsoluteOffset: Int64(contentStartByte),
+          length: .bytes(Int64(readLength))
+        )
+        var contentData = Data(contentChunk.readableBytesView)
+        var decoded = String(data: contentData, encoding: .utf8)
+        if decoded == nil, readLength < rangeLen {
+          // A capped read may split the final UTF-8 scalar. Remove only that
+          // incomplete suffix; malformed UTF-8 within the prefix still fails.
+          for _ in 0..<3 where decoded == nil && !contentData.isEmpty {
+            contentData.removeLast()
+            decoded = String(data: contentData, encoding: .utf8)
+          }
+        }
+        guard let decoded else {
+          throw ScribeError.invalidInput(message: "File is not valid UTF-8: \(s)")
+        }
+        rawSlice = decoded
+      } else {
+        rawSlice = ""
+      }
+
+      // ---- Apply content caps (same boundedContent as before) ----
+      let bounded = boundedContent(rawSlice)
+
+      // Count lines in the bounded (possibly backtracked) content.
+      let returnedLineCount = bounded.content.reduce(into: 1) { count, character in
+        if character == "\n" { count += 1 }
+      }
+
+      let endsAtNewline = bounded.content.isEmpty || bounded.content.last == "\n"
+      let startIndex = startLineIndex
+      let endIndex = resolvedLimit.map { min(totalLines, startIndex + $0) } ?? totalLines
+
+      let returnedEndLine: Int
+      let nextByteOffset: Int?
+
+      if bounded.reason != nil && !endsAtNewline {
+        returnedEndLine = max(startIndex + 1, startIndex + max(0, returnedLineCount - 1))
+        nextByteOffset = sliceStartByteOffset + bounded.content.utf8.count
+      } else {
+        returnedEndLine = min(endIndex, startIndex + returnedLineCount)
+        nextByteOffset = nil
+      }
+
+      let lineTruncated = (bounded.reason == nil) && endIndex < totalLines
+      let truncated = bounded.reason != nil || lineTruncated
+      let truncationReason = bounded.reason ?? (lineTruncated ? "line_limit" : nil)
+
       return ReadFileResult(
         absolutePath: s,
-        content: "",
+        content: bounded.content,
         totalBytes: totalBytes,
         totalLines: totalLines,
-        startLine: totalLines + 1,
-        endLine: totalLines,
-        truncated: false,
-        truncationReason: nil,
-        byteOffset: nil
+        startLine: startIndex + 1,
+        endLine: returnedEndLine,
+        truncated: truncated,
+        truncationReason: truncationReason,
+        byteOffset: nextByteOffset
       )
     }
-
-    let endIndex = min(totalLines, startIndex + resolvedLimit)
-    let requestedSlice = parts[startIndex..<endIndex].joined(separator: "\n")
-
-    // Compute the byte offset in the *original* file where requestedSlice starts.
-    // Each part's byte length + 1 for its \n separator (lines before startIndex).
-    let sliceStartByteOffset: Int = {
-      var off = byteOffsetBase
-      for i in 0..<startIndex {
-        off += parts[i].utf8.count + 1  // +1 for the \n that was split away
-      }
-      return off
-    }()
-
-    let bounded = boundedContent(requestedSlice)
-
-    // Count lines in the bounded (possibly backtracked) content.
-    let returnedLineCount = bounded.content.reduce(into: 1) { count, character in
-      if character == "\n" { count += 1 }
-    }
-
-    // Determine whether the bounded content ends at a clean line boundary.
-    let endsAtNewline = bounded.content.isEmpty || bounded.content.last == "\n"
-
-    let returnedEndLine: Int
-    let nextByteOffset: Int?
-
-    if bounded.reason != nil && !endsAtNewline {
-      // Content cap landed mid-line and we couldn't backtrack to a newline
-      // (single long line or the cap landed in the first line with no prior newline).
-      // Don't include the partial line in the reported range, but ensure we never
-      // report an inverted range (e.g. startLine=1, endLine=0) when the partial line
-      // is the very first line being read.
-      returnedEndLine = max(startIndex + 1, startIndex + max(0, returnedLineCount - 1))
-      nextByteOffset = sliceStartByteOffset + bounded.content.utf8.count
-    } else {
-      returnedEndLine = min(endIndex, startIndex + returnedLineCount)
-      nextByteOffset = nil
-    }
-
-    let lineTruncated = (bounded.reason == nil) && endIndex < totalLines
-    let truncated = bounded.reason != nil || lineTruncated
-    let truncationReason = bounded.reason ?? (lineTruncated ? "line_limit" : nil)
-
-    return ReadFileResult(
-      absolutePath: s,
-      content: bounded.content,
-      totalBytes: totalBytes,
-      totalLines: totalLines,
-      startLine: startIndex + 1,
-      endLine: returnedEndLine,
-      truncated: truncated,
-      truncationReason: truncationReason,
-      byteOffset: nextByteOffset
-    )
   }
 
   private static func boundedContent(_ content: String) -> (content: String, reason: String?) {
