@@ -132,6 +132,8 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               ])
             return ToolResult.text(Self.jsonError(String(describing: error)))
           }
+        } catch is AgentTurnInterruptedError {
+          throw AgentTurnInterruptedError()
         } catch {
 
           let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))

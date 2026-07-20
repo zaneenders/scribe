@@ -40,6 +40,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let maxToolRounds: Int
   let workingDirectory: FilePath
   let reasoningEnabled: Bool?
+  let reasoningEffort: String?
   let hooks: AgentLoopHooks
   let contextWindow: Int
 
@@ -51,6 +52,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     maxToolRounds: Int,
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
+    reasoningEffort: String? = nil,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0
   ) {
@@ -61,6 +63,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.maxToolRounds = maxToolRounds
     self.workingDirectory = workingDirectory
     self.reasoningEnabled = reasoningEnabled
+    self.reasoningEffort = reasoningEffort
     self.hooks = hooks
     self.contextWindow = contextWindow
   }
@@ -129,7 +132,9 @@ private func runSingleCodexRound(
     reasoning: config.reasoningEnabled == true
       ? {
         var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()
-        r.effort = .medium
+        r.effort = config.reasoningEffort
+          .flatMap { ScribeLLMCodex.Components.Schemas.CodexReasoning.EffortPayload(rawValue: $0) }
+          ?? .medium
         return r
       }()
       : nil,

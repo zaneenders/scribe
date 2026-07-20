@@ -39,8 +39,6 @@ public struct ScribeAgent: Sendable {
   /// Codex initializer for callers that already own a configured client.
   public init(
     codexClient: ScribeLLMCodex.Client,
-    accessToken: String,
-    accountID: String,
     model: String,
     tools: [any ScribeTool] = [],
     toolExecutor: (any ToolExecutor)? = nil,
@@ -52,12 +50,11 @@ public struct ScribeAgent: Sendable {
     let prepared = Self.prepareTools(tools, executor: toolExecutor, logger: logger)
     self.toolExecutor = prepared.executor
     self.chatTools = prepared.chatTools
-    _ = accessToken
-    _ = accountID
     self.provider = CodexProvider(
       source: .configured(codexClient),
       model: model,
       reasoningEnabled: reasoningEnabled,
+      reasoningEffort: nil,
       contextWindow: contextWindow)
     self.workingDirectory = workingDirectory
     self.logger = logger

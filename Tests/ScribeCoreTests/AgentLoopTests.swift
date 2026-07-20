@@ -142,15 +142,16 @@ private struct FakeTool: ScribeTool {
   }
 }
 
-private struct InterruptedTool: ScribeTool {
-  static var name: String { "interrupted_tool" }
-  static var description: String { "Throws AgentTurnInterruptedError." }
+private struct FailingTool: ScribeTool {
+  static var name: String { "failing_tool" }
+  static var description: String { "Throws a generic error." }
   static var parameters: [ScribeToolParameter] { [] }
   static var promptHint: String? { nil }
   struct Result: Encodable { let ok = true }
   func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
     _ = logger
-    throw AgentTurnInterruptedError()
+    struct GenericError: Error {}
+    throw GenericError()
   }
 }
 
@@ -709,7 +710,7 @@ struct AgentLoopTests {
   @Test func toolThatThrowsIsConvertedToJSONError() async throws {
     let chunks = [
       sseChunk(
-        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"interrupted_tool","arguments":"{}"}}]}}]}"#
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"failing_tool","arguments":"{}"}}]}}]}"#
       ),
       doneChunk(),
     ]
@@ -720,7 +721,7 @@ struct AgentLoopTests {
     let transport = FakeClientTransport(
       statusCode: 200, responseBodyChunksForCall: [chunks, replyChunks])
     let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
-    let registry = ToolRegistry(tools: [InterruptedTool()], logger: toolRunnerTestLogger)
+    let registry = ToolRegistry(tools: [FailingTool()], logger: toolRunnerTestLogger)
     let config = AgentLoopConfig(
       model: "test-model",
       client: client,

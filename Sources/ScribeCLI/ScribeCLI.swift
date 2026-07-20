@@ -6,13 +6,7 @@ import ScribeCore
 import SystemPackage
 
 enum LoginProvider: String, ExpressibleByArgument {
-  case openai
-  case moonshot
-}
-
-/// Simple API key credential for Moonshot/Kimi Code.
-private struct MoonshotCredential: Codable {
-  let apiKey: String
+  case codex
 }
 
 @main struct ScribeCLI: AsyncParsableCommand {
@@ -40,7 +34,7 @@ private struct MoonshotCredential: Codable {
 
   @Option(
     name: .long,
-    help: "Log in to a provider: \"openai\" (ChatGPT subscription) or \"moonshot\" (Kimi Code API key)."
+    help: "Log in to ChatGPT (browser-based OAuth). Sets api.type to \"codex\"."
   )
   var login: LoginProvider?
 
@@ -86,10 +80,8 @@ private struct MoonshotCredential: Codable {
 
     if let provider = login {
       switch provider {
-      case .openai:
+      case .codex:
         try await loginCodex(loaded: loaded)
-      case .moonshot:
-        try await loginMoonshotApiKey(loaded: loaded)
       }
       return
     }
@@ -100,6 +92,9 @@ private struct MoonshotCredential: Codable {
     }
 
     let cwd = FilePath.currentDirectory.string
+
+    ShellCaptureDirectory.setup(dataHome: loaded.paths.dataHomePath)
+    defer { ShellCaptureDirectory.teardown() }
 
     if listSessions {
       let root = loaded.paths.sessionsDirectory
@@ -173,6 +168,7 @@ private struct MoonshotCredential: Codable {
       tools: tools,
       workingDirectory: cwd,
       reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
+      reasoningEffort: loaded.scribeConfig.reasoningEffort,
       maxTokens: loaded.scribeConfig.maxTokens
     )
 
@@ -332,10 +328,6 @@ extension ScribeCLI {
     try? FileHandle.standardError.write(contentsOf: text)
   }
 
-  private static func escapeForSingleQuotedPOSIXPath(_ path: String) -> String {
-    path.replacingOccurrences(of: "'", with: "'\"'\"'")
-  }
-
   func relativeTime(from date: Date) -> String {
     let delta = date.timeIntervalSinceNow * -1
     switch delta {
@@ -396,48 +388,5 @@ extension ScribeCLI {
       print("❌ Logout failed: \(error)")
       throw error
     }
-  }
-
-  func loginMoonshotApiKey(loaded: LoadedConfig) async throws {
-    print("Enter your Kimi Code API key (starts with sk-kimi-):")
-    guard let apiKey = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !apiKey.isEmpty
-    else {
-      print("❌ No API key entered.")
-      throw ScribeError.invalidInput(message: "No API key entered.")
-    }
-
-    guard KimiK3Support.isKimiCodeAPIKey(apiKey) else {
-      print("")
-      print("❌ That doesn't look like a Kimi Code API key.")
-      print("   Kimi Code keys start with \"sk-kimi-\".")
-      print("   Moonshot platform keys should be used with api.moonshot.ai in your config.")
-      print("   Get a key at: https://kimi.com/code")
-      throw ScribeError.invalidInput(message: "Invalid Kimi Code API key format.")
-    }
-
-    // Store the API key in a credential file
-    let storeURL = URL(fileURLWithPath: loaded.paths.dataHomePath)
-      .appendingPathComponent("moonshot-api-key.json")
-    let credential = MoonshotCredential(apiKey: apiKey)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    let data = try encoder.encode(credential)
-    try data.write(to: storeURL, options: .atomic)
-    try FileManager.default.setAttributes(
-      [.posixPermissions: NSNumber(value: 0o600)],
-      ofItemAtPath: storeURL.path
-    )
-
-    print("")
-    print("✅ Kimi Code API key saved!")
-    print("   Stored at: \(storeURL.path)")
-    print("")
-    print("Add a kimi profile to your config to use it:")
-    print("  api.type: \"kimi\"")
-    print("  api.baseUrl: \"https://api.kimi.com/coding\"")
-    print("  agent.model: \"kimi-k3-thinking\"")
-    print("")
-    print("Or the key will be auto-detected for profiles with api.type: \"kimi\".")
   }
 }

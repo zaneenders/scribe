@@ -10,6 +10,7 @@ public struct ScribeConfig: Sendable {
 
   public var workingDirectory: String
   public var reasoningEnabled: Bool?
+  public var reasoningEffort: String?
   public var maxTokens: Int?
   public init(
     agentModel: String,
@@ -21,6 +22,7 @@ public struct ScribeConfig: Sendable {
     tools: [any ScribeTool] = [],
     workingDirectory: String,
     reasoningEnabled: Bool?,
+    reasoningEffort: String? = nil,
     maxTokens: Int? = nil
   ) {
     self.agentModel = agentModel
@@ -32,6 +34,7 @@ public struct ScribeConfig: Sendable {
     self.tools = tools
     self.workingDirectory = workingDirectory
     self.reasoningEnabled = reasoningEnabled
+    self.reasoningEffort = reasoningEffort
     self.maxTokens = maxTokens
   }
 }

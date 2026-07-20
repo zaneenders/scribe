@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Subprocess
+import Synchronization
 import SystemPackage
 
 #if canImport(Darwin)
@@ -23,10 +24,45 @@ struct OutputCapture: Sendable {
   let stdoutHandle: FileHandle
   let stderrHandle: FileHandle
 
+  // MARK: - Session capture directory
+
+  private static let _sessionCaptureDir = Mutex<URL?>(nil)
+
+  /// Sets the per-session capture directory. Files from any previous session are
+  /// removed, and subsequent `create` calls will place files inside this directory
+  /// instead of the OS temporary directory.
+  static func setupSessionCaptureDir(dataHome: String) {
+    let dir = URL(fileURLWithPath: dataHome, isDirectory: true)
+      .appendingPathComponent("tmp", isDirectory: true)
+      .appendingPathComponent("shell", isDirectory: true)
+    cleanupDirectory(dir)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    _sessionCaptureDir.withLock { $0 = dir }
+  }
+
+  /// Removes the per-session capture directory and all contained files.
+  static func teardownSessionCaptureDir() {
+    let dir = _sessionCaptureDir.withLock {
+      let d = $0
+      $0 = nil
+      return d
+    }
+    if let dir { cleanupDirectory(dir) }
+  }
+
+  private static func cleanupDirectory(_ dir: URL) {
+    if let entries = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+      for url in entries {
+        try? FileManager.default.removeItem(at: url)
+      }
+    }
+  }
+
   static func create(id: UUID, in tmpDir: URL) throws -> OutputCapture {
-    let stdoutURL = tmpDir.appendingPathComponent(
+    let effectiveDir = _sessionCaptureDir.withLock { $0 } ?? tmpDir
+    let stdoutURL = effectiveDir.appendingPathComponent(
       "scribe-shell-\(id.uuidString)-stdout.txt")
-    let stderrURL = tmpDir.appendingPathComponent(
+    let stderrURL = effectiveDir.appendingPathComponent(
       "scribe-shell-\(id.uuidString)-stderr.txt")
 
     try "".write(to: stdoutURL, atomically: false, encoding: .utf8)
@@ -239,4 +275,18 @@ struct OutputCapture: Sendable {
 struct DrainBytes: Sendable {
   let out: Int
   let err: Int
+}
+
+/// Public surface for managing the per-session shell output capture directory.
+public enum ShellCaptureDirectory {
+  /// Creates (or reuses) a per-session capture directory under
+  /// `\(dataHome)/tmp/shell/`. Any files from a previous session are removed.
+  public static func setup(dataHome: String) {
+    OutputCapture.setupSessionCaptureDir(dataHome: dataHome)
+  }
+
+  /// Removes the per-session capture directory and all contained files.
+  public static func teardown() {
+    OutputCapture.teardownSessionCaptureDir()
+  }
 }

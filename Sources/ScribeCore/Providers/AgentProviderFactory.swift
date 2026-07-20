@@ -32,6 +32,7 @@ enum AgentProviderFactory {
         source: .credentials(serverURL: serverURL),
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
+        reasoningEffort: configuration.reasoningEffort,
         contextWindow: configuration.contextWindow)
 
     case "kimi":

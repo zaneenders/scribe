@@ -12,6 +12,7 @@ public enum ScribeConfigBinding {
   public static let contextWindow = "agent.contextWindow"
   public static let contextWindowThreshold = "agent.contextWindowThreshold"
   public static let reasoningEnabled = "agent.reasoning"
+  public static let reasoningEffort = "agent.reasoningEffort"
   public static let loggingLevel = "logging.level"
 }
 
@@ -38,6 +39,7 @@ private struct ConfigManifest: Codable {
     var contextWindow: Int
     var contextWindowThreshold: Double
     var reasoning: Bool?
+    var reasoningEffort: String?
     var maxTokens: Int?
   }
   struct LoggingSection: Codable {
@@ -50,11 +52,6 @@ private struct ConfigManifest: Codable {
     var logging: LoggingSection
   }
   var profiles: [ProfileEntry]
-}
-
-/// Credential model for reading stored Moonshot/Kimi API keys.
-private struct MoonshotStoredCredential: Codable {
-  let apiKey: String
 }
 
 public struct LoadedConfig: Sendable {
@@ -289,9 +286,6 @@ public enum ConfigLoader {
       {
         resolvedAPIKey = envKey
       }
-      if resolvedAPIKey == nil {
-        resolvedAPIKey = try? Self.readMoonshotStoredKey(paths: paths)
-      }
       try KimiK3Support.validateMaxCompletionTokens(profile.agent.maxTokens)
       try KimiK3Support.validateEndpoint(apiKey: resolvedAPIKey, serverURL: baseURL)
     }
@@ -315,6 +309,7 @@ public enum ConfigLoader {
       apiType: resolvedAPIType,
       workingDirectory: ".",
       reasoningEnabled: profile.agent.reasoning,
+      reasoningEffort: profile.agent.reasoningEffort,
       maxTokens: profile.agent.maxTokens
     )
     return LoadedConfig(
@@ -382,15 +377,5 @@ public enum ConfigLoader {
     let dir = url.deletingLastPathComponent()
     try createDirectoryWithIntermediates(FilePath(dir.path))
     try data.write(to: url, options: .atomic)
-  }
-
-  private static func readMoonshotStoredKey(paths: ScribePaths) throws -> String? {
-    let url = URL(fileURLWithPath: paths.dataHomePath)
-      .appendingPathComponent("moonshot-api-key.json")
-    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-    let data = try Data(contentsOf: url)
-    let decoded = try JSONDecoder().decode(MoonshotStoredCredential.self, from: data)
-    let trimmed = decoded.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
   }
 }

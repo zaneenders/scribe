@@ -14,6 +14,7 @@ struct CodexProvider: AgentProvider {
   let source: ClientSource
   let model: String
   let reasoningEnabled: Bool?
+  let reasoningEffort: String?
   let contextWindow: Int
 
   func run(
@@ -57,6 +58,7 @@ struct CodexProvider: AgentProvider {
         maxToolRounds: options.maxToolRounds,
         workingDirectory: workingDirectory,
         reasoningEnabled: reasoningEnabled,
+        reasoningEffort: reasoningEffort,
         hooks: .default,
         contextWindow: contextWindow
       )
