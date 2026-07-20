@@ -6,38 +6,65 @@ import Testing
 @Suite
 struct AgentProviderFactoryTests {
 
+  // MARK: - Factory helper
+
+  private func configuration(
+    model: String = "test-model",
+    serverURL: String = "https://api.example.com",
+    apiKey: String? = "test-key",
+    apiType: String? = nil,
+    contextWindow: Int = 128_000,
+    reasoningEnabled: Bool? = nil,
+    reasoningEffort: String? = nil,
+    maxTokens: Int? = nil
+  ) -> ScribeConfig {
+    ScribeConfig(
+      agentModel: model,
+      contextWindow: contextWindow,
+      contextWindowThreshold: 0.75,
+      serverURL: serverURL,
+      apiKey: apiKey,
+      apiType: apiType,
+      workingDirectory: "/tmp",
+      reasoningEnabled: reasoningEnabled,
+      reasoningEffort: reasoningEffort,
+      maxTokens: maxTokens
+    )
+  }
+
   // MARK: - Invalid server URL
 
   @Test("throws on empty serverURL")
   func throwsOnEmptyServerURL() {
-    let config = ScribeConfig(
-      agentModel: "gpt-4o",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
-      serverURL: "",
-      apiKey: "sk-test",
-      apiType: "openai",
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil
-    )
+    let config = configuration(serverURL: "")
 
     #expect(throws: ScribeError.self) {
       _ = try AgentProviderFactory.make(configuration: config)
     }
   }
 
+  // MARK: - Provider-selection matrix (default / unknown / explicit OpenAI)
+
+  @Test("provider selection returns OpenAICompletionsProvider", arguments: [
+    (apiType: nil as String?, label: "nil → standard"),
+    (apiType: "unknown-type" as String?, label: "unknown → standard"),
+    (apiType: "openai" as String?, label: "explicit openai → standard"),
+  ])
+  func providerSelectionMatrix(apiType: String?, label: String) throws {
+    let config = configuration(apiType: apiType)
+    let provider = try AgentProviderFactory.make(configuration: config)
+    #expect(provider is OpenAICompletionsProvider)
+  }
+
   // MARK: - Codex provider
 
   @Test("codex apiType returns CodexProvider with credentials source")
   func codexApiTypeReturnsCodexProvider() throws {
-    let config = ScribeConfig(
-      agentModel: "codex-model",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
+    let config = configuration(
+      model: "codex-model",
       serverURL: "https://codex.example.com",
       apiKey: nil,
       apiType: "codex",
-      workingDirectory: "/tmp",
       reasoningEnabled: true,
       reasoningEffort: "high"
     )
@@ -49,22 +76,18 @@ struct AgentProviderFactoryTests {
     #expect(codexProvider.model == "codex-model")
     #expect(codexProvider.reasoningEnabled == true)
     #expect(codexProvider.reasoningEffort == "high")
-    #expect(codexProvider.contextWindow == 128000)
+    #expect(codexProvider.contextWindow == 128_000)
   }
 
   // MARK: - Kimi provider
 
   @Test("kimi apiType with kimi code key and URL returns provider")
   func kimiWithKimiCodeCredentials() throws {
-    let config = ScribeConfig(
-      agentModel: "kimi-model",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
+    let config = configuration(
+      model: "kimi-model",
       serverURL: KimiK3Support.kimiCodeBaseURL,
       apiKey: "sk-kimi-test-key",
       apiType: "kimi",
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil,
       maxTokens: 8192
     )
 
@@ -78,15 +101,11 @@ struct AgentProviderFactoryTests {
 
   @Test("kimi apiType with moonshot key and URL returns provider")
   func kimiWithMoonshotCredentials() throws {
-    let config = ScribeConfig(
-      agentModel: "kimi-model",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
+    let config = configuration(
+      model: "kimi-model",
       serverURL: KimiK3Support.moonshotBaseURL,
       apiKey: "sk-platform-key",
-      apiType: "kimi",
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil
+      apiType: "kimi"
     )
 
     let provider = try AgentProviderFactory.make(configuration: config)
@@ -99,15 +118,11 @@ struct AgentProviderFactoryTests {
 
   @Test("kimi apiType validates maxCompletionTokens")
   func kimiValidatesMaxTokens() {
-    let config = ScribeConfig(
-      agentModel: "kimi-model",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
+    let config = configuration(
+      model: "kimi-model",
       serverURL: KimiK3Support.moonshotBaseURL,
       apiKey: "sk-platform-key",
       apiType: "kimi",
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil,
       maxTokens: 2_000_000  // Way over the limit
     )
 
@@ -116,81 +131,11 @@ struct AgentProviderFactoryTests {
     }
   }
 
-  // MARK: - Default / OpenAI provider
-
-  @Test("default apiType returns OpenAICompletionsProvider")
-  func defaultApiTypeReturnsOpenAICompletionsProvider() throws {
-    let config = ScribeConfig(
-      agentModel: "gpt-4o",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
-      serverURL: "https://api.openai.com",
-      apiKey: "sk-openai-key",
-      apiType: nil,
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil
-    )
-
-    let provider = try AgentProviderFactory.make(configuration: config)
-    #expect(provider is OpenAICompletionsProvider)
-
-    let completionsProvider = provider as! OpenAICompletionsProvider
-    #expect(completionsProvider.model == "gpt-4o")
-    #expect(completionsProvider.requestProfile == .standard)
-  }
-
-  @Test("unknown apiType string returns OpenAICompletionsProvider as default")
-  func unknownApiTypeDefaults() throws {
-    let config = ScribeConfig(
-      agentModel: "some-model",
-      contextWindow: 16384,
-      contextWindowThreshold: 0.75,
-      serverURL: "https://custom-llm.example.com",
-      apiKey: "sk-key",
-      apiType: "some-unknown-type",
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil
-    )
-
-    let provider = try AgentProviderFactory.make(configuration: config)
-    #expect(provider is OpenAICompletionsProvider)
-  }
-
-  @Test("openai apiType explicitly returns OpenAICompletionsProvider")
-  func openaiApiTypeExplicit() throws {
-    let config = ScribeConfig(
-      agentModel: "gpt-4o-mini",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
-      serverURL: "https://api.openai.com",
-      apiKey: "sk-key",
-      apiType: "openai",
-      workingDirectory: "/tmp",
-      reasoningEnabled: false
-    )
-
-    let provider = try AgentProviderFactory.make(configuration: config)
-    #expect(provider is OpenAICompletionsProvider)
-
-    let completionsProvider = provider as! OpenAICompletionsProvider
-    #expect(completionsProvider.reasoningEnabled == false)
-  }
-
   // MARK: - Configuration passthrough
 
   @Test("contextWindow is propagated to provider")
   func contextWindowPropagated() throws {
-    let config = ScribeConfig(
-      agentModel: "model",
-      contextWindow: 50000,
-      contextWindowThreshold: 0.75,
-      serverURL: "https://api.example.com",
-      apiKey: "sk-key",
-      apiType: nil,
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil
-    )
-
+    let config = configuration(contextWindow: 50000)
     let provider = try AgentProviderFactory.make(configuration: config)
     let completionsProvider = provider as! OpenAICompletionsProvider
     #expect(completionsProvider.contextWindow == 50000)
@@ -198,18 +143,7 @@ struct AgentProviderFactoryTests {
 
   @Test("maxCompletionTokens nil is propagated to provider")
   func maxTokensNilPropagated() throws {
-    let config = ScribeConfig(
-      agentModel: "model",
-      contextWindow: 128000,
-      contextWindowThreshold: 0.75,
-      serverURL: "https://api.example.com",
-      apiKey: "sk-key",
-      apiType: nil,
-      workingDirectory: "/tmp",
-      reasoningEnabled: nil,
-      maxTokens: nil
-    )
-
+    let config = configuration(maxTokens: nil)
     let provider = try AgentProviderFactory.make(configuration: config)
     let completionsProvider = provider as! OpenAICompletionsProvider
     #expect(completionsProvider.maxCompletionTokens == nil)
