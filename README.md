@@ -12,7 +12,7 @@ Ai Agent written in Swift
 Clone Scribe into `~/.scribe/scribe` so it shares the same root as config, logs, and
 sessions — this lets Scribe find and modify its own source.
 
-On first run Scribe writes a default `scribe-config.json` targeting Ollama at
+On first run Scribe writes a default `scribe.config.json` targeting Ollama at
 `http://localhost:11434` with the **`gemma4:e2b`** model.  Edit the file or set
 `SCRIBE_CONFIG_PATH` to point to your own config.
 
@@ -55,31 +55,69 @@ Currently not supported, I would start with updating [slate](https://github.com/
 
 ## Configuration
 
-Scribe looks for `scribe-config.json` in this order:
+Scribe looks for `scribe.config.json` in this order:
 
 1. `SCRIBE_CONFIG_PATH` environment variable (if set)
-2. `~/.scribe/scribe-config.json`
-3. `<cwd>/scribe-config.json`
+2. `~/.scribe/scribe.config.json`
+3. `<cwd>/scribe.config.json`
 
-If no config is found, a default is written to `~/.scribe/scribe-config.json` and loaded.
+If no config is found, a default is written to `~/.scribe/scribe.config.json` and loaded.
 
 Set `SCRIBE_HOME` to override the `~/.scribe` data directory for config, logs, and sessions
 (e.g. `SCRIBE_HOME=~/.local/share/scribe scribe`).
 
 > `cwd` current working directory
 
-### Configuration values
+### Configuration schema
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `api.baseUrl` | `http://localhost:11434` | API base URL (Ollama default) |
+The config file contains a `profiles` array — at least one profile is required.
+Scribe uses the first profile by default; override with `--profile <name>`.
+
+```jsonc
+{
+  "profiles": [
+    {
+      "name": "local",
+      "api": {
+        "baseUrl": "http://localhost:11434",
+        "apiKey": "",
+        // "type": "codex" | "kimi"   // omit for OpenAI-compatible providers
+      },
+      "agent": {
+        "model": "gemma4:e2b",
+        "contextWindow": 128000,
+        "contextWindowThreshold": 0.8,
+        "reasoning": false,
+        // "reasoningEffort": "medium", // low | medium | high (reasoning models)
+        // "maxTokens": 4096            // required for Kimi (max 4096)
+      },
+      "logging": {
+        "level": "trace"                // trace | debug | info | notice | warning | error
+      }
+    }
+  ]
+}
+```
+
+#### Profile fields
+
+| Path | Default | Description |
+|------|---------|-------------|
+| `name` | *(required)* | Profile identifier; first profile is active by default |
+| `api.baseUrl` | *(required)* | API base URL (e.g. `http://localhost:11434` for Ollama) |
 | `api.apiKey` | `""` | Bearer token; leave empty when no auth is required |
-| `agent.model` | `gemma4:e2b` | Model name |
-| `agent.contextWindow` | `128000` | Token context window size |
+| `api.type` | *(omitted)* | `"codex"` for ChatGPT/Codex, `"kimi"` for Kimi Code; omit for any OpenAI-compatible provider |
+| `agent.model` | *(required)* | Model name |
+| `agent.contextWindow` | *(required)* | Token context window size |
 | `agent.contextWindowThreshold` | `0.8` | Fraction (0–1) that triggers context compaction |
-| `logging.level` | `trace` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
+| `agent.reasoning` | `false` | Enable reasoning/thinking tokens for models that support it |
+| `agent.reasoningEffort` | *(omitted)* | Reasoning effort: `"low"`, `"medium"`, or `"high"` |
+| `agent.maxTokens` | *(omitted)* | Max completion tokens; required for Kimi (4096 max) |
+| `logging.level` | `"trace"` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
 
-> Only OpenAI-compatible `completions` APIs are supported right now.
+> Scribe supports OpenAI-compatible `completions` APIs, plus `codex` (ChatGPT
+> backend) and `kimi` (Kimi Code) — set `api.type` to opt into non-standard
+> providers.
 
 ## Tools
 
@@ -92,7 +130,7 @@ Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
 ```
 ~/.scribe/
 ├── scribe/                              # source clone (git clone ... ~/.scribe/scribe)
-├── scribe-config.json
+├── scribe.config.json
 └── sessions/{uuid}/
     ├── metadata.json
     ├── messages.jsonl
