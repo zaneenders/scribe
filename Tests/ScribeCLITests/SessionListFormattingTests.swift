@@ -104,7 +104,7 @@ struct SessionListFormattingTests {
     )
   }
 
-  @Test func formatSessionLineColumnAlignment() {
+  @Test func formatSessionLineColumnAlignment() throws {
 
     let rows: [(id: String, when: String, cwd: String)] = [
       ("8FFC6215", "2m ago", "~/.scribe/Code/scribe"),
@@ -132,7 +132,7 @@ struct SessionListFormattingTests {
       }
       idStarts.append(line.distance(from: line.startIndex, to: r.lowerBound))
     }
-    let expectedId = idStarts.first!
+    let expectedId = try #require(idStarts.first)
     for (i, start) in idStarts.enumerated() {
       #expect(start == expectedId, "Line \(i) id at \(start), expected \(expectedId): \(stripped[i])")
     }
@@ -146,7 +146,7 @@ struct SessionListFormattingTests {
       }
       cwdStarts.append(line.distance(from: line.startIndex, to: r.lowerBound))
     }
-    let expectedCwd = cwdStarts.first!
+    let expectedCwd = try #require(cwdStarts.first)
     for (i, start) in cwdStarts.enumerated() {
       #expect(start == expectedCwd, "Line \(i) cwd at \(start), expected \(expectedCwd): \(stripped[i])")
     }

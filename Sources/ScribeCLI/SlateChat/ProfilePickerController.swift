@@ -14,19 +14,21 @@ internal final class ProfilePickerController {
   func handleInput(_ action: TerminalInputAction) -> ProfilePickerEffects? {
     guard var snap = snapshot else { return nil }
     switch action {
-    case .arrowUp:
+    case .character("f"):
       if !snap.profiles.isEmpty {
         snap.cursor = (snap.cursor - 1 + snap.profiles.count) % snap.profiles.count
         snapshot = snap
         return ProfilePickerEffects(needsRender: true)
       }
       return ProfilePickerEffects.none
-    case .arrowDown:
+    case .character("j"):
       if !snap.profiles.isEmpty {
         snap.cursor = (snap.cursor + 1) % snap.profiles.count
         snapshot = snap
         return ProfilePickerEffects(needsRender: true)
       }
+      return ProfilePickerEffects.none
+    case .arrowUp, .arrowDown:
       return ProfilePickerEffects.none
     case .enter:
       return confirm()

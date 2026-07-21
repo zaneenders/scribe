@@ -63,46 +63,37 @@ struct ImageSupportTests {
   }
 
   @Test func detectsImageFileByMagicBytes() throws {
-    let dir = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
+    try withTemporaryDirectory { dir in
+      let pngPath = dir.appendingPathComponent("not-really-a-txt.txt").path
+      try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: pngPath))
+      #expect(ImageSupport.isImageFile(path: pngPath) == true)
 
-    let pngPath = dir.appendingPathComponent("not-really-a-txt.txt").path
-    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: pngPath))
-    #expect(ImageSupport.isImageFile(path: pngPath) == true)
-
-    let txtPath = dir.appendingPathComponent("actually-text.png").path
-    try Data("hello world".utf8).write(to: URL(fileURLWithPath: txtPath))
-    #expect(ImageSupport.isImageFile(path: txtPath) == false)
+      let txtPath = dir.appendingPathComponent("actually-text.png").path
+      try Data("hello world".utf8).write(to: URL(fileURLWithPath: txtPath))
+      #expect(ImageSupport.isImageFile(path: txtPath) == false)
+    }
   }
 
   @Test func detectImageTypeUsesMagicBytesNotExtension() throws {
-    let dir = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
-
-    let path = dir.appendingPathComponent("tricky.jpg").path
-    try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: path))
-    #expect(ImageSupport.detectImageType(path: path) == "image/png")
+    try withTemporaryDirectory { dir in
+      let path = dir.appendingPathComponent("tricky.jpg").path
+      try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: path))
+      #expect(ImageSupport.detectImageType(path: path) == "image/png")
+    }
   }
 
   @Test func base64EncodesImage() throws {
-    let dir = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
+    try withTemporaryDirectory { dir in
+      let imagePath = dir.appendingPathComponent("test.png").path
+      let data = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+      try data.write(to: URL(fileURLWithPath: imagePath))
 
-    let imagePath = dir.appendingPathComponent("test.png").path
-    let data = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-    try data.write(to: URL(fileURLWithPath: imagePath))
-
-    let (mimeType, base64, bytes) = try ImageSupport.base64ImageData(from: imagePath)
-    #expect(mimeType == "image/png")
-    #expect(bytes == data.count)
-    #expect(!base64.isEmpty)
-    #expect(Data(base64Encoded: base64) == data)
+      let (mimeType, base64, bytes) = try ImageSupport.base64ImageData(from: imagePath)
+      #expect(mimeType == "image/png")
+      #expect(bytes == data.count)
+      #expect(!base64.isEmpty)
+      #expect(Data(base64Encoded: base64) == data)
+    }
   }
 
 }

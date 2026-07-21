@@ -12,7 +12,6 @@ struct StreamProcessor<AO: AbortObserver> {
   private(set) var lastUsage: Components.Schemas.CompletionUsage?
   private(set) var streamStarted = false
   private(set) var streamSection: AssistantStreamSection?
-  private(set) var firstStreamContentAt: ContinuousClock.Instant?
   private(set) var decodedChunkCount = 0
   private(set) var skippedChunkCount = 0
   let streamWallStart: ContinuousClock.Instant
@@ -89,7 +88,6 @@ struct StreamProcessor<AO: AbortObserver> {
           guard let delta = choice.delta else { continue }
 
           for r in [delta.reasoningContent, delta.reasoning].compactMap({ $0 }).filter({ !$0.isEmpty }) {
-            if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
             streamStarted = true
             if case .some(.reasoning) = streamSection {
 
@@ -101,7 +99,6 @@ struct StreamProcessor<AO: AbortObserver> {
           }
 
           if let t = delta.content, !t.isEmpty {
-            if firstStreamContentAt == nil { firstStreamContentAt = clock.now }
             streamStarted = true
             if case .some(.answer) = streamSection {
 

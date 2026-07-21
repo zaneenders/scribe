@@ -1,0 +1,522 @@
+openapi: 3.1.0
+info:
+  title: OpenAI Codex Responses API (ChatGPT subscription)
+  version: 1.0.0
+  description: >
+    Streaming chat via the Codex /responses endpoint used by ChatGPT
+    Plus/Pro subscriptions.  Authenticate with an OAuth Bearer token +
+    `chatgpt-account-id` header (extracted from the JWT).  The API speaks
+    SSE (text/event-stream) and WebSocket; this spec only models SSE.
+servers:
+  - url: https://chatgpt.com/backend-api
+paths:
+  /codex/responses:
+    post:
+      operationId: createCodexResponse
+      summary: Create a streaming Codex response
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCodexResponseRequest"
+      responses:
+        "200":
+          description: Server-Sent Events stream of response events
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/CodexResponseStreamEvent"
+
+components:
+  schemas:
+    # ------------------------------------------------------------------
+    # Request
+    # ------------------------------------------------------------------
+    CreateCodexResponseRequest:
+      type: object
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: Model ID (e.g. gpt-5.6-sol)
+        store:
+          type: boolean
+          default: false
+        stream:
+          type: boolean
+          default: true
+        instructions:
+          type: string
+          description: System prompt / developer instructions
+        previous_response_id:
+          type: string
+          description: Prior response ID for delta continuation (WebSocket cached mode)
+        input:
+          type: array
+          description: Conversation items (messages, tool calls, tool results)
+          items:
+            $ref: "#/components/schemas/CodexInputItem"
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodexTool"
+        tool_choice:
+          type: string
+          enum: [auto, none, required]
+          default: auto
+        parallel_tool_calls:
+          type: boolean
+          default: true
+        temperature:
+          type: number
+          format: float
+        reasoning:
+          $ref: "#/components/schemas/CodexReasoning"
+        service_tier:
+          type: string
+          enum: [auto, default, flex, priority]
+          description: >
+            flex = half price (slower), priority = 2x price (faster).
+            default / auto use standard pricing.
+        text:
+          type: object
+          properties:
+            verbosity:
+              type: string
+              enum: [low, medium, high]
+          description: Controls output verbosity
+        include:
+          type: array
+          items:
+            type: string
+          description: >
+            Additional fields to include in the response.
+            e.g. ["reasoning.encrypted_content"]
+        prompt_cache_key:
+          type: string
+          description: Token for prompt caching
+      additionalProperties: true
+
+    CodexReasoning:
+      type: object
+      properties:
+        effort:
+          type: string
+          enum: [none, minimal, low, medium, high, xhigh, max]
+          description: Reasoning depth
+        summary:
+          type: string
+          enum: [auto, concise, detailed, off, on]
+          description: Reasoning summary style
+      additionalProperties: true
+
+    # ------------------------------------------------------------------
+    # Input Items (conversation messages)
+    # ------------------------------------------------------------------
+    CodexInputItem:
+      oneOf:
+        - $ref: "#/components/schemas/CodexSystemMessage"
+        - $ref: "#/components/schemas/CodexDeveloperMessage"
+        - $ref: "#/components/schemas/CodexUserMessage"
+        - $ref: "#/components/schemas/CodexAssistantMessage"
+        - $ref: "#/components/schemas/CodexFunctionCall"
+        - $ref: "#/components/schemas/CodexFunctionCallOutput"
+      discriminator:
+        propertyName: type
+        mapping:
+          system: "#/components/schemas/CodexSystemMessage"
+          developer: "#/components/schemas/CodexDeveloperMessage"
+          user: "#/components/schemas/CodexUserMessage"
+          assistant: "#/components/schemas/CodexAssistantMessage"
+          function_call: "#/components/schemas/CodexFunctionCall"
+          function_call_output: "#/components/schemas/CodexFunctionCallOutput"
+
+    CodexSystemMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system]
+        content:
+          type: string
+
+    CodexDeveloperMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [developer]
+        content:
+          type: string
+
+    CodexUserMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user]
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/CodexInputContent"
+
+    CodexInputContent:
+      oneOf:
+        - $ref: "#/components/schemas/CodexInputText"
+        - $ref: "#/components/schemas/CodexInputImage"
+      discriminator:
+        propertyName: type
+        mapping:
+          input_text: "#/components/schemas/CodexInputText"
+          input_image: "#/components/schemas/CodexInputImage"
+
+    CodexInputText:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          enum: [input_text]
+        text:
+          type: string
+
+    CodexInputImage:
+      type: object
+      required: [type, image_url]
+      properties:
+        type:
+          type: string
+          enum: [input_image]
+        image_url:
+          type: string
+          description: data:image/...;base64,... URL
+        detail:
+          type: string
+          enum: [auto, low, high]
+          default: auto
+
+    CodexAssistantMessage:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [assistant]
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/CodexOutputContent"
+        id:
+          type: string
+          description: Assistant message ID (msg_xxx)
+        status:
+          type: string
+          enum: [completed, incomplete]
+        phase:
+          type: string
+          enum: [commentary, final_answer]
+          description: >
+            Distinguishes plan/commentary text from final answer text.
+            Used by reasoning models.
+
+    CodexOutputContent:
+      oneOf:
+        - $ref: "#/components/schemas/CodexOutputText"
+      discriminator:
+        propertyName: type
+        mapping:
+          output_text: "#/components/schemas/CodexOutputText"
+
+    CodexOutputText:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          enum: [output_text]
+        text:
+          type: string
+        annotations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          description: Annotations (citations, file references, etc.)
+
+    CodexFunctionCall:
+      type: object
+      required: [type, call_id, name, arguments]
+      properties:
+        type:
+          type: string
+          enum: [function_call]
+        id:
+          type: string
+          description: Unique item ID (fc_xxx)
+        call_id:
+          type: string
+          description: Tool call identifier
+        name:
+          type: string
+          description: Function name
+        arguments:
+          type: string
+          description: JSON-encoded arguments
+
+    CodexFunctionCallOutput:
+      type: object
+      required: [type, call_id, output]
+      properties:
+        type:
+          type: string
+          enum: [function_call_output]
+        call_id:
+          type: string
+          description: Matching call_id from the function_call
+        output:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: "#/components/schemas/CodexInputContent"
+          description: Tool result text or content array (for images)
+
+    # ------------------------------------------------------------------
+    # Tools
+    # ------------------------------------------------------------------
+    CodexTool:
+      type: object
+      required: [type, name]
+      properties:
+        type:
+          type: string
+          enum: [function]
+        name:
+          type: string
+        description:
+          type: string
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema for the function parameters
+        strict:
+          type: boolean
+          default: false
+        defer_loading:
+          type: boolean
+          description: >
+            If true, the tool definition is registered lazily (Kimi-style deferred tools).
+            Only included in tool_search_output items, not as a top-level tool.
+      additionalProperties: true
+
+    # ------------------------------------------------------------------
+    # SSE Stream Events (simplified union of key event types)
+    # ------------------------------------------------------------------
+    CodexResponseStreamEvent:
+      type: object
+      description: >
+        A single SSE event from the Codex /responses stream.  The `type`
+        field discriminates the event kind.  Only the most important event
+        shapes are modelled; unknown events should be parsed leniently.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - response.created
+            - response.output_item.added
+            - response.output_text.delta
+            - response.reasoning_text.delta
+            - response.reasoning_summary_text.delta
+            - response.reasoning_summary_part.done
+            - response.refusal.delta
+            - response.function_call_arguments.delta
+            - response.function_call_arguments.done
+            - response.output_item.done
+            - response.completed
+            - response.incomplete
+            - response.failed
+            - error
+        # --- response.created ---
+        response:
+          $ref: "#/components/schemas/CodexCreatedResponse"
+        # --- response.output_item.added ---
+        output_index:
+          type: integer
+        item:
+          $ref: "#/components/schemas/CodexOutputItem"
+        # --- delta events ---
+        delta:
+          type: string
+        # --- response.function_call_arguments.done ---
+        arguments:
+          type: string
+        # --- error ---
+        code:
+          type: string
+        message:
+          type: string
+      additionalProperties: true
+
+    CodexCreatedResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Response ID (resp_xxx)
+        status:
+          type: string
+      additionalProperties: true
+
+    CodexOutputItem:
+      oneOf:
+        - $ref: "#/components/schemas/CodexReasoningItem"
+        - $ref: "#/components/schemas/CodexMessageItem"
+        - $ref: "#/components/schemas/CodexFunctionCallItem"
+      discriminator:
+        propertyName: type
+        mapping:
+          reasoning: "#/components/schemas/CodexReasoningItem"
+          message: "#/components/schemas/CodexMessageItem"
+          function_call: "#/components/schemas/CodexFunctionCallItem"
+
+    CodexReasoningItem:
+      type: object
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [reasoning]
+        id:
+          type: string
+        encrypted_content:
+          type: string
+          description: Encrypted reasoning content (opaque to client)
+        summary:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              text:
+                type: string
+            additionalProperties: true
+        content:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              text:
+                type: string
+            additionalProperties: true
+      additionalProperties: true
+
+    CodexMessageItem:
+      type: object
+      required: [type, id, role]
+      properties:
+        type:
+          type: string
+          enum: [message]
+        id:
+          type: string
+        role:
+          type: string
+          enum: [assistant]
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodexOutputContent"
+        status:
+          type: string
+        phase:
+          type: string
+      additionalProperties: true
+
+    CodexFunctionCallItem:
+      type: object
+      required: [type, call_id, name]
+      properties:
+        type:
+          type: string
+          enum: [function_call]
+        id:
+          type: string
+        call_id:
+          type: string
+        name:
+          type: string
+        arguments:
+          type: string
+      additionalProperties: true
+
+    # ------------------------------------------------------------------
+    # Terminal response (response.completed / response.incomplete)
+    # ------------------------------------------------------------------
+    CodexTerminalResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [completed, incomplete, failed, cancelled]
+        service_tier:
+          type: string
+        usage:
+          $ref: "#/components/schemas/CodexUsage"
+        output:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodexOutputItem"
+        error:
+          $ref: "#/components/schemas/CodexResponseError"
+        incomplete_details:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    CodexResponseError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      additionalProperties: true
+
+    CodexUsage:
+      type: object
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        input_tokens_details:
+          type: object
+          properties:
+            cached_tokens:
+              type: integer
+            cache_write_tokens:
+              type: integer
+          additionalProperties: true
+        output_tokens_details:
+          type: object
+          properties:
+            reasoning_tokens:
+              type: integer
+          additionalProperties: true
+      additionalProperties: true

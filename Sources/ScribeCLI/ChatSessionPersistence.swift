@@ -70,6 +70,163 @@ enum ChatSessionStore {
     directory.appendingPathComponent("messages.jsonl")
   }
 
+  private static func attachmentsDirectory(in directory: FilePath) -> FilePath {
+    directory.appendingPathComponent("attachments")
+  }
+
+  private enum PersistedContentPart: Codable {
+    case text(String)
+    case imageURL(url: String, detail: String?)
+    case imageReference(path: String, mimeType: String, detail: String?)
+
+    private enum CodingKeys: String, CodingKey {
+      case type, text, imageUrl = "image_url", path, mimeType = "mime_type", detail
+    }
+
+    private struct ImageURLPayload: Codable {
+      let url: String
+      let detail: String?
+    }
+
+    init(from decoder: any Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      switch try container.decode(String.self, forKey: .type) {
+      case "text":
+        self = .text(try container.decode(String.self, forKey: .text))
+      case "image_url":
+        let payload = try container.decode(ImageURLPayload.self, forKey: .imageUrl)
+        self = .imageURL(url: payload.url, detail: payload.detail)
+      case "image_ref":
+        self = .imageReference(
+          path: try container.decode(String.self, forKey: .path),
+          mimeType: try container.decode(String.self, forKey: .mimeType),
+          detail: try container.decodeIfPresent(String.self, forKey: .detail))
+      default:
+        throw DecodingError.dataCorruptedError(
+          forKey: .type, in: container, debugDescription: "Unknown persisted content part")
+      }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      switch self {
+      case .text(let text):
+        try container.encode("text", forKey: .type)
+        try container.encode(text, forKey: .text)
+      case .imageURL(let url, let detail):
+        try container.encode("image_url", forKey: .type)
+        try container.encode(ImageURLPayload(url: url, detail: detail), forKey: .imageUrl)
+      case .imageReference(let path, let mimeType, let detail):
+        try container.encode("image_ref", forKey: .type)
+        try container.encode(path, forKey: .path)
+        try container.encode(mimeType, forKey: .mimeType)
+        try container.encodeIfPresent(detail, forKey: .detail)
+      }
+    }
+  }
+
+  private struct PersistedMessage: Codable {
+    let role: ScribeMessage.Role
+    let content: [PersistedContentPart]
+    let name: String?
+    let toolCalls: [ScribeToolCall]?
+    let toolCallId: String?
+    let reasoning: String?
+
+    private enum CodingKeys: String, CodingKey {
+      case role, content, name
+      case toolCalls = "tool_calls"
+      case toolCallId = "tool_call_id"
+      case reasoning = "reasoning_content"
+    }
+
+    init(_ message: ScribeMessage, directory: FilePath) throws {
+      role = message.role
+      name = message.name
+      toolCalls = message.toolCalls
+      toolCallId = message.toolCallId
+      reasoning = message.reasoning
+      content = try message.contentParts.map { part in
+        switch part {
+        case .text(let text):
+          return .text(text)
+        case .image(let url, let detail):
+          guard let image = try ChatSessionStore.decodeImageDataURI(url) else {
+            return .imageURL(url: url, detail: detail)
+          }
+          let filename =
+            "\(UUID().uuidString).\(ChatSessionStore.fileExtension(for: image.mimeType))"
+          let relativePath = "attachments/\(filename)"
+          let attachments = ChatSessionStore.attachmentsDirectory(in: directory)
+          try createDirectoryWithIntermediates(attachments)
+          try image.data.write(
+            to: URL(fileURLWithPath: attachments.appendingPathComponent(filename).string),
+            options: [.atomic])
+          return .imageReference(path: relativePath, mimeType: image.mimeType, detail: detail)
+        }
+      }
+    }
+
+    func hydrated(in directory: FilePath) throws -> ScribeMessage {
+      let parts: [ScribeContentPart] = try content.map { part in
+        switch part {
+        case .text(let text):
+          return .text(text)
+        case .imageURL(let url, let detail):
+          return .image(url: url, detail: detail)
+        case .imageReference(let path, let mimeType, let detail):
+          guard path.hasPrefix("attachments/"),
+            !path.contains(".."),
+            !path.dropFirst("attachments/".count).contains("/")
+          else {
+            throw ScribeError.sessionCorrupted(reason: "Invalid session attachment path: \(path)")
+          }
+          let data = try Data(
+            contentsOf: URL(fileURLWithPath: directory.appendingPathComponent(path).string))
+          return .image(
+            url: "data:\(mimeType);base64,\(data.base64EncodedString())", detail: detail)
+        }
+      }
+      return ScribeMessage(
+        role: role,
+        contentParts: parts,
+        name: name,
+        toolCalls: toolCalls,
+        toolCallId: toolCallId,
+        reasoning: reasoning)
+    }
+  }
+
+  private static func decodeImageDataURI(_ value: String) throws -> (mimeType: String, data: Data)? {
+    guard value.hasPrefix("data:") else { return nil }
+    guard let separator = value.firstIndex(of: ",") else {
+      throw ScribeError.sessionCorrupted(reason: "Malformed image data URI")
+    }
+    let metadata = String(value[value.index(value.startIndex, offsetBy: 5)..<separator])
+    let fields = metadata.split(separator: ";", omittingEmptySubsequences: false)
+    guard let mime = fields.first.map(String.init), mime.hasPrefix("image/"),
+      fields.dropFirst().contains("base64"),
+      let data = Data(base64Encoded: String(value[value.index(after: separator)...]))
+    else {
+      throw ScribeError.sessionCorrupted(reason: "Malformed base64 image data URI")
+    }
+    return (mime, data)
+  }
+
+  private static func fileExtension(for mimeType: String) -> String {
+    switch mimeType.lowercased() {
+    case "image/jpeg": return "jpg"
+    case "image/png": return "png"
+    case "image/gif": return "gif"
+    case "image/webp": return "webp"
+    case "image/bmp": return "bmp"
+    case "image/tiff": return "tiff"
+    case "image/heic": return "heic"
+    case "image/heif": return "heif"
+    default: return "img"
+    }
+  }
+
   static func ensureSessionsDirectory(_ sessionsRoot: FilePath) async throws {
     try await FileSystem.shared.createDirectory(
       at: sessionsRoot,
@@ -133,8 +290,16 @@ enum ChatSessionStore {
     }
     let data = try Data(contentsOf: URL(fileURLWithPath: path.string))
     let lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
-    return lines.compactMap { line in
-      try? dec.decode(ScribeMessage.self, from: Data(line))
+    return try lines.map { line in
+      let lineData = Data(line)
+      if let persisted = try? dec.decode(PersistedMessage.self, from: lineData) {
+        return try persisted.hydrated(in: directory)
+      }
+      // Legacy sessions stored ScribeMessage directly, including inline data URIs.
+      guard let message = try? dec.decode(ScribeMessage.self, from: lineData) else {
+        throw ScribeError.sessionCorrupted(reason: "Unrecognized message format in session file")
+      }
+      return message
     }
   }
 
@@ -151,7 +316,8 @@ enum ChatSessionStore {
     func append(_ messages: [ScribeMessage]) throws {
       guard !messages.isEmpty else { return }
       for message in messages {
-        var data = try ChatSessionStore.enc.encode(message)
+        let persisted = try PersistedMessage(message, directory: directory)
+        var data = try ChatSessionStore.enc.encode(persisted)
         data.append(UInt8(ascii: "\n"))
         try writer.append(data)
       }

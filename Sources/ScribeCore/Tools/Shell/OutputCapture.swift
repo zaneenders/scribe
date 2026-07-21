@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Subprocess
+import Synchronization
 import SystemPackage
 
 #if canImport(Darwin)
@@ -23,10 +24,44 @@ struct OutputCapture: Sendable {
   let stdoutHandle: FileHandle
   let stderrHandle: FileHandle
 
+  // MARK: - Session capture directory
+
+  private static let _sessionCaptureDir = Mutex<URL?>(nil)
+
+  /// Creates a process-specific subdirectory under
+  /// `\(dataHome)/tmp/shell/<UUID>/` so that concurrent Scribe processes do not
+  /// interfere with each other's capture files.
+  ///
+  /// Throws if the directory cannot be created.
+  static func setupSessionCaptureDir(dataHome: String) throws {
+    let processUUID = UUID()
+    let baseDir = URL(fileURLWithPath: dataHome, isDirectory: true)
+      .appendingPathComponent("tmp", isDirectory: true)
+      .appendingPathComponent("shell", isDirectory: true)
+    let dir = baseDir.appendingPathComponent(
+      processUUID.uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: dir, withIntermediateDirectories: true)
+    _sessionCaptureDir.withLock { $0 = dir }
+  }
+
+  /// Removes only this process's capture subdirectory.
+  static func teardownSessionCaptureDir() {
+    let dir = _sessionCaptureDir.withLock {
+      let d = $0
+      $0 = nil
+      return d
+    }
+    if let dir {
+      try? FileManager.default.removeItem(at: dir)
+    }
+  }
+
   static func create(id: UUID, in tmpDir: URL) throws -> OutputCapture {
-    let stdoutURL = tmpDir.appendingPathComponent(
+    let effectiveDir = _sessionCaptureDir.withLock { $0 } ?? tmpDir
+    let stdoutURL = effectiveDir.appendingPathComponent(
       "scribe-shell-\(id.uuidString)-stdout.txt")
-    let stderrURL = tmpDir.appendingPathComponent(
+    let stderrURL = effectiveDir.appendingPathComponent(
       "scribe-shell-\(id.uuidString)-stderr.txt")
 
     try "".write(to: stdoutURL, atomically: false, encoding: .utf8)
@@ -239,4 +274,20 @@ struct OutputCapture: Sendable {
 struct DrainBytes: Sendable {
   let out: Int
   let err: Int
+}
+
+/// Public surface for managing the per-session shell output capture directory.
+public enum ShellCaptureDirectory {
+  /// Creates a process-specific capture directory under
+  /// `\(dataHome)/tmp/shell/<UUID>/`.
+  ///
+  /// Throws if the directory cannot be created.
+  public static func setup(dataHome: String) throws {
+    try OutputCapture.setupSessionCaptureDir(dataHome: dataHome)
+  }
+
+  /// Removes this process's capture directory and all contained files.
+  public static func teardown() {
+    OutputCapture.teardownSessionCaptureDir()
+  }
 }

@@ -178,6 +178,67 @@ struct TranscriptControllerTests {
     #expect(state.usageHUD?.contextWindowUsedPercent == 50)
   }
 
+  @Test func usageContextWindowPctReportsOverflow() {
+    var state = TranscriptState()
+    let usage = ScribeUsage(promptTokens: 5000, completionTokens: 100, totalTokens: 5100)
+    _ = TranscriptController.apply(
+      .lifecycle(.usage(usage, tokensPerSecond: nil)),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: 4000)
+    #expect(state.usageHUD?.contextWindowUsedPercent == 125)
+  }
+
+  @Test func beginModelTurnResetsTurnButPreservesSessionUsage() {
+    var state = TranscriptState()
+    let usage = ScribeUsage(
+      promptTokens: 100, completionTokens: 50, totalTokens: 150,
+      reasoningTokens: 25, cachedPromptTokens: 75)
+    _ = TranscriptController.apply(
+      .lifecycle(.usage(usage, tokensPerSecond: 10)),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: 4000)
+
+    state.beginModelTurn()
+
+    #expect(state.usageTurnTotal == 0)
+    #expect(state.usageSessionTotal == 150)
+    #expect(state.usageHUD?.roundTotal == nil)
+    #expect(state.usageHUD?.turnTotal == 0)
+    #expect(state.usageHUD?.sessionTotal == 150)
+    #expect(state.usageHUD?.outputTokensPerSecond == nil)
+    #expect(state.usageHUD?.reasoningTokens == nil)
+    #expect(state.usageHUD?.cachedPromptTokens == nil)
+  }
+
+  @Test func resetUsageClearsSessionUsage() {
+    var state = TranscriptState()
+    let usage = ScribeUsage(promptTokens: 100, completionTokens: 50, totalTokens: 150)
+    _ = TranscriptController.apply(
+      .lifecycle(.usage(usage, tokensPerSecond: nil)),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: 4000)
+
+    state.resetUsage()
+
+    #expect(state.usageTurnTotal == 0)
+    #expect(state.usageSessionTotal == 0)
+    #expect(state.usageHUD == nil)
+  }
+
+  @Test func changingContextWindowRecomputesUsagePct() {
+    var state = TranscriptState()
+    let usage = ScribeUsage(promptTokens: 2000, completionTokens: 100, totalTokens: 2100)
+    _ = TranscriptController.apply(
+      .lifecycle(.usage(usage, tokensPerSecond: nil)),
+      to: &state, theme: theme, renderer: renderer,
+      followingLive: true, contextWindow: 4000)
+
+    state.updateUsageContextWindow(8000)
+
+    #expect(state.usageHUD?.contextWindow == 8000)
+    #expect(state.usageHUD?.contextWindowUsedPercent == 25)
+  }
+
   @Test func appendAssistantTextSkipsRenderWhenScrolledUp() {
     var state = TranscriptState()
     _ = TranscriptController.apply(

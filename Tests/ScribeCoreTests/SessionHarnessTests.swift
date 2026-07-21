@@ -284,14 +284,6 @@ struct SessionHarnessTests {
   }
 }
 
-private func sseChunk(_ json: String) -> HTTPBody.ByteChunk {
-  ArraySlice("data: \(json)\n\n".utf8)
-}
-
-private func doneChunk() -> HTTPBody.ByteChunk {
-  ArraySlice("data: [DONE]\n\n".utf8)
-}
-
 private final class CountingTransport: ClientTransport, Sendable {
   private let chunks: [HTTPBody.ByteChunk]
   private let state = Mutex(0)

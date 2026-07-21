@@ -20,6 +20,49 @@ struct TranscriptState: Equatable {
   var usageSessionCompletion: Int = 0
   var usageSessionTotal: Int = 0
   var usageHUD: UsageHUDSnapshot? = nil
+
+  mutating func beginModelTurn() {
+    usageTurnPrompt = 0
+    usageTurnCompletion = 0
+    usageTurnTotal = 0
+    guard var usageHUD else { return }
+    usageHUD.roundPrompt = nil
+    usageHUD.roundCompletion = nil
+    usageHUD.roundTotal = nil
+    usageHUD.turnPrompt = 0
+    usageHUD.turnCompletion = 0
+    usageHUD.turnTotal = 0
+    usageHUD.outputTokensPerSecond = nil
+    usageHUD.reasoningTokens = nil
+    usageHUD.cachedPromptTokens = nil
+    self.usageHUD = usageHUD
+  }
+
+  mutating func resetUsage() {
+    usageTurnPrompt = 0
+    usageTurnCompletion = 0
+    usageTurnTotal = 0
+    usageSessionPrompt = 0
+    usageSessionCompletion = 0
+    usageSessionTotal = 0
+    usageHUD = nil
+  }
+
+  mutating func updateUsageContextWindow(_ contextWindow: Int?) {
+    guard var usageHUD else { return }
+    usageHUD.contextWindow = contextWindow
+    usageHUD.contextWindowUsedPercent = Self.contextWindowUsedPercent(
+      promptTokens: usageHUD.roundPrompt,
+      contextWindow: contextWindow)
+    self.usageHUD = usageHUD
+  }
+
+  static func contextWindowUsedPercent(promptTokens: Int?, contextWindow: Int?) -> Int? {
+    guard let promptTokens, promptTokens > 0, let contextWindow, contextWindow > 0 else {
+      return nil
+    }
+    return Int(Double(promptTokens) / Double(contextWindow) * 100)
+  }
 }
 
 struct TranscriptController {
@@ -255,10 +298,9 @@ struct TranscriptController {
     state.usageSessionPrompt += triple.prompt
     state.usageSessionCompletion += triple.completion
     state.usageSessionTotal += triple.total
-    let pct: Int? = {
-      guard let cw = contextWindow, cw > 0, triple.prompt > 0 else { return nil }
-      return min(100, Int(Double(triple.prompt) / Double(cw) * 100))
-    }()
+    let pct = TranscriptState.contextWindowUsedPercent(
+      promptTokens: triple.prompt,
+      contextWindow: contextWindow)
     state.usageHUD = UsageHUDSnapshot(
       roundPrompt: triple.prompt,
       roundCompletion: triple.completion,
