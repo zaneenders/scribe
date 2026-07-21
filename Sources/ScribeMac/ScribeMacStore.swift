@@ -1,0 +1,280 @@
+import Chroma
+import Foundation
+import ScribeCore
+import ScribeKit
+
+@MainActor
+final class ScribeMacStore {
+  enum Phase {
+    case starting
+    case ready
+    case failed(String)
+  }
+
+  enum ItemKind {
+    case user
+    case answer
+    case reasoning
+    case tool
+    case notice
+    case warning
+    case error
+  }
+
+  struct TranscriptItem: Identifiable {
+    let id = UUID()
+    var kind: ItemKind
+    var title: String
+    var text: String
+    var running = false
+  }
+
+  private enum StreamEvent: Sendable {
+    case agent(AgentEvent)
+    case finished(TurnOutcome)
+    case failed(String)
+  }
+
+  static let shared = ScribeMacStore()
+  static let composerID = WidgetID("scribe-composer")
+
+  var phase: Phase = .starting
+  var draft = ""
+  var transcript: [TranscriptItem] = []
+  var isRunning = false
+  var profileName = ""
+  var modelName = ""
+  var workingDirectory = ""
+  var usageText = ""
+  let transcriptScroll = ScrollViewController()
+
+  private var session: BootstrappedSession?
+  private var runTask: Task<Void, Never>?
+  private var didStart = false
+  private var composerFocusPending = false
+
+  private init() {}
+
+  func start() {
+    guard !didStart else { return }
+    didStart = true
+    Task {
+      do {
+        try ShellCaptureDirectory.setup(dataHome: ScribePaths.resolve().dataHomePath)
+        let opened = try await ScribeSessionBootstrap.open(version: GitVersion.hash)
+        install(opened)
+      } catch {
+        phase = .failed(error.localizedDescription)
+      }
+    }
+  }
+
+  func newSession() {
+    guard !isRunning else { return }
+    phase = .starting
+    Task {
+      do {
+        let opened = try await ScribeSessionBootstrap.open(version: GitVersion.hash)
+        install(opened)
+      } catch {
+        phase = .failed(error.localizedDescription)
+      }
+    }
+  }
+
+  func resumeLatest() {
+    guard !isRunning else { return }
+    phase = .starting
+    Task {
+      do {
+        let opened = try await ScribeSessionBootstrap.open(
+          resumeLatest: true,
+          version: GitVersion.hash)
+        install(opened)
+      } catch {
+        phase = .failed(error.localizedDescription)
+      }
+    }
+  }
+
+  private func install(_ opened: BootstrappedSession) {
+    session = opened
+    profileName = opened.profile.name
+    modelName = opened.profile.model
+    workingDirectory = opened.workingDirectory
+    transcript = Self.replay(opened.initialMessages)
+    usageText = ""
+    phase = .ready
+    transcriptScroll.scrollToBottom()
+    composerFocusPending = true
+  }
+
+  /// Focus must be requested after a frame has registered the composer leaf.
+  func applyPendingFocus() {
+    guard composerFocusPending else { return }
+    Interaction.current.focus(Self.composerID, editing: true)
+    if Interaction.current.isTextEditing {
+      composerFocusPending = false
+    }
+  }
+
+  func submit(_ proposed: String? = nil) {
+    guard !isRunning, let harness = session?.harness else { return }
+    let text = (proposed ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return }
+    draft = ""
+    isRunning = true
+    transcript.append(TranscriptItem(kind: .user, title: "You", text: text))
+    transcriptScroll.scrollToBottom()
+
+    let (events, continuation) = AsyncStream<StreamEvent>.makeStream()
+    runTask = Task { [weak self] in
+      guard let self else { return }
+      let consumer = Task { @MainActor [weak self] in
+        for await event in events {
+          self?.handle(event)
+        }
+      }
+      do {
+        let outcome = try await harness.submit(
+          text,
+          onEvent: { event in continuation.yield(.agent(event)) })
+        continuation.yield(.finished(outcome))
+      } catch {
+        continuation.yield(.failed(error.localizedDescription))
+      }
+      continuation.finish()
+      _ = await consumer.result
+    }
+  }
+
+  func stop() {
+    guard isRunning, let harness = session?.harness else { return }
+    Task { await harness.interrupt() }
+  }
+
+  func close() {
+    let harness = session?.harness
+    runTask?.cancel()
+    runTask = nil
+    if let harness {
+      Task { await harness.interrupt() }
+    }
+    ShellCaptureDirectory.teardown()
+  }
+
+  private func handle(_ event: StreamEvent) {
+    switch event {
+    case .agent(let event): reduce(event)
+    case .finished(let outcome):
+      isRunning = false
+      if outcome == .interrupted {
+        transcript.append(TranscriptItem(kind: .notice, title: "Stopped", text: "Response interrupted."))
+      }
+      runTask = nil
+      composerFocusPending = true
+    case .failed(let message):
+      isRunning = false
+      transcript.append(TranscriptItem(kind: .error, title: "Error", text: message))
+      runTask = nil
+    }
+    transcriptScroll.scrollToBottom()
+  }
+
+  private func reduce(_ event: AgentEvent) {
+    switch event {
+    case .output(.sectionStarted(let section, _)):
+      ensureStreamItem(section)
+    case .output(.text(let section, let text)):
+      append(text, to: section)
+    case .output(.empty):
+      transcript.append(TranscriptItem(kind: .notice, title: "Scribe", text: "Empty response."))
+    case .output(.finalized):
+      break
+    case .tool(.invocation(let name, let arguments, let output)):
+      upsertTool(name: name, arguments: arguments, output: output, running: false)
+    case .tool(.warning(let warning)):
+      transcript.append(TranscriptItem(kind: .warning, title: "Warning", text: warning))
+    case .lifecycle(.usage(let usage, let rate)):
+      var parts: [String] = []
+      if let total = usage.totalTokens { parts.append("\(total) tokens") }
+      if let rate { parts.append(String(format: "%.1f tok/s", rate)) }
+      usageText = parts.joined(separator: " | ")
+    case .lifecycle(.error(let error)):
+      transcript.append(TranscriptItem(kind: .error, title: "Error", text: error.localizedDescription))
+    case .lifecycle(.interrupted):
+      break
+    case .lifecycle(.recovered(let reason)):
+      transcript.append(TranscriptItem(kind: .warning, title: "Recovered", text: reason))
+    case .boundary(.toolExecutionStart(let name, let arguments)):
+      upsertTool(name: name, arguments: arguments, output: "", running: true)
+    case .boundary(.toolExecutionEnd(let name, let output)):
+      upsertTool(name: name, arguments: "", output: output, running: false)
+    case .boundary:
+      break
+    }
+  }
+
+  private func ensureStreamItem(_ section: AssistantStreamSection) {
+    let kind: ItemKind = section == .reasoning ? .reasoning : .answer
+    if transcript.last?.kind != kind {
+      transcript.append(TranscriptItem(
+        kind: kind,
+        title: section == .reasoning ? "Reasoning" : "Scribe",
+        text: "",
+        running: true))
+    }
+  }
+
+  private func append(_ text: String, to section: AssistantStreamSection) {
+    ensureStreamItem(section)
+    transcript[transcript.count - 1].text += text
+  }
+
+  private func upsertTool(name: String, arguments: String, output: String, running: Bool) {
+    if let index = transcript.lastIndex(where: { $0.kind == .tool && $0.title == name && $0.running }) {
+      if !arguments.isEmpty { transcript[index].text = arguments }
+      if !output.isEmpty {
+        if !transcript[index].text.isEmpty { transcript[index].text += "\n\n" }
+        transcript[index].text += output
+      }
+      transcript[index].running = running
+    } else {
+      let text = [arguments, output].filter { !$0.isEmpty }.joined(separator: "\n\n")
+      transcript.append(TranscriptItem(kind: .tool, title: name, text: text, running: running))
+    }
+  }
+
+  private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
+    var result: [TranscriptItem] = []
+    for message in messages {
+      switch message.role {
+      case .system:
+        continue
+      case .user:
+        result.append(TranscriptItem(kind: .user, title: "You", text: message.content))
+      case .assistant:
+        if let reasoning = message.reasoning, !reasoning.isEmpty {
+          result.append(TranscriptItem(kind: .reasoning, title: "Reasoning", text: reasoning))
+        }
+        if !message.content.isEmpty {
+          result.append(TranscriptItem(kind: .answer, title: "Scribe", text: message.content))
+        }
+        for call in message.toolCalls ?? [] {
+          result.append(TranscriptItem(
+            kind: .tool, title: call.name, text: call.arguments, running: true))
+        }
+      case .tool:
+        if let index = result.lastIndex(where: { $0.kind == .tool && $0.running }) {
+          if !result[index].text.isEmpty { result[index].text += "\n\n" }
+          result[index].text += message.content
+          result[index].running = false
+        } else {
+          result.append(TranscriptItem(
+            kind: .tool, title: message.name ?? "Tool", text: message.content))
+        }
+      }
+    }
+    return result
+  }
+}
