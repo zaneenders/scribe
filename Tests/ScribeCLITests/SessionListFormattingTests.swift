@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 @Suite
 struct SessionListFormattingTests {

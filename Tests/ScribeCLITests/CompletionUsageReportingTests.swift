@@ -3,6 +3,7 @@ import ScribeCore
 import Testing
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 struct CompletionUsageReportingTests {
   @Test func groupingIntAddsThousandsSeparators() async throws {

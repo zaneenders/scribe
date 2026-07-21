@@ -8,9 +8,12 @@ let package = Package(
   ],
   products: [
     .executable(name: "scribe", targets: ["ScribeCLI"]),
+    .executable(name: "scribe-mac", targets: ["ScribeMac"]),
     .library(name: "ScribeCore", targets: ["ScribeCore"]),
+    .library(name: "ScribeKit", targets: ["ScribeKit"]),
   ],
   dependencies: [
+    .package(path: "../chroma"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -74,6 +77,20 @@ let package = Package(
       ]
     ),
     .target(
+      name: "ScribeKit",
+      dependencies: [
+        "ScribeCore",
+        "ScribeLLM",
+        .product(name: "Logging", package: "swift-log"),
+        .product(name: "SystemPackage", package: "swift-system"),
+        .product(name: "_NIOFileSystem", package: "swift-nio"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ]
+    ),
+    .target(
       name: "ScribeCore",
       dependencies: [
         "ScribeLLM",
@@ -96,6 +113,7 @@ let package = Package(
       dependencies: [
         "ScribeCore",
         "ScribeCodexAuth",
+        "ScribeKit",
         .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "SlateCore", package: "slate"),
@@ -109,6 +127,24 @@ let package = Package(
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
         .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
+      ],
+      plugins: [
+        "GitVersionPlugin"
+      ]
+    ),
+    .executableTarget(
+      name: "ScribeMac",
+      dependencies: [
+        "ScribeCore",
+        "ScribeKit",
+        .product(name: "Chroma", package: "chroma"),
+        .product(name: "MetalBackend", package: "chroma"),
+        .product(name: "Logging", package: "swift-log"),
+        .product(name: "SystemPackage", package: "swift-system"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
       ],
       plugins: [
         "GitVersionPlugin"
@@ -130,7 +166,8 @@ let package = Package(
     .testTarget(
       name: "ScribeCLITests",
       dependencies: [
-        "ScribeCLI"
+        "ScribeCLI",
+        "ScribeKit",
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

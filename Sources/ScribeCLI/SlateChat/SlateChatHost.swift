@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
+import ScribeKit
 import SlateCore
 import Subprocess
 import Synchronization

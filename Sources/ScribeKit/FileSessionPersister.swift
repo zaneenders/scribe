@@ -5,7 +5,7 @@ import Synchronization
 import SystemPackage
 import _NIOFileSystem
 
-final class FileSessionPersister: SessionPersister {
+public final class FileSessionPersister: SessionPersister {
 
   private struct State {
     var sessionId: UUID
@@ -20,7 +20,7 @@ final class FileSessionPersister: SessionPersister {
   private let scribeVersion: String?
   private let logger: Logger
 
-  static func open(
+  public static func open(
     sessionId: UUID,
     directory: FilePath,
     sessionCreatedAt: Date,
@@ -69,7 +69,7 @@ final class FileSessionPersister: SessionPersister {
     self.logger = logger
   }
 
-  func append(_ messages: [ScribeMessage]) async throws {
+  public func append(_ messages: [ScribeMessage]) async throws {
     guard !messages.isEmpty else { return }
     do {
       try state.withLock { try $0.appender.append(messages) }
@@ -81,13 +81,13 @@ final class FileSessionPersister: SessionPersister {
     }
   }
 
-  func directory(for newSessionId: UUID) -> FilePath {
+  public func directory(for newSessionId: UUID) -> FilePath {
     let currentDir = state.withLock { $0.directory }
     let sessionsRoot = currentDir.removingLastComponent()
     return sessionsRoot.appendingPathComponent(newSessionId.uuidString)
   }
 
-  func openSession(
+  public func openSession(
     _ snapshot: SessionPersistenceSnapshot,
     parent: SessionParent
   ) async throws {
