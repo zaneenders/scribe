@@ -7,10 +7,12 @@ import SystemPackage
 public enum ScribeConfigBinding {
   public static let apiBaseURL = "api.baseUrl"
   public static let apiKey = "api.apiKey"
+  public static let apiType = "api.type"
   public static let agentModel = "agent.model"
   public static let contextWindow = "agent.contextWindow"
   public static let contextWindowThreshold = "agent.contextWindowThreshold"
   public static let reasoningEnabled = "agent.reasoning"
+  public static let reasoningEffort = "agent.reasoningEffort"
   public static let loggingLevel = "logging.level"
 }
 
@@ -30,12 +32,15 @@ private struct ConfigManifest: Codable {
   struct APISection: Codable {
     var baseUrl: String
     var apiKey: String
+    var type: String?
   }
   struct AgentSection: Codable {
     var model: String
     var contextWindow: Int
     var contextWindowThreshold: Double
     var reasoning: Bool?
+    var reasoningEffort: String?
+    var maxTokens: Int?
   }
   struct LoggingSection: Codable {
     var level: String
@@ -53,6 +58,7 @@ public struct LoadedConfig: Sendable {
   public var scribeConfig: ScribeConfig
   public var apiBaseURL: String
   public var apiKey: String?
+  public var apiType: String?
   public var logLevel: ScribeLogLevel
   public var chatSessionsDirectoryPath: String
   public var resolvedConfigurationPath: String
@@ -80,14 +86,49 @@ public struct LoadedConfig: Sendable {
   }
 }
 
+public struct CodexProfileUpsert: Sendable, Equatable {
+  public var profileName: String
+  public var created: Bool
+
+  public init(profileName: String, created: Bool) {
+    self.profileName = profileName
+    self.created = created
+  }
+}
+
+/// Lightweight result that only resolves paths and config file location.
+/// Does NOT parse the manifest or validate any profile — safe for use by
+/// `--login`, `--logout`, and `--list-sessions` even when a profile is broken.
+public struct ResolvedPaths: Sendable {
+  public var paths: ScribePaths
+  public var configPath: FilePath
+
+  public var dataHomePath: String { paths.dataHomePath }
+  public var resolvedConfigurationPath: String { configPath.string }
+}
+
 public enum ConfigLoader {
   private static let configFileName = "scribe.config.json"
 
-  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
+  public static let codexProfileName = "codex"
+  public static let codexProfileBaseURL = "https://chatgpt.com/backend-api"
+  public static let codexProfileModel = "gpt-5.6-sol"
+
+  /// Resolve Scribe data home and the config file path (creating a default
+  /// config when none exists).  No profile is selected or validated.
+  public static func resolvePaths() throws -> ResolvedPaths {
     let paths = ScribePaths.resolve()
     let configPath = try resolveConfigurationPath(paths: paths)
+    return ResolvedPaths(paths: paths, configPath: configPath)
+  }
+
+  /// Fully load and validate the active profile (or the named override).
+  /// Throws when the config is missing, malformed, or the active profile fails
+  /// validation — use `resolvePaths()` for operations that only need paths.
+  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
+    let resolved = try resolvePaths()
     return try await loadConfiguration(
-      at: configPath, paths: paths, profileOverride: profileOverride)
+      at: resolved.configPath, paths: resolved.paths, profileOverride: profileOverride)
   }
 
   private static func resolveConfigurationPath(paths: ScribePaths) throws -> FilePath {
@@ -112,7 +153,7 @@ public enum ConfigLoader {
     try writeDefaultSetup(paths: paths)
     if let data =
       "scribe: no config found — wrote default \(configFileName) to \(paths.dataHomePath)\n"
-        .data(using: .utf8)
+      .data(using: .utf8)
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
@@ -193,7 +234,6 @@ public enum ConfigLoader {
 
     let activeName = try resolveActiveProfileName(
       summaries: summaries,
-      paths: paths,
       override: profileOverride)
 
     guard
@@ -259,7 +299,31 @@ public enum ConfigLoader {
     }
 
     let apiKeyTrimmed = profile.api.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
+    var resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
+    let apiType = profile.api.type?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedAPIType: String? = apiType.flatMap { $0.isEmpty ? nil : $0 }
+
+    if let resolvedAPIType {
+      guard resolvedAPIType == "codex" || resolvedAPIType == "kimi" else {
+        throw ScribeError.configuration(
+          key: ScribeConfigBinding.apiType,
+          reason:
+            "Unknown `\(ScribeConfigBinding.apiType)` value \"\(resolvedAPIType)\" for profile `\(profileName)`; use \"codex\", \"kimi\", or omit it for OpenAI-compatible providers."
+        )
+      }
+    }
+
+    if resolvedAPIType == "kimi" {
+      if resolvedAPIKey == nil,
+        let envKey = ProcessInfo.processInfo.environment["KIMI_API_KEY"]?
+          .trimmingCharacters(in: .whitespacesAndNewlines),
+        !envKey.isEmpty
+      {
+        resolvedAPIKey = envKey
+      }
+      try KimiK3Support.validateMaxCompletionTokens(profile.agent.maxTokens)
+      try KimiK3Support.validateEndpoint(apiKey: resolvedAPIKey, serverURL: baseURL)
+    }
 
     let levelRaw = profile.logging.level.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let logLevel = ScribeLogLevel(parsingConfig: levelRaw) else {
@@ -277,13 +341,17 @@ public enum ConfigLoader {
       contextWindowThreshold: contextWindowThreshold,
       serverURL: baseURL,
       apiKey: resolvedAPIKey,
+      apiType: resolvedAPIType,
       workingDirectory: ".",
-      reasoningEnabled: profile.agent.reasoning
+      reasoningEnabled: profile.agent.reasoning,
+      reasoningEffort: profile.agent.reasoningEffort,
+      maxTokens: profile.agent.maxTokens
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,
       apiBaseURL: baseURL,
       apiKey: resolvedAPIKey,
+      apiType: resolvedAPIType,
       logLevel: logLevel,
       chatSessionsDirectoryPath: paths.sessionsDirectoryPath,
       resolvedConfigurationPath: configPath.string,
@@ -295,7 +363,6 @@ public enum ConfigLoader {
 
   private static func resolveActiveProfileName(
     summaries: [ProfileSummary],
-    paths: ScribePaths,
     override: String?
   ) throws -> String {
     if let override {
@@ -316,21 +383,69 @@ public enum ConfigLoader {
       return trimmed
     }
 
-    if let stored = try ActiveProfileStore.read(from: paths) {
-      guard summaries.contains(where: { $0.name == stored }) else {
-        let available = summaries.map(\.name).joined(separator: ", ")
-        throw ScribeError.configuration(
-          key: "activeProfile",
-          reason:
-            "`active-profile.json` selects `\(stored)`, which is not listed in `\(configFileName)`. Available profiles: \(available)."
-        )
-      }
-      return stored
+    return summaries[0].name
+  }
+
+  /// Adds the ChatGPT/Codex profile to the config file, or repairs the `api`
+  /// section of an existing profile with the same name. Called after a
+  /// successful `scribe --login` so the login leaves behind a runnable profile.
+  @discardableResult
+  public static func upsertCodexProfile(at configPath: FilePath) throws -> CodexProfileUpsert {
+    let url = URL(fileURLWithPath: configPath.string)
+    let data: Data
+    do {
+      data = try Data(contentsOf: url)
+    } catch {
+      throw ScribeError.configuration(
+        key: nil,
+        reason:
+          "Could not read `\(configPath.string)` to add the `\(codexProfileName)` profile. (\(error))")
     }
 
-    let first = summaries[0].name
-    try ActiveProfileStore.write(first, paths: paths)
-    return first
+    let manifest: ConfigManifest
+    do {
+      manifest = try JSONDecoder().decode(ConfigManifest.self, from: data)
+    } catch {
+      throw ScribeError.configuration(
+        key: "profiles",
+        reason:
+          "Could not decode `\(configPath.string)` to add the `\(codexProfileName)` profile. (\(error))")
+    }
+
+    var profiles = manifest.profiles
+    var created = false
+    if let index = profiles.firstIndex(where: {
+      $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == codexProfileName
+    }) {
+      // Keep the user's model/logging/apiKey; only repoint the API section.
+      profiles[index].api.type = "codex"
+      profiles[index].api.baseUrl = codexProfileBaseURL
+    } else {
+      profiles.append(
+        ConfigManifest.ProfileEntry(
+          name: codexProfileName,
+          api: ConfigManifest.APISection(
+            baseUrl: codexProfileBaseURL,
+            apiKey: "",
+            type: "codex"
+          ),
+          agent: ConfigManifest.AgentSection(
+            model: codexProfileModel,
+            contextWindow: 400000,
+            contextWindowThreshold: 0.8,
+            reasoning: true
+          ),
+          logging: ConfigManifest.LoggingSection(level: "trace")
+        ))
+      created = true
+    }
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    let encoded = try encoder.encode(ConfigManifest(profiles: profiles))
+    try encoded.write(to: url, options: .atomic)
+
+    return CodexProfileUpsert(profileName: codexProfileName, created: created)
   }
 
   private static func writeDefaultSetup(paths: ScribePaths) throws {
@@ -359,6 +474,5 @@ public enum ConfigLoader {
     let dir = url.deletingLastPathComponent()
     try createDirectoryWithIntermediates(FilePath(dir.path))
     try data.write(to: url, options: .atomic)
-    try ActiveProfileStore.write("local", paths: paths)
   }
 }

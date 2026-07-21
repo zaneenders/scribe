@@ -4,6 +4,7 @@ struct AgentTurnInterruptedError: Error, Sendable {
 
 public enum TurnOutcome: Sendable, Equatable {
   case completed
+  case incomplete(reason: String?)
   case interrupted
   case toolRoundLimit(rounds: Int)
   case error(String)

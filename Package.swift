@@ -28,6 +28,8 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-collections.git", from: "1.4.1"),
     .package(url: "https://github.com/apple/swift-profile-recorder.git", .upToNextMinor(from: "0.3.13")),
     .package(url: "https://github.com/apple/swift-nio.git", from: "2.100.0"),
+    .package(url: "https://github.com/apple/swift-crypto.git", from: "3.10.0"),
+    .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
   ],
   targets: [
     .target(
@@ -45,9 +47,38 @@ let package = Package(
       ]
     ),
     .target(
+      name: "ScribeLLMCodex",
+      dependencies: [
+        .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+        .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ],
+      plugins: [
+        .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
+      ]
+    ),
+    .target(
+      name: "ScribeCodexAuth",
+      dependencies: [
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "AsyncHTTPClient", package: "async-http-client"),
+        .product(name: "NIOCore", package: "swift-nio"),
+        .product(name: "Subprocess", package: "swift-subprocess"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ]
+    ),
+    .target(
       name: "ScribeCore",
       dependencies: [
         "ScribeLLM",
+        "ScribeLLMCodex",
+        "ScribeCodexAuth",
         .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
         .product(name: "SystemPackage", package: "swift-system"),
         .product(name: "Configuration", package: "swift-configuration"),
@@ -64,7 +95,9 @@ let package = Package(
       name: "ScribeCLI",
       dependencies: [
         "ScribeCore",
+        "ScribeCodexAuth",
         .product(name: "SystemPackage", package: "swift-system"),
+        .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "SlateCore", package: "slate"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "Markdown", package: "swift-markdown"),
@@ -86,6 +119,8 @@ let package = Package(
       dependencies: [
         "ScribeCore",
         "ScribeLLM",
+        "ScribeLLMCodex",
+        "ScribeCodexAuth",
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),

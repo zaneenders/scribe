@@ -39,6 +39,9 @@ struct ToolRunnerReadImageTests {
       #expect(payload.isImage == true)
       #expect(payload.mimeType == "image/png")
       #expect(payload.bytes == data.count)
+      #expect(payload.attached == true)
+      #expect(payload.base64 == nil, "Base64 must only be carried by the attachment")
+      #expect(result.text.count < 1_000)
     }
   }
 
@@ -80,4 +83,5 @@ private struct ReadImagePayload: Decodable {
   let mimeType: String?
   let base64: String?
   let bytes: Int?
+  let attached: Bool?
 }

@@ -2,6 +2,7 @@ import Foundation
 import Logging
 import ScribeCore
 import SlateCore
+import Subprocess
 import Synchronization
 import SystemPackage
 
@@ -118,7 +119,7 @@ internal final class SlateChatHost {
   private var profilePickerController = ProfilePickerController()
   private var profileCatalog: [ProfileSummary] = []
   private var activeProfileName: String = ""
-  private var scribePaths: ScribePaths = ScribePaths(dataHome: FilePath("/"))
+  private let selectProfileOnStart: Bool
   private var banner: BannerSnapshot? = nil
   private var contextWindow: Int? = nil
 
@@ -158,7 +159,7 @@ internal final class SlateChatHost {
     sessionCreatedAt: Date,
     profileCatalog: [ProfileSummary],
     activeProfileName: String,
-    scribePaths: ScribePaths,
+    selectProfileOnStart: Bool,
     logger: Logger
   ) {
     self.configuration = configuration
@@ -169,7 +170,7 @@ internal final class SlateChatHost {
     self.sessionCreatedAt = sessionCreatedAt
     self.profileCatalog = profileCatalog
     self.activeProfileName = activeProfileName
-    self.scribePaths = scribePaths
+    self.selectProfileOnStart = selectProfileOnStart
     self.logger = logger
 
     pickerController.logger = logger
@@ -219,7 +220,7 @@ internal final class SlateChatHost {
           let version = GitVersion.hash
           let sid = self.sessionId.uuidString
           Task.detached(priority: .background) { [weak self] in
-            if let branch = SlateChatHost.detectGitBranch(cwd: cwd) {
+            if let branch = await SlateChatHost.detectGitBranch(cwd: cwd) {
               await MainActor.run {
                 self?.banner = BannerSnapshot(
                   profileName: profileName,
@@ -234,6 +235,13 @@ internal final class SlateChatHost {
           }
 
           self.installCoordinator()
+
+          if self.selectProfileOnStart {
+            _ = self.profilePickerController.open(
+              profiles: self.profileCatalog,
+              activeName: self.activeProfileName,
+              modelBusy: false)
+          }
 
           self.spinnerTask?.cancel()
           self.spinnerTask = Task { [weak self] in
@@ -618,6 +626,7 @@ internal final class SlateChatHost {
     self.sessionId = newId
     self.sessionCreatedAt = Date()
     self.modelBusy = false
+    transcriptState.resetUsage()
     queueTrayDispatch = nil
     queueBatchTotal = 0
     steeringLineOutstanding = false
@@ -672,21 +681,7 @@ internal final class SlateChatHost {
       case .modelTurnRunning(let running):
         modelBusy = running
         if running {
-          transcriptState.usageTurnPrompt = 0
-          transcriptState.usageTurnCompletion = 0
-          transcriptState.usageTurnTotal = 0
-          if var u = transcriptState.usageHUD {
-            u.roundPrompt = nil
-            u.roundCompletion = nil
-            u.roundTotal = nil
-            u.turnPrompt = 0
-            u.turnCompletion = 0
-            u.turnTotal = 0
-            u.outputTokensPerSecond = nil
-            u.reasoningTokens = nil
-            u.cachedPromptTokens = nil
-            transcriptState.usageHUD = u
-          }
+          transcriptState.beginModelTurn()
         } else {
           if let wake = renderWake {
             Task.detached(priority: .userInitiated) {
@@ -797,22 +792,18 @@ internal final class SlateChatHost {
     }
   }
 
-  private nonisolated static func detectGitBranch(cwd: String) -> String? {
-
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process.arguments = ["branch", "--show-current"]
-    process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = FileHandle.nullDevice
+  private nonisolated static func detectGitBranch(cwd: String) async -> String? {
     do {
-      try process.run()
-      process.waitUntilExit()
-      guard process.terminationStatus == 0 else { return nil }
-      let data = try pipe.fileHandleForReading.readToEnd() ?? Data()
-      let branch = String(data: data, encoding: .utf8)?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let result = try await Subprocess.run(
+        .path("/usr/bin/git"),
+        arguments: ["branch", "--show-current"],
+        workingDirectory: SubprocessFilePathBridge.workingDirectory(FilePath(cwd)),
+        output: .string(limit: 4096),
+        error: .discarded
+      )
+      guard result.terminationStatus.isSuccess else { return nil }
+      let branch: String? = result.standardOutput?
+        .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
       return branch?.isEmpty == true ? nil : branch
     } catch {
       return nil
@@ -926,18 +917,20 @@ extension SlateChatHost {
 
   private func applyModelProfile(_ name: String, previousName: String) async {
     do {
-      try ActiveProfileStore.write(name, paths: scribePaths)
-      let loaded = try await ConfigLoader.load()
+      let loaded = try await ConfigLoader.load(profileOverride: name)
       var newConfig = configuration
       newConfig.agentModel = loaded.scribeConfig.agentModel
       newConfig.contextWindow = loaded.scribeConfig.contextWindow
       newConfig.contextWindowThreshold = loaded.scribeConfig.contextWindowThreshold
       newConfig.serverURL = loaded.scribeConfig.serverURL
       newConfig.apiKey = loaded.scribeConfig.apiKey
+      newConfig.apiType = loaded.apiType
       newConfig.reasoningEnabled = loaded.scribeConfig.reasoningEnabled
+      newConfig.maxTokens = loaded.scribeConfig.maxTokens
       try await harness.reconfigure(configuration: newConfig)
       configuration = newConfig
       contextWindow = newConfig.contextWindow
+      transcriptState.updateUsageContextWindow(contextWindow)
       activeProfileName = loaded.activeProfileName
       profileCatalog = loaded.profiles
       pickerController.configuration = newConfig

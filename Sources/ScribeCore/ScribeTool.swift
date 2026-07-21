@@ -27,21 +27,94 @@ public struct ToolAttachment: Sendable {
 
 public struct ToolResult: Sendable {
 
+  /// Hard limits for text inserted into model context. Attachments are carried separately.
+  public static let maxTextBytes = 128 * 1024
+  public static let maxTextCharacters = 128_000
+
   public let text: String
 
   public let attachments: [ToolAttachment]
 
   public let warnings: [String]
 
+  public let textWasTruncated: Bool
+
   public init(text: String, attachments: [ToolAttachment] = [], warnings: [String] = []) {
-    self.text = text
+    let bounded = Self.boundedText(text)
+    self.text = bounded.text
     self.attachments = attachments
-    self.warnings = warnings
+    self.warnings =
+      bounded.truncated
+      ? warnings + [
+        "Tool result exceeded the global 128 KiB / 128,000-character limit and was truncated."
+      ]
+      : warnings
+    self.textWasTruncated = bounded.truncated
+  }
+
+  private static func boundedText(_ text: String) -> (text: String, truncated: Bool) {
+    let originalBytes = text.utf8.count
+    let originalCharacters = text.count
+    guard originalBytes > maxTextBytes || originalCharacters > maxTextCharacters else {
+      return (text, false)
+    }
+
+    // Keep the replacement valid JSON so every tool and transcript consumer can handle it.
+    // The preview budget is reduced until JSON escaping and metadata also fit both ceilings.
+    let characters = Array(text.prefix(maxTextCharacters))
+    var low = 0
+    var high = characters.count
+    var best = truncationEnvelope(
+      preview: "", originalBytes: originalBytes, originalCharacters: originalCharacters)
+
+    while low <= high {
+      let middle = low + (high - low) / 2
+      let candidate = truncationEnvelope(
+        preview: String(characters.prefix(middle)),
+        originalBytes: originalBytes,
+        originalCharacters: originalCharacters)
+      if candidate.utf8.count <= maxTextBytes && candidate.count <= maxTextCharacters {
+        best = candidate
+        low = middle + 1
+      } else {
+        high = middle - 1
+      }
+    }
+    return (best, true)
+  }
+
+  private static func truncationEnvelope(
+    preview: String,
+    originalBytes: Int,
+    originalCharacters: Int
+  ) -> String {
+    let payload: [String: Any] = [
+      "tool_result_truncated": true,
+      "truncation_reason": "global_tool_result_limit",
+      "original_bytes": originalBytes,
+      "original_characters": originalCharacters,
+      "max_bytes": maxTextBytes,
+      "max_characters": maxTextCharacters,
+      "content_preview": preview,
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+      return #"{"tool_result_truncated":true,"truncation_reason":"global_tool_result_limit"}"#
+    }
+    return String(decoding: data, as: UTF8.self)
   }
 }
 
 public protocol AttachableToolResult {
   var toolAttachments: [ToolAttachment] { get }
+
+  /// Compact tool output sent back to the model alongside the attachments.
+  /// Use this to keep large attachment payloads (for example base64 image data)
+  /// out of ordinary tool messages, where they would otherwise be duplicated.
+  var attachmentToolResultText: String? { get }
+}
+
+extension AttachableToolResult {
+  public var attachmentToolResultText: String? { nil }
 }
 
 public protocol WarnableToolResult {

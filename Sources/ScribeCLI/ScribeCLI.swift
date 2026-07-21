@@ -1,8 +1,13 @@
 import ArgumentParser
 import Foundation
 import ProfileRecorderServer
+import ScribeCodexAuth
 import ScribeCore
 import SystemPackage
+
+enum LoginProvider: String, ExpressibleByArgument {
+  case codex
+}
 
 @main struct ScribeCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -29,7 +34,17 @@ import SystemPackage
 
   @Option(
     name: .long,
-    help: "Use this named backend profile for this run (does not change the saved selection)."
+    help:
+      "Log in to ChatGPT (browser-based OAuth) and create or update the \"codex\" profile."
+  )
+  var login: LoginProvider?
+
+  @Flag(name: .long, help: "Log out of the ChatGPT subscription account.")
+  var logout = false
+
+  @Option(
+    name: .long,
+    help: "Use this named backend profile for this session and skip the startup profile picker."
   )
   var profile: String?
 
@@ -52,6 +67,30 @@ import SystemPackage
       key: nil,
       reason: "Scribe is only tested on macOS and Linux.")
     #endif
+
+    // Resolve paths first — safe even when no config or broken profile exists.
+    let resolved = try ConfigLoader.resolvePaths()
+
+    // Commands that only need paths — no profile validation required.
+    if let provider = login {
+      switch provider {
+      case .codex:
+        try await loginCodex(resolved: resolved)
+      }
+      return
+    }
+
+    if logout {
+      try await logoutCodex(resolved: resolved)
+      return
+    }
+
+    if listSessions {
+      try await listSavedSessions(resolved: resolved)
+      return
+    }
+
+    // Everything below needs a fully validated active profile.
     let loaded = try await ConfigLoader.load(profileOverride: profile)
 
     if info {
@@ -66,42 +105,8 @@ import SystemPackage
 
     let cwd = FilePath.currentDirectory.string
 
-    if listSessions {
-      let root = loaded.paths.sessionsDirectory
-      try await ChatSessionStore.ensureSessionsDirectory(root)
-      let cwdFilter: String? = all ? nil : cwd
-      let files = try await ChatSessionStore.listSessionDirectories(
-        sessionsRoot: root,
-        cwdFilter: cwdFilter)
-      guard !files.isEmpty else {
-        if all {
-          print("No saved sessions under \(root.string)")
-        } else {
-          print("No saved sessions under \(root.string) for \(cwd) (use --all to list all sessions)")
-        }
-        return
-      }
-      let home = NSHomeDirectory()
-      for directory in files {
-        guard let meta = try? ChatSessionStore.loadMetadata(from: directory) else { continue }
-        let shortId = String(meta.id.uuidString.prefix(8))
-        let st = FileStat.stat(directory)
-        let updatedAt = st.exists ? st.modificationDate : meta.createdAt
-        let when = relativeTime(from: updatedAt)
-        let displayCwd = meta.cwd.replacingOccurrences(of: home, with: "~")
-
-        let logFile = loaded.paths.logFile(sessionId: meta.id).string
-        let displayLog = logFile.replacingOccurrences(of: home, with: "~")
-        print(
-          formatSessionLine(
-            shortId: shortId,
-            when: when,
-            cwd: displayCwd,
-            logFile: displayLog,
-            version: meta.scribeVersion ?? "unknown"))
-      }
-      return
-    }
+    try ShellCaptureDirectory.setup(dataHome: loaded.paths.dataHomePath)
+    defer { ShellCaptureDirectory.teardown() }
 
     let tools: [any ScribeTool] = [
       ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
@@ -134,9 +139,12 @@ import SystemPackage
       contextWindowThreshold: loaded.scribeConfig.contextWindowThreshold,
       serverURL: loaded.scribeConfig.serverURL,
       apiKey: loaded.scribeConfig.apiKey,
+      apiType: loaded.apiType,
       tools: tools,
       workingDirectory: cwd,
-      reasoningEnabled: loaded.scribeConfig.reasoningEnabled
+      reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
+      reasoningEffort: loaded.scribeConfig.reasoningEffort,
+      maxTokens: loaded.scribeConfig.maxTokens
     )
 
     let sessionDirectory: FilePath
@@ -207,7 +215,7 @@ import SystemPackage
       sessionId: sessionId,
       profileCatalog: loaded.profiles,
       activeProfileName: loaded.activeProfileName,
-      scribePaths: loaded.paths,
+      selectProfileOnStart: profile == nil,
       logger: logger
     )
     logger.notice("chat.session.end", metadata: ["status": "ok"])
@@ -241,12 +249,11 @@ import SystemPackage
     print("Scribe version:  \(GitVersion.hash)")
     print("Data home:       \(abbreviate(p.dataHomePath))")
     print("Config:          \(abbreviate(loaded.resolvedConfigurationPath))")
-    print("Active profile:  \(loaded.activeProfileName)")
-    print("Selection file:  \(abbreviate(p.activeProfilePath.string))")
+    print("Default profile: \(loaded.activeProfileName)")
     print("Model:           \(loaded.scribeConfig.agentModel)")
     print("API base URL:    \(loaded.apiBaseURL)")
     print(
-      "Sessions:        \(abbreviate(p.sessionsDirectoryPath))  ({sessionId}/metadata.json, messages.jsonl, scribe.log)"
+      "Sessions:        \(abbreviate(p.sessionsDirectoryPath))  ({sessionId}/metadata.json, messages.jsonl, attachments/, scribe.log)"
     )
     if let env = scribeHomeEnv {
       print("SCRIBE_HOME:     \(env)")
@@ -263,8 +270,8 @@ import SystemPackage
       print("    api:   \(entry.baseURL)")
     }
     print("")
-    print("Saved selection: \(loaded.activeProfileName) (\(loaded.paths.activeProfilePath.string))")
-    print("Switch in chat with `/model`, or pass `--profile <name>` for one run.")
+    print("Choose at session startup or pass `--profile <name>` to skip the picker.")
+    print("Switch during a session with `/model`.")
   }
 }
 
@@ -296,10 +303,6 @@ extension ScribeCLI {
     try? FileHandle.standardError.write(contentsOf: text)
   }
 
-  private static func escapeForSingleQuotedPOSIXPath(_ path: String) -> String {
-    path.replacingOccurrences(of: "'", with: "'\"'\"'")
-  }
-
   func relativeTime(from date: Date) -> String {
     let delta = date.timeIntervalSinceNow * -1
     switch delta {
@@ -322,5 +325,84 @@ extension ScribeCLI {
     let timeCol = when.padding(toLength: 9, withPad: " ", startingAt: 0)
     return
       "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m\(logFile)\u{001B}[0m  \u{001B}[2m(\(version))\u{001B}[0m"
+  }
+
+  // MARK: - Login / Logout
+
+  func loginCodex(resolved: ResolvedPaths) async throws {
+    print("Opening browser for ChatGPT login...")
+    print("A browser window should open. Complete login to finish.")
+    print("")
+
+    do {
+      let credential = try await CodexOAuth.login(
+        baseDirectory: URL(fileURLWithPath: resolved.dataHomePath, isDirectory: true)
+      )
+      let upsert = try ConfigLoader.upsertCodexProfile(
+        at: resolved.configPath)
+      print("")
+      print("✅ Authenticated successfully!")
+      print("   Account ID: \(credential.accountId)")
+      print("")
+      if upsert.created {
+        print("✅ Added profile \"\(upsert.profileName)\" to \(resolved.resolvedConfigurationPath)")
+      } else {
+        print("✅ Updated profile \"\(upsert.profileName)\" in \(resolved.resolvedConfigurationPath)")
+      }
+      print("   Use it with `scribe --profile \(upsert.profileName)` or pick it at session startup.")
+    } catch {
+      print("")
+      print("❌ Login failed: \(error)")
+      throw error
+    }
+  }
+
+  func logoutCodex(resolved: ResolvedPaths) async throws {
+    do {
+      try CodexOAuth.logout(
+        baseDirectory: URL(fileURLWithPath: resolved.dataHomePath, isDirectory: true)
+      )
+      print("✅ Logged out of ChatGPT subscription.")
+    } catch {
+      print("❌ Logout failed: \(error)")
+      throw error
+    }
+  }
+
+  func listSavedSessions(resolved: ResolvedPaths) async throws {
+    let cwd = FilePath.currentDirectory.string
+    let root = resolved.paths.sessionsDirectory
+    try await ChatSessionStore.ensureSessionsDirectory(root)
+    let cwdFilter: String? = all ? nil : cwd
+    let files = try await ChatSessionStore.listSessionDirectories(
+      sessionsRoot: root,
+      cwdFilter: cwdFilter)
+    guard !files.isEmpty else {
+      if all {
+        print("No saved sessions under \(root.string)")
+      } else {
+        print("No saved sessions under \(root.string) for \(cwd) (use --all to list all sessions)")
+      }
+      return
+    }
+    let home = NSHomeDirectory()
+    for directory in files {
+      guard let meta = try? ChatSessionStore.loadMetadata(from: directory) else { continue }
+      let shortId = String(meta.id.uuidString.prefix(8))
+      let st = FileStat.stat(directory)
+      let updatedAt = st.exists ? st.modificationDate : meta.createdAt
+      let when = relativeTime(from: updatedAt)
+      let displayCwd = meta.cwd.replacingOccurrences(of: home, with: "~")
+
+      let logFile = resolved.paths.logFile(sessionId: meta.id).string
+      let displayLog = logFile.replacingOccurrences(of: home, with: "~")
+      print(
+        formatSessionLine(
+          shortId: shortId,
+          when: when,
+          cwd: displayCwd,
+          logFile: displayLog,
+          version: meta.scribeVersion ?? "unknown"))
+    }
   }
 }

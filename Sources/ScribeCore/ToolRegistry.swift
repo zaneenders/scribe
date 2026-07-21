@@ -98,17 +98,29 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               attachments = []
             }
             let warnings = (value as? WarnableToolResult)?.toolWarnings ?? []
-            logger.debug(
+            let modelOutput =
+              (value as? AttachableToolResult)?.attachmentToolResultText
+              ?? encoded
+            let toolResult = ToolResult(
+              text: modelOutput, attachments: attachments, warnings: warnings)
+            let logLevel: Logger.Level = toolResult.textWasTruncated ? .warning : .debug
+            logger.log(
+              level: logLevel,
               "agent.tool.completed",
               metadata: [
                 "tool": "\(name)",
                 "elapsed_ms": "\(elapsedMs)",
-                "output_chars": "\(encoded.count)",
+                "encoded_output_chars": "\(encoded.count)",
+                "model_output_chars": "\(modelOutput.count)",
+                "bounded_output_chars": "\(toolResult.text.count)",
+                "bounded_output_bytes": "\(toolResult.text.utf8.count)",
+                "global_output_truncated": "\(toolResult.textWasTruncated)",
+                "attachment_payload_omitted_from_model_output": "\(modelOutput.count != encoded.count)",
                 "attachments": "\(attachments.count)",
-                "warnings": "\(warnings.count)",
+                "warnings": "\(toolResult.warnings.count)",
                 "args": "\(arguments.logSafe())",
               ])
-            return ToolResult(text: encoded, attachments: attachments, warnings: warnings)
+            return toolResult
           } catch {
             logger.warning(
               "agent.tool.encode_failed",
@@ -120,6 +132,8 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               ])
             return ToolResult.text(Self.jsonError(String(describing: error)))
           }
+        } catch is AgentTurnInterruptedError {
+          throw AgentTurnInterruptedError()
         } catch {
 
           let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))

@@ -1,64 +1,74 @@
-import Foundation
 import Logging
 import ScribeLLM
+import ScribeLLMCodex
 import SystemPackage
 
+/// Public agent facade. Provider-specific client, authentication, and request
+/// behavior live behind `AgentProvider` implementations.
 public struct ScribeAgent: Sendable {
-
-  private let model: String
-  private let reasoningEnabled: Bool?
-
-  internal let chatTools: [Components.Schemas.ChatTool]
+  internal let chatTools: [ScribeLLM.Components.Schemas.ChatTool]
   private let toolExecutor: any ToolExecutor
-  private let client: Client
+  private let provider: any AgentProvider
   private let workingDirectory: FilePath
   private let logger: Logger
   private let abortNotifier = AbortNotifier()
 
+  /// Standard OpenAI-compatible initializer.
   public init(
-    client: Client,
+    client: ScribeLLM.Client,
     model: String,
     tools: [any ScribeTool] = [],
     toolExecutor: (any ToolExecutor)? = nil,
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
+    contextWindow: Int = 0,
     logger: Logger
   ) {
-    self.client = client
+    let prepared = Self.prepareTools(tools, executor: toolExecutor, logger: logger)
+    self.toolExecutor = prepared.executor
+    self.chatTools = prepared.chatTools
+    self.provider = OpenAICompletionsProvider.openAICompletions(
+      client: client,
+      model: model,
+      reasoningEnabled: reasoningEnabled,
+      contextWindow: contextWindow)
     self.workingDirectory = workingDirectory
     self.logger = logger
-    self.model = model
-    self.reasoningEnabled = reasoningEnabled
-    if let customExecutor = toolExecutor {
-      self.toolExecutor = customExecutor
-      self.chatTools = tools.map { type(of: $0).toChatTool(logger: logger) }
-    } else {
-      let registry = ToolRegistry(tools: tools, logger: logger)
-      self.toolExecutor = registry
-      self.chatTools = registry.chatTools
-    }
   }
 
+  /// Codex initializer for callers that already own a configured client.
   public init(
-    configuration: ScribeConfig,
+    codexClient: ScribeLLMCodex.Client,
+    model: String,
+    tools: [any ScribeTool] = [],
+    toolExecutor: (any ToolExecutor)? = nil,
+    workingDirectory: FilePath,
+    reasoningEnabled: Bool?,
+    contextWindow: Int = 0,
     logger: Logger
-  ) throws {
-    guard let serverURL = URL(string: configuration.serverURL) else {
-      throw ScribeError.configuration(
-        key: "serverURL",
-        reason: "Invalid serverURL in ScribeConfig: \(configuration.serverURL)")
-    }
-    let client = OpenAICompatibleClient.make(
-      serverURL: serverURL, apiKey: configuration.apiKey)
-    self.init(
-      client: client,
-      model: configuration.agentModel,
-      tools: configuration.tools,
-      toolExecutor: nil,
-      workingDirectory: FilePath(configuration.workingDirectory),
-      reasoningEnabled: configuration.reasoningEnabled,
-      logger: logger
-    )
+  ) {
+    let prepared = Self.prepareTools(tools, executor: toolExecutor, logger: logger)
+    self.toolExecutor = prepared.executor
+    self.chatTools = prepared.chatTools
+    self.provider = CodexProvider(
+      source: .configured(codexClient),
+      model: model,
+      reasoningEnabled: reasoningEnabled,
+      reasoningEffort: nil,
+      contextWindow: contextWindow)
+    self.workingDirectory = workingDirectory
+    self.logger = logger
+  }
+
+  /// Creates an agent and selects its provider from configuration.
+  /// Codex credentials remain lazy and are resolved when the first turn runs.
+  public init(configuration: ScribeConfig, logger: Logger) throws {
+    let registry = ToolRegistry(tools: configuration.tools, logger: logger)
+    self.toolExecutor = registry
+    self.chatTools = registry.chatTools
+    self.provider = try AgentProviderFactory.make(configuration: configuration)
+    self.workingDirectory = FilePath(configuration.workingDirectory)
+    self.logger = logger
   }
 
   public func run(
@@ -77,70 +87,31 @@ public struct ScribeAgent: Sendable {
     history: [ScribeMessage],
     options: AgentRunOptions = AgentRunOptions()
   ) -> TurnStream {
-    let wireMessages = promptMessages.toChatMessages()
-    let historyWire = history.toChatMessages()
-    let (stream, continuation) = AsyncStream<AgentEvent>.makeStream()
-
     abortNotifier.clear()
-
-    let agentLogger = logger
-    let task = Task {
-      [
-        toolExecutor, chatTools, client, wireMessages, historyWire, options,
-        agentLogger, abortNotifier, model, reasoningEnabled, workingDirectory
-      ] in
-      defer {
-        continuation.finish()
-      }
-
-      let ctx = AgentContext(messages: historyWire)
-
-      let config = AgentLoopConfig(
-        model: model,
-        client: client,
-        toolExecutor: toolExecutor,
-        chatTools: chatTools,
-        temperature: options.temperature,
-        maxToolRounds: options.maxToolRounds,
-        workingDirectory: workingDirectory,
-        reasoningEnabled: reasoningEnabled,
-        hooks: .default
-      )
-
-      do {
-        let result = try await runAgentLoop(
-          promptMessages: wireMessages,
-          context: ctx,
-          config: config,
-          emit: { continuation.yield($0) },
-          logger: agentLogger,
-          abortObserver: abortNotifier
-        )
-
-        let newMessages = result.messages.toScribeMessages()
-        switch result.termination {
-        case .completed:
-          return TurnResult(newMessages: newMessages, outcome: .completed)
-        case .interrupted:
-          continuation.yield(.lifecycle(.interrupted))
-          return TurnResult(newMessages: newMessages, outcome: .interrupted)
-        case .toolRoundLimit(let rounds):
-          return TurnResult(newMessages: newMessages, outcome: .toolRoundLimit(rounds: rounds))
-        case .error(let desc):
-          continuation.yield(.lifecycle(.error(.generic(desc))))
-          return TurnResult(newMessages: newMessages, outcome: .error(desc))
-        }
-      } catch is AgentTurnInterruptedError {
-        continuation.yield(.lifecycle(.interrupted))
-
-        return TurnResult(newMessages: [], outcome: .interrupted)
-      }
-    }
-
-    return TurnStream(events: stream, result: task)
+    return provider.run(
+      promptMessages: promptMessages.toChatMessages(),
+      history: history.toChatMessages(),
+      options: options,
+      toolExecutor: toolExecutor,
+      chatTools: chatTools,
+      workingDirectory: workingDirectory,
+      logger: logger,
+      abortNotifier: abortNotifier)
   }
 
   public func abort() {
     abortNotifier.request()
+  }
+
+  private static func prepareTools(
+    _ tools: [any ScribeTool],
+    executor: (any ToolExecutor)?,
+    logger: Logger
+  ) -> (executor: any ToolExecutor, chatTools: [ScribeLLM.Components.Schemas.ChatTool]) {
+    if let executor {
+      return (executor, tools.map { type(of: $0).toChatTool(logger: logger) })
+    }
+    let registry = ToolRegistry(tools: tools, logger: logger)
+    return (registry, registry.chatTools)
   }
 }
