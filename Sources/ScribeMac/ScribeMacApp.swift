@@ -75,14 +75,21 @@ struct ScribeMacRoot: Block {
       if store.showModelPicker {
         modelPicker
       }
+      if store.showDirectoryPicker && !store.requiresDirectoryBeforeStart {
+        directoryPicker
+      }
       switch store.phase {
       case .starting:
-        VStack(spacing: 12) {
-          Spacer()
-          Text("Starting Scribe...").fontScale(theme.textScale).foregroundColor(theme.textSecondary)
-          Spacer()
+        if store.showDirectoryPicker {
+          DirectoryPalette(store: store, theme: theme, required: store.requiresDirectoryBeforeStart)
+        } else {
+          VStack(spacing: 12) {
+            Spacer()
+            Text("Starting Scribe...").fontScale(theme.textScale).foregroundColor(theme.textSecondary)
+            Spacer()
+          }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
       case .failed(let message):
         VStack(spacing: 14, alignment: .leading) {
           Text("Could not start Scribe").fontScale(theme.textScale).foregroundColor(theme.errorText)
@@ -119,6 +126,10 @@ struct ScribeMacRoot: Block {
       }
       Spacer()
       Button(
+        "Directory", id: WidgetID("directory-toggle"), fontScale: theme.smallScale,
+        padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
+      ) { store.toggleDirectoryPicker() }
+      Button(
         "New", id: WidgetID("new-session"), fontScale: theme.smallScale,
         padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
       ) { store.newSession() }
@@ -132,6 +143,10 @@ struct ScribeMacRoot: Block {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(theme.headerBackground)
     .border(theme.border)
+  }
+
+  @MainActor private var directoryPicker: some Block {
+    DirectoryPalette(store: store, theme: theme, required: false)
   }
 
   @MainActor private var modelPicker: some Block {
@@ -168,6 +183,75 @@ struct ScribeMacRoot: Block {
       }
     }
     .frame(maxWidth: 300, alignment: .leading)
+    .background(theme.headerBackground)
+    .border(theme.border)
+  }
+}
+
+private struct DirectoryPalette: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+  let required: Bool
+
+  @MainActor var body: some Block {
+    VStack(spacing: 10, alignment: .leading) {
+      if required {
+        Text("Choose a project directory").fontScale(theme.textScale).foregroundColor(theme.accent)
+        WrappedText(
+          text: "Scribe launched from /. Type a path and press Enter to start a session there.",
+          theme: theme, color: theme.textSecondary)
+      } else {
+        Text("Change directory").fontScale(theme.textScale).foregroundColor(theme.accent)
+        WrappedText(
+          text: "Starts a new session in the chosen directory. Tab completes directory names.",
+          theme: theme, color: theme.textSecondary)
+      }
+      HStack(spacing: 6) {
+        Text("$ cd").fontScale(theme.textScale).foregroundColor(theme.green)
+        TextField(
+          required ? "/path/to/project" : "path",
+          id: ScribeMacStore.directoryPaletteID,
+          fontScale: theme.textScale,
+          text: { store.directoryDraft },
+          onChange: { store.updateDirectoryDraft($0) },
+          onSubmit: { store.submitDirectory($0) }
+        )
+      }
+      if !store.directoryError.isEmpty {
+        Text(sanitizeASCII(store.directoryError))
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.errorText)
+      }
+      if !store.directoryMatches.isEmpty {
+        VStack(spacing: 2, alignment: .leading) {
+          Text("Matches")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+          for match in store.directoryMatches.prefix(8) {
+            Text(sanitizeASCII(match))
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textPrimary)
+          }
+          if store.directoryMatches.count > 8 {
+            Text("+\(store.directoryMatches.count - 8) more")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+        }
+      }
+      if !required {
+        HStack(spacing: 8) {
+          Button("Cancel", id: WidgetID("directory-cancel"), fontScale: theme.smallScale) {
+            store.closeDirectoryPicker()
+          }
+        }
+      }
+      if required {
+        Spacer()
+      }
+    }
+    .padding(theme.margin)
+    .frame(maxWidth: required ? .infinity : 640, maxHeight: required ? .infinity : nil, alignment: .topLeading)
     .background(theme.headerBackground)
     .border(theme.border)
   }
@@ -314,8 +398,24 @@ private struct StatusBar: Block {
       Text(store.isRunning ? "WORKING" : "READY")
         .fontScale(theme.smallScale)
         .foregroundColor(store.isRunning ? theme.yellow : theme.green)
-      Text(sanitizeASCII(store.workingDirectory))
-        .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+      Interactive(
+        id: WidgetID("cwd-toggle"),
+        action: { store.toggleDirectoryPicker() }
+      ) { phase in
+        HStack(spacing: 4) {
+          Text("cwd")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+          Text(sanitizeASCII(store.workingDirectory))
+            .fontScale(theme.smallScale)
+            .foregroundColor(
+              store.isRunning
+                ? theme.textSecondary
+                : phase == .hovered ? theme.accent : theme.textPrimary)
+        }
+        .padding(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+        .background(store.isRunning ? .clear : phase == .hovered ? theme.buttonHover : theme.buttonIdle)
+      }
       if !store.sessionIdText.isEmpty {
         Text("Session: \(store.sessionIdText)")
           .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)

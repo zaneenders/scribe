@@ -2,6 +2,7 @@ import Chroma
 import Foundation
 import ScribeCore
 import ScribeKit
+import SystemPackage
 
 @MainActor
 final class ScribeMacStore {
@@ -43,6 +44,7 @@ final class ScribeMacStore {
 
   static let shared = ScribeMacStore()
   static let composerID = WidgetID("scribe-composer")
+  static let directoryPaletteID = WidgetID("directory-palette")
 
   var phase: Phase = .starting
   var draft = ""
@@ -62,20 +64,55 @@ final class ScribeMacStore {
   /// Whether the model picker overlay is visible.
   var showModelPicker = false
 
+  /// Whether the directory palette is visible.
+  var showDirectoryPicker = false
+  /// Path typed into the palette's `$ cd` field.
+  var directoryDraft = ""
+  /// Validation or completion feedback for the palette.
+  var directoryError = ""
+  /// Directory names from the most recent Tab completion.
+  var directoryMatches: [String] = []
+  /// True when Finder-style launch at `/` must pick a directory before bootstrap.
+  var requiresDirectoryBeforeStart = false
+
   private var session: BootstrappedSession?
   private var runTask: Task<Void, Never>?
   private var didStart = false
   private var composerFocusPending = false
+  private var directoryFocusPending = false
+  /// Cwd anchor for palette resolution before the first session exists.
+  private var directoryBaseCWD = FilePath.currentDirectory.string
 
   private init() {}
 
   func start() {
     guard !didStart else { return }
     didStart = true
+    #if canImport(AppKit)
+    DirectoryPaletteKeyMonitor.shared.install()
+    DirectoryPaletteKeyMonitor.shared.onTab = { [weak self] in
+      self?.tabCompleteDirectory()
+    }
+    DirectoryPaletteKeyMonitor.shared.onEscape = { [weak self] in
+      self?.closeDirectoryPicker()
+    }
+    #endif
+    let launchCWD = FilePath.currentDirectory.string
+    directoryBaseCWD = launchCWD
+    if launchCWD == "/" {
+      requiresDirectoryBeforeStart = true
+      showDirectoryPicker = true
+      directoryDraft = "~"
+      directoryFocusPending = true
+      phase = .starting
+      return
+    }
     Task {
       do {
         try ShellCaptureDirectory.setup(dataHome: ScribePaths.resolve().dataHomePath)
-        let opened = try await ScribeSessionBootstrap.open(version: GitVersion.hash)
+        let opened = try await ScribeSessionBootstrap.open(
+          workingDirectory: launchCWD,
+          version: GitVersion.hash)
         install(opened)
       } catch {
         phase = .failed(error.localizedDescription)
@@ -88,7 +125,9 @@ final class ScribeMacStore {
     phase = .starting
     Task {
       do {
-        let opened = try await ScribeSessionBootstrap.open(version: GitVersion.hash)
+        let opened = try await ScribeSessionBootstrap.open(
+          workingDirectory: workingDirectory,
+          version: GitVersion.hash)
         install(opened)
       } catch {
         phase = .failed(error.localizedDescription)
@@ -103,6 +142,7 @@ final class ScribeMacStore {
       do {
         let opened = try await ScribeSessionBootstrap.open(
           resumeLatest: true,
+          workingDirectory: workingDirectory,
           version: GitVersion.hash)
         install(opened)
       } catch {
@@ -124,8 +164,15 @@ final class ScribeMacStore {
     composerFocusPending = true
   }
 
-  /// Focus must be requested after a frame has registered the composer leaf.
+  /// Focus must be requested after a frame has registered the target leaf.
   func applyPendingFocus() {
+    if directoryFocusPending {
+      Interaction.current.focus(Self.directoryPaletteID, editing: true)
+      if Interaction.current.isTextEditing {
+        directoryFocusPending = false
+      }
+      return
+    }
     guard composerFocusPending else { return }
     Interaction.current.focus(Self.composerID, editing: true)
     if Interaction.current.isTextEditing {
@@ -133,10 +180,108 @@ final class ScribeMacStore {
     }
   }
 
+  // MARK: - Directory palette
+
+  func toggleDirectoryPicker() {
+    guard !isRunning else { return }
+    if showDirectoryPicker && !requiresDirectoryBeforeStart {
+      closeDirectoryPicker()
+      return
+    }
+    openDirectoryPicker()
+  }
+
+  func openDirectoryPicker() {
+    guard !isRunning else { return }
+    showModelPicker = false
+    showDirectoryPicker = true
+    directoryDraft = workingDirectory.isEmpty ? "~" : workingDirectory
+    directoryError = ""
+    directoryMatches = []
+    directoryFocusPending = true
+  }
+
+  func closeDirectoryPicker() {
+    guard !requiresDirectoryBeforeStart else { return }
+    showDirectoryPicker = false
+    directoryError = ""
+    directoryMatches = []
+    composerFocusPending = true
+  }
+
+  func updateDirectoryDraft(_ text: String) {
+    directoryDraft = sanitizeASCII(text.replacingOccurrences(of: "\n", with: ""))
+    directoryError = ""
+    directoryMatches = []
+  }
+
+  func tabCompleteDirectory() {
+    let result = DirectoryPathCompletion.tabComplete(
+      input: directoryDraft,
+      relativeTo: directoryResolutionBase)
+    directoryDraft = sanitizeASCII(result.text)
+    directoryMatches = result.matches
+    directoryError = result.matches.isEmpty ? "No matching directories." : ""
+    directoryFocusPending = true
+  }
+
+  func submitDirectory(_ proposed: String? = nil) {
+    let text = sanitizeASCII((proposed ?? directoryDraft).trimmingCharacters(in: .whitespacesAndNewlines))
+    guard !text.isEmpty else {
+      directoryError = "path is empty"
+      return
+    }
+    let result = DirectoryPathCompletion.resolve(
+      input: text,
+      relativeTo: directoryResolutionBase)
+    guard let path = result.path else {
+      directoryError = result.error ?? "Invalid directory."
+      directoryMatches = []
+      return
+    }
+    if !requiresDirectoryBeforeStart, path == workingDirectory {
+      closeDirectoryPicker()
+      return
+    }
+    Task {
+      await openSession(in: path)
+    }
+  }
+
+  private var directoryResolutionBase: String {
+    workingDirectory.isEmpty ? directoryBaseCWD : workingDirectory
+  }
+
+  private func openSession(in directory: String) async {
+    phase = .starting
+    showDirectoryPicker = false
+    directoryError = ""
+    directoryMatches = []
+    directoryFocusPending = false
+    do {
+      if session == nil {
+        try ShellCaptureDirectory.setup(dataHome: ScribePaths.resolve().dataHomePath)
+      }
+      let opened = try await ScribeSessionBootstrap.open(
+        workingDirectory: directory,
+        version: GitVersion.hash)
+      requiresDirectoryBeforeStart = false
+      install(opened)
+    } catch {
+      requiresDirectoryBeforeStart = directoryBaseCWD == "/"
+      showDirectoryPicker = true
+      directoryDraft = directory
+      directoryError = error.localizedDescription
+      directoryFocusPending = true
+      phase = requiresDirectoryBeforeStart ? .starting : .ready
+    }
+  }
+
   // MARK: - Model picker
 
   func toggleModelPicker() {
     guard !isRunning else { return }
+    showDirectoryPicker = false
     showModelPicker.toggle()
   }
 
@@ -258,6 +403,9 @@ final class ScribeMacStore {
   }
 
   func close() {
+    #if canImport(AppKit)
+    DirectoryPaletteKeyMonitor.shared.uninstall()
+    #endif
     let harness = session?.harness
     session?.messageQueues.clearAll()
     runTask?.cancel()
