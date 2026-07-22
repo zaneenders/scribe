@@ -42,10 +42,23 @@ final class ScriptedTransport: ClientTransport, Sendable {
   struct Response: Sendable {
     let status: Int
     let chunks: [HTTPBody.ByteChunk]
+    /// When set, `send` throws this error instead of producing a response, simulating
+    /// a transport-level failure such as a dropped connection.
+    let error: (any Error)?
+    /// When set, the response body fails with this error after every chunk has been
+    /// delivered, simulating a mid-stream disconnect.
+    let streamError: (any Error)?
 
-    init(status: Int, chunks: [HTTPBody.ByteChunk]) {
+    init(
+      status: Int,
+      chunks: [HTTPBody.ByteChunk],
+      error: (any Error)? = nil,
+      streamError: (any Error)? = nil
+    ) {
       self.status = status
       self.chunks = chunks
+      self.error = error
+      self.streamError = streamError
     }
 
     /// A response with status 200 and no body.
@@ -110,22 +123,26 @@ final class ScriptedTransport: ClientTransport, Sendable {
       )
     }
 
-    let (statusCode, chunks) = state.withLock { state -> (Int, [HTTPBody.ByteChunk]) in
+    let scripted = state.withLock { state -> Response in
       let idx = state.callIndex
       state.callIndex += 1
       if idx < responses.count {
-        let r = responses[idx]
-        return (r.status, r.chunks)
+        return responses[idx]
       }
-      return responses.last.map { ($0.status, $0.chunks) } ?? (200, [])
+      return responses.last ?? Response(status: 200, chunks: [])
     }
+    if let error = scripted.error { throw error }
 
-    let response = HTTPResponse(status: .init(code: statusCode))
-    if chunks.isEmpty { return (response, nil) }
+    let response = HTTPResponse(status: .init(code: scripted.status))
+    if scripted.chunks.isEmpty && scripted.streamError == nil { return (response, nil) }
     let responseBody = HTTPBody(
-      AsyncStream { continuation in
-        for chunk in chunks { continuation.yield(chunk) }
-        continuation.finish()
+      AsyncThrowingStream { continuation in
+        for chunk in scripted.chunks { continuation.yield(chunk) }
+        if let streamError = scripted.streamError {
+          continuation.finish(throwing: streamError)
+        } else {
+          continuation.finish()
+        }
       }, length: .unknown)
     return (response, responseBody)
   }

@@ -1,6 +1,8 @@
 import Foundation
 import Logging
+import OpenAPIRuntime
 import ScribeLLM
+import Synchronization
 import SystemPackage
 
 // MARK: - Shared Types
@@ -21,6 +23,7 @@ protocol AgentLoopConfigFields: Sendable {
   var workingDirectory: FilePath { get }
   var hooks: AgentLoopHooks { get }
   var contextWindow: Int { get }
+  var retryPolicy: RetryPolicy { get }
 }
 
 /// The result of a single provider round trip: the assistant message to commit and how
@@ -39,9 +42,10 @@ enum RoundOutcome: Sendable, Equatable {
 // MARK: - Agent Loop Core
 
 /// Runs the provider-neutral agent orchestration: prompt injection, per-round request
-/// budget enforcement, abort checks, context-overflow recovery, tool dispatch with
-/// hooks, and attachment injection. Providers supply only `runRound`, which performs a
-/// single HTTP round trip and stream decode.
+/// budget enforcement, abort checks, context-overflow recovery, transient-failure
+/// retries with backoff, tool dispatch with hooks, and attachment injection. Providers
+/// supply only `runRound`, which performs a single HTTP round trip and stream decode,
+/// reporting progress through the supplied per-attempt `emit` sink.
 ///
 /// `logTag` is appended to every log event name (e.g. ".codex") so provider logs remain
 /// distinguishable while the orchestration stays identical.
@@ -53,7 +57,9 @@ func runAgentLoopCore(
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   abortObserver: some AbortObserver,
-  runRound: @escaping @Sendable ([Components.Schemas.ChatMessage], Int) async throws -> RoundResult
+  runRound: @escaping @Sendable (
+    [Components.Schemas.ChatMessage], Int, @escaping @Sendable (AgentEvent) -> Void
+  ) async throws -> RoundResult
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
@@ -106,14 +112,41 @@ func runAgentLoopCore(
 
     let roundResult: RoundResult
     do {
-      roundResult = try await abortObserver.race { [currentContext, round] in
-        try await runRound(currentContext.messages, round)
+      roundResult = try await runRoundWithRetry(
+        policy: config.retryPolicy,
+        logger: logger,
+        logTag: logTag,
+        round: round,
+        emit: emit,
+        abortObserver: abortObserver
+      ) { [currentContext, round] attemptEmit in
+        try await abortObserver.race {
+          try await runRound(currentContext.messages, round, attemptEmit)
+        }
       }
     } catch is AgentTurnInterruptedError {
       logger.notice("agent.abort\(logTag)", metadata: ["where": "mid-stream", "round": "\(round)"])
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
       outcome = .interrupted
       return (newMessages, outcome)
+    } catch let scribeError as ScribeError
+      where !attemptedRecovery && isImageInputUnsupportedError(scribeError)
+    {
+      let detail = scribeError.errorDescription ?? String(describing: scribeError)
+      guard
+        let reason = rollbackUnsupportedImageInput(
+          messages: &currentContext.messages,
+          newMessages: &newMessages,
+          providerDetail: detail)
+      else {
+        outcome = .error(detail)
+        throw scribeError
+      }
+      attemptedRecovery = true
+      logger.notice("agent.recover\(logTag)", metadata: ["round": "\(round)", "reason": "\(reason)"])
+      emit(.lifecycle(.recovered(reason: reason)))
+      emit(.boundary(.turnEnd(round: round, outcome: .completed)))
+      continue
     } catch let scribeError as ScribeError where !attemptedRecovery && isContextLengthError(scribeError) {
       let detail = scribeError.errorDescription ?? String(describing: scribeError)
       guard
@@ -203,6 +236,12 @@ func runAgentLoopCore(
           "tools": "\(invocations.map(\.name).joined(separator: ","))",
         ])
 
+      // OpenAI-compatible APIs require every tool response for an assistant's parallel
+      // tool_calls to appear contiguously before any other role. Tool-produced attachments
+      // are synthetic user messages, so defer them until the complete tool-result block has
+      // been assembled.
+      var pendingAttachments: [(attachment: ToolAttachment, toolName: String)] = []
+
       for inv in invocations {
         if abortObserver.isAborted() {
           logger.notice(
@@ -221,7 +260,11 @@ func runAgentLoopCore(
           preflightResult = nil
         case .block(let reason):
           resolvedInv = inv
-          preflightResult = ToolResult.text(ToolRegistry.jsonError(reason))
+          logger.warning(
+            "agent.tool.blocked\(logTag)",
+            metadata: ["tool": "\(inv.name)", "round": "\(round)", "reason": "\(reason.logSafe())"])
+          preflightResult = ToolRegistry.failureResult(
+            tool: inv.name, code: "blocked", description: reason)
         }
 
         emit(.boundary(.toolExecutionStart(name: resolvedInv.name, arguments: resolvedInv.arguments)))
@@ -241,15 +284,19 @@ func runAgentLoopCore(
             return (newMessages, outcome)
           } catch let ScribeError.toolUnknown(name) {
             logger.warning("agent.tool.unknown\(logTag)", metadata: ["tool": "\(name)", "round": "\(round)"])
-            result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
+            result = ToolRegistry.failureResult(
+              tool: name, code: "unknown_tool", description: "Unknown tool; no registered tool has this name")
           } catch {
+            let description =
+              (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             logger.warning(
               "agent.tool.executor.error\(logTag)",
               metadata: [
                 "tool": "\(resolvedInv.name)", "round": "\(round)",
-                "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+                "err": "\(description.logSafe())",
               ])
-            result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
+            result = ToolRegistry.failureResult(
+              tool: resolvedInv.name, code: "executor_failed", description: description)
           }
         }
 
@@ -268,26 +315,30 @@ func runAgentLoopCore(
             name: nil, toolCalls: nil, toolCallId: resolvedInv.id))
         emit(.boundary(.messageEnd(role: .tool, round: round)))
 
-        for attachment in finalResult.attachments {
-          logger.info(
-            "agent.tool.attachment.inject\(logTag)",
-            metadata: [
-              "round": "\(round)",
-              "tool": "\(resolvedInv.name)",
-              "mime_type": "\(attachment.mimeType)",
-              "base64_chars": "\(attachment.base64.count)",
-              "source_path": "\(attachment.sourcePath ?? "nil")",
-            ])
-          emit(.boundary(.messageStart(role: .user, round: round)))
-          roundBuffer.append(toolAttachmentMessage(attachment))
-          emit(.boundary(.messageEnd(role: .user, round: round)))
-        }
+        pendingAttachments.append(
+          contentsOf: finalResult.attachments.map { (attachment: $0, toolName: resolvedInv.name) })
 
         if afterDecision.terminate {
           commit(&currentContext.messages, &newMessages, roundBuffer)
           outcome = .completed
           return (newMessages, outcome)
         }
+      }
+
+      for pending in pendingAttachments {
+        let attachment = pending.attachment
+        logger.info(
+          "agent.tool.attachment.inject\(logTag)",
+          metadata: [
+            "round": "\(round)",
+            "tool": "\(pending.toolName)",
+            "mime_type": "\(attachment.mimeType)",
+            "base64_chars": "\(attachment.base64.count)",
+            "source_path": "\(attachment.sourcePath ?? "nil")",
+          ])
+        emit(.boundary(.messageStart(role: .user, round: round)))
+        roundBuffer.append(toolAttachmentMessage(attachment))
+        emit(.boundary(.messageEnd(role: .user, round: round)))
       }
 
       commit(&currentContext.messages, &newMessages, roundBuffer)
@@ -302,6 +353,97 @@ private func commit(
 ) {
   context.append(contentsOf: buffer)
   newMessages.append(contentsOf: buffer)
+}
+
+// MARK: - Round Retry
+
+/// Runs a single provider round, retrying transient networking failures with backoff
+/// according to `policy` and surfacing each retry as `.lifecycle(.retrying)`.
+///
+/// A failed attempt is only retried when it produced no visible stream output: once
+/// assistant content reaches the transcript, replaying the round would duplicate it.
+/// An abort during the backoff sleep rethrows `AgentTurnInterruptedError` so the
+/// caller's interrupted handling applies unchanged.
+private func runRoundWithRetry(
+  policy: RetryPolicy,
+  logger: Logger,
+  logTag: String,
+  round: Int,
+  emit: @escaping @Sendable (AgentEvent) -> Void,
+  abortObserver: some AbortObserver,
+  operation: @escaping @Sendable (@escaping @Sendable (AgentEvent) -> Void) async throws -> RoundResult
+) async throws -> RoundResult {
+  var retryAttempt = 0
+  while true {
+    // Tracks whether this attempt made assistant output visible. Boundary events are
+    // invisible in the transcript, so re-emitting them on a retry is harmless.
+    let streamConsumed = Mutex(false)
+    let attemptEmit: @Sendable (AgentEvent) -> Void = { event in
+      if event.makesStreamOutputVisible {
+        streamConsumed.withLock { $0 = true }
+      }
+      emit(event)
+    }
+    do {
+      return try await operation(attemptEmit)
+    } catch {
+      guard retryAttempt < policy.maxRetries,
+        policy.isRetryable(error),
+        !streamConsumed.withLock({ $0 })
+      else { throw error }
+      retryAttempt += 1
+      let backoff = policy.delay(forRetryAttempt: retryAttempt)
+      let reason = retryReasonSummary(error)
+      logger.notice(
+        "agent.retry\(logTag)",
+        metadata: [
+          "round": "\(round)",
+          "attempt": "\(retryAttempt)",
+          "max_retries": "\(policy.maxRetries)",
+          "backoff": "\(backoff)",
+          "err": "\(reason)",
+        ])
+      emit(.lifecycle(.retrying(attempt: retryAttempt, maxRetries: policy.maxRetries, delay: backoff, reason: reason)))
+      do {
+        try await abortObserver.race { try await Task.sleep(for: backoff) }
+      } catch is AgentTurnInterruptedError {
+        throw AgentTurnInterruptedError()
+      } catch {
+        // The backoff sleep itself was cancelled; proceed with the retry.
+      }
+    }
+  }
+}
+
+/// One-line, length-capped error description for the transcript's retry notice.
+/// OpenAPIRuntime's `ClientError` wrapper is unwrapped so a dropped connection reads
+/// as the underlying cause rather than the generic "Client encountered an error".
+private func retryReasonSummary(_ error: any Error) -> String {
+  var current = error
+  while let clientError = current as? ClientError {
+    current = clientError.underlyingError
+  }
+  let description: String
+  switch current {
+  case let urlError as URLError:
+    description = urlError.localizedDescription
+  default:
+    description = (current as? LocalizedError)?.errorDescription ?? String(describing: current)
+  }
+  guard description.count > 200 else { return description }
+  return String(description.prefix(200)) + "…"
+}
+
+extension AgentEvent {
+  /// True when the event makes assistant stream output visible to the user.
+  fileprivate var makesStreamOutputVisible: Bool {
+    switch self {
+    case .output, .lifecycle(.usage):
+      return true
+    case .tool, .lifecycle, .boundary:
+      return false
+    }
+  }
 }
 
 // MARK: - Attachments
@@ -321,7 +463,78 @@ func toolAttachmentMessage(
   ).toChatMessage()
 }
 
-// MARK: - Context Overflow Recovery
+// MARK: - Provider Input Recovery
+
+func isImageInputUnsupportedError(_ error: ScribeError) -> Bool {
+  let detail: String
+  switch error {
+  case .apiHTTPError(let statusCode, let message, _):
+    guard statusCode == 400 || statusCode == 422 else { return false }
+    detail = message
+  case .generic(let message):
+    detail = message
+  default:
+    return false
+  }
+
+  let lower = detail.lowercased()
+  let rejectsImagePart =
+    lower.contains("unknown variant `image_url`")
+    || lower.contains("unknown variant \"image_url\"")
+    || lower.contains("unsupported content type") && lower.contains("image_url")
+    || lower.contains("image_url") && lower.contains("expected `text`")
+    || lower.contains("image_url") && lower.contains("expected \"text\"")
+  return rejectsImagePart
+}
+
+func rollbackUnsupportedImageInput(
+  messages: inout [Components.Schemas.ChatMessage],
+  newMessages: inout [Components.Schemas.ChatMessage],
+  providerDetail: String
+) -> String? {
+  let newMessageStart = messages.count - newMessages.count
+  let imageIndexes = messages.indices.filter { isImageMessage(messages[$0]) }
+  guard !imageIndexes.isEmpty else { return nil }
+
+  let detail =
+    providerDetail.count > 512
+    ? String(providerDetail.prefix(512)) + "…"
+    : providerDetail
+  for index in imageIndexes {
+    let replacement = unsupportedImageReplacement(original: messages[index], providerDetail: detail)
+    messages[index] = replacement
+    if index >= newMessageStart {
+      let newIndex = index - newMessageStart
+      if newMessages.indices.contains(newIndex) { newMessages[newIndex] = replacement }
+    }
+  }
+
+  return "provider rejected image input — replaced \(imageIndexes.count) attachment(s) with text"
+}
+
+private func unsupportedImageReplacement(
+  original: Components.Schemas.ChatMessage,
+  providerDetail: String
+) -> Components.Schemas.ChatMessage {
+  let labels: [String]
+  if case .case2(let parts) = original.content {
+    labels = parts.compactMap { part in
+      guard case .text(let textPart) = part else { return nil }
+      let text = textPart.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      return text.isEmpty ? nil : text
+    }
+  } else {
+    labels = []
+  }
+  let label = labels.joined(separator: "\n")
+  let prefix = label.isEmpty ? "An image attachment" : label
+  let text =
+    "\(prefix) could not be shown because this provider does not support image input. "
+    + "Do not infer or claim to have inspected the image. Tell the user that this model cannot read "
+    + "images and ask them to provide the relevant content as text, run OCR/image conversion, or "
+    + "switch to a vision-capable model. Provider response: \(providerDetail)"
+  return Components.Schemas.ChatMessage(role: original.role, content: .case1(text))
+}
 
 func isContextLengthError(_ error: ScribeError) -> Bool {
   let detail: String

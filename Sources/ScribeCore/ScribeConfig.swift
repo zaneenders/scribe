@@ -12,6 +12,9 @@ public struct ScribeConfig: Sendable {
   public var reasoningEnabled: Bool?
   public var reasoningEffort: String?
   public var maxTokens: Int?
+  /// Retries per provider round on transient networking failures; `nil` uses the
+  /// default policy, `0` disables retrying.
+  public var maxRetries: Int?
   public init(
     agentModel: String,
     contextWindow: Int,
@@ -23,7 +26,8 @@ public struct ScribeConfig: Sendable {
     workingDirectory: String,
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
-    maxTokens: Int? = nil
+    maxTokens: Int? = nil,
+    maxRetries: Int? = nil
   ) {
     self.agentModel = agentModel
     self.contextWindow = contextWindow
@@ -36,5 +40,6 @@ public struct ScribeConfig: Sendable {
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEffort = reasoningEffort
     self.maxTokens = maxTokens
+    self.maxRetries = maxRetries
   }
 }

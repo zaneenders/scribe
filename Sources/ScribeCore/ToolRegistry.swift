@@ -122,30 +122,34 @@ public struct ToolRegistry: Sendable, ToolExecutor {
               ])
             return toolResult
           } catch {
+            let description = Self.errorDescription(error)
             logger.warning(
               "agent.tool.encode_failed",
               metadata: [
                 "tool": "\(name)",
                 "elapsed_ms": "\(elapsedMs)",
                 "args": "\(arguments.logSafe())",
-                "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+                "error": "\(description.logSafe())",
               ])
-            return ToolResult.text(Self.jsonError(String(describing: error)))
+            return Self.failureResult(
+              tool: name,
+              code: "result_encoding_failed",
+              description: description)
           }
         } catch is AgentTurnInterruptedError {
           throw AgentTurnInterruptedError()
         } catch {
-
           let elapsedMs = Int(start.duration(to: clock.now) / .milliseconds(1))
-          logger.trace(
-            "agent.tool.task.exited",
+          let description = Self.errorDescription(error)
+          logger.warning(
+            "agent.tool.failed",
             metadata: [
               "tool": "\(name)",
               "elapsed_ms": "\(elapsedMs)",
               "args": "\(arguments.logSafe())",
-              "error": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+              "error": "\(description.logSafe())",
             ])
-          return ToolResult.text(Self.jsonError(String(describing: error)))
+          return Self.failureResult(tool: name, code: "execution_failed", description: description)
         }
       }
     } catch is AgentTurnInterruptedError {
@@ -172,6 +176,18 @@ public struct ToolRegistry: Sendable, ToolExecutor {
 
   private static let jsonSerializationFallback =
     "{\"ok\":false,\"error\":\"tool result could not be encoded as JSON\"}"
+
+  private static func errorDescription(_ error: any Error) -> String {
+    (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+  }
+
+  static func failureResult(tool: String, code: String, description: String) -> ToolResult {
+    let message =
+      "Tool `\(tool)` failed (\(code)): \(description). "
+      + "The tool did not complete; do not assume its intended action occurred. "
+      + "Correct the arguments or use another available approach."
+    return ToolResult(text: jsonError(message), warnings: [message])
+  }
 
   public static func jsonError(_ text: String) -> String {
     let payload: [String: Any] = ["ok": false, "error": text]

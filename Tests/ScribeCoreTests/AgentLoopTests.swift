@@ -9,6 +9,14 @@ import Testing
 
 @testable import ScribeCore
 
+extension RetryPolicy {
+  /// Millisecond backoffs so retry tests stay fast.
+  static let fastTestPolicy = RetryPolicy(
+    maxRetries: 3,
+    initialDelay: .milliseconds(1),
+    maxDelay: .milliseconds(4))
+}
+
 private func withTimeout<T: Sendable>(
   seconds: Double,
   _ operation: @escaping @Sendable () async throws -> T
@@ -34,7 +42,8 @@ private func makeConfig(
   tools: [any ScribeTool] = [],
   temperature: Double = 0,
   maxToolRounds: Int = .max,
-  hooks: AgentLoopHooks = .default
+  hooks: AgentLoopHooks = .default,
+  retryPolicy: RetryPolicy = .fastTestPolicy
 ) -> AgentLoopConfig {
   let transport = ScriptedTransport(status: statusCode, chunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
@@ -47,7 +56,8 @@ private func makeConfig(
     temperature: temperature,
     maxToolRounds: maxToolRounds, workingDirectory: FilePath("/tmp"),
     reasoningEnabled: true,
-    hooks: hooks
+    hooks: hooks,
+    retryPolicy: retryPolicy
   )
 }
 
@@ -90,6 +100,14 @@ private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
   switch content {
   case .case1(let text): return text
   case .case2: return nil
+  }
+}
+
+private func isTestImageMessage(_ message: Components.Schemas.ChatMessage) -> Bool {
+  guard case .case2(let parts) = message.content else { return false }
+  return parts.contains { part in
+    if case .imageUrl = part { return true }
+    return false
   }
 }
 
@@ -357,7 +375,8 @@ struct AgentLoopTests {
       #expect(toolMessages.count >= 1)
       if let toolMsg = toolMessages.first {
         #expect(toolMsg.toolCallId == "c1")
-        #expect(stringContent(toolMsg)?.contains("unknown tool") == true)
+        #expect(stringContent(toolMsg)?.lowercased().contains("unknown tool") == true)
+        #expect(stringContent(toolMsg)?.contains("do not assume its intended action occurred") == true)
       }
     }
   }
@@ -590,7 +609,8 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 4)
     #expect(messages[2].role == .tool)
-    #expect(stringContent(messages[2])?.contains("ok") == true)
+    #expect(stringContent(messages[2])?.contains("Tool `failing_tool` failed (execution_failed)") == true)
+    #expect(stringContent(messages[2])?.contains("do not assume its intended action occurred") == true)
   }
 
   private struct AttachingTool: ScribeTool {
@@ -608,6 +628,115 @@ struct AgentLoopTests {
       _ = logger
       return Result()
     }
+  }
+
+  @Test func parallelToolResultsStayContiguousBeforeAttachments() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"image:0","type":"function","function":{"name":"attaching_tool","arguments":"{}"}},{"index":1,"id":"shell:1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let replyChunks = [
+      sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool(), FakeTool()], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: .default
+    )
+
+    let (messages, termination) = try await runLoop(
+      prompt: "inspect image and repo", config: config, abortNotifier: AbortNotifier())
+    expectTermination(termination, .completed)
+
+    #expect(messages.count == 6)
+    #expect(messages[1].role == .assistant)
+    #expect(messages[2].role == .tool)
+    #expect(messages[2].toolCallId == "image:0")
+    #expect(messages[3].role == .tool)
+    #expect(messages[3].toolCallId == "shell:1")
+    #expect(messages[4].role == .user)
+    guard case .case2 = messages[4].content else {
+      Issue.record("Expected the attachment user message after all parallel tool results")
+      return
+    }
+    #expect(messages[5].role == .assistant)
+  }
+
+  @Test func unsupportedImageInputIsReplacedWithTextAndRetried() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"attaching_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let unsupportedBody: HTTPBody.ByteChunk = ArraySlice(
+      #"{"error":{"message":"Failed to deserialize the JSON body into the target type: messages[4]: unknown variant `image_url`, expected `text` at line 45 column 3"}}"#
+        .utf8)
+    let recoveryChunks = [
+      sseChunk(#"{"id":"3","choices":[{"index":0,"delta":{"content":"continued without image"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 400, chunks: [unsupportedBody]),
+      ScriptedTransport.Response(status: 200, chunks: recoveryChunks),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool()], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "text-only-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: .default
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
+    let (messages, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { e in events.withLock { $0.append(e) } },
+      logger: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+
+    let recovered = events.withLock { $0 }.compactMap { e -> String? in
+      if case .lifecycle(.recovered(let reason)) = e { return reason }
+      return nil
+    }
+    #expect(recovered == ["provider rejected image input — replaced 1 attachment(s) with text"])
+    #expect(!messages.contains(where: isTestImageMessage))
+    let replacement = try #require(
+      messages.first { message in
+        message.role == .user && stringContent(message)?.contains("does not support image input") == true
+      })
+    #expect(stringContent(replacement)?.contains("tiny.png:") == true)
+    #expect(stringContent(replacement)?.contains("Do not infer or claim to have inspected") == true)
+    #expect(stringContent(replacement)?.contains("provide the relevant content as text") == true)
+    #expect(stringContent(replacement)?.contains("switch to a vision-capable model") == true)
+    #expect(messages.last?.role == .assistant)
+    #expect(messages.last.flatMap(stringContent) == "continued without image")
   }
 
   @Test func contextOverflowRecoversByRollingBackAttachments() async throws {
@@ -831,6 +960,8 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     let toolMsg = messages.first { $0.role == .tool }
     #expect(stringContent(toolMsg!)?.contains("denied by policy") == true)
+    #expect(stringContent(toolMsg!)?.contains("Tool `fake_tool` failed (blocked)") == true)
+    #expect(stringContent(toolMsg!)?.contains("do not assume its intended action occurred") == true)
   }
 
   @Test func afterToolCallCanTerminateLoop() async throws {
@@ -1063,6 +1194,196 @@ struct AgentLoopTests {
     #expect(json["reasoning_effort"] == nil)
     #expect(json["reasoning"] == nil)
     #expect(json["max_tokens"] == nil)
+  }
+
+  // MARK: - Transient failure retry
+
+  @Test func retriesTransientHTTPErrorWithBackoff() async throws {
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 429, chunks: [errorBody("engine overloaded")]),
+      ScriptedTransport.Response(status: 429, chunks: [errorBody("engine overloaded")]),
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
+          doneChunk(),
+        ]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
+    let (messages, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { event in events.withLock { $0.append(event) } },
+      logger: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+    #expect(messages.count == 2)
+    #expect(stringContent(messages[1]) == "reply")
+    #expect(transport.capturedRequests.count == 3)
+
+    let retries: [(attempt: Int, maxRetries: Int)] = events.withLock { $0 }.compactMap { event in
+      guard case .lifecycle(.retrying(let attempt, let maxRetries, _, _)) = event else { return nil }
+      return (attempt, maxRetries)
+    }
+    #expect(retries.count == 2)
+    #expect(retries[0].attempt == 1 && retries[0].maxRetries == 3)
+    #expect(retries[1].attempt == 2 && retries[1].maxRetries == 3)
+  }
+
+  @Test func retriesExhaustedPropagatesHTTPError() async throws {
+    let transport = ScriptedTransport(status: 429, chunks: [errorBody("engine overloaded")])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: RetryPolicy(
+        maxRetries: 2, initialDelay: .milliseconds(1), maxDelay: .milliseconds(4))
+    )
+    do {
+      _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
+      #expect(Bool(false), "expected error")
+    } catch let ScribeError.apiHTTPError(statusCode, _, _) {
+      #expect(statusCode == 429)
+    } catch {
+      #expect(Bool(false), "unexpected error: \(error)")
+    }
+    #expect(transport.capturedRequests.count == 3)
+  }
+
+  @Test func retriesTransportLevelFailure() async throws {
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(
+        status: 200, chunks: [], error: URLError(.networkConnectionLost)),
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
+          doneChunk(),
+        ]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    let (messages, termination) = try await runLoop(
+      prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    expectTermination(termination, .completed)
+    #expect(stringContent(messages[1]) == "reply")
+    #expect(transport.capturedRequests.count == 2)
+  }
+
+  @Test func doesNotRetryNonRetryableHTTPError() async throws {
+    let transport = ScriptedTransport(status: 401, chunks: [errorBody("unauthorized")])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    do {
+      _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
+      #expect(Bool(false), "expected error")
+    } catch let ScribeError.apiHTTPError(statusCode, _, _) {
+      #expect(statusCode == 401)
+    } catch {
+      #expect(Bool(false), "unexpected error: \(error)")
+    }
+    #expect(transport.capturedRequests.count == 1)
+  }
+
+  @Test func doesNotRetryAfterStreamOutputStarted() async throws {
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"}}]}"#)
+        ],
+        streamError: URLError(.networkConnectionLost)),
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"full"}}]}"#),
+          doneChunk(),
+        ]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
+    let (_, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { event in events.withLock { $0.append(event) } },
+      logger: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    // The round fails mid-stream; the error surfaces without replaying the round.
+    guard case .error = termination else {
+      #expect(Bool(false), "Expected error termination, got \(termination)")
+      return
+    }
+    #expect(transport.capturedRequests.count == 1)
+    let retryEvents = events.withLock { $0 }.contains { event in
+      if case .lifecycle(.retrying) = event { return true }
+      return false
+    }
+    #expect(!retryEvents)
   }
 
 }

@@ -13,6 +13,7 @@ public enum ScribeConfigBinding {
   public static let contextWindowThreshold = "agent.contextWindowThreshold"
   public static let reasoningEnabled = "agent.reasoning"
   public static let reasoningEffort = "agent.reasoningEffort"
+  public static let maxRetries = "agent.maxRetries"
   public static let loggingLevel = "logging.level"
 }
 
@@ -41,6 +42,7 @@ private struct ConfigManifest: Codable {
     var reasoning: Bool?
     var reasoningEffort: String?
     var maxTokens: Int?
+    var maxRetries: Int?
   }
   struct LoggingSection: Codable {
     var level: String
@@ -298,6 +300,14 @@ public enum ConfigLoader {
       )
     }
 
+    if let maxRetries = profile.agent.maxRetries, maxRetries < 0 {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.maxRetries,
+        reason:
+          "`\(ScribeConfigBinding.maxRetries)` must be 0 or greater for profile `\(profileName)`."
+      )
+    }
+
     let apiKeyTrimmed = profile.api.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     var resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
     let apiType = profile.api.type?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -345,7 +355,8 @@ public enum ConfigLoader {
       workingDirectory: ".",
       reasoningEnabled: profile.agent.reasoning,
       reasoningEffort: profile.agent.reasoningEffort,
-      maxTokens: profile.agent.maxTokens
+      maxTokens: profile.agent.maxTokens,
+      maxRetries: profile.agent.maxRetries
     )
     return LoadedConfig(
       scribeConfig: scribeConfig,
