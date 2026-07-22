@@ -188,6 +188,46 @@ func codexUserMessageWithImageOnly() {
 }
 
 @Test
+func codexMessageConversionSanitizesForeignToolCallIDs() {
+  // Regression: after switching models mid-session to the ChatGPT backend, the
+  // history can carry tool call IDs from another provider ("tool_..."). The
+  // backend 400s unless the function_call item ID begins with "fc".
+  let foreignID = "tool_3AXlpi3mBRnQCMzIr7HgDba0"
+  let assistantMsg = ScribeLLM.Components.Schemas.ChatMessage(
+    role: .assistant,
+    content: .case1("Let me check that file."),
+    toolCalls: [
+      ScribeLLM.Components.Schemas.AssistantToolCall(
+        id: foreignID,
+        _type: "function",
+        function: ScribeLLM.Components.Schemas.AssistantToolCall.FunctionPayload(
+          name: "read_file",
+          arguments: #"{}"#
+        )
+      )
+    ]
+  )
+  let toolMsg = ScribeLLM.Components.Schemas.ChatMessage(
+    role: .tool,
+    content: .case1("file contents"),
+    toolCallId: foreignID
+  )
+
+  let items = convertChatMessagesToCodexInput([assistantMsg, toolMsg])
+
+  guard let items, items.count == 3,
+    case .functionCall(let call) = items[1],
+    case .functionCallOutput(let output) = items[2]
+  else {
+    Issue.record("Expected assistant + functionCall + functionCallOutput items")
+    return
+  }
+  #expect(call.id?.hasPrefix("fc_") == true)
+  #expect(call.callId.hasPrefix("call_"))
+  #expect(output.callId == call.callId)
+}
+
+@Test
 func codexMessageConversionPreservesSystemAndToolMessages() {
   let systemMsg = ScribeLLM.Components.Schemas.ChatMessage(
     role: .system,

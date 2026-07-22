@@ -20,12 +20,36 @@ struct CodexToolCallIdentifiers: Equatable {
 
   init(encoded: String) {
     let parts = encoded.split(separator: Self.separator, maxSplits: 1, omittingEmptySubsequences: false)
-    callID = String(parts[0])
-    itemID = parts.count == 2 ? String(parts[1]) : encoded
+    if parts.count == 2 {
+      callID = String(parts[0])
+      itemID = String(parts[1])
+    } else {
+      // Foreign or legacy ID, e.g. left in the history by a non-Codex provider
+      // before a mid-session model switch. The ChatGPT backend requires item IDs
+      // beginning with "fc" and call IDs beginning with "call_"; derive both
+      // deterministically so the function_call and its function_call_output,
+      // which share this encoded ID, stay paired.
+      let cleaned = Self.sanitize(encoded)
+      callID = cleaned.hasPrefix("call_") ? cleaned : "call_" + cleaned
+      itemID = cleaned.hasPrefix("fc_") ? cleaned : "fc_" + cleaned
+    }
   }
 
   var encoded: String {
     "\(callID)\(Self.separator)\(itemID)"
+  }
+
+  private static func sanitize(_ id: String) -> String {
+    let cleaned = id.filter { char in
+      char == "_" || char == "-" || (char.isASCII && (char.isLetter || char.isNumber))
+    }
+    if !cleaned.isEmpty { return cleaned }
+    // Deterministic fallback (FNV-1a) so a call and its output still pair up.
+    var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+    for byte in id.utf8 {
+      hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+    }
+    return String(hash, radix: 16)
   }
 }
 
@@ -43,6 +67,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let reasoningEffort: String?
   let hooks: AgentLoopHooks
   let contextWindow: Int
+  let retryPolicy: RetryPolicy
 
   init(
     model: String,
@@ -54,7 +79,8 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
     hooks: AgentLoopHooks,
-    contextWindow: Int = 0
+    contextWindow: Int = 0,
+    retryPolicy: RetryPolicy = .default
   ) {
     self.model = model
     self.client = client
@@ -66,6 +92,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.reasoningEffort = reasoningEffort
     self.hooks = hooks
     self.contextWindow = contextWindow
+    self.retryPolicy = retryPolicy
   }
 }
 
@@ -88,11 +115,11 @@ func runCodexAgentLoop(
     emit: emit,
     logger: logger,
     abortObserver: abortObserver
-  ) { contextMessages, round in
+  ) { contextMessages, round, roundEmit in
     try await runSingleCodexRound(
       contextMessages: contextMessages,
       config: config,
-      emit: emit,
+      emit: roundEmit,
       logger: logger,
       round: round,
       abortObserver: abortObserver

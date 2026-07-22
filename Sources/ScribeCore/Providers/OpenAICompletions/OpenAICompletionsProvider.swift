@@ -9,6 +9,7 @@ struct OpenAICompletionsProvider: AgentProvider {
   let contextWindow: Int
   let requestProfile: ChatCompletionRequestProfile
   let maxCompletionTokens: Int?
+  var retryPolicy: RetryPolicy = .default
 
   func run(
     promptMessages: [Components.Schemas.ChatMessage],
@@ -33,7 +34,8 @@ struct OpenAICompletionsProvider: AgentProvider {
       hooks: .default,
       requestProfile: requestProfile,
       maxCompletionTokens: maxCompletionTokens,
-      contextWindow: contextWindow
+      contextWindow: contextWindow,
+      retryPolicy: retryPolicy
     )
 
     let task = Task<TurnResult, Error> {

@@ -20,6 +20,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let requestProfile: ChatCompletionRequestProfile
   let maxCompletionTokens: Int?
   let contextWindow: Int
+  let retryPolicy: RetryPolicy
 
   init(
     model: String,
@@ -33,7 +34,8 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     hooks: AgentLoopHooks,
     requestProfile: ChatCompletionRequestProfile = .standard,
     maxCompletionTokens: Int? = nil,
-    contextWindow: Int = 0
+    contextWindow: Int = 0,
+    retryPolicy: RetryPolicy = .default
   ) {
     self.model = model
     self.client = client
@@ -47,6 +49,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.requestProfile = requestProfile
     self.maxCompletionTokens = maxCompletionTokens
     self.contextWindow = contextWindow
+    self.retryPolicy = retryPolicy
   }
 }
 
@@ -69,11 +72,11 @@ func runAgentLoop(
     emit: emit,
     logger: logger,
     abortObserver: abortObserver
-  ) { contextMessages, round in
+  ) { contextMessages, round, roundEmit in
     try await runSingleRound(
       contextMessages: contextMessages,
       config: config,
-      emit: emit,
+      emit: roundEmit,
       logger: logger,
       round: round,
       abortObserver: abortObserver

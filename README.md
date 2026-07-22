@@ -113,6 +113,7 @@ Scribe uses the first profile by default; override with `--profile <name>`.
 | `agent.reasoning` | `false` | Enable reasoning/thinking tokens for models that support it |
 | `agent.reasoningEffort` | *(omitted)* | Reasoning effort: `"low"`, `"medium"`, or `"high"` |
 | `agent.maxTokens` | *(omitted)* | Max completion tokens; required for Kimi (4096 max) |
+| `agent.maxRetries` | `3` | Retries with exponential backoff on transient network failures (HTTP 429/5xx, dropped connections, timeouts); `0` disables |
 | `logging.level` | `"trace"` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
 
 > Scribe supports OpenAI-compatible `completions` APIs, plus `codex` (ChatGPT
