@@ -315,6 +315,8 @@ final class ScribeMacStore {
       usageText = parts.joined(separator: " | ")
     case .lifecycle(.error(let error)):
       transcript.append(TranscriptItem(kind: .error, title: "Error", text: error.localizedDescription))
+    case .lifecycle(.retrying(let attempt, let maxRetries, let delay, let reason)):
+      transcript.append(TranscriptItem(kind: .warning, title: "Retrying", text: "\(reason) (attempt \(attempt)/\(maxRetries), delay: \(String(format: "%.1f", Double(delay.components.seconds) + Double(delay.components.attoseconds) / 1e18))s)"))
     case .lifecycle(.interrupted):
       break
     case .lifecycle(.recovered(let reason)):
