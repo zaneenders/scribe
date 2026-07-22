@@ -178,7 +178,10 @@ final class ScribeMacStore {
       transcript.append(TranscriptItem(kind: .error, title: "Error", text: message))
       runTask = nil
     }
-    transcriptScroll.scrollToBottom()
+    // The transcript ScrollView's sticksToBottom behavior follows new content
+    // only when it was already at the bottom. Do not enqueue an unconditional
+    // controller request here: streaming events would otherwise override a
+    // user's attempt to scroll back through the response.
   }
 
   private func reduce(_ event: AgentEvent) {
