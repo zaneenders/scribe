@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
+import ScribeKit
 import SlateCore
 import Subprocess
 import Synchronization
@@ -299,7 +300,7 @@ internal final class SlateChatHost {
 
             case .enter:
               if self.inPaste {
-                if self.editMode == .edit { self.inputBuffer.append("\n") }
+                self.inputBuffer.append("\n")
               } else if self.editMode == .read {
                 self.logger.debug(
                   "chat.mode.to-edit",
@@ -397,7 +398,7 @@ internal final class SlateChatHost {
               self.viewport.queueGoToBottom()
 
             case .shiftEnter:
-              if self.editMode == .edit { self.inputBuffer.append("\n") }
+              if self.inPaste || self.editMode == .edit { self.inputBuffer.append("\n") }
               self.logger.debug(
                 "chat.user.input.shift-enter",
                 metadata: [
@@ -408,7 +409,7 @@ internal final class SlateChatHost {
                 ])
 
             case .character(let ch):
-              if self.editMode == .edit { self.inputBuffer.append(ch) }
+              if self.inPaste || self.editMode == .edit { self.inputBuffer.append(ch) }
 
             case .backspace:
               if !self.inPaste, self.editMode == .edit, !self.inputBuffer.isEmpty {
@@ -416,7 +417,7 @@ internal final class SlateChatHost {
               }
 
             case .tab:
-              if self.editMode == .edit { self.inputBuffer.append("    ") }
+              if self.inPaste || self.editMode == .edit { self.inputBuffer.append("    ") }
             }
           }
 
@@ -713,7 +714,7 @@ internal final class SlateChatHost {
 
   private func recordSteeringPopDispatch(poppedText: String) {
     let pendingBeforePop = messageQueues.steeringCount()
-    let index = max(1, queueBatchTotal - pendingBeforePop + 1)
+    let index = max(1, queueBatchTotal - pendingBeforePop)
     queueBatchTotal = max(queueBatchTotal, pendingBeforePop + index - 1)
     queueTrayDispatch = QueuedTraySnapshot.ActiveDispatch(
       index: index,

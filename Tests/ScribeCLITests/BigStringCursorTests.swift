@@ -2,6 +2,7 @@ import Testing
 import _RopeModule
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 @Suite
 struct BigStringCursorTests {

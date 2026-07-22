@@ -29,9 +29,19 @@ mkdir -p ~/.local/bin
 mkdir -p ~/.scribe
 git clone https://github.com/zaneenders/scribe.git ~/.scribe/scribe
 cd ~/.scribe/scribe
+
+# CLI
 swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
+
+# Mac app (double-clickable, installable in /Applications)
+swift package --allow-writing-to-package-directory bundle
+cp -R dist/Scribe.app /Applications/
 ```
+
+Launch the GUI from Finder, Spotlight, or `open -a Scribe`. The bundle also
+embeds the CLI at `Scribe.app/Contents/Helpers/scribe` if you prefer a single
+install artifact over a separate `~/.local/bin/scribe`.
 
 ### Linux
 

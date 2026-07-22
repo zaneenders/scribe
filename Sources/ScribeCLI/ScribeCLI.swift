@@ -3,6 +3,7 @@ import Foundation
 import ProfileRecorderServer
 import ScribeCodexAuth
 import ScribeCore
+import ScribeKit
 import SystemPackage
 
 enum LoginProvider: String, ExpressibleByArgument {
@@ -108,30 +109,8 @@ enum LoginProvider: String, ExpressibleByArgument {
     try ShellCaptureDirectory.setup(dataHome: loaded.paths.dataHomePath)
     defer { ShellCaptureDirectory.teardown() }
 
-    let tools: [any ScribeTool] = [
-      ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool(),
-    ]
-    let toolNames = tools.map { type(of: $0).name }.joined(separator: ", ")
-    let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
-
-    let systemPrompt = """
-      You are Scribe, a coding agent CLI with shell and file tools.
-
-      Prefer doing over asking use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don't ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never "should I look at X?" instead of opening X.
-
-      Git: use `shell` for normal inspection (`git status`, `git diff`, `git log`, branches). Avoid destructive git operations (force push, hard reset, branch deletion) unless the user explicitly requests them.
-
-      Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
-
-      Tool names must match exactly: \(toolNames).
-      Parallel tool calls are fine when they do not depend on each other's outputs.
-
-      \(toolHints)
-
-      Scribe's configuration, logs, and sessions live under `~/.scribe/` by default.  If asked to modify or rebuild Scribe itself, clone the source into `~/.scribe/scribe/` from https://github.com/zaneenders/scribe.
-
-      Current working directory (relative paths resolve here): \(cwd)
-      """
+    let tools = ScribeSystemPrompt.defaultTools()
+    let systemPrompt = ScribeSystemPrompt.make(tools: tools, cwd: cwd)
 
     let scribeConfig = ScribeConfig(
       agentModel: loaded.scribeConfig.agentModel,

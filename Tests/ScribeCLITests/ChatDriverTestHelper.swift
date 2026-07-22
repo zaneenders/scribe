@@ -2,6 +2,7 @@ import Foundation
 import ScribeCore
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 struct ChatDriver {
   var state: TranscriptState

@@ -1,4 +1,4 @@
-enum SubmitEffect: Equatable, Sendable {
+public enum SubmitEffect: Equatable, Sendable {
 
   case sendToGate(String)
   case popAndSendToGate
@@ -16,9 +16,9 @@ enum SubmitEffect: Equatable, Sendable {
   case none
 }
 
-enum SubmitCoordinator {
+public enum SubmitCoordinator {
 
-  static func handleEnter(
+  public static func handleEnter(
     text: String,
     modelBusy: Bool,
     steeringQueueCount: Int,
@@ -46,7 +46,7 @@ enum SubmitCoordinator {
     return .sendToGate(text)
   }
 
-  static func handleFollowUpSubmit(
+  public static func handleFollowUpSubmit(
     text: String,
     modelBusy: Bool
   ) -> SubmitEffect {
@@ -58,7 +58,7 @@ enum SubmitCoordinator {
     return .sendToGate(text)
   }
 
-  static func handleCtrlC(
+  public static func handleCtrlC(
     steeringQueueCount: Int,
     modelBusy: Bool
   ) -> SubmitEffect {
