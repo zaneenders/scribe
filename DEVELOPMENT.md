@@ -44,9 +44,10 @@ No `sudo`, no `CAP_SYS_PTRACE`, no restart needed.
 
 ### Setup
 
-The profiler starts when `PROFILE_RECORDER_SERVER_URL_PATTERN` is set at
-launch time. It binds a tiny HTTP server on a UNIX domain socket. Without
-the env var, there is zero overhead.
+The mac executable starts the profiler automatically in debug builds, using
+`/tmp/scribe-mac-{PID}.sock`. The CLI starts it when
+`PROFILE_RECORDER_SERVER_URL_PATTERN` is set at launch time. Release builds do
+not start it unless that variable is set.
 
 ```bash
 PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' scribe
@@ -57,9 +58,11 @@ the environment variable:
 
 ```bash
 swift build --product scribe-mac
-PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-mac-{PID}.sock' \
-  .build/debug/scribe-mac
+.build/debug/scribe-mac
 ```
+
+Set `PROFILE_RECORDER_SERVER_URL_PATTERN` only when you want to override the
+default debug socket path.
 
 The CLI and mac executable both include frame pointers, so release-mode
 profiling is also available when needed.

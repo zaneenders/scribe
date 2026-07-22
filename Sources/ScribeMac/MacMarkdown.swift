@@ -281,6 +281,192 @@ func layoutMarkdown(
 
 // MARK: - Blocks
 
+/// The computed layout of a MarkdownText block for one frame, cached for
+/// hit testing and text extraction by the selection system.
+struct MarkdownLayout {
+  var lines: [VisualLine]
+  var lineHeight: Float
+  var cellWidth: Float
+  var scale: Float
+  /// The screen rect where this block was drawn (in the window's coordinate space).
+  var rect: Rect = .zero
+
+  /// Returns the (line index, column) for a point in window coordinates,
+  /// or nil if the point is outside this block.
+  func hitTest(point: Point) -> (line: Int, column: Int)? {
+    guard rect.contains(point) else { return nil }
+    let lineIndex = Int((point.y - rect.minY) / lineHeight)
+    guard lineIndex >= 0, lineIndex < lines.count else { return nil }
+    let line = lines[lineIndex]
+    let xOffset = point.x - rect.minX
+    var col = 0
+    var runX: Float = 0
+    for run in line.runs {
+      let runWidth = Float(run.text.count) * cellWidth
+      if xOffset < runX + runWidth {
+        col += Int((xOffset - runX) / cellWidth)
+        return (lineIndex, min(col, line.columnCount))
+      }
+      runX += runWidth
+      col += run.text.count
+    }
+    return (lineIndex, line.columnCount)
+  }
+
+  /// Extracts the text in the given range (line, column) → (line, column).
+  /// Ranges are clamped to valid bounds. The end is exclusive.
+  func textInRange(from start: (line: Int, column: Int), to end: (line: Int, column: Int)) -> String {
+    guard !lines.isEmpty else { return "" }
+    let sl = max(0, min(start.line, lines.count - 1))
+    let el = max(0, min(end.line, lines.count - 1))
+    if sl > el || (sl == el && start.column >= end.column) { return "" }
+
+    var result = ""
+    for li in sl...el {
+      let line = lines[li]
+      let sc = (li == sl) ? max(0, min(start.column, line.columnCount)) : 0
+      let ec = (li == el) ? max(0, min(end.column, line.columnCount)) : line.columnCount
+      if sc < ec {
+        var col = 0
+        for run in line.runs {
+          let runEnd = col + run.text.count
+          if runEnd <= sc {
+            col = runEnd
+            continue
+          }
+          if col >= ec { break }
+          let rs = max(0, sc - col)
+          let re = min(run.text.count, ec - col)
+          if rs < re {
+            let startIdx = run.text.index(run.text.startIndex, offsetBy: rs)
+            let endIdx = run.text.index(run.text.startIndex, offsetBy: re)
+            result += run.text[startIdx..<endIdx]
+          }
+          col = runEnd
+        }
+      }
+      // A range crossing a visual line boundary includes its newline, even
+      // when either side lands exactly at a line edge or the line is empty.
+      if li < el { result += "\n" }
+    }
+    return result
+  }
+
+  /// Draws the layout into `drawList`, optionally highlighting a selection range.
+  func draw(into drawList: inout DrawList, selection: (start: (line: Int, column: Int), end: (line: Int, column: Int))?, theme: MacTheme) {
+    let sel: (start: (line: Int, column: Int), end: (line: Int, column: Int))?
+    if let selection {
+      if selection.start.line < selection.end.line
+        || (selection.start.line == selection.end.line
+          && selection.start.column <= selection.end.column)
+      {
+        sel = selection
+      } else {
+        sel = (selection.end, selection.start)
+      }
+    } else {
+      sel = nil
+    }
+    for (index, line) in lines.enumerated() {
+      let y = rect.minY + Float(index) * lineHeight
+      if case .code = line.kind {
+        drawList.fillRect(
+          Rect(x: rect.minX, y: y, width: rect.size.width, height: lineHeight),
+          color: theme.codeBackground)
+      }
+      if let sel {
+        let sl = sel.start.line, el = sel.end.line
+        if index >= sl && index <= el {
+          let sc = (index == sl) ? sel.start.column : 0
+          let ec = (index == el) ? sel.end.column : line.columnCount
+          if sc < ec {
+            // Draw selection background behind the selected text portion
+            let selX = rect.minX + Float(sc) * cellWidth
+            let selW = Float(ec - sc) * cellWidth
+            drawList.fillRect(
+              Rect(x: selX, y: y, width: selW, height: lineHeight),
+              color: theme.accent)
+          }
+        }
+      }
+      var x = rect.minX
+      var column = 0
+      for run in line.runs {
+        let runEnd = column + run.text.count
+        let selectedColumns: Range<Int>?
+        if let sel, index >= sel.start.line, index <= sel.end.line {
+          let selectionStart = (index == sel.start.line) ? sel.start.column : 0
+          let selectionEnd = (index == sel.end.line) ? sel.end.column : line.columnCount
+          let overlapStart = max(column, selectionStart)
+          let overlapEnd = min(runEnd, selectionEnd)
+          selectedColumns = overlapStart < overlapEnd ? overlapStart..<overlapEnd : nil
+        } else {
+          selectedColumns = nil
+        }
+
+        if let selectedColumns {
+          let selectedStart = selectedColumns.lowerBound - column
+          let selectedEnd = selectedColumns.upperBound - column
+          let firstIndex = run.text.index(run.text.startIndex, offsetBy: selectedStart)
+          let secondIndex = run.text.index(run.text.startIndex, offsetBy: selectedEnd)
+          let prefix = String(run.text[..<firstIndex])
+          let selectedText = String(run.text[firstIndex..<secondIndex])
+          let suffix = String(run.text[secondIndex...])
+          if !prefix.isEmpty {
+            drawList.text(prefix, at: Point(x: x, y: y), color: run.color, scale: scale)
+          }
+          let selectedX = x + Float(selectedStart) * cellWidth
+          drawList.text(
+            selectedText, at: Point(x: selectedX, y: y), color: theme.background, scale: scale)
+          if !suffix.isEmpty {
+            let suffixX = x + Float(selectedEnd) * cellWidth
+            drawList.text(suffix, at: Point(x: suffixX, y: y), color: run.color, scale: scale)
+          }
+        } else {
+          drawList.text(run.text, at: Point(x: x, y: y), color: run.color, scale: scale)
+        }
+        x += Float(run.text.count) * cellWidth
+        column = runEnd
+      }
+    }
+  }
+}
+
+/// A per-frame registry of MarkdownLayouts, populated during draw and
+/// queried for hit testing during drag selection.
+@MainActor
+enum MarkdownLayoutRegistry {
+  private static var layouts: [WidgetID: MarkdownLayout] = [:]
+
+  static func register(_ id: WidgetID, layout: MarkdownLayout) {
+    layouts[id] = layout
+  }
+
+  static func layout(for id: WidgetID) -> MarkdownLayout? {
+    layouts[id]
+  }
+
+  /// Returns the layout whose rect contains the given point, or nil.
+  static func layout(at point: Point) -> MarkdownLayout? {
+    for (_, layout) in layouts {
+      if layout.rect.contains(point) { return layout }
+    }
+    return nil
+  }
+
+  /// Returns the layout with the given rect, or nil.
+  static func layout(withRect rect: Rect) -> MarkdownLayout? {
+    for (_, layout) in layouts {
+      if layout.rect == rect { return layout }
+    }
+    return nil
+  }
+
+  static func clear() {
+    layouts.removeAll()
+  }
+}
+
 /// A markdown source string rendered as wrapped, colored runs inside the
 /// width the layout engine proposes.
 struct MarkdownText: PrimitiveBlock {
@@ -289,6 +475,9 @@ struct MarkdownText: PrimitiveBlock {
   var baseColor: Color
   var scale: Float = 2
   var lineSpacing: Float = 4
+  /// Optional stable ID for this block, used to register its layout for
+  /// hit testing and text selection.
+  var itemID: WidgetID? = nil
 
   private func lines(forWidth width: Float) -> [VisualLine] {
     let metrics = FontMetrics()
@@ -312,19 +501,15 @@ struct MarkdownText: PrimitiveBlock {
     let cellWidth = metrics.cellAdvance * scale
     let lineHeight = metrics.lineAdvance * scale + lineSpacing
     let laidOut = lines(forWidth: rect.size.width)
-    for (index, line) in laidOut.enumerated() {
-      let y = rect.minY + Float(index) * lineHeight
-      if case .code = line.kind {
-        drawList.fillRect(
-          Rect(x: rect.minX, y: y, width: rect.size.width, height: lineHeight),
-          color: theme.codeBackground)
-      }
-      var x = rect.minX
-      for run in line.runs {
-        drawList.text(run.text, at: Point(x: x, y: y), color: run.color, scale: scale)
-        x += Float(run.text.count) * cellWidth
-      }
+    let layout = MarkdownLayout(
+      lines: laidOut, lineHeight: lineHeight, cellWidth: cellWidth,
+      scale: scale, rect: rect)
+    if let id = itemID {
+      MarkdownLayoutRegistry.register(id, layout: layout)
     }
+    // Check for a selection that overlaps this block
+    let selection = SelectionManager.shared.selection(for: layout)
+    layout.draw(into: &drawList, selection: selection, theme: theme)
   }
 }
 
@@ -335,8 +520,109 @@ struct WrappedText: Block {
   var theme: MacTheme
   var color: Color
   var scale: Float = 2
+  /// Optional stable ID for this block, used to register its layout for
+  /// hit testing and text selection.
+  var itemID: WidgetID? = nil
 
   var body: MarkdownText {
-    MarkdownText(markdown: text, theme: theme, baseColor: color, scale: scale)
+    MarkdownText(markdown: text, theme: theme, baseColor: color, scale: scale, itemID: itemID)
+  }
+}
+
+// MARK: - Selection Manager
+
+/// Tracks text selection across frames. Reads drag state from Interaction
+/// and maps it to text positions using the MarkdownLayoutRegistry.
+@MainActor
+final class SelectionManager {
+  static let shared = SelectionManager()
+
+  /// The rect of the layout where the selection originated.
+  private var originLayoutRect: Rect? = nil
+  private(set) var selectionStart: (line: Int, column: Int)?
+  private(set) var selectionEnd: (line: Int, column: Int)?
+  /// Whether a drag is in progress (selection is being extended).
+  var isSelecting: Bool = false
+
+  private init() {}
+
+  /// Call at the start of each frame to update selection from drag state.
+  func updateFromDrag() {
+    let interaction = Interaction.current
+    guard interaction.isDragging else {
+      if isSelecting {
+        isSelecting = false
+      }
+      return
+    }
+
+    if !isSelecting {
+      isSelecting = true
+      originLayoutRect = nil
+      selectionStart = nil
+      selectionEnd = nil
+    }
+
+    guard let origin = interaction.dragOrigin else { return }
+    let current = interaction.dragCurrent
+
+    if originLayoutRect == nil {
+      // First drag frame — find the layout under the origin
+      if let layout = MarkdownLayoutRegistry.layout(at: origin),
+        let hit = layout.hitTest(point: origin)
+      {
+        originLayoutRect = layout.rect
+        selectionStart = hit
+      }
+    }
+
+    guard let layoutRect = originLayoutRect else { return }
+    guard let layout = MarkdownLayoutRegistry.layout(withRect: layoutRect),
+      selectionStart != nil else { return }
+
+    if let endHit = layout.hitTest(point: current) {
+      selectionEnd = endHit
+    } else if current.y > layout.rect.maxY {
+      selectionEnd = (layout.lines.count - 1, layout.lines.last?.columnCount ?? 0)
+    } else if current.y < layout.rect.minY {
+      selectionEnd = (0, 0)
+    }
+  }
+
+  /// Returns the normalized selection range if it overlaps the given layout,
+  /// or nil. Normalized means start <= end.
+  func selection(for layout: MarkdownLayout) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
+    guard let rect = originLayoutRect, rect == layout.rect else { return nil }
+    guard let start = selectionStart, let end = selectionEnd else { return nil }
+    if start.line < end.line || (start.line == end.line && start.column <= end.column) {
+      return (start, end)
+    }
+    return (end, start)
+  }
+
+  /// Returns the currently selected text, or nil if nothing is selected.
+  func selectedText() -> String? {
+    guard let rect = originLayoutRect,
+      let start = selectionStart,
+      let end = selectionEnd else { return nil }
+
+    guard let layout = MarkdownLayoutRegistry.layout(withRect: rect) else { return nil }
+
+    let s: (line: Int, column: Int)
+    let e: (line: Int, column: Int)
+    if start.line < end.line || (start.line == end.line && start.column <= end.column) {
+      s = start; e = end
+    } else {
+      s = end; e = start
+    }
+    return layout.textInRange(from: s, to: e)
+  }
+
+  /// Clears the selection.
+  func clear() {
+    originLayoutRect = nil
+    selectionStart = nil
+    selectionEnd = nil
+    isSelecting = false
   }
 }

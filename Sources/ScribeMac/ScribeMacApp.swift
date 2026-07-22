@@ -1,4 +1,5 @@
 import Chroma
+import Foundation
 import Logging
 import MetalBackend
 import ProfileRecorderServer
@@ -18,6 +19,18 @@ struct ScribeMacApp: MetalApp {
     let profileRecorderTask = Task.detached {
       let logger = Logger(label: "scribe.mac.profile-recorder")
       do {
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        if environment["PROFILE_RECORDER_SERVER_URL"] == nil
+          && environment["PROFILE_RECORDER_SERVER_URL_PATTERN"] == nil
+        {
+          setenv(
+            "PROFILE_RECORDER_SERVER_URL_PATTERN",
+            "unix:///tmp/scribe-mac-{PID}.sock",
+            0
+          )
+        }
+        #endif
         let configuration = try await ProfileRecorderServerConfiguration.parseFromEnvironment()
         await ProfileRecorderServer(configuration: configuration).runIgnoringFailures(logger: logger)
       } catch {
@@ -41,6 +54,20 @@ struct ScribeMacRoot: Block {
   let theme = MacTheme()
 
   @MainActor var body: some Block {
+    let interaction = Interaction.current
+    // Hit testing uses the layouts retained from the preceding frame. Update
+    // the selection before clearing the registry for this frame's draw pass.
+    if interaction.input.pointerPressed {
+      SelectionManager.shared.clear()
+    }
+    SelectionManager.shared.updateFromDrag()
+    MarkdownLayoutRegistry.clear()
+
+    // Handle Cmd+C copy
+    interaction.onCopy = {
+      SelectionManager.shared.selectedText()
+    }
+
     store.applyPendingFocus()
     return VStack(spacing: 0, alignment: .leading) {
       header
@@ -188,9 +215,12 @@ struct TranscriptItemBlock: Block {
           .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
       } else if item.kind == .answer || item.kind == .reasoning {
         MarkdownText(
-          markdown: item.text, theme: theme, baseColor: bodyColor, scale: theme.textScale)
+          markdown: item.text, theme: theme, baseColor: bodyColor,
+          scale: theme.textScale, itemID: item.layoutID)
       } else {
-        WrappedText(text: item.text, theme: theme, color: bodyColor, scale: theme.textScale)
+        WrappedText(
+          text: item.text, theme: theme, color: bodyColor,
+          scale: theme.textScale, itemID: item.layoutID)
       }
     }
     .padding(theme.panelPadding)
