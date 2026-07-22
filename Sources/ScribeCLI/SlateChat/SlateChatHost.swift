@@ -714,7 +714,7 @@ internal final class SlateChatHost {
 
   private func recordSteeringPopDispatch(poppedText: String) {
     let pendingBeforePop = messageQueues.steeringCount()
-    let index = max(1, queueBatchTotal - pendingBeforePop + 1)
+    let index = max(1, queueBatchTotal - pendingBeforePop)
     queueBatchTotal = max(queueBatchTotal, pendingBeforePop + index - 1)
     queueTrayDispatch = QueuedTraySnapshot.ActiveDispatch(
       index: index,

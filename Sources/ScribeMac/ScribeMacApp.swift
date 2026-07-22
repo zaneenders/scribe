@@ -96,18 +96,7 @@ struct ScribeMacRoot: Block {
         .padding(theme.margin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       case .ready:
-        // A switch branch is represented as one TupleBlock child by BlockBuilder.
-        // Give the ready-state regions their own stack so they are laid out
-        // vertically instead of all being drawn into the same rectangle.
-        VStack(spacing: 0, alignment: .leading) {
-          transcript
-          if !store.queuedTexts.isEmpty {
-            queuedTray
-          }
-          composer
-          status
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        ReadyLayout(store: store, theme: theme)
       }
     }
     .background(theme.background)
@@ -182,8 +171,26 @@ struct ScribeMacRoot: Block {
     .background(theme.headerBackground)
     .border(theme.border)
   }
+}
 
-  @MainActor private var transcript: some Block {
+private struct ReadyLayout: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
+    VStack(spacing: 0, alignment: .leading) {
+      TranscriptView(store: store, theme: theme)
+      BottomChrome(store: store, theme: theme)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+}
+
+private struct TranscriptView: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
     let rows: [LazyVStack.Row]
     if store.transcript.isEmpty {
       rows = [LazyVStack.Row(
@@ -195,7 +202,7 @@ struct ScribeMacRoot: Block {
             theme: theme, color: theme.textSecondary)
         }
         .padding(theme.panelPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
       )]
     } else {
       rows = store.transcript.map { item in
@@ -205,7 +212,7 @@ struct ScribeMacRoot: Block {
             .padding(EdgeInsets(
               top: theme.spacing / 2, leading: theme.margin,
               bottom: theme.spacing / 2, trailing: theme.margin))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         )
       }
     }
@@ -216,8 +223,29 @@ struct ScribeMacRoot: Block {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(theme.panelBackground)
   }
+}
 
-  @MainActor private var composer: some Block {
+private struct BottomChrome: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
+    VStack(spacing: 0, alignment: .leading) {
+      if !store.queuedTexts.isEmpty {
+        QueuedTray(store: store, theme: theme)
+      }
+      ComposerBar(store: store, theme: theme)
+      StatusBar(store: store, theme: theme)
+    }
+    .frame(maxWidth: .infinity, alignment: .topLeading)
+  }
+}
+
+private struct ComposerBar: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
     HStack(spacing: 8) {
       TextField(
         store.isRunning ? "Queue a message..." : "Message Scribe",
@@ -235,12 +263,17 @@ struct ScribeMacRoot: Block {
       }
     }
     .padding(theme.margin)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
     .background(theme.composerBackground)
     .border(theme.border)
   }
+}
 
-  @MainActor private var queuedTray: some Block {
+private struct QueuedTray: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
     let queued = store.queuedTexts
     return VStack(spacing: 4, alignment: .leading) {
       HStack(spacing: 8) {
@@ -260,7 +293,7 @@ struct ScribeMacRoot: Block {
       }
     }
     .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
     .background(theme.statusBackground)
     .border(theme.border)
   }
@@ -270,8 +303,13 @@ struct ScribeMacRoot: Block {
     guard flat.count > limit else { return flat }
     return String(flat.prefix(limit - 3)) + "..."
   }
+}
 
-  @MainActor private var status: some Block {
+private struct StatusBar: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
     HStack(spacing: 10) {
       Text(store.isRunning ? "WORKING" : "READY")
         .fontScale(theme.smallScale)
@@ -289,8 +327,8 @@ struct ScribeMacRoot: Block {
       }
     }
     .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
-    .frame(height: theme.statusHeight, alignment: .leading)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(height: theme.statusHeight, alignment: .topLeading)
+    .frame(maxWidth: .infinity, alignment: .topLeading)
     .background(theme.statusBackground)
   }
 }
