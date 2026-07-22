@@ -26,6 +26,9 @@ enum AgentProviderFactory {
         reason: "Invalid serverURL: \(configuration.serverURL)")
     }
 
+    let retryPolicy =
+      configuration.maxRetries.map { RetryPolicy(maxRetries: $0) } ?? .default
+
     switch configuration.apiType {
     case "codex":
       return CodexProvider(
@@ -33,7 +36,8 @@ enum AgentProviderFactory {
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEffort: configuration.reasoningEffort,
-        contextWindow: configuration.contextWindow)
+        contextWindow: configuration.contextWindow,
+        retryPolicy: retryPolicy)
 
     case "kimi":
       let transport = try KimiK3Support.resolveTransport(
@@ -62,7 +66,8 @@ enum AgentProviderFactory {
         reasoningEnabled: configuration.reasoningEnabled,
         contextWindow: configuration.contextWindow,
         requestProfile: profile,
-        maxCompletionTokens: configuration.maxTokens)
+        maxCompletionTokens: configuration.maxTokens,
+        retryPolicy: retryPolicy)
 
     default:
       return OpenAICompletionsProvider(
@@ -73,7 +78,8 @@ enum AgentProviderFactory {
         reasoningEnabled: configuration.reasoningEnabled,
         contextWindow: configuration.contextWindow,
         requestProfile: .standard,
-        maxCompletionTokens: nil)
+        maxCompletionTokens: nil,
+        retryPolicy: retryPolicy)
     }
   }
 }

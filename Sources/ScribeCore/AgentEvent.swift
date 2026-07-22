@@ -44,6 +44,10 @@ public enum AgentEvent: Sendable {
     case interrupted
 
     case recovered(reason: String)
+
+    /// A transient networking failure is being retried after `delay`. `attempt` is the
+    /// 1-based retry number and `maxRetries` the configured ceiling.
+    case retrying(attempt: Int, maxRetries: Int, delay: Duration, reason: String)
   }
 
   public enum Boundary: Sendable {

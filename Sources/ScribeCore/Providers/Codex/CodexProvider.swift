@@ -16,6 +16,7 @@ struct CodexProvider: AgentProvider {
   let reasoningEnabled: Bool?
   let reasoningEffort: String?
   let contextWindow: Int
+  var retryPolicy: RetryPolicy = .default
 
   func run(
     promptMessages: [ScribeLLM.Components.Schemas.ChatMessage],
@@ -60,7 +61,8 @@ struct CodexProvider: AgentProvider {
         reasoningEnabled: reasoningEnabled,
         reasoningEffort: reasoningEffort,
         hooks: .default,
-        contextWindow: contextWindow
+        contextWindow: contextWindow,
+        retryPolicy: retryPolicy
       )
 
       do {

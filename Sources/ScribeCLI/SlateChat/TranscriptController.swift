@@ -132,6 +132,18 @@ struct TranscriptController {
         ]))
       return Effects(needsRender: true)
 
+    case .lifecycle(.retrying(let attempt, let maxRetries, let delay, let reason)):
+      let delaySeconds =
+        Double(delay.components.seconds) + Double(delay.components.attoseconds) / 1_000_000_000_000_000_000
+      let delayText = String(format: "%.1f", delaySeconds)
+      state.lines.append(
+        TLine(spans: [
+          StyledSpan(
+            fg: theme.warningFG, bg: theme.background, bold: false,
+            text: "(network failure — retry \(attempt)/\(maxRetries) in \(delayText)s: \(reason))")
+        ]))
+      return Effects(needsRender: true)
+
     case .boundary:
       return Effects()
     }

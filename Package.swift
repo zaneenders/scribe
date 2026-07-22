@@ -101,7 +101,9 @@ let package = Package(
         .product(name: "Configuration", package: "swift-configuration"),
         .product(name: "Subprocess", package: "swift-subprocess"),
         .product(name: "Logging", package: "swift-log"),
+        .product(name: "NIOCore", package: "swift-nio"),
         .product(name: "_NIOFileSystem", package: "swift-nio"),
+        .product(name: "AsyncHTTPClient", package: "async-http-client"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
