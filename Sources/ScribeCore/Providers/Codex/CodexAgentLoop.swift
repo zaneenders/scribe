@@ -67,6 +67,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let reasoningEffort: String?
   let hooks: AgentLoopHooks
   let contextWindow: Int
+  let retryPolicy: RetryPolicy
 
   init(
     model: String,
@@ -78,7 +79,8 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
     hooks: AgentLoopHooks,
-    contextWindow: Int = 0
+    contextWindow: Int = 0,
+    retryPolicy: RetryPolicy = .default
   ) {
     self.model = model
     self.client = client
@@ -90,6 +92,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.reasoningEffort = reasoningEffort
     self.hooks = hooks
     self.contextWindow = contextWindow
+    self.retryPolicy = retryPolicy
   }
 }
 
@@ -112,11 +115,11 @@ func runCodexAgentLoop(
     emit: emit,
     logger: logger,
     abortObserver: abortObserver
-  ) { contextMessages, round in
+  ) { contextMessages, round, roundEmit in
     try await runSingleCodexRound(
       contextMessages: contextMessages,
       config: config,
-      emit: emit,
+      emit: roundEmit,
       logger: logger,
       round: round,
       abortObserver: abortObserver

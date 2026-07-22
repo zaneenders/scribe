@@ -1,6 +1,8 @@
 import Foundation
 import Logging
+import OpenAPIRuntime
 import ScribeLLM
+import Synchronization
 import SystemPackage
 
 // MARK: - Shared Types
@@ -21,6 +23,7 @@ protocol AgentLoopConfigFields: Sendable {
   var workingDirectory: FilePath { get }
   var hooks: AgentLoopHooks { get }
   var contextWindow: Int { get }
+  var retryPolicy: RetryPolicy { get }
 }
 
 /// The result of a single provider round trip: the assistant message to commit and how
@@ -39,9 +42,10 @@ enum RoundOutcome: Sendable, Equatable {
 // MARK: - Agent Loop Core
 
 /// Runs the provider-neutral agent orchestration: prompt injection, per-round request
-/// budget enforcement, abort checks, context-overflow recovery, tool dispatch with
-/// hooks, and attachment injection. Providers supply only `runRound`, which performs a
-/// single HTTP round trip and stream decode.
+/// budget enforcement, abort checks, context-overflow recovery, transient-failure
+/// retries with backoff, tool dispatch with hooks, and attachment injection. Providers
+/// supply only `runRound`, which performs a single HTTP round trip and stream decode,
+/// reporting progress through the supplied per-attempt `emit` sink.
 ///
 /// `logTag` is appended to every log event name (e.g. ".codex") so provider logs remain
 /// distinguishable while the orchestration stays identical.
@@ -53,7 +57,9 @@ func runAgentLoopCore(
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   abortObserver: some AbortObserver,
-  runRound: @escaping @Sendable ([Components.Schemas.ChatMessage], Int) async throws -> RoundResult
+  runRound: @escaping @Sendable (
+    [Components.Schemas.ChatMessage], Int, @escaping @Sendable (AgentEvent) -> Void
+  ) async throws -> RoundResult
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
@@ -106,8 +112,17 @@ func runAgentLoopCore(
 
     let roundResult: RoundResult
     do {
-      roundResult = try await abortObserver.race { [currentContext, round] in
-        try await runRound(currentContext.messages, round)
+      roundResult = try await runRoundWithRetry(
+        policy: config.retryPolicy,
+        logger: logger,
+        logTag: logTag,
+        round: round,
+        emit: emit,
+        abortObserver: abortObserver
+      ) { [currentContext, round] attemptEmit in
+        try await abortObserver.race {
+          try await runRound(currentContext.messages, round, attemptEmit)
+        }
       }
     } catch is AgentTurnInterruptedError {
       logger.notice("agent.abort\(logTag)", metadata: ["where": "mid-stream", "round": "\(round)"])
@@ -338,6 +353,97 @@ private func commit(
 ) {
   context.append(contentsOf: buffer)
   newMessages.append(contentsOf: buffer)
+}
+
+// MARK: - Round Retry
+
+/// Runs a single provider round, retrying transient networking failures with backoff
+/// according to `policy` and surfacing each retry as `.lifecycle(.retrying)`.
+///
+/// A failed attempt is only retried when it produced no visible stream output: once
+/// assistant content reaches the transcript, replaying the round would duplicate it.
+/// An abort during the backoff sleep rethrows `AgentTurnInterruptedError` so the
+/// caller's interrupted handling applies unchanged.
+private func runRoundWithRetry(
+  policy: RetryPolicy,
+  logger: Logger,
+  logTag: String,
+  round: Int,
+  emit: @escaping @Sendable (AgentEvent) -> Void,
+  abortObserver: some AbortObserver,
+  operation: @escaping @Sendable (@escaping @Sendable (AgentEvent) -> Void) async throws -> RoundResult
+) async throws -> RoundResult {
+  var retryAttempt = 0
+  while true {
+    // Tracks whether this attempt made assistant output visible. Boundary events are
+    // invisible in the transcript, so re-emitting them on a retry is harmless.
+    let streamConsumed = Mutex(false)
+    let attemptEmit: @Sendable (AgentEvent) -> Void = { event in
+      if event.makesStreamOutputVisible {
+        streamConsumed.withLock { $0 = true }
+      }
+      emit(event)
+    }
+    do {
+      return try await operation(attemptEmit)
+    } catch {
+      guard retryAttempt < policy.maxRetries,
+        policy.isRetryable(error),
+        !streamConsumed.withLock({ $0 })
+      else { throw error }
+      retryAttempt += 1
+      let backoff = policy.delay(forRetryAttempt: retryAttempt)
+      let reason = retryReasonSummary(error)
+      logger.notice(
+        "agent.retry\(logTag)",
+        metadata: [
+          "round": "\(round)",
+          "attempt": "\(retryAttempt)",
+          "max_retries": "\(policy.maxRetries)",
+          "backoff": "\(backoff)",
+          "err": "\(reason)",
+        ])
+      emit(.lifecycle(.retrying(attempt: retryAttempt, maxRetries: policy.maxRetries, delay: backoff, reason: reason)))
+      do {
+        try await abortObserver.race { try await Task.sleep(for: backoff) }
+      } catch is AgentTurnInterruptedError {
+        throw AgentTurnInterruptedError()
+      } catch {
+        // The backoff sleep itself was cancelled; proceed with the retry.
+      }
+    }
+  }
+}
+
+/// One-line, length-capped error description for the transcript's retry notice.
+/// OpenAPIRuntime's `ClientError` wrapper is unwrapped so a dropped connection reads
+/// as the underlying cause rather than the generic "Client encountered an error".
+private func retryReasonSummary(_ error: any Error) -> String {
+  var current = error
+  while let clientError = current as? ClientError {
+    current = clientError.underlyingError
+  }
+  let description: String
+  switch current {
+  case let urlError as URLError:
+    description = urlError.localizedDescription
+  default:
+    description = (current as? LocalizedError)?.errorDescription ?? String(describing: current)
+  }
+  guard description.count > 200 else { return description }
+  return String(description.prefix(200)) + "…"
+}
+
+extension AgentEvent {
+  /// True when the event makes assistant stream output visible to the user.
+  fileprivate var makesStreamOutputVisible: Bool {
+    switch self {
+    case .output, .lifecycle(.usage):
+      return true
+    case .tool, .lifecycle, .boundary:
+      return false
+    }
+  }
 }
 
 // MARK: - Attachments

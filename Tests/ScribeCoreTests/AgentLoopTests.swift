@@ -9,6 +9,14 @@ import Testing
 
 @testable import ScribeCore
 
+extension RetryPolicy {
+  /// Millisecond backoffs so retry tests stay fast.
+  static let fastTestPolicy = RetryPolicy(
+    maxRetries: 3,
+    initialDelay: .milliseconds(1),
+    maxDelay: .milliseconds(4))
+}
+
 private func withTimeout<T: Sendable>(
   seconds: Double,
   _ operation: @escaping @Sendable () async throws -> T
@@ -34,7 +42,8 @@ private func makeConfig(
   tools: [any ScribeTool] = [],
   temperature: Double = 0,
   maxToolRounds: Int = .max,
-  hooks: AgentLoopHooks = .default
+  hooks: AgentLoopHooks = .default,
+  retryPolicy: RetryPolicy = .fastTestPolicy
 ) -> AgentLoopConfig {
   let transport = ScriptedTransport(status: statusCode, chunks: chunks)
   let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
@@ -47,7 +56,8 @@ private func makeConfig(
     temperature: temperature,
     maxToolRounds: maxToolRounds, workingDirectory: FilePath("/tmp"),
     reasoningEnabled: true,
-    hooks: hooks
+    hooks: hooks,
+    retryPolicy: retryPolicy
   )
 }
 
@@ -1184,6 +1194,196 @@ struct AgentLoopTests {
     #expect(json["reasoning_effort"] == nil)
     #expect(json["reasoning"] == nil)
     #expect(json["max_tokens"] == nil)
+  }
+
+  // MARK: - Transient failure retry
+
+  @Test func retriesTransientHTTPErrorWithBackoff() async throws {
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 429, chunks: [errorBody("engine overloaded")]),
+      ScriptedTransport.Response(status: 429, chunks: [errorBody("engine overloaded")]),
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
+          doneChunk(),
+        ]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
+    let (messages, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { event in events.withLock { $0.append(event) } },
+      logger: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+    #expect(messages.count == 2)
+    #expect(stringContent(messages[1]) == "reply")
+    #expect(transport.capturedRequests.count == 3)
+
+    let retries: [(attempt: Int, maxRetries: Int)] = events.withLock { $0 }.compactMap { event in
+      guard case .lifecycle(.retrying(let attempt, let maxRetries, _, _)) = event else { return nil }
+      return (attempt, maxRetries)
+    }
+    #expect(retries.count == 2)
+    #expect(retries[0].attempt == 1 && retries[0].maxRetries == 3)
+    #expect(retries[1].attempt == 2 && retries[1].maxRetries == 3)
+  }
+
+  @Test func retriesExhaustedPropagatesHTTPError() async throws {
+    let transport = ScriptedTransport(status: 429, chunks: [errorBody("engine overloaded")])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: RetryPolicy(
+        maxRetries: 2, initialDelay: .milliseconds(1), maxDelay: .milliseconds(4))
+    )
+    do {
+      _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
+      #expect(Bool(false), "expected error")
+    } catch let ScribeError.apiHTTPError(statusCode, _, _) {
+      #expect(statusCode == 429)
+    } catch {
+      #expect(Bool(false), "unexpected error: \(error)")
+    }
+    #expect(transport.capturedRequests.count == 3)
+  }
+
+  @Test func retriesTransportLevelFailure() async throws {
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(
+        status: 200, chunks: [], error: URLError(.networkConnectionLost)),
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
+          doneChunk(),
+        ]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    let (messages, termination) = try await runLoop(
+      prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    expectTermination(termination, .completed)
+    #expect(stringContent(messages[1]) == "reply")
+    #expect(transport.capturedRequests.count == 2)
+  }
+
+  @Test func doesNotRetryNonRetryableHTTPError() async throws {
+    let transport = ScriptedTransport(status: 401, chunks: [errorBody("unauthorized")])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    do {
+      _ = try await runLoop(prompt: "test", config: config, abortNotifier: AbortNotifier())
+      #expect(Bool(false), "expected error")
+    } catch let ScribeError.apiHTTPError(statusCode, _, _) {
+      #expect(statusCode == 401)
+    } catch {
+      #expect(Bool(false), "unexpected error: \(error)")
+    }
+    #expect(transport.capturedRequests.count == 1)
+  }
+
+  @Test func doesNotRetryAfterStreamOutputStarted() async throws {
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"}}]}"#)
+        ],
+        streamError: URLError(.networkConnectionLost)),
+      ScriptedTransport.Response(
+        status: 200,
+        chunks: [
+          sseChunk(#"{"id":"2","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"full"}}]}"#),
+          doneChunk(),
+        ]),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      retryPolicy: .fastTestPolicy
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
+    let (_, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { event in events.withLock { $0.append(event) } },
+      logger: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    // The round fails mid-stream; the error surfaces without replaying the round.
+    guard case .error = termination else {
+      #expect(Bool(false), "Expected error termination, got \(termination)")
+      return
+    }
+    #expect(transport.capturedRequests.count == 1)
+    let retryEvents = events.withLock { $0 }.contains { event in
+      if case .lifecycle(.retrying) = event { return true }
+      return false
+    }
+    #expect(!retryEvents)
   }
 
 }
