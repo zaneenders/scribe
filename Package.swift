@@ -182,5 +182,19 @@ let package = Package(
       name: "GitVersionPlugin",
       capability: .buildTool()
     ),
+    .plugin(
+      name: "ScribeAppBundlerPlugin",
+      capability: .command(
+        intent: .custom(
+          verb: "bundle",
+          description: "Build Scribe.app from the scribe-mac and scribe executables"
+        ),
+        permissions: [
+          .writeToPackageDirectory(
+            reason: "Writes the assembled Scribe.app bundle under the package directory"
+          ),
+        ]
+      )
+    ),
   ]
 )

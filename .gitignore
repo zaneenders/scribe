@@ -7,3 +7,4 @@
 scribe-edit
 *.perf
 *.profraw
+/dist
