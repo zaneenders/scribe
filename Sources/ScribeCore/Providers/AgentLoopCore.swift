@@ -203,6 +203,12 @@ func runAgentLoopCore(
           "tools": "\(invocations.map(\.name).joined(separator: ","))",
         ])
 
+      // OpenAI-compatible APIs require every tool response for an assistant's parallel
+      // tool_calls to appear contiguously before any other role. Tool-produced attachments
+      // are synthetic user messages, so defer them until the complete tool-result block has
+      // been assembled.
+      var pendingAttachments: [(attachment: ToolAttachment, toolName: String)] = []
+
       for inv in invocations {
         if abortObserver.isAborted() {
           logger.notice(
@@ -268,26 +274,30 @@ func runAgentLoopCore(
             name: nil, toolCalls: nil, toolCallId: resolvedInv.id))
         emit(.boundary(.messageEnd(role: .tool, round: round)))
 
-        for attachment in finalResult.attachments {
-          logger.info(
-            "agent.tool.attachment.inject\(logTag)",
-            metadata: [
-              "round": "\(round)",
-              "tool": "\(resolvedInv.name)",
-              "mime_type": "\(attachment.mimeType)",
-              "base64_chars": "\(attachment.base64.count)",
-              "source_path": "\(attachment.sourcePath ?? "nil")",
-            ])
-          emit(.boundary(.messageStart(role: .user, round: round)))
-          roundBuffer.append(toolAttachmentMessage(attachment))
-          emit(.boundary(.messageEnd(role: .user, round: round)))
-        }
+        pendingAttachments.append(
+          contentsOf: finalResult.attachments.map { (attachment: $0, toolName: resolvedInv.name) })
 
         if afterDecision.terminate {
           commit(&currentContext.messages, &newMessages, roundBuffer)
           outcome = .completed
           return (newMessages, outcome)
         }
+      }
+
+      for pending in pendingAttachments {
+        let attachment = pending.attachment
+        logger.info(
+          "agent.tool.attachment.inject\(logTag)",
+          metadata: [
+            "round": "\(round)",
+            "tool": "\(pending.toolName)",
+            "mime_type": "\(attachment.mimeType)",
+            "base64_chars": "\(attachment.base64.count)",
+            "source_path": "\(attachment.sourcePath ?? "nil")",
+          ])
+        emit(.boundary(.messageStart(role: .user, round: round)))
+        roundBuffer.append(toolAttachmentMessage(attachment))
+        emit(.boundary(.messageEnd(role: .user, round: round)))
       }
 
       commit(&currentContext.messages, &newMessages, roundBuffer)

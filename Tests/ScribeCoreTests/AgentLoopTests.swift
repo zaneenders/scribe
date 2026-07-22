@@ -610,6 +610,53 @@ struct AgentLoopTests {
     }
   }
 
+  @Test func parallelToolResultsStayContiguousBeforeAttachments() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"image:0","type":"function","function":{"name":"attaching_tool","arguments":"{}"}},{"index":1,"id":"shell:1","type":"function","function":{"name":"fake_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let replyChunks = [
+      sseChunk(#"{"id":"2","choices":[{"index":0,"delta":{"content":"done"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 200, chunks: replyChunks),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool(), FakeTool()], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: .default
+    )
+
+    let (messages, termination) = try await runLoop(
+      prompt: "inspect image and repo", config: config, abortNotifier: AbortNotifier())
+    expectTermination(termination, .completed)
+
+    #expect(messages.count == 6)
+    #expect(messages[1].role == .assistant)
+    #expect(messages[2].role == .tool)
+    #expect(messages[2].toolCallId == "image:0")
+    #expect(messages[3].role == .tool)
+    #expect(messages[3].toolCallId == "shell:1")
+    #expect(messages[4].role == .user)
+    guard case .case2 = messages[4].content else {
+      Issue.record("Expected the attachment user message after all parallel tool results")
+      return
+    }
+    #expect(messages[5].role == .assistant)
+  }
+
   @Test func contextOverflowRecoversByRollingBackAttachments() async throws {
 
     let toolChunks = [
