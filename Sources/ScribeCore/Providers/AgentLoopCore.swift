@@ -114,6 +114,24 @@ func runAgentLoopCore(
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
       outcome = .interrupted
       return (newMessages, outcome)
+    } catch let scribeError as ScribeError
+      where !attemptedRecovery && isImageInputUnsupportedError(scribeError)
+    {
+      let detail = scribeError.errorDescription ?? String(describing: scribeError)
+      guard
+        let reason = rollbackUnsupportedImageInput(
+          messages: &currentContext.messages,
+          newMessages: &newMessages,
+          providerDetail: detail)
+      else {
+        outcome = .error(detail)
+        throw scribeError
+      }
+      attemptedRecovery = true
+      logger.notice("agent.recover\(logTag)", metadata: ["round": "\(round)", "reason": "\(reason)"])
+      emit(.lifecycle(.recovered(reason: reason)))
+      emit(.boundary(.turnEnd(round: round, outcome: .completed)))
+      continue
     } catch let scribeError as ScribeError where !attemptedRecovery && isContextLengthError(scribeError) {
       let detail = scribeError.errorDescription ?? String(describing: scribeError)
       guard
@@ -331,7 +349,76 @@ func toolAttachmentMessage(
   ).toChatMessage()
 }
 
-// MARK: - Context Overflow Recovery
+// MARK: - Provider Input Recovery
+
+func isImageInputUnsupportedError(_ error: ScribeError) -> Bool {
+  let detail: String
+  switch error {
+  case .apiHTTPError(let statusCode, let message, _):
+    guard statusCode == 400 || statusCode == 422 else { return false }
+    detail = message
+  case .generic(let message):
+    detail = message
+  default:
+    return false
+  }
+
+  let lower = detail.lowercased()
+  let rejectsImagePart =
+    lower.contains("unknown variant `image_url`")
+    || lower.contains("unknown variant \"image_url\"")
+    || lower.contains("unsupported content type") && lower.contains("image_url")
+    || lower.contains("image_url") && lower.contains("expected `text`")
+    || lower.contains("image_url") && lower.contains("expected \"text\"")
+  return rejectsImagePart
+}
+
+func rollbackUnsupportedImageInput(
+  messages: inout [Components.Schemas.ChatMessage],
+  newMessages: inout [Components.Schemas.ChatMessage],
+  providerDetail: String
+) -> String? {
+  let newMessageStart = messages.count - newMessages.count
+  let imageIndexes = messages.indices.filter { isImageMessage(messages[$0]) }
+  guard !imageIndexes.isEmpty else { return nil }
+
+  let detail =
+    providerDetail.count > 512
+    ? String(providerDetail.prefix(512)) + "…"
+    : providerDetail
+  for index in imageIndexes {
+    let replacement = unsupportedImageReplacement(original: messages[index], providerDetail: detail)
+    messages[index] = replacement
+    if index >= newMessageStart {
+      let newIndex = index - newMessageStart
+      if newMessages.indices.contains(newIndex) { newMessages[newIndex] = replacement }
+    }
+  }
+
+  return "provider rejected image input — replaced \(imageIndexes.count) attachment(s) with text"
+}
+
+private func unsupportedImageReplacement(
+  original: Components.Schemas.ChatMessage,
+  providerDetail: String
+) -> Components.Schemas.ChatMessage {
+  let labels: [String]
+  if case .case2(let parts) = original.content {
+    labels = parts.compactMap { part in
+      guard case .text(let textPart) = part else { return nil }
+      let text = textPart.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      return text.isEmpty ? nil : text
+    }
+  } else {
+    labels = []
+  }
+  let label = labels.joined(separator: "\n")
+  let prefix = label.isEmpty ? "An image attachment" : label
+  let text =
+    "\(prefix) could not be shown because this provider does not support image input. "
+    + "Continue without inspecting the image. Provider response: \(providerDetail)"
+  return Components.Schemas.ChatMessage(role: original.role, content: .case1(text))
+}
 
 func isContextLengthError(_ error: ScribeError) -> Bool {
   let detail: String

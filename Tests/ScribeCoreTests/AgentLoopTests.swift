@@ -93,6 +93,14 @@ private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
   }
 }
 
+private func isTestImageMessage(_ message: Components.Schemas.ChatMessage) -> Bool {
+  guard case .case2(let parts) = message.content else { return false }
+  return parts.contains { part in
+    if case .imageUrl = part { return true }
+    return false
+  }
+}
+
 private func expectTermination(_ actual: TurnOutcome, _ expected: TurnOutcome) {
   switch (actual, expected) {
   case (.completed, .completed): return
@@ -655,6 +663,65 @@ struct AgentLoopTests {
       return
     }
     #expect(messages[5].role == .assistant)
+  }
+
+  @Test func unsupportedImageInputIsReplacedWithTextAndRetried() async throws {
+    let toolChunks = [
+      sseChunk(
+        #"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"attaching_tool","arguments":"{}"}}]}}]}"#
+      ),
+      doneChunk(),
+    ]
+    let unsupportedBody: HTTPBody.ByteChunk = ArraySlice(
+      #"{"error":{"message":"Failed to deserialize the JSON body into the target type: messages[4]: unknown variant `image_url`, expected `text` at line 45 column 3"}}"#
+        .utf8)
+    let recoveryChunks = [
+      sseChunk(#"{"id":"3","choices":[{"index":0,"delta":{"content":"continued without image"}}]}"#),
+      doneChunk(),
+    ]
+    let transport = ScriptedTransport(responses: [
+      ScriptedTransport.Response(status: 200, chunks: toolChunks),
+      ScriptedTransport.Response(status: 400, chunks: [unsupportedBody]),
+      ScriptedTransport.Response(status: 200, chunks: recoveryChunks),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [AttachingTool()], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "text-only-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil,
+      hooks: .default
+    )
+    let events = Mutex<[AgentEvent]>([])
+    let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
+    let (messages, termination) = try await runAgentLoop(
+      promptMessages: [userMsg],
+      context: AgentContext(messages: []),
+      config: config,
+      emit: { e in events.withLock { $0.append(e) } },
+      logger: testLogger,
+      abortObserver: AbortNotifier()
+    )
+    expectTermination(termination, .completed)
+
+    let recovered = events.withLock { $0 }.compactMap { e -> String? in
+      if case .lifecycle(.recovered(let reason)) = e { return reason }
+      return nil
+    }
+    #expect(recovered == ["provider rejected image input — replaced 1 attachment(s) with text"])
+    #expect(!messages.contains(where: isTestImageMessage))
+    let replacement = try #require(
+      messages.first { message in
+        message.role == .user && stringContent(message)?.contains("does not support image input") == true
+      })
+    #expect(stringContent(replacement)?.contains("tiny.png:") == true)
+    #expect(messages.last?.role == .assistant)
+    #expect(messages.last.flatMap(stringContent) == "continued without image")
   }
 
   @Test func contextOverflowRecoversByRollingBackAttachments() async throws {
