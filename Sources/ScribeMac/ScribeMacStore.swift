@@ -51,6 +51,7 @@ final class ScribeMacStore {
   var modelName = ""
   var workingDirectory = ""
   var usageText = ""
+  var sessionIdText: String { session?.sessionId.uuidString.prefix(8).uppercased() ?? "" }
   let transcriptScroll = ScrollViewController()
 
   /// Available profiles for model switching.

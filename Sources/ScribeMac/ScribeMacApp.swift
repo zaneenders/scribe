@@ -63,9 +63,10 @@ struct ScribeMacRoot: Block {
     SelectionManager.shared.updateFromDrag()
     MarkdownLayoutRegistry.clear()
 
-    // Handle Cmd+C copy
+    // Handle Cmd+C copy — check both selection managers
     interaction.onCopy = {
-      SelectionManager.shared.selectedText()
+      if let markdown = SelectionManager.shared.selectedText() { return markdown }
+      return TextSelectionManager.shared.selectedText()
     }
 
     store.applyPendingFocus()
@@ -242,6 +243,11 @@ struct ScribeMacRoot: Block {
         .foregroundColor(store.isRunning ? theme.yellow : theme.green)
       Text(sanitizeASCII(store.workingDirectory))
         .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+      if !store.sessionIdText.isEmpty {
+        Text("Session: \(store.sessionIdText)")
+          .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+          .selectable(WidgetID("session-id"))
+      }
       Spacer()
       if !store.usageText.isEmpty {
         Text(store.usageText).fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
