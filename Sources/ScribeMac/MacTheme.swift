@@ -9,8 +9,8 @@ struct MacTheme: Sendable {
   var headerHeight: Float = 52
   var statusHeight: Float = 38
   var itemHeight: Float = 42
-  var textScale: Float = 2.5
-  var smallScale: Float = 2
+  var textScale: Float = 1.75
+  var smallScale: Float = 1.5
 
   var background = Color(r: 0.08, g: 0.09, b: 0.13, a: 1)
   var panelBackground = Color(r: 0.10, g: 0.11, b: 0.16, a: 1)
