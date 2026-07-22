@@ -1,5 +1,7 @@
 import Chroma
+import Logging
 import MetalBackend
+import ProfileRecorderServer
 
 @main
 struct ScribeMacApp: MetalApp {
@@ -13,6 +15,17 @@ struct ScribeMacApp: MetalApp {
   }
 
   @MainActor static func main() {
+    let profileRecorderTask = Task.detached {
+      let logger = Logger(label: "scribe.mac.profile-recorder")
+      do {
+        let configuration = try await ProfileRecorderServerConfiguration.parseFromEnvironment()
+        await ProfileRecorderServer(configuration: configuration).runIgnoringFailures(logger: logger)
+      } catch {
+        logger.warning("profile-recorder.configuration.failed", metadata: ["error": "\(error)"])
+      }
+    }
+    defer { profileRecorderTask.cancel() }
+
     let app = Self()
     guard let renderer = MetalRenderer(size: app.windowSize) else {
       fatalError("Metal requires Apple Silicon or supported GPU.")
@@ -89,11 +102,11 @@ struct ScribeMacRoot: Block {
   }
 
   @MainActor private var transcript: some Block {
-    ScrollView(
-      id: WidgetID("transcript"), sticksToBottom: true, controller: store.transcriptScroll
-    ) {
-      if store.transcript.isEmpty {
-        VStack(spacing: 8, alignment: .leading) {
+    let rows: [LazyVStack.Row]
+    if store.transcript.isEmpty {
+      rows = [LazyVStack.Row(
+        id: WidgetID("transcript-empty"),
+        content: VStack(spacing: 8, alignment: .leading) {
           Text("Ready").fontScale(theme.textScale).foregroundColor(theme.accent)
           WrappedText(
             text: "Ask Scribe to inspect, explain, or change the current project.",
@@ -101,15 +114,23 @@ struct ScribeMacRoot: Block {
         }
         .padding(theme.panelPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      for item in store.transcript {
-        TranscriptItemBlock(item: item, theme: theme)
-          .padding(EdgeInsets(
-            top: theme.spacing / 2, leading: theme.margin,
-            bottom: theme.spacing / 2, trailing: theme.margin))
-          .frame(maxWidth: .infinity, alignment: .leading)
+      )]
+    } else {
+      rows = store.transcript.map { item in
+        LazyVStack.Row(
+          id: item.layoutID,
+          content: TranscriptItemBlock(item: item, theme: theme)
+            .padding(EdgeInsets(
+              top: theme.spacing / 2, leading: theme.margin,
+              bottom: theme.spacing / 2, trailing: theme.margin))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        )
       }
     }
+    return LazyVStack(
+      id: WidgetID("transcript"), sticksToBottom: true,
+      controller: store.transcriptScroll, rows: rows
+    )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(theme.panelBackground)
   }

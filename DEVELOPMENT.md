@@ -52,7 +52,17 @@ the env var, there is zero overhead.
 PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' scribe
 ```
 
-> you may append `scribe` with something like `swift build -c release` if you want to profile a version you are building.
+For the mac executable, launch the built binary from a terminal so it inherits
+the environment variable:
+
+```bash
+swift build --product scribe-mac
+PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-mac-{PID}.sock' \
+  .build/debug/scribe-mac
+```
+
+The CLI and mac executable both include frame pointers, so release-mode
+profiling is also available when needed.
 
 The `{PID}` template is replaced with the process ID at runtime.
 

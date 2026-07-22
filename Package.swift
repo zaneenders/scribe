@@ -140,11 +140,13 @@ let package = Package(
         .product(name: "Chroma", package: "chroma"),
         .product(name: "MetalBackend", package: "chroma"),
         .product(name: "Logging", package: "swift-log"),
+        .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
         .product(name: "SystemPackage", package: "swift-system"),
       ],
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
+        .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
       ],
       plugins: [
         "GitVersionPlugin"

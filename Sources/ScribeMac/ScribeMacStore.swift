@@ -27,6 +27,11 @@ final class ScribeMacStore {
     var title: String
     var text: String
     var running = false
+    var layoutRevision = 0
+
+    var layoutID: WidgetID {
+      WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
+    }
   }
 
   private enum StreamEvent: Sendable {
@@ -232,6 +237,7 @@ final class ScribeMacStore {
   private func append(_ text: String, to section: AssistantStreamSection) {
     ensureStreamItem(section)
     transcript[transcript.count - 1].text += text
+    transcript[transcript.count - 1].layoutRevision += 1
   }
 
   private func upsertTool(name: String, arguments: String, output: String, running: Bool) {
@@ -242,6 +248,7 @@ final class ScribeMacStore {
         transcript[index].text += output
       }
       transcript[index].running = running
+      transcript[index].layoutRevision += 1
     } else {
       let text = [arguments, output].filter { !$0.isEmpty }.joined(separator: "\n\n")
       transcript.append(TranscriptItem(kind: .tool, title: name, text: text, running: running))
