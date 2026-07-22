@@ -365,7 +365,8 @@ struct AgentLoopTests {
       #expect(toolMessages.count >= 1)
       if let toolMsg = toolMessages.first {
         #expect(toolMsg.toolCallId == "c1")
-        #expect(stringContent(toolMsg)?.contains("unknown tool") == true)
+        #expect(stringContent(toolMsg)?.lowercased().contains("unknown tool") == true)
+        #expect(stringContent(toolMsg)?.contains("do not assume its intended action occurred") == true)
       }
     }
   }
@@ -598,7 +599,8 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     #expect(messages.count == 4)
     #expect(messages[2].role == .tool)
-    #expect(stringContent(messages[2])?.contains("ok") == true)
+    #expect(stringContent(messages[2])?.contains("Tool `failing_tool` failed (execution_failed)") == true)
+    #expect(stringContent(messages[2])?.contains("do not assume its intended action occurred") == true)
   }
 
   private struct AttachingTool: ScribeTool {
@@ -720,6 +722,9 @@ struct AgentLoopTests {
         message.role == .user && stringContent(message)?.contains("does not support image input") == true
       })
     #expect(stringContent(replacement)?.contains("tiny.png:") == true)
+    #expect(stringContent(replacement)?.contains("Do not infer or claim to have inspected") == true)
+    #expect(stringContent(replacement)?.contains("provide the relevant content as text") == true)
+    #expect(stringContent(replacement)?.contains("switch to a vision-capable model") == true)
     #expect(messages.last?.role == .assistant)
     #expect(messages.last.flatMap(stringContent) == "continued without image")
   }
@@ -945,6 +950,8 @@ struct AgentLoopTests {
     expectTermination(termination, .completed)
     let toolMsg = messages.first { $0.role == .tool }
     #expect(stringContent(toolMsg!)?.contains("denied by policy") == true)
+    #expect(stringContent(toolMsg!)?.contains("Tool `fake_tool` failed (blocked)") == true)
+    #expect(stringContent(toolMsg!)?.contains("do not assume its intended action occurred") == true)
   }
 
   @Test func afterToolCallCanTerminateLoop() async throws {

@@ -245,7 +245,11 @@ func runAgentLoopCore(
           preflightResult = nil
         case .block(let reason):
           resolvedInv = inv
-          preflightResult = ToolResult.text(ToolRegistry.jsonError(reason))
+          logger.warning(
+            "agent.tool.blocked\(logTag)",
+            metadata: ["tool": "\(inv.name)", "round": "\(round)", "reason": "\(reason.logSafe())"])
+          preflightResult = ToolRegistry.failureResult(
+            tool: inv.name, code: "blocked", description: reason)
         }
 
         emit(.boundary(.toolExecutionStart(name: resolvedInv.name, arguments: resolvedInv.arguments)))
@@ -265,15 +269,19 @@ func runAgentLoopCore(
             return (newMessages, outcome)
           } catch let ScribeError.toolUnknown(name) {
             logger.warning("agent.tool.unknown\(logTag)", metadata: ["tool": "\(name)", "round": "\(round)"])
-            result = ToolResult.text(ToolRegistry.jsonError("unknown tool \(name)"))
+            result = ToolRegistry.failureResult(
+              tool: name, code: "unknown_tool", description: "Unknown tool; no registered tool has this name")
           } catch {
+            let description =
+              (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             logger.warning(
               "agent.tool.executor.error\(logTag)",
               metadata: [
                 "tool": "\(resolvedInv.name)", "round": "\(round)",
-                "err": "\(String(describing: error).replacingOccurrences(of: "\"", with: "\\\""))",
+                "err": "\(description.logSafe())",
               ])
-            result = ToolResult.text(ToolRegistry.jsonError(String(describing: error)))
+            result = ToolRegistry.failureResult(
+              tool: resolvedInv.name, code: "executor_failed", description: description)
           }
         }
 
@@ -416,7 +424,9 @@ private func unsupportedImageReplacement(
   let prefix = label.isEmpty ? "An image attachment" : label
   let text =
     "\(prefix) could not be shown because this provider does not support image input. "
-    + "Continue without inspecting the image. Provider response: \(providerDetail)"
+    + "Do not infer or claim to have inspected the image. Tell the user that this model cannot read "
+    + "images and ask them to provide the relevant content as text, run OCR/image conversion, or "
+    + "switch to a vision-capable model. Provider response: \(providerDetail)"
   return Components.Schemas.ChatMessage(role: original.role, content: .case1(text))
 }
 
