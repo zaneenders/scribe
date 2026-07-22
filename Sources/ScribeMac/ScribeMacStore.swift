@@ -35,6 +35,7 @@ final class ScribeMacStore {
   }
 
   private enum StreamEvent: Sendable {
+    case userPrompt(String)
     case agent(AgentEvent)
     case finished(TurnOutcome)
     case failed(String)
@@ -52,6 +53,8 @@ final class ScribeMacStore {
   var workingDirectory = ""
   var usageText = ""
   var sessionIdText: String { session?.sessionId.uuidString.prefix(8).uppercased() ?? "" }
+  /// Messages queued while a turn is running, oldest first.
+  var queuedTexts: [String] { session?.messageQueues.steeringPreviewTexts() ?? [] }
   let transcriptScroll = ScrollViewController()
 
   /// Available profiles for model switching.
@@ -182,13 +185,15 @@ final class ScribeMacStore {
   }
 
   func submit(_ proposed: String? = nil) {
-    guard !isRunning, let harness = session?.harness else { return }
     let text = (proposed ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
+    if isRunning {
+      enqueue(text)
+      return
+    }
+    guard let harness = session?.harness else { return }
     draft = ""
     isRunning = true
-    transcript.append(TranscriptItem(kind: .user, title: "You", text: text))
-    transcriptScroll.scrollToBottom()
 
     let (events, continuation) = AsyncStream<StreamEvent>.makeStream()
     runTask = Task { [weak self] in
@@ -201,6 +206,7 @@ final class ScribeMacStore {
       do {
         let outcome = try await harness.submit(
           text,
+          onUserPrompt: { prompt in continuation.yield(.userPrompt(prompt)) },
           onEvent: { event in continuation.yield(.agent(event)) })
         continuation.yield(.finished(outcome))
       } catch {
@@ -211,13 +217,49 @@ final class ScribeMacStore {
     }
   }
 
+  /// Queue a message while the model is busy. The harness drains the steering
+  /// queue after the current turn, matching the CLI's Enter-while-busy path.
+  private func enqueue(_ text: String) {
+    guard let queues = session?.messageQueues else { return }
+    guard queues.enqueueSteering(text: text) else { return }
+    draft = ""
+  }
+
   func stop() {
     guard isRunning, let harness = session?.harness else { return }
+    // Interrupting alone would let the harness dispatch queued steering
+    // messages into a fresh turn, so Stop also drops the pending queue.
+    let dropped = discardQueuedMessages()
+    if dropped > 0 {
+      transcript.append(
+        TranscriptItem(
+          kind: .notice, title: "Queue",
+          text: "Discarded \(dropped) queued message\(dropped == 1 ? "" : "s")."))
+    }
     Task { await harness.interrupt() }
+  }
+
+  func clearQueue() {
+    let dropped = discardQueuedMessages()
+    guard dropped > 0 else { return }
+    transcript.append(
+      TranscriptItem(
+        kind: .notice, title: "Queue",
+        text: "Cleared \(dropped) queued message\(dropped == 1 ? "" : "s")."))
+    transcriptScroll.scrollToBottom()
+  }
+
+  @discardableResult
+  private func discardQueuedMessages() -> Int {
+    guard let queues = session?.messageQueues else { return 0 }
+    let count = queues.steeringCount() + queues.followUpCount()
+    queues.clearAll()
+    return count
   }
 
   func close() {
     let harness = session?.harness
+    session?.messageQueues.clearAll()
     runTask?.cancel()
     runTask = nil
     if let harness {
@@ -228,6 +270,11 @@ final class ScribeMacStore {
 
   private func handle(_ event: StreamEvent) {
     switch event {
+    case .userPrompt(let text):
+      // Echoes both the submitted message and queued messages as the harness
+      // dispatches them at the start of each turn.
+      transcript.append(TranscriptItem(kind: .user, title: "You", text: text))
+      transcriptScroll.scrollToBottom()
     case .agent(let event): reduce(event)
     case .finished(let outcome):
       isRunning = false

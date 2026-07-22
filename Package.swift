@@ -13,7 +13,7 @@ let package = Package(
     .library(name: "ScribeKit", targets: ["ScribeKit"]),
   ],
   dependencies: [
-    .package(path: "../chroma"),
+    .package(url: "https://github.com/zaneenders/chroma", revision: "de0aae9"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),

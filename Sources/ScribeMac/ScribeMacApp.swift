@@ -101,6 +101,9 @@ struct ScribeMacRoot: Block {
         // vertically instead of all being drawn into the same rectangle.
         VStack(spacing: 0, alignment: .leading) {
           transcript
+          if !store.queuedTexts.isEmpty {
+            queuedTray
+          }
           composer
           status
         }
@@ -217,7 +220,7 @@ struct ScribeMacRoot: Block {
   @MainActor private var composer: some Block {
     HStack(spacing: 8) {
       TextField(
-        store.isRunning ? "Scribe is working..." : "Message Scribe",
+        store.isRunning ? "Queue a message..." : "Message Scribe",
         id: ScribeMacStore.composerID,
         fontScale: theme.textScale,
         text: { store.draft },
@@ -225,6 +228,7 @@ struct ScribeMacRoot: Block {
         onSubmit: { store.submit($0) }
       )
       if store.isRunning {
+        Button("Queue", id: WidgetID("queue"), pressedColor: theme.accent) { store.submit() }
         Button("Stop", id: WidgetID("stop"), pressedColor: theme.red) { store.stop() }
       } else {
         Button("Send", id: WidgetID("send"), pressedColor: theme.accent) { store.submit() }
@@ -234,6 +238,37 @@ struct ScribeMacRoot: Block {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(theme.composerBackground)
     .border(theme.border)
+  }
+
+  @MainActor private var queuedTray: some Block {
+    let queued = store.queuedTexts
+    return VStack(spacing: 4, alignment: .leading) {
+      HStack(spacing: 8) {
+        Text("QUEUED (\(queued.count)) · sent in order after each turn")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.yellow)
+        Spacer()
+        Button(
+          "Clear", id: WidgetID("clear-queue"), fontScale: theme.smallScale,
+          padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
+        ) { store.clearQueue() }
+      }
+      for (index, text) in queued.enumerated() {
+        Text("[\(index + 1)/\(queued.count)] \(queuePreview(text))")
+          .fontScale(theme.smallScale)
+          .foregroundColor(index == 0 ? theme.textPrimary : theme.textSecondary)
+      }
+    }
+    .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(theme.statusBackground)
+    .border(theme.border)
+  }
+
+  private func queuePreview(_ text: String, limit: Int = 100) -> String {
+    let flat = sanitizeASCII(text.replacingOccurrences(of: "\n", with: " "))
+    guard flat.count > limit else { return flat }
+    return String(flat.prefix(limit - 3)) + "..."
   }
 
   @MainActor private var status: some Block {
