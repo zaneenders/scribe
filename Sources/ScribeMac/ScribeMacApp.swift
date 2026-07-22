@@ -71,6 +71,9 @@ struct ScribeMacRoot: Block {
     store.applyPendingFocus()
     return VStack(spacing: 0, alignment: .leading) {
       header
+      if store.showModelPicker {
+        modelPicker
+      }
       switch store.phase {
       case .starting:
         VStack(spacing: 12) {
@@ -109,8 +112,18 @@ struct ScribeMacRoot: Block {
   @MainActor private var header: some Block {
     HStack(spacing: 10) {
       Text("SCRIBE").fontScale(theme.textScale).foregroundColor(theme.accent)
-      Text("\(sanitizeASCII(store.profileName)) / \(sanitizeASCII(store.modelName))")
-        .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+      Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
+        HStack(spacing: 4) {
+          Text("\(sanitizeASCII(store.profileName)) / \(sanitizeASCII(store.modelName))")
+            .fontScale(theme.smallScale)
+            .foregroundColor(phase == .hovered ? theme.accent : theme.textSecondary)
+          Text(store.showModelPicker ? "▲" : "▼")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+        }
+        .padding(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
+        .background(phase == .hovered ? theme.buttonHover : theme.headerBackground)
+      }
       Spacer()
       Button(
         "New", id: WidgetID("new-session"), fontScale: theme.smallScale,
@@ -124,6 +137,44 @@ struct ScribeMacRoot: Block {
     .padding(EdgeInsets(top: 8, leading: theme.margin, bottom: 8, trailing: theme.margin))
     .frame(height: theme.headerHeight, alignment: .leading)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .background(theme.headerBackground)
+    .border(theme.border)
+  }
+
+  @MainActor private var modelPicker: some Block {
+    let itemHeight: Float = 34
+    let profiles = store.profileCatalog
+    return VStack(spacing: 0, alignment: .leading) {
+      for (_, profile) in profiles.enumerated() {
+        let isActive = profile.name == store.profileName
+        Interactive(
+          id: WidgetID("model-picker-item-\(profile.name)"),
+          action: { store.selectProfile(profile.name) }
+        ) { phase in
+          HStack(spacing: 6) {
+            Text(isActive ? "●" : " ")
+              .fontScale(theme.smallScale)
+              .foregroundColor(isActive ? theme.accent : .clear)
+            Text(sanitizeASCII(profile.name))
+              .fontScale(theme.smallScale)
+              .foregroundColor(
+                isActive ? theme.accent
+                  : phase == .hovered ? theme.textPrimary : theme.textSecondary)
+            Spacer()
+            Text(sanitizeASCII(profile.model))
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+          .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
+          .frame(height: itemHeight, alignment: .leading)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(
+            phase == .hovered ? theme.buttonHover
+              : isActive ? theme.buttonIdle : theme.panelBackground)
+        }
+      }
+    }
+    .frame(maxWidth: 300, alignment: .leading)
     .background(theme.headerBackground)
     .border(theme.border)
   }

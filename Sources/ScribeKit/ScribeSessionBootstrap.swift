@@ -11,6 +11,7 @@ public struct BootstrappedSession: Sendable {
   public let sessionId: UUID
   public let sessionDirectory: FilePath
   public let profile: ProfileSummary
+  public let profileCatalog: [ProfileSummary]
   public let workingDirectory: String
 
   public init(
@@ -20,6 +21,7 @@ public struct BootstrappedSession: Sendable {
     sessionId: UUID,
     sessionDirectory: FilePath,
     profile: ProfileSummary,
+    profileCatalog: [ProfileSummary],
     workingDirectory: String
   ) {
     self.harness = harness
@@ -28,6 +30,7 @@ public struct BootstrappedSession: Sendable {
     self.sessionId = sessionId
     self.sessionDirectory = sessionDirectory
     self.profile = profile
+    self.profileCatalog = profileCatalog
     self.workingDirectory = workingDirectory
   }
 }
@@ -138,6 +141,7 @@ public enum ScribeSessionBootstrap {
       sessionId: sessionId,
       sessionDirectory: directory,
       profile: profile,
+      profileCatalog: loaded.profiles,
       workingDirectory: workingDirectory
     )
   }

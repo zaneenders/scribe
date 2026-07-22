@@ -53,6 +53,11 @@ final class ScribeMacStore {
   var usageText = ""
   let transcriptScroll = ScrollViewController()
 
+  /// Available profiles for model switching.
+  var profileCatalog: [ProfileSummary] = []
+  /// Whether the model picker overlay is visible.
+  var showModelPicker = false
+
   private var session: BootstrappedSession?
   private var runTask: Task<Void, Never>?
   private var didStart = false
@@ -106,6 +111,7 @@ final class ScribeMacStore {
     session = opened
     profileName = opened.profile.name
     modelName = opened.profile.model
+    profileCatalog = opened.profileCatalog
     workingDirectory = opened.workingDirectory
     transcript = Self.replay(opened.initialMessages)
     usageText = ""
@@ -120,6 +126,57 @@ final class ScribeMacStore {
     Interaction.current.focus(Self.composerID, editing: true)
     if Interaction.current.isTextEditing {
       composerFocusPending = false
+    }
+  }
+
+  // MARK: - Model picker
+
+  func toggleModelPicker() {
+    guard !isRunning else { return }
+    showModelPicker.toggle()
+  }
+
+  func selectProfile(_ name: String) {
+    showModelPicker = false
+    guard name != profileName else { return }
+    Task { await applyModelProfile(name) }
+  }
+
+  private func applyModelProfile(_ name: String) async {
+    let previousName = profileName
+    do {
+      let loaded = try await ConfigLoader.load(profileOverride: name)
+      guard let harness = session?.harness else { return }
+      let newConfig = ScribeConfig(
+        agentModel: loaded.scribeConfig.agentModel,
+        contextWindow: loaded.scribeConfig.contextWindow,
+        contextWindowThreshold: loaded.scribeConfig.contextWindowThreshold,
+        serverURL: loaded.scribeConfig.serverURL,
+        apiKey: loaded.scribeConfig.apiKey,
+        apiType: loaded.apiType,
+        tools: ScribeSystemPrompt.defaultTools(),
+        workingDirectory: workingDirectory,
+        reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
+        reasoningEffort: loaded.scribeConfig.reasoningEffort,
+        maxTokens: loaded.scribeConfig.maxTokens
+      )
+      try await harness.reconfigure(configuration: newConfig)
+      profileName = loaded.activeProfileName
+      modelName = loaded.scribeConfig.agentModel
+      profileCatalog = loaded.profiles
+      let message: String
+      if name == previousName {
+        message = "Model reloaded: \(name) (\(modelName))"
+      } else {
+        message = "Switched to \(name) (\(modelName))"
+      }
+      transcript.append(TranscriptItem(kind: .notice, title: "Model", text: message))
+      transcriptScroll.scrollToBottom()
+    } catch {
+      transcript.append(
+        TranscriptItem(
+          kind: .error, title: "Error",
+          text: "Could not switch model: \(error.localizedDescription)"))
     }
   }
 
