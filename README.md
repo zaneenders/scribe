@@ -31,6 +31,7 @@ git clone https://github.com/zaneenders/scribe.git ~/.scribe/scribe
 cd ~/.scribe/scribe
 swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
+install -m 755 .build/release/scribe-mac ~/.local/bin/scribe-mac
 ```
 
 ### Linux
