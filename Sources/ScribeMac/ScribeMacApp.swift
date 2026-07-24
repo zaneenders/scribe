@@ -78,6 +78,9 @@ struct ScribeMacRoot: Block {
       if store.showDirectoryPicker && !store.requiresDirectoryBeforeStart {
         directoryPicker
       }
+      if let error = store.lastError {
+        errorBanner(error)
+      }
       switch store.phase {
       case .starting:
         if store.showDirectoryPicker {
@@ -107,10 +110,35 @@ struct ScribeMacRoot: Block {
         .padding(theme.margin)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       case .ready:
-        ReadyLayout(store: store, theme: theme)
+        HStack(spacing: 0) {
+          SessionSidebar(store: store, theme: theme)
+          if let active = store.active {
+            ReadyLayout(store: store, session: active, theme: theme)
+          } else {
+            emptyState
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       }
     }
     .background(theme.background)
+  }
+
+  @MainActor private var emptyState: some Block {
+    VStack(spacing: 12) {
+      Spacer()
+      Text("No session open").fontScale(theme.textScale).foregroundColor(theme.textSecondary)
+      HStack(spacing: 8) {
+        Button("New session", id: WidgetID("empty-new"), fontScale: theme.textScale) {
+          store.newSession()
+        }
+        Button("Resume latest", id: WidgetID("empty-resume"), fontScale: theme.textScale) {
+          store.resumeLatest()
+        }
+      }
+      Spacer()
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   @MainActor private var header: some Block {
@@ -118,7 +146,7 @@ struct ScribeMacRoot: Block {
       Text("SCRIBE").fontScale(theme.titleScale).foregroundColor(theme.accent)
       Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
         HStack(spacing: 4) {
-          Text("\(sanitizeASCII(store.profileName)) / \(sanitizeASCII(store.modelName))")
+          Text(profileLabel)
             .fontScale(theme.smallScale)
             .foregroundColor(phase == .hovered ? theme.accent : theme.textSecondary)
           Text(store.showModelPicker ? "▲" : "▼")
@@ -149,6 +177,28 @@ struct ScribeMacRoot: Block {
     .border(theme.border)
   }
 
+  @MainActor private var profileLabel: String {
+    guard let active = store.active else { return "no session" }
+    return "\(sanitizeASCII(active.profileName)) / \(sanitizeASCII(active.modelName))"
+  }
+
+  @MainActor private func errorBanner(_ message: String) -> some Block {
+    HStack(spacing: 8) {
+      Text(sanitizeASCII(message))
+        .fontScale(theme.smallScale)
+        .foregroundColor(theme.errorText)
+      Spacer()
+      Button(
+        "Dismiss", id: WidgetID("error-dismiss"), fontScale: theme.smallScale,
+        padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
+      ) { store.dismissError() }
+    }
+    .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(theme.statusBackground)
+    .border(theme.border)
+  }
+
   @MainActor private var directoryPicker: some Block {
     DirectoryPalette(store: store, theme: theme, required: false)
   }
@@ -158,7 +208,7 @@ struct ScribeMacRoot: Block {
     let profiles = store.profileCatalog
     return VStack(spacing: 0, alignment: .leading) {
       for (_, profile) in profiles.enumerated() {
-        let isActive = profile.name == store.profileName
+        let isActive = profile.name == store.active?.profileName
         Interactive(
           id: WidgetID("model-picker-item-\(profile.name)"),
           action: { store.selectProfile(profile.name) }
@@ -189,6 +239,104 @@ struct ScribeMacRoot: Block {
     .frame(maxWidth: 300, alignment: .leading)
     .background(theme.headerBackground)
     .border(theme.border)
+  }
+}
+
+/// Lists every open session with live status, so a turn keeps visibly running
+/// in the background while another session is on screen.
+private struct SessionSidebar: Block {
+  let store: ScribeMacStore
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
+    VStack(spacing: 0, alignment: .leading) {
+      HStack(spacing: 6) {
+        Text("SESSIONS")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.textSecondary)
+        Spacer()
+        Button(
+          "+ New", id: WidgetID("sidebar-new"), fontScale: theme.smallScale,
+          padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
+        ) { store.newSession() }
+      }
+      .padding(EdgeInsets(top: 8, leading: theme.margin, bottom: 8, trailing: 8))
+
+      for session in store.sessions {
+        SessionRow(
+          store: store,
+          session: session,
+          theme: theme,
+          isActive: session.sessionId == store.activeSessionID)
+      }
+
+      if store.pendingSessionCount > 0 {
+        Text("Starting session...")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.yellow)
+          .padding(EdgeInsets(top: 4, leading: theme.margin, bottom: 4, trailing: theme.margin))
+      }
+
+      if store.sessions.isEmpty && store.pendingSessionCount == 0 {
+        Text("No sessions")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.textSecondary)
+          .padding(EdgeInsets(top: 4, leading: theme.margin, bottom: 4, trailing: theme.margin))
+      }
+
+      Spacer()
+    }
+    .frame(width: 220)
+    .frame(maxHeight: .infinity, alignment: .topLeading)
+    .background(theme.statusBackground)
+    .border(theme.border)
+  }
+}
+
+private struct SessionRow: Block {
+  let store: ScribeMacStore
+  let session: SessionController
+  let theme: MacTheme
+  let isActive: Bool
+
+  @MainActor var body: some Block {
+    HStack(spacing: 2) {
+      Interactive(
+        id: WidgetID("session-row:\(session.sessionId.uuidString)"),
+        action: { store.switchTo(session.sessionId) }
+      ) { phase in
+        HStack(spacing: 6) {
+          Text("●")
+            .fontScale(theme.smallScale)
+            .foregroundColor(session.isRunning ? theme.yellow : theme.green)
+          VStack(spacing: 2, alignment: .leading) {
+            Text(sanitizeASCII(session.directoryTitle))
+              .fontScale(theme.smallScale)
+              .foregroundColor(
+                isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
+            Text(sanitizeASCII("\(session.sessionIdText) · \(session.modelName)"))
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+          Spacer()
+          if session.hasUnreadActivity && !isActive {
+            Text("●")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.accent)
+          }
+        }
+        .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: 4))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+          isActive ? theme.buttonIdle : phase == .hovered ? theme.buttonHover : .clear)
+      }
+      Button(
+        "X", id: WidgetID("session-close:\(session.sessionId.uuidString)"),
+        fontScale: theme.smallScale,
+        padding: EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6)
+      ) { store.closeSession(session.sessionId) }
+    }
+    .padding(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4))
   }
 }
 
@@ -263,24 +411,25 @@ private struct DirectoryPalette: Block {
 
 private struct ReadyLayout: Block {
   let store: ScribeMacStore
+  let session: SessionController
   let theme: MacTheme
 
   @MainActor var body: some Block {
     VStack(spacing: 0, alignment: .leading) {
-      TranscriptView(store: store, theme: theme)
-      BottomChrome(store: store, theme: theme)
+      TranscriptView(session: session, theme: theme)
+      BottomChrome(store: store, session: session, theme: theme)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 }
 
 private struct TranscriptView: Block {
-  let store: ScribeMacStore
+  let session: SessionController
   let theme: MacTheme
 
   @MainActor var body: some Block {
     let rows: [LazyVStack.Row]
-    if store.transcript.isEmpty {
+    if session.transcript.isEmpty {
       rows = [LazyVStack.Row(
         id: WidgetID("transcript-empty"),
         content: VStack(spacing: 8, alignment: .leading) {
@@ -293,7 +442,7 @@ private struct TranscriptView: Block {
         .frame(maxWidth: .infinity, alignment: .topLeading)
       )]
     } else {
-      rows = store.transcript.map { item in
+      rows = session.transcript.map { item in
         LazyVStack.Row(
           id: item.layoutID,
           content: TranscriptItemBlock(item: item, theme: theme)
@@ -304,9 +453,11 @@ private struct TranscriptView: Block {
         )
       }
     }
+    // The scroll identity is per session, so each session keeps its own
+    // scroll position while switching.
     return LazyVStack(
-      id: WidgetID("transcript"), sticksToBottom: true,
-      controller: store.transcriptScroll, rows: rows
+      id: WidgetID("transcript:\(session.sessionId.uuidString)"), sticksToBottom: true,
+      controller: session.scroll, rows: rows
     )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(theme.panelBackground)
@@ -315,48 +466,49 @@ private struct TranscriptView: Block {
 
 private struct BottomChrome: Block {
   let store: ScribeMacStore
+  let session: SessionController
   let theme: MacTheme
 
   @MainActor var body: some Block {
     VStack(spacing: 0, alignment: .leading) {
-      if !store.queuedTexts.isEmpty {
-        QueuedTray(store: store, theme: theme)
+      if !session.queuedTexts.isEmpty {
+        QueuedTray(session: session, theme: theme)
       }
-      ComposerBar(store: store, theme: theme)
-      StatusBar(store: store, theme: theme)
+      ComposerBar(session: session, theme: theme)
+      StatusBar(store: store, session: session, theme: theme)
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
   }
 }
 
 private struct ComposerBar: Block {
-  let store: ScribeMacStore
+  let session: SessionController
   let theme: MacTheme
 
   @MainActor var body: some Block {
     HStack(spacing: 8) {
       TextField(
-        store.isRunning ? "Queue a message..." : "Message Scribe",
+        session.isRunning ? "Queue a message..." : "Message Scribe",
         id: ScribeMacStore.composerID,
         fontScale: theme.textScale,
-        text: { store.draft },
-        onChange: { store.draft = sanitizeASCII($0.replacingOccurrences(of: "\n", with: " ")) },
-        onSubmit: { store.submit($0) }
+        text: { session.draft },
+        onChange: { session.draft = sanitizeASCII($0.replacingOccurrences(of: "\n", with: " ")) },
+        onSubmit: { session.submit($0) }
       )
-      if store.isRunning {
+      if session.isRunning {
         Button(
           "Queue", id: WidgetID("queue"), fontScale: theme.textScale,
           pressedColor: theme.accent
-        ) { store.submit() }
+        ) { session.submit() }
         Button(
           "Stop", id: WidgetID("stop"), fontScale: theme.textScale,
           pressedColor: theme.red
-        ) { store.stop() }
+        ) { session.stop() }
       } else {
         Button(
           "Send", id: WidgetID("send"), fontScale: theme.textScale,
           pressedColor: theme.accent
-        ) { store.submit() }
+        ) { session.submit() }
       }
     }
     .padding(theme.margin)
@@ -367,11 +519,11 @@ private struct ComposerBar: Block {
 }
 
 private struct QueuedTray: Block {
-  let store: ScribeMacStore
+  let session: SessionController
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    let queued = store.queuedTexts
+    let queued = session.queuedTexts
     return VStack(spacing: 4, alignment: .leading) {
       HStack(spacing: 8) {
         Text("QUEUED (\(queued.count)) · sent in order after each turn")
@@ -379,9 +531,14 @@ private struct QueuedTray: Block {
           .foregroundColor(theme.yellow)
         Spacer()
         Button(
+          "Send next", id: WidgetID("force-send-queue"), fontScale: theme.smallScale,
+          pressedColor: theme.accent,
+          padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
+        ) { session.forceSendNext() }
+        Button(
           "Clear", id: WidgetID("clear-queue"), fontScale: theme.smallScale,
           padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
-        ) { store.clearQueue() }
+        ) { session.clearQueue() }
       }
       for (index, text) in queued.enumerated() {
         Text("[\(index + 1)/\(queued.count)] \(queuePreview(text))")
@@ -404,13 +561,14 @@ private struct QueuedTray: Block {
 
 private struct StatusBar: Block {
   let store: ScribeMacStore
+  let session: SessionController
   let theme: MacTheme
 
   @MainActor var body: some Block {
     HStack(spacing: 10) {
-      Text(store.isRunning ? "WORKING" : "READY")
+      Text(session.isRunning ? "WORKING" : "READY")
         .fontScale(theme.smallScale)
-        .foregroundColor(store.isRunning ? theme.yellow : theme.green)
+        .foregroundColor(session.isRunning ? theme.yellow : theme.green)
       Interactive(
         id: WidgetID("cwd-toggle"),
         action: { store.toggleDirectoryPicker() }
@@ -419,24 +577,19 @@ private struct StatusBar: Block {
           Text("cwd")
             .fontScale(theme.smallScale)
             .foregroundColor(theme.textSecondary)
-          Text(sanitizeASCII(store.workingDirectory))
+          Text(sanitizeASCII(session.workingDirectory))
             .fontScale(theme.smallScale)
-            .foregroundColor(
-              store.isRunning
-                ? theme.textSecondary
-                : phase == .hovered ? theme.accent : theme.textPrimary)
+            .foregroundColor(phase == .hovered ? theme.accent : theme.textPrimary)
         }
         .padding(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
-        .background(store.isRunning ? .clear : phase == .hovered ? theme.buttonHover : theme.buttonIdle)
+        .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
       }
-      if !store.sessionIdText.isEmpty {
-        Text("Session: \(store.sessionIdText)")
-          .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
-          .selectable(WidgetID("session-id"))
-      }
+      Text("Session: \(session.sessionIdText)")
+        .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+        .selectable(WidgetID("session-id"))
       Spacer()
-      if !store.usageText.isEmpty {
-        Text(store.usageText).fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+      if !session.usageText.isEmpty {
+        Text(session.usageText).fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
       }
     }
     .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
@@ -447,7 +600,7 @@ private struct StatusBar: Block {
 }
 
 struct TranscriptItemBlock: Block {
-  let item: ScribeMacStore.TranscriptItem
+  let item: SessionController.TranscriptItem
   let theme: MacTheme
 
   @MainActor var body: some Block {

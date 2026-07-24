@@ -4,6 +4,12 @@ import ScribeCore
 import ScribeKit
 import SystemPackage
 
+/// Owns every open chat session and which one is on screen.
+///
+/// Sessions are independent ``SessionController``s: switching sessions or
+/// starting a new one never interrupts a turn already streaming — the
+/// controller keeps consuming events in the background and flags unread
+/// activity for the sidebar.
 @MainActor
 final class ScribeMacStore {
   enum Phase {
@@ -12,55 +18,31 @@ final class ScribeMacStore {
     case failed(String)
   }
 
-  enum ItemKind {
-    case user
-    case answer
-    case reasoning
-    case tool
-    case notice
-    case warning
-    case error
-  }
-
-  struct TranscriptItem: Identifiable {
-    let id = UUID()
-    var kind: ItemKind
-    var title: String
-    var text: String
-    var running = false
-    var layoutRevision = 0
-
-    var layoutID: WidgetID {
-      WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
-    }
-  }
-
-  private enum StreamEvent: Sendable {
-    case userPrompt(String)
-    case agent(AgentEvent)
-    case finished(TurnOutcome)
-    case failed(String)
-  }
-
   static let shared = ScribeMacStore()
   static let composerID = WidgetID("scribe-composer")
   static let directoryPaletteID = WidgetID("directory-palette")
 
+  /// Startup phase. Only the initial bootstrap blanks the UI; later session
+  /// opens run in the background and report through `pendingSessionCount`
+  /// and `lastError`.
   var phase: Phase = .starting
-  var draft = ""
-  var transcript: [TranscriptItem] = []
-  var isRunning = false
-  var profileName = ""
-  var modelName = ""
-  var workingDirectory = ""
-  var usageText = ""
-  var sessionIdText: String { session?.sessionId.uuidString.prefix(8).uppercased() ?? "" }
-  /// Messages queued while a turn is running, oldest first.
-  var queuedTexts: [String] { session?.messageQueues.steeringPreviewTexts() ?? [] }
-  let transcriptScroll = ScrollViewController()
 
-  /// Available profiles for model switching.
+  /// Live sessions, oldest first. Turns keep running while not active.
+  private(set) var sessions: [SessionController] = []
+  private(set) var activeSessionID: UUID?
+  /// Session opens currently bootstrapping (new / resume / directory change).
+  private(set) var pendingSessionCount = 0
+  /// Non-fatal failure shown as a dismissible banner over the session UI.
+  var lastError: String?
+
+  /// The session currently on screen, if any.
+  var active: SessionController? {
+    sessions.first { $0.sessionId == activeSessionID }
+  }
+
+  /// Profiles listed by the model picker; refreshed on every config load.
   var profileCatalog: [ProfileSummary] = []
+
   /// Whether the model picker overlay is visible.
   var showModelPicker = false
 
@@ -75,9 +57,8 @@ final class ScribeMacStore {
   /// True when Finder-style launch at `/` must pick a directory before bootstrap.
   var requiresDirectoryBeforeStart = false
 
-  private var session: BootstrappedSession?
-  private var runTask: Task<Void, Never>?
   private var didStart = false
+  private var didSetupShellCapture = false
   private var composerFocusPending = false
   private var directoryFocusPending = false
   /// Cwd anchor for palette resolution before the first session exists.
@@ -109,7 +90,7 @@ final class ScribeMacStore {
     }
     Task {
       do {
-        try ShellCaptureDirectory.setup(dataHome: ScribePaths.resolve().dataHomePath)
+        try ensureShellCapture()
         let opened = try await ScribeSessionBootstrap.open(
           workingDirectory: launchCWD,
           version: GitVersion.hash)
@@ -120,48 +101,131 @@ final class ScribeMacStore {
     }
   }
 
+  // MARK: - Session lifecycle
+
+  /// Opens a brand-new session in the background. Any turn already streaming
+  /// in another session keeps running untouched.
   func newSession() {
-    guard !isRunning else { return }
-    phase = .starting
+    guard !isStarting else { return }
+    openSessionInBackground(workingDirectory: active?.workingDirectory ?? directoryBaseCWD)
+  }
+
+  /// Resumes the most recently saved session, or switches to it when it is
+  /// already open here — two live controllers on one session file would
+  /// interleave writes to its transcript.
+  func resumeLatest() {
+    guard !isStarting else { return }
+    let cwd = active?.workingDirectory ?? directoryBaseCWD
+    pendingSessionCount += 1
     Task {
+      defer { pendingSessionCount -= 1 }
       do {
+        let directory = try await ChatSessionStore.resolveResumeDirectory(
+          specifier: "latest",
+          sessionsRoot: ScribePaths.resolve().sessionsDirectory,
+          preferCWD: cwd)
+        let metadata = try ChatSessionStore.loadMetadata(from: directory)
+        if let existing = sessions.first(where: { $0.sessionId == metadata.id }) {
+          switchTo(existing.sessionId)
+          return
+        }
+        try ensureShellCapture()
         let opened = try await ScribeSessionBootstrap.open(
-          workingDirectory: workingDirectory,
+          resumeLatest: true,
+          workingDirectory: cwd,
           version: GitVersion.hash)
         install(opened)
       } catch {
-        phase = .failed(error.localizedDescription)
+        reportError("Could not resume session: \(error.localizedDescription)")
       }
     }
   }
 
-  func resumeLatest() {
-    guard !isRunning else { return }
-    phase = .starting
-    Task {
-      do {
-        let opened = try await ScribeSessionBootstrap.open(
-          resumeLatest: true,
-          workingDirectory: workingDirectory,
-          version: GitVersion.hash)
-        install(opened)
-      } catch {
-        phase = .failed(error.localizedDescription)
+  /// Brings a session on screen. Its turn — running or not — is unaffected;
+  /// the previously visible session keeps streaming in the background.
+  func switchTo(_ id: UUID) {
+    guard sessions.contains(where: { $0.sessionId == id }) else { return }
+    activeSessionID = id
+    for session in sessions {
+      let isActive = session.sessionId == id
+      session.isActive = isActive
+      if isActive { session.hasUnreadActivity = false }
+    }
+    composerFocusPending = true
+  }
+
+  /// Removes a session. An in-flight turn is interrupted but its streaming
+  /// task is left to wind down so the interrupted turn persists cleanly.
+  func closeSession(_ id: UUID) {
+    guard let index = sessions.firstIndex(where: { $0.sessionId == id }) else { return }
+    let controller = sessions.remove(at: index)
+    controller.shutdown(cancelTask: false)
+    if activeSessionID == id {
+      if sessions.isEmpty {
+        activeSessionID = nil
+      } else {
+        let next = sessions[min(index, sessions.count - 1)]
+        switchTo(next.sessionId)
       }
     }
   }
 
   private func install(_ opened: BootstrappedSession) {
-    session = opened
-    profileName = opened.profile.name
-    modelName = opened.profile.model
+    let controller = SessionController(boot: opened)
+    sessions.append(controller)
     profileCatalog = opened.profileCatalog
-    workingDirectory = opened.workingDirectory
-    transcript = Self.replay(opened.initialMessages)
-    usageText = ""
+    requiresDirectoryBeforeStart = false
+    lastError = nil
     phase = .ready
-    transcriptScroll.scrollToBottom()
-    composerFocusPending = true
+    switchTo(controller.sessionId)
+  }
+
+  private func openSessionInBackground(workingDirectory: String, reopenPaletteOnError: Bool = false) {
+    pendingSessionCount += 1
+    Task {
+      defer { pendingSessionCount -= 1 }
+      do {
+        try ensureShellCapture()
+        let opened = try await ScribeSessionBootstrap.open(
+          workingDirectory: workingDirectory,
+          version: GitVersion.hash)
+        install(opened)
+      } catch {
+        if reopenPaletteOnError, sessions.isEmpty {
+          requiresDirectoryBeforeStart = directoryBaseCWD == "/"
+          showDirectoryPicker = true
+          directoryDraft = workingDirectory
+          directoryError = error.localizedDescription
+          directoryFocusPending = true
+        } else {
+          reportError("Could not start session in \(workingDirectory): \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
+  private func ensureShellCapture() throws {
+    guard !didSetupShellCapture else { return }
+    try ShellCaptureDirectory.setup(dataHome: ScribePaths.resolve().dataHomePath)
+    didSetupShellCapture = true
+  }
+
+  private func reportError(_ message: String) {
+    lastError = message
+    // With no sessions to fall back on, still leave the empty state usable
+    // rather than the fatal startup screen.
+    if sessions.isEmpty, isStarting {
+      phase = .ready
+    }
+  }
+
+  private var isStarting: Bool {
+    if case .starting = phase { return true }
+    return false
+  }
+
+  func dismissError() {
+    lastError = nil
   }
 
   /// Focus must be requested after a frame has registered the target leaf.
@@ -173,6 +237,10 @@ final class ScribeMacStore {
       }
       return
     }
+    if let active, active.wantsComposerFocus {
+      active.wantsComposerFocus = false
+      composerFocusPending = true
+    }
     guard composerFocusPending else { return }
     Interaction.current.focus(Self.composerID, editing: true)
     if Interaction.current.isTextEditing {
@@ -183,7 +251,6 @@ final class ScribeMacStore {
   // MARK: - Directory palette
 
   func toggleDirectoryPicker() {
-    guard !isRunning else { return }
     if showDirectoryPicker && !requiresDirectoryBeforeStart {
       closeDirectoryPicker()
       return
@@ -192,10 +259,9 @@ final class ScribeMacStore {
   }
 
   func openDirectoryPicker() {
-    guard !isRunning else { return }
     showModelPicker = false
     showDirectoryPicker = true
-    directoryDraft = workingDirectory.isEmpty ? "~" : workingDirectory
+    directoryDraft = active?.workingDirectory ?? (directoryBaseCWD == "/" ? "~" : directoryBaseCWD)
     directoryError = ""
     directoryMatches = []
     directoryFocusPending = true
@@ -239,307 +305,55 @@ final class ScribeMacStore {
       directoryMatches = []
       return
     }
-    if !requiresDirectoryBeforeStart, path == workingDirectory {
+    if !requiresDirectoryBeforeStart, path == active?.workingDirectory {
       closeDirectoryPicker()
       return
     }
-    Task {
-      await openSession(in: path)
-    }
-  }
-
-  private var directoryResolutionBase: String {
-    workingDirectory.isEmpty ? directoryBaseCWD : workingDirectory
-  }
-
-  private func openSession(in directory: String) async {
-    phase = .starting
     showDirectoryPicker = false
     directoryError = ""
     directoryMatches = []
     directoryFocusPending = false
-    do {
-      if session == nil {
-        try ShellCaptureDirectory.setup(dataHome: ScribePaths.resolve().dataHomePath)
-      }
-      let opened = try await ScribeSessionBootstrap.open(
-        workingDirectory: directory,
-        version: GitVersion.hash)
-      requiresDirectoryBeforeStart = false
-      install(opened)
-    } catch {
-      requiresDirectoryBeforeStart = directoryBaseCWD == "/"
-      showDirectoryPicker = true
-      directoryDraft = directory
-      directoryError = error.localizedDescription
-      directoryFocusPending = true
-      phase = requiresDirectoryBeforeStart ? .starting : .ready
-    }
+    // Starts a new session in the chosen directory; the current session, if
+    // any, keeps running in the background.
+    openSessionInBackground(workingDirectory: path, reopenPaletteOnError: true)
+  }
+
+  private var directoryResolutionBase: String {
+    active?.workingDirectory ?? directoryBaseCWD
   }
 
   // MARK: - Model picker
 
   func toggleModelPicker() {
-    guard !isRunning else { return }
+    guard active?.isRunning != true else { return }
     showDirectoryPicker = false
     showModelPicker.toggle()
   }
 
   func selectProfile(_ name: String) {
     showModelPicker = false
-    guard name != profileName else { return }
-    Task { await applyModelProfile(name) }
-  }
-
-  private func applyModelProfile(_ name: String) async {
-    let previousName = profileName
-    do {
-      let loaded = try await ConfigLoader.load(profileOverride: name)
-      guard let harness = session?.harness else { return }
-      let newConfig = ScribeConfig(
-        agentModel: loaded.scribeConfig.agentModel,
-        contextWindow: loaded.scribeConfig.contextWindow,
-        contextWindowThreshold: loaded.scribeConfig.contextWindowThreshold,
-        serverURL: loaded.scribeConfig.serverURL,
-        apiKey: loaded.scribeConfig.apiKey,
-        apiType: loaded.apiType,
-        tools: ScribeSystemPrompt.defaultTools(),
-        workingDirectory: workingDirectory,
-        reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
-        reasoningEffort: loaded.scribeConfig.reasoningEffort,
-        maxTokens: loaded.scribeConfig.maxTokens
-      )
-      try await harness.reconfigure(configuration: newConfig)
-      profileName = loaded.activeProfileName
-      modelName = loaded.scribeConfig.agentModel
-      profileCatalog = loaded.profiles
-      let message: String
-      if name == previousName {
-        message = "Model reloaded: \(name) (\(modelName))"
-      } else {
-        message = "Switched to \(name) (\(modelName))"
+    guard let active, name != active.profileName else { return }
+    Task {
+      if let catalog = await active.applyModelProfile(name) {
+        profileCatalog = catalog
       }
-      transcript.append(TranscriptItem(kind: .notice, title: "Model", text: message))
-      transcriptScroll.scrollToBottom()
-    } catch {
-      transcript.append(
-        TranscriptItem(
-          kind: .error, title: "Error",
-          text: "Could not switch model: \(error.localizedDescription)"))
     }
   }
 
-  func submit(_ proposed: String? = nil) {
-    let text = (proposed ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
-    if isRunning {
-      enqueue(text)
-      return
-    }
-    guard let harness = session?.harness else { return }
-    draft = ""
-    isRunning = true
-
-    let (events, continuation) = AsyncStream<StreamEvent>.makeStream()
-    runTask = Task { [weak self] in
-      guard let self else { return }
-      let consumer = Task { @MainActor [weak self] in
-        for await event in events {
-          self?.handle(event)
-        }
-      }
-      do {
-        let outcome = try await harness.submit(
-          text,
-          onUserPrompt: { prompt in continuation.yield(.userPrompt(prompt)) },
-          onEvent: { event in continuation.yield(.agent(event)) })
-        continuation.yield(.finished(outcome))
-      } catch {
-        continuation.yield(.failed(error.localizedDescription))
-      }
-      continuation.finish()
-      _ = await consumer.result
-    }
-  }
-
-  /// Queue a message while the model is busy. The harness drains the steering
-  /// queue after the current turn, matching the CLI's Enter-while-busy path.
-  private func enqueue(_ text: String) {
-    guard let queues = session?.messageQueues else { return }
-    guard queues.enqueueSteering(text: text) else { return }
-    draft = ""
-  }
-
-  func stop() {
-    guard isRunning, let harness = session?.harness else { return }
-    // Interrupting alone would let the harness dispatch queued steering
-    // messages into a fresh turn, so Stop also drops the pending queue.
-    let dropped = discardQueuedMessages()
-    if dropped > 0 {
-      transcript.append(
-        TranscriptItem(
-          kind: .notice, title: "Queue",
-          text: "Discarded \(dropped) queued message\(dropped == 1 ? "" : "s")."))
-    }
-    Task { await harness.interrupt() }
-  }
-
-  func clearQueue() {
-    let dropped = discardQueuedMessages()
-    guard dropped > 0 else { return }
-    transcript.append(
-      TranscriptItem(
-        kind: .notice, title: "Queue",
-        text: "Cleared \(dropped) queued message\(dropped == 1 ? "" : "s")."))
-    transcriptScroll.scrollToBottom()
-  }
-
-  @discardableResult
-  private func discardQueuedMessages() -> Int {
-    guard let queues = session?.messageQueues else { return 0 }
-    let count = queues.steeringCount() + queues.followUpCount()
-    queues.clearAll()
-    return count
-  }
+  // MARK: - App teardown
 
   func close() {
     #if canImport(AppKit)
     DirectoryPaletteKeyMonitor.shared.uninstall()
     #endif
-    let harness = session?.harness
-    session?.messageQueues.clearAll()
-    runTask?.cancel()
-    runTask = nil
-    if let harness {
-      Task { await harness.interrupt() }
+    for session in sessions {
+      session.shutdown(cancelTask: true)
     }
-    ShellCaptureDirectory.teardown()
-  }
-
-  private func handle(_ event: StreamEvent) {
-    switch event {
-    case .userPrompt(let text):
-      // Echoes both the submitted message and queued messages as the harness
-      // dispatches them at the start of each turn.
-      transcript.append(TranscriptItem(kind: .user, title: "You", text: text))
-      transcriptScroll.scrollToBottom()
-    case .agent(let event): reduce(event)
-    case .finished(let outcome):
-      isRunning = false
-      if outcome == .interrupted {
-        transcript.append(TranscriptItem(kind: .notice, title: "Stopped", text: "Response interrupted."))
-      }
-      runTask = nil
-      composerFocusPending = true
-    case .failed(let message):
-      isRunning = false
-      transcript.append(TranscriptItem(kind: .error, title: "Error", text: message))
-      runTask = nil
+    sessions = []
+    activeSessionID = nil
+    if didSetupShellCapture {
+      ShellCaptureDirectory.teardown()
+      didSetupShellCapture = false
     }
-    // The transcript ScrollView's sticksToBottom behavior follows new content
-    // only when it was already at the bottom. Do not enqueue an unconditional
-    // controller request here: streaming events would otherwise override a
-    // user's attempt to scroll back through the response.
-  }
-
-  private func reduce(_ event: AgentEvent) {
-    switch event {
-    case .output(.sectionStarted(let section, _)):
-      ensureStreamItem(section)
-    case .output(.text(let section, let text)):
-      append(text, to: section)
-    case .output(.empty):
-      transcript.append(TranscriptItem(kind: .notice, title: "Scribe", text: "Empty response."))
-    case .output(.finalized):
-      break
-    case .tool(.invocation(let name, let arguments, let output)):
-      upsertTool(name: name, arguments: arguments, output: output, running: false)
-    case .tool(.warning(let warning)):
-      transcript.append(TranscriptItem(kind: .warning, title: "Warning", text: warning))
-    case .lifecycle(.usage(let usage, let rate)):
-      var parts: [String] = []
-      if let total = usage.totalTokens { parts.append("\(total) tokens") }
-      if let rate { parts.append(String(format: "%.1f tok/s", rate)) }
-      usageText = parts.joined(separator: " | ")
-    case .lifecycle(.error(let error)):
-      transcript.append(TranscriptItem(kind: .error, title: "Error", text: error.localizedDescription))
-    case .lifecycle(.retrying(let attempt, let maxRetries, let delay, let reason)):
-      transcript.append(TranscriptItem(kind: .warning, title: "Retrying", text: "\(reason) (attempt \(attempt)/\(maxRetries), delay: \(String(format: "%.1f", Double(delay.components.seconds) + Double(delay.components.attoseconds) / 1e18))s)"))
-    case .lifecycle(.interrupted):
-      break
-    case .lifecycle(.recovered(let reason)):
-      transcript.append(TranscriptItem(kind: .warning, title: "Recovered", text: reason))
-    case .boundary(.toolExecutionStart(let name, let arguments)):
-      upsertTool(name: name, arguments: arguments, output: "", running: true)
-    case .boundary(.toolExecutionEnd(let name, let output)):
-      upsertTool(name: name, arguments: "", output: output, running: false)
-    case .boundary:
-      break
-    }
-  }
-
-  private func ensureStreamItem(_ section: AssistantStreamSection) {
-    let kind: ItemKind = section == .reasoning ? .reasoning : .answer
-    if transcript.last?.kind != kind {
-      transcript.append(TranscriptItem(
-        kind: kind,
-        title: section == .reasoning ? "Reasoning" : "Scribe",
-        text: "",
-        running: true))
-    }
-  }
-
-  private func append(_ text: String, to section: AssistantStreamSection) {
-    ensureStreamItem(section)
-    transcript[transcript.count - 1].text += text
-    transcript[transcript.count - 1].layoutRevision += 1
-  }
-
-  private func upsertTool(name: String, arguments: String, output: String, running: Bool) {
-    if let index = transcript.lastIndex(where: { $0.kind == .tool && $0.title == name && $0.running }) {
-      if !arguments.isEmpty { transcript[index].text = arguments }
-      if !output.isEmpty {
-        if !transcript[index].text.isEmpty { transcript[index].text += "\n\n" }
-        transcript[index].text += output
-      }
-      transcript[index].running = running
-      transcript[index].layoutRevision += 1
-    } else {
-      let text = [arguments, output].filter { !$0.isEmpty }.joined(separator: "\n\n")
-      transcript.append(TranscriptItem(kind: .tool, title: name, text: text, running: running))
-    }
-  }
-
-  private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
-    var result: [TranscriptItem] = []
-    for message in messages {
-      switch message.role {
-      case .system:
-        continue
-      case .user:
-        result.append(TranscriptItem(kind: .user, title: "You", text: message.content))
-      case .assistant:
-        if let reasoning = message.reasoning, !reasoning.isEmpty {
-          result.append(TranscriptItem(kind: .reasoning, title: "Reasoning", text: reasoning))
-        }
-        if !message.content.isEmpty {
-          result.append(TranscriptItem(kind: .answer, title: "Scribe", text: message.content))
-        }
-        for call in message.toolCalls ?? [] {
-          result.append(TranscriptItem(
-            kind: .tool, title: call.name, text: call.arguments, running: true))
-        }
-      case .tool:
-        if let index = result.lastIndex(where: { $0.kind == .tool && $0.running }) {
-          if !result[index].text.isEmpty { result[index].text += "\n\n" }
-          result[index].text += message.content
-          result[index].running = false
-        } else {
-          result.append(TranscriptItem(
-            kind: .tool, title: message.name ?? "Tool", text: message.content))
-        }
-      }
-    }
-    return result
   }
 }
