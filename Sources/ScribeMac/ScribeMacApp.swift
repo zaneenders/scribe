@@ -95,8 +95,12 @@ struct ScribeMacRoot: Block {
           Text("Could not start Scribe").fontScale(theme.textScale).foregroundColor(theme.errorText)
           WrappedText(text: message, theme: theme, color: theme.textPrimary)
           HStack(spacing: 8) {
-            Button("New session", id: WidgetID("retry-new")) { store.newSession() }
-            Button("Resume latest", id: WidgetID("retry-resume")) { store.resumeLatest() }
+            Button("New session", id: WidgetID("retry-new"), fontScale: theme.textScale) {
+              store.newSession()
+            }
+            Button("Resume latest", id: WidgetID("retry-resume"), fontScale: theme.textScale) {
+              store.resumeLatest()
+            }
           }
           Spacer()
         }
@@ -111,7 +115,7 @@ struct ScribeMacRoot: Block {
 
   @MainActor private var header: some Block {
     HStack(spacing: 10) {
-      Text("SCRIBE").fontScale(theme.textScale).foregroundColor(theme.accent)
+      Text("SCRIBE").fontScale(theme.titleScale).foregroundColor(theme.accent)
       Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
         HStack(spacing: 4) {
           Text("\(sanitizeASCII(store.profileName)) / \(sanitizeASCII(store.modelName))")
@@ -340,10 +344,19 @@ private struct ComposerBar: Block {
         onSubmit: { store.submit($0) }
       )
       if store.isRunning {
-        Button("Queue", id: WidgetID("queue"), pressedColor: theme.accent) { store.submit() }
-        Button("Stop", id: WidgetID("stop"), pressedColor: theme.red) { store.stop() }
+        Button(
+          "Queue", id: WidgetID("queue"), fontScale: theme.textScale,
+          pressedColor: theme.accent
+        ) { store.submit() }
+        Button(
+          "Stop", id: WidgetID("stop"), fontScale: theme.textScale,
+          pressedColor: theme.red
+        ) { store.stop() }
       } else {
-        Button("Send", id: WidgetID("send"), pressedColor: theme.accent) { store.submit() }
+        Button(
+          "Send", id: WidgetID("send"), fontScale: theme.textScale,
+          pressedColor: theme.accent
+        ) { store.submit() }
       }
     }
     .padding(theme.margin)

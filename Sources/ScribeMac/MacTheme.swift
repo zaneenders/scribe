@@ -3,14 +3,19 @@ import Chroma
 /// The macOS app's palette and metrics, mirroring the CLI's dark theme
 /// where Chroma's immediate-mode blocks allow.
 struct MacTheme: Sendable {
-  var margin: Float = 14
+  var margin: Float = 12
   var spacing: Float = 8
-  var panelPadding: Float = 12
-  var headerHeight: Float = 52
-  var statusHeight: Float = 38
-  var itemHeight: Float = 42
-  var textScale: Float = 1.75
-  var smallScale: Float = 1.5
+  var panelPadding: Float = 10
+  var headerHeight: Float = 46
+  var statusHeight: Float = 32
+  var itemHeight: Float = 36
+
+  // Render the native 20×28 artwork at an exact half scale. Unlike the former
+  // fractional scales, this maps each 2×2 source area consistently and keeps
+  // the bitmap's corners crisp instead of producing uneven rounded edges.
+  var titleScale: Float = 0.5
+  var textScale: Float = 0.5
+  var smallScale: Float = 0.5
 
   var background = Color(r: 0.08, g: 0.09, b: 0.13, a: 1)
   var panelBackground = Color(r: 0.10, g: 0.11, b: 0.16, a: 1)

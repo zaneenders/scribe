@@ -473,8 +473,8 @@ struct MarkdownText: PrimitiveBlock {
   var markdown: String
   var theme: MacTheme
   var baseColor: Color
-  var scale: Float = 2
-  var lineSpacing: Float = 4
+  var scale: Float = 0.5
+  var lineSpacing: Float = 2
   /// Optional stable ID for this block, used to register its layout for
   /// hit testing and text selection.
   var itemID: WidgetID? = nil
@@ -519,7 +519,7 @@ struct WrappedText: Block {
   var text: String
   var theme: MacTheme
   var color: Color
-  var scale: Float = 2
+  var scale: Float = 0.5
   /// Optional stable ID for this block, used to register its layout for
   /// hit testing and text selection.
   var itemID: WidgetID? = nil
