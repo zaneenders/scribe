@@ -26,6 +26,9 @@ struct MacTheme: Sendable {
   var buttonIdle = Color(r: 0.18, g: 0.20, b: 0.30, a: 1)
   var buttonHover = Color(r: 0.24, g: 0.28, b: 0.42, a: 1)
   var buttonPressed = Color(r: 0.30, g: 0.38, b: 0.55, a: 1)
+  var sidebarBackground = Color(r: 0.085, g: 0.095, b: 0.14, a: 1)
+  var sidebarSelection = Color(r: 0.15, g: 0.18, b: 0.28, a: 1)
+  var sidebarHover = Color(r: 0.12, g: 0.14, b: 0.21, a: 1)
 
   var accent = Color(r: 0.3, g: 0.6, b: 1.0, a: 1)
   var green = Color(r: 0.3, g: 0.8, b: 0.4, a: 1)

@@ -220,7 +220,8 @@ struct ScribeMacRoot: Block {
             Text(sanitizeASCII(profile.name))
               .fontScale(theme.smallScale)
               .foregroundColor(
-                isActive ? theme.accent
+                isActive
+                  ? theme.accent
                   : phase == .hovered ? theme.textPrimary : theme.textSecondary)
             Spacer()
             Text(sanitizeASCII(profile.model))
@@ -231,7 +232,8 @@ struct ScribeMacRoot: Block {
           .frame(height: itemHeight, alignment: .leading)
           .frame(maxWidth: .infinity, alignment: .leading)
           .background(
-            phase == .hovered ? theme.buttonHover
+            phase == .hovered
+              ? theme.buttonHover
               : isActive ? theme.buttonIdle : theme.panelBackground)
         }
       }
@@ -255,40 +257,51 @@ private struct SessionSidebar: Block {
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
         Spacer()
-        Button(
-          "+ New", id: WidgetID("sidebar-new"), fontScale: theme.smallScale,
-          padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
-        ) { store.newSession() }
+        Interactive(id: WidgetID("sidebar-new"), action: { store.newSession() }) { phase in
+          Text("+")
+            .fontScale(theme.textScale)
+            .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
+            .frame(width: 24, height: 24)
+            .background(phase == .idle ? .clear : theme.sidebarHover)
+        }
       }
-      .padding(EdgeInsets(top: 8, leading: theme.margin, bottom: 8, trailing: 8))
+      .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 6))
+      .frame(height: 40, alignment: .leading)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .border(theme.border)
 
-      for session in store.sessions {
-        SessionRow(
-          store: store,
-          session: session,
-          theme: theme,
-          isActive: session.sessionId == store.activeSessionID)
+      VStack(spacing: 1, alignment: .leading) {
+        for session in store.sessions {
+          SessionRow(
+            store: store,
+            session: session,
+            theme: theme,
+            isActive: session.sessionId == store.activeSessionID)
+        }
+
+        if store.pendingSessionCount > 0 {
+          HStack(spacing: 6) {
+            Text("●").fontScale(theme.smallScale).foregroundColor(theme.yellow)
+            Text("Starting session...")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+          .padding(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8))
+        }
+
+        if store.sessions.isEmpty && store.pendingSessionCount == 0 {
+          Text("No open sessions")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+            .padding(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
+        }
       }
-
-      if store.pendingSessionCount > 0 {
-        Text("Starting session...")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.yellow)
-          .padding(EdgeInsets(top: 4, leading: theme.margin, bottom: 4, trailing: theme.margin))
-      }
-
-      if store.sessions.isEmpty && store.pendingSessionCount == 0 {
-        Text("No sessions")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
-          .padding(EdgeInsets(top: 4, leading: theme.margin, bottom: 4, trailing: theme.margin))
-      }
-
+      .frame(maxWidth: .infinity, alignment: .topLeading)
       Spacer()
     }
-    .frame(width: 220)
+    .frame(width: 160)
     .frame(maxHeight: .infinity, alignment: .topLeading)
-    .background(theme.statusBackground)
+    .background(theme.sidebarBackground)
     .border(theme.border)
   }
 }
@@ -300,24 +313,18 @@ private struct SessionRow: Block {
   let isActive: Bool
 
   @MainActor var body: some Block {
-    HStack(spacing: 2) {
+    ZStack(alignment: .trailing) {
       Interactive(
         id: WidgetID("session-row:\(session.sessionId.uuidString)"),
         action: { store.switchTo(session.sessionId) }
       ) { phase in
-        HStack(spacing: 6) {
-          Text("●")
+        HStack(spacing: 0) {
+          Text(sanitizeASCII(session.directoryTitle))
             .fontScale(theme.smallScale)
-            .foregroundColor(session.isRunning ? theme.yellow : theme.green)
-          VStack(spacing: 2, alignment: .leading) {
-            Text(sanitizeASCII(session.directoryTitle))
-              .fontScale(theme.smallScale)
-              .foregroundColor(
-                isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
-            Text(sanitizeASCII("\(session.sessionIdText) · \(session.modelName)"))
-              .fontScale(theme.smallScale)
-              .foregroundColor(theme.textSecondary)
-          }
+            .foregroundColor(
+              session.isRunning
+                ? theme.yellow
+                : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
           Spacer()
           if session.hasUnreadActivity && !isActive {
             Text("●")
@@ -325,18 +332,29 @@ private struct SessionRow: Block {
               .foregroundColor(theme.accent)
           }
         }
-        .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: 4))
+        .padding(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 28))
+        .frame(height: 32, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-          isActive ? theme.buttonIdle : phase == .hovered ? theme.buttonHover : .clear)
+          isActive
+            ? theme.sidebarSelection
+            : phase == .hovered ? theme.sidebarHover : .clear
+        )
+        .border(isActive ? theme.accent : .clear, width: isActive ? 1 : 0)
       }
-      Button(
-        "X", id: WidgetID("session-close:\(session.sessionId.uuidString)"),
-        fontScale: theme.smallScale,
-        padding: EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6)
-      ) { store.closeSession(session.sessionId) }
+      Interactive(
+        id: WidgetID("session-close:\(session.sessionId.uuidString)"),
+        action: { store.closeSession(session.sessionId) }
+      ) { phase in
+        Text("×")
+          .fontScale(theme.smallScale)
+          .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
+          .frame(width: 24, height: 30)
+          .background(phase == .idle ? .clear : theme.sidebarHover)
+      }
+      .padding(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4))
     }
-    .padding(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4))
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -430,25 +448,29 @@ private struct TranscriptView: Block {
   @MainActor var body: some Block {
     let rows: [LazyVStack.Row]
     if session.transcript.isEmpty {
-      rows = [LazyVStack.Row(
-        id: WidgetID("transcript-empty"),
-        content: VStack(spacing: 8, alignment: .leading) {
-          Text("Ready").fontScale(theme.textScale).foregroundColor(theme.accent)
-          WrappedText(
-            text: "Ask Scribe to inspect, explain, or change the current project.",
-            theme: theme, color: theme.textSecondary)
-        }
-        .padding(theme.panelPadding)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-      )]
+      rows = [
+        LazyVStack.Row(
+          id: WidgetID("transcript-empty"),
+          content: VStack(spacing: 8, alignment: .leading) {
+            Text("Ready").fontScale(theme.textScale).foregroundColor(theme.accent)
+            WrappedText(
+              text: "Ask Scribe to inspect, explain, or change the current project.",
+              theme: theme, color: theme.textSecondary)
+          }
+          .padding(theme.panelPadding)
+          .frame(maxWidth: .infinity, alignment: .topLeading)
+        )
+      ]
     } else {
       rows = session.transcript.map { item in
         LazyVStack.Row(
           id: item.layoutID,
           content: TranscriptItemBlock(item: item, theme: theme)
-            .padding(EdgeInsets(
-              top: theme.spacing / 2, leading: theme.margin,
-              bottom: theme.spacing / 2, trailing: theme.margin))
+            .padding(
+              EdgeInsets(
+                top: theme.spacing / 2, leading: theme.margin,
+                bottom: theme.spacing / 2, trailing: theme.margin)
+            )
             .frame(maxWidth: .infinity, alignment: .topLeading)
         )
       }
