@@ -47,6 +47,11 @@ final class SessionController {
   let boot: BootstrappedSession
 
   var transcript: [TranscriptItem]
+  /// Composer text, already sanitized to ASCII by the TextField's `onChange`.
+  /// This is the single sanitization boundary: `submit` reads the draft (via
+  /// the no-argument call path) rather than the field's raw buffer, so
+  /// non-ASCII text can't reach the harness. `proposed` arguments are only
+  /// passed text that already crossed that boundary (e.g. queued messages).
   var draft = ""
   var isRunning = false
   var usageText = ""
@@ -97,6 +102,13 @@ final class SessionController {
       enqueue(text)
       return
     }
+    startTurn(text: text)
+  }
+
+  /// Starts a turn for `text`, wiring the harness's event callbacks into a
+  /// stream consumed on the main actor. Shared by `submit` and
+  /// `forceSendNext`.
+  private func startTurn(text: String) {
     draft = ""
     isRunning = true
 
@@ -171,30 +183,7 @@ final class SessionController {
       Task { await boot.harness.interrupt() }
       return
     }
-    draft = ""
-    isRunning = true
-
-    let harness = boot.harness
-    let (events, continuation) = AsyncStream<StreamEvent>.makeStream()
-    runTask = Task { [weak self] in
-      guard let self else { return }
-      let consumer = Task { @MainActor [weak self] in
-        for await event in events {
-          self?.handle(event)
-        }
-      }
-      do {
-        let outcome = try await harness.submit(
-          text,
-          onUserPrompt: { prompt in continuation.yield(.userPrompt(prompt)) },
-          onEvent: { event in continuation.yield(.agent(event)) })
-        continuation.yield(.finished(outcome))
-      } catch {
-        continuation.yield(.failed(error.localizedDescription))
-      }
-      continuation.finish()
-      _ = await consumer.result
-    }
+    startTurn(text: text)
   }
 
   private func queuePreview(_ text: String, limit: Int = 80) -> String {
@@ -366,17 +355,37 @@ final class SessionController {
 
   private func upsertTool(name: String, arguments: String, output: String, running: Bool) {
     if let index = transcript.lastIndex(where: { $0.kind == .tool && $0.title == name && $0.running }) {
-      if !arguments.isEmpty { transcript[index].text = arguments }
       if !output.isEmpty {
-        if !transcript[index].text.isEmpty { transcript[index].text += "\n\n" }
-        transcript[index].text += output
+        let lines = ToolInvocationFormatting.outputLines(name: name, jsonOutput: output)
+        if !transcript[index].text.isEmpty, !lines.isEmpty {
+          transcript[index].text += "\n"
+        }
+        transcript[index].text += lines.joined(separator: "\n")
       }
       transcript[index].running = running
       transcript[index].layoutRevision += 1
     } else {
-      let text = [arguments, output].filter { !$0.isEmpty }.joined(separator: "\n\n")
-      transcript.append(TranscriptItem(kind: .tool, title: name, text: text, running: running))
+      var sections: [String] = []
+      if let summary = Self.argumentSummaryText(name: name, arguments: arguments) {
+        sections.append(summary)
+      }
+      if !output.isEmpty {
+        sections.append(
+          ToolInvocationFormatting.outputLines(name: name, jsonOutput: output)
+            .joined(separator: "\n"))
+      }
+      transcript.append(
+        TranscriptItem(kind: .tool, title: name, text: sections.joined(separator: "\n"), running: running))
     }
+  }
+
+  /// Human-readable summary of a tool call's arguments (e.g. the shell
+  /// command or file path), falling back to the raw JSON for tools without a
+  /// known summary format.
+  static func argumentSummaryText(name: String, arguments: String) -> String? {
+    let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    return ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: trimmed) ?? trimmed
   }
 
   private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
@@ -397,17 +406,26 @@ final class SessionController {
         for call in message.toolCalls ?? [] {
           result.append(
             TranscriptItem(
-              kind: .tool, title: call.name, text: call.arguments, running: true))
+              kind: .tool, title: call.name,
+              text: argumentSummaryText(name: call.name, arguments: call.arguments) ?? "",
+              running: true))
         }
       case .tool:
         if let index = result.lastIndex(where: { $0.kind == .tool && $0.running }) {
-          if !result[index].text.isEmpty { result[index].text += "\n\n" }
-          result[index].text += message.content
+          let lines = ToolInvocationFormatting.outputLines(
+            name: result[index].title, jsonOutput: message.content)
+          if !result[index].text.isEmpty, !lines.isEmpty {
+            result[index].text += "\n"
+          }
+          result[index].text += lines.joined(separator: "\n")
           result[index].running = false
         } else {
+          let name = message.name ?? "Tool"
           result.append(
             TranscriptItem(
-              kind: .tool, title: message.name ?? "Tool", text: message.content))
+              kind: .tool, title: name,
+              text: ToolInvocationFormatting.outputLines(name: name, jsonOutput: message.content)
+                .joined(separator: "\n")))
         }
       }
     }

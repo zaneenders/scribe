@@ -85,6 +85,19 @@ struct DirectoryPathCompletionTests {
     }
   }
 
+  @Test func tabCompleteRootSlashListsRootNotBaseCWD() throws {
+    try withTemporaryDirectory { dir in
+      let marker = "basecwd-only-\(UUID().uuidString)"
+      try FileManager.default.createDirectory(
+        at: dir.appendingPathComponent(marker, isDirectory: true),
+        withIntermediateDirectories: true)
+      let result = DirectoryPathCompletion.tabComplete(input: "/", relativeTo: dir.path)
+      #expect(result.text == "/")
+      #expect(!result.matches.isEmpty)
+      #expect(!result.matches.contains(marker))
+    }
+  }
+
   @Test func tabCompleteAbsoluteTrailingSlashListsChildren() throws {
     try withTemporaryDirectory { dir in
       let child = dir.appendingPathComponent("nested", isDirectory: true)

@@ -202,7 +202,7 @@ internal final class SlateChatHost {
         self.renderWake = wake
         self.contextWindow = self.configuration.contextWindow
 
-        Task { @MainActor in
+        Task { @MainActor [self] in
           await self.refreshTranscriptFromDocument()
 
           let cwd = FilePath.currentDirectory.string

@@ -129,6 +129,13 @@ public enum DirectoryPathCompletion {
       return (FilePath(home), "", input.startIndex)
     }
 
+    // Bare root: list the root directory itself. Without this guard the
+    // hasSuffix("/") branch below would drop the slash and resolve the empty
+    // remainder against baseCWD, listing the wrong directory.
+    if input == "/" {
+      return (FilePath("/"), "", input.endIndex)
+    }
+
     if input.hasSuffix("/") {
       do {
         let parent = try resolveAbsolutePath(String(input.dropLast()), baseCWD: baseCWD)

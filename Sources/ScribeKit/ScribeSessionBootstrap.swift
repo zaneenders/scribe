@@ -39,6 +39,7 @@ public struct BootstrappedSession: Sendable {
 public enum ScribeSessionBootstrap {
   public static func open(
     resumeLatest: Bool = false,
+    resumeDirectory: FilePath? = nil,
     profileOverride: String? = nil,
     workingDirectory: String = FilePath.currentDirectory.string,
     version: String
@@ -64,12 +65,16 @@ public enum ScribeSessionBootstrap {
     let sessionId: UUID
     let directory: FilePath
     let messages: [ScribeMessage]
-    if resumeLatest {
-      directory = try await ChatSessionStore.resolveResumeDirectory(
-        specifier: "latest",
-        sessionsRoot: loaded.paths.sessionsDirectory,
-        preferCWD: workingDirectory
-      )
+    if resumeLatest || resumeDirectory != nil {
+      if let resumeDirectory {
+        directory = resumeDirectory
+      } else {
+        directory = try await ChatSessionStore.resolveResumeDirectory(
+          specifier: "latest",
+          sessionsRoot: loaded.paths.sessionsDirectory,
+          preferCWD: workingDirectory
+        )
+      }
       let metadata = try ChatSessionStore.loadMetadata(from: directory)
       sessionId = metadata.id
       messages = try ChatSessionStore.loadMessages(from: directory)
@@ -86,8 +91,9 @@ public enum ScribeSessionBootstrap {
       messages = []
     }
 
+    let isResuming = resumeLatest || resumeDirectory != nil
     var logger = loaded.makeSessionLogger(sessionId: sessionId)
-    logger[metadataKey: "mode"] = resumeLatest ? "resume" : "new"
+    logger[metadataKey: "mode"] = isResuming ? "resume" : "new"
     logger.notice(
       "chat.session.start",
       metadata: [
