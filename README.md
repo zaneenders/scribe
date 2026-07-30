@@ -36,12 +36,22 @@ install -m 755 .build/release/scribe ~/.local/bin/scribe
 
 # Mac app (double-clickable, installable in /Applications)
 swift package --allow-writing-to-package-directory bundle
-cp -R dist/Scribe.app /Applications/
+rm -rf /Applications/Scribe.app
+ditto dist/Scribe.app /Applications/Scribe.app
 ```
 
-Launch the GUI from Finder, Spotlight, or `open -a Scribe`. The bundle also
-embeds the CLI at `Scribe.app/Contents/Helpers/scribe` if you prefer a single
-install artifact over a separate `~/.local/bin/scribe`.
+Quit any development instance started with `swift run scribe-mac` before opening
+the installed app. Launch the installed bundle explicitly after rebuilding:
+
+```bash
+open /Applications/Scribe.app
+```
+
+Using the explicit path prevents Launch Services from selecting the copy under
+`dist/`, since both bundles have the same identifier. Removing the old app before
+copying also prevents stale files from a previous bundle from surviving an
+upgrade. The bundle embeds the CLI at `Scribe.app/Contents/Helpers/scribe` if you
+prefer a single install artifact over a separate `~/.local/bin/scribe`.
 
 ### Linux
 
