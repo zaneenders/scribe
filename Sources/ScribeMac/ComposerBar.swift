@@ -25,32 +25,36 @@ struct ComposerBar: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    HStack(spacing: 8) {
-      TextField(
+    HStack(spacing: 8, alignment: .bottom) {
+      GrowingTextField(
         session.isRunning ? "Queue a message..." : "Message Scribe",
         id: ScribeMacStore.composerID,
         fontScale: theme.textScale,
         text: { session.draft },
-        onChange: { session.draft = sanitizeASCII($0.replacingOccurrences(of: "\n", with: " ")) },
-        // Chroma fires onChange before onSubmit within a frame, so `draft`
-        // already holds the sanitized text — submit with no argument to use
-        // it rather than the field's raw buffer.
-        onSubmit: { _ in session.submit() }
+        onChange: { session.updateDraft($0) },
+        onNewline: { session.insertComposerNewline() }
       )
-      if session.isRunning {
-        Button(
-          "Queue", id: WidgetID("queue"), fontScale: theme.textScale,
-          pressedColor: theme.accent
-        ) { session.submit() }
-        Button(
-          "Stop", id: WidgetID("stop"), fontScale: theme.textScale,
-          pressedColor: theme.red
-        ) { session.stop() }
-      } else {
-        Button(
-          "Send", id: WidgetID("send"), fontScale: theme.textScale,
-          pressedColor: theme.accent
-        ) { session.submit() }
+      VStack(spacing: 4, alignment: .trailing) {
+        if session.isRunning {
+          HStack(spacing: 6) {
+            Button(
+              "Queue", id: WidgetID("queue"), fontScale: theme.textScale,
+              pressedColor: theme.accent
+            ) { session.submit() }
+            Button(
+              "Stop", id: WidgetID("stop"), fontScale: theme.textScale,
+              pressedColor: theme.red
+            ) { session.stop() }
+          }
+        } else {
+          Button(
+            "Send", id: WidgetID("send"), fontScale: theme.textScale,
+            pressedColor: theme.accent
+          ) { session.submit() }
+        }
+        Text(session.isRunning ? "Cmd+Return queue | Esc stop" : "Cmd+Return send")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.textSecondary)
       }
     }
     .padding(theme.margin)

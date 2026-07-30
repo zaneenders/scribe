@@ -2,7 +2,7 @@
 import AppKit
 import Chroma
 
-/// Consumes Tab while the directory palette owns keyboard focus.
+/// Handles app-specific editing shortcuts before Chroma translates key events.
 @MainActor
 final class DirectoryPaletteKeyMonitor {
   static let shared = DirectoryPaletteKeyMonitor()
@@ -10,26 +10,44 @@ final class DirectoryPaletteKeyMonitor {
   private var monitor: Any?
   var onTab: (() -> Void)?
   var onEscape: (() -> Void)?
+  var onComposerSubmit: (() -> Void)?
+  var onComposerStop: (() -> Bool)?
+  var onComposerHistoryPrevious: (() -> Bool)?
+  var onComposerHistoryNext: (() -> Bool)?
 
   private init() {}
 
   func install() {
     guard monitor == nil else { return }
     monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      guard Interaction.current.isTextEditing,
-        Interaction.current.editingLeaf == ScribeMacStore.directoryPaletteID
-      else {
+      guard Interaction.current.isTextEditing else { return event }
+      let leaf = Interaction.current.editingLeaf
+      if leaf == ScribeMacStore.directoryPaletteID {
+        if event.keyCode == 48 {
+          self?.onTab?()
+          return nil
+        }
+        if event.keyCode == 53 {
+          self?.onEscape?()
+          return nil
+        }
         return event
       }
-      if event.keyCode == 48 {
-        self?.onTab?()
+      guard leaf == ScribeMacStore.composerID else { return event }
+      switch event.keyCode {
+      case 36, 76:  // Return / keypad Enter
+        guard event.modifierFlags.contains(.command) else { return event }
+        self?.onComposerSubmit?()
         return nil
+      case 53:  // Escape
+        return self?.onComposerStop?() == true ? nil : event
+      case 126:  // Up
+        return self?.onComposerHistoryPrevious?() == true ? nil : event
+      case 125:  // Down
+        return self?.onComposerHistoryNext?() == true ? nil : event
+      default:
+        return event
       }
-      if event.keyCode == 53 {
-        self?.onEscape?()
-        return nil
-      }
-      return event
     }
   }
 
@@ -40,6 +58,10 @@ final class DirectoryPaletteKeyMonitor {
     monitor = nil
     onTab = nil
     onEscape = nil
+    onComposerSubmit = nil
+    onComposerStop = nil
+    onComposerHistoryPrevious = nil
+    onComposerHistoryNext = nil
   }
 }
 #endif

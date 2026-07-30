@@ -86,7 +86,7 @@ final class ScribeMacStore {
   var directoryError = ""
   /// Directory names from the most recent Tab completion.
   var directoryMatches: [String] = []
-  /// True when Finder-style launch at `/` must pick a directory before bootstrap.
+  /// True until the user chooses the initial working directory.
   var requiresDirectoryBeforeStart = false
 
   private var didStart = false
@@ -109,29 +109,32 @@ final class ScribeMacStore {
     DirectoryPaletteKeyMonitor.shared.onEscape = { [weak self] in
       self?.closeDirectoryPicker()
     }
+    DirectoryPaletteKeyMonitor.shared.onComposerSubmit = { [weak self] in
+      self?.active?.submit()
+    }
+    DirectoryPaletteKeyMonitor.shared.onComposerStop = { [weak self] in
+      guard let active = self?.active, active.isRunning else { return false }
+      active.stop()
+      return true
+    }
+    DirectoryPaletteKeyMonitor.shared.onComposerHistoryPrevious = { [weak self] in
+      self?.active?.recallPreviousPrompt() ?? false
+    }
+    DirectoryPaletteKeyMonitor.shared.onComposerHistoryNext = { [weak self] in
+      self?.active?.recallNextPrompt() ?? false
+    }
     #endif
     let launchCWD = FilePath.currentDirectory.string
-    directoryBaseCWD = launchCWD
+    // Finder launches at `/`, which is not a useful default for a new session.
+    // Use the home directory until the user picks a project from Directory.
+    directoryBaseCWD = launchCWD == "/" ? NSHomeDirectory() : launchCWD
+
+    // The session sidebar is now the launch screen: users can open history,
+    // start in the launch directory, or choose another directory from there.
+    requiresDirectoryBeforeStart = false
+    showDirectoryPicker = false
+    phase = .ready
     refreshSavedSessions()
-    if launchCWD == "/" {
-      requiresDirectoryBeforeStart = true
-      showDirectoryPicker = true
-      directoryDraft = "~"
-      directoryFocusPending = true
-      phase = .starting
-      return
-    }
-    Task {
-      do {
-        try ensureShellCapture()
-        let opened = try await ScribeSessionBootstrap.open(
-          workingDirectory: launchCWD,
-          version: GitVersion.hash)
-        install(opened)
-      } catch {
-        phase = .failed(error.localizedDescription)
-      }
-    }
   }
 
   // MARK: - Session lifecycle
@@ -315,7 +318,7 @@ final class ScribeMacStore {
         install(opened)
       } catch {
         if reopenPaletteOnError, sessions.isEmpty {
-          requiresDirectoryBeforeStart = directoryBaseCWD == "/"
+          requiresDirectoryBeforeStart = true
           showDirectoryPicker = true
           directoryDraft = workingDirectory
           directoryError = error.localizedDescription

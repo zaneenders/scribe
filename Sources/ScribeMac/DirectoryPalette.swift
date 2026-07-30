@@ -13,7 +13,7 @@ struct DirectoryPalette: Block {
       if required {
         Text("Choose a project directory").fontScale(theme.textScale).foregroundColor(theme.accent)
         WrappedText(
-          text: "Scribe launched from /. Type a path and press Enter to start a session there.",
+          text: "Type a path and press Enter to start a session there. Tab completes directory names.",
           theme: theme, color: theme.textSecondary)
       } else {
         Text("Change directory").fontScale(theme.textScale).foregroundColor(theme.accent)

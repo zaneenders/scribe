@@ -68,6 +68,9 @@ final class SessionController {
   var modelName: String
 
   private var runTask: Task<Void, Never>?
+  private var promptHistory: [String]
+  private var historyIndex: Int?
+  private var draftBeforeHistory = ""
   /// Non-nil when the user requested a force-send of a queued message while
   /// the model was busy.  Consumed in `handle(_:)` after the current turn
   /// finishes (including after an interrupt), so the queued message is not
@@ -91,6 +94,56 @@ final class SessionController {
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
     self.transcript = Self.replay(boot.initialMessages)
+    self.promptHistory = boot.initialMessages.compactMap { message in
+      message.role == .user && !message.content.isEmpty ? message.content : nil
+    }
+  }
+
+  // MARK: - Composer editing
+
+  func updateDraft(_ text: String) {
+    draft = sanitizeASCII(text)
+    historyIndex = nil
+    draftBeforeHistory = ""
+  }
+
+  func insertComposerNewline() {
+    draft.append("\n")
+    historyIndex = nil
+    draftBeforeHistory = ""
+    Interaction.current.focus(ScribeMacStore.composerID, editing: true)
+  }
+
+  /// Recalls submitted prompts only when the composer is empty or already in
+  /// history-navigation mode, leaving arrow keys available for caret movement
+  /// while the user is editing a draft.
+  @discardableResult
+  func recallPreviousPrompt() -> Bool {
+    guard !promptHistory.isEmpty, draft.isEmpty || historyIndex != nil else { return false }
+    if historyIndex == nil {
+      draftBeforeHistory = draft
+      historyIndex = promptHistory.count - 1
+    } else if let index = historyIndex, index > 0 {
+      historyIndex = index - 1
+    }
+    if let historyIndex { draft = promptHistory[historyIndex] }
+    Interaction.current.focus(ScribeMacStore.composerID, editing: true)
+    return true
+  }
+
+  @discardableResult
+  func recallNextPrompt() -> Bool {
+    guard let index = historyIndex else { return false }
+    if index + 1 < promptHistory.count {
+      historyIndex = index + 1
+      draft = promptHistory[index + 1]
+    } else {
+      historyIndex = nil
+      draft = draftBeforeHistory
+      draftBeforeHistory = ""
+    }
+    Interaction.current.focus(ScribeMacStore.composerID, editing: true)
+    return true
   }
 
   // MARK: - Sending
@@ -109,7 +162,10 @@ final class SessionController {
   /// stream consumed on the main actor. Shared by `submit` and
   /// `forceSendNext`.
   private func startTurn(text: String) {
+    rememberPrompt(text)
     draft = ""
+    historyIndex = nil
+    draftBeforeHistory = ""
     isRunning = true
 
     let harness = boot.harness
@@ -139,7 +195,16 @@ final class SessionController {
   /// queue after the current turn, matching the CLI's Enter-while-busy path.
   private func enqueue(_ text: String) {
     guard boot.messageQueues.enqueueSteering(text: text) else { return }
+    rememberPrompt(text)
     draft = ""
+    historyIndex = nil
+    draftBeforeHistory = ""
+  }
+
+  private func rememberPrompt(_ text: String) {
+    if promptHistory.last != text {
+      promptHistory.append(text)
+    }
   }
 
   func stop() {

@@ -163,6 +163,10 @@ private func runSingleCodexRound(
           config.reasoningEffort
           .flatMap { ScribeLLMCodex.Components.Schemas.CodexReasoning.EffortPayload(rawValue: $0) }
           ?? .medium
+        // Codex reasoning is hidden unless a summary is explicitly requested.
+        // Request the provider-selected summary so reasoning models such as
+        // gpt-5.6-sol emit response.reasoning_summary_text.delta events.
+        r.summary = .auto
         return r
       }()
       : nil,
