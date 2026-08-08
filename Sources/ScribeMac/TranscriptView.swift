@@ -13,7 +13,7 @@ struct ReadyLayout: Block {
       TranscriptView(session: session, theme: theme)
       BottomChrome(store: store, session: session, theme: theme)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .sizing(x: .grow, y: .grow)
   }
 }
 
@@ -34,7 +34,7 @@ struct TranscriptView: Block {
               theme: theme, color: theme.textSecondary)
           }
           .padding(theme.panelPadding)
-          .frame(maxWidth: .infinity, alignment: .topLeading)
+          .sizing(x: .grow)
         )
       ]
     } else {
@@ -47,7 +47,7 @@ struct TranscriptView: Block {
                 top: theme.spacing / 2, leading: theme.margin,
                 bottom: theme.spacing / 2, trailing: theme.margin)
             )
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .sizing(x: .grow)
         )
       }
     }
@@ -57,7 +57,7 @@ struct TranscriptView: Block {
       id: WidgetID("transcript:\(session.sessionId.uuidString)"), sticksToBottom: true,
       controller: session.scroll, rows: rows
     )
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .sizing(x: .grow, y: .grow)
     .background(theme.panelBackground)
   }
 }
@@ -83,7 +83,7 @@ struct TranscriptItemBlock: Block {
       }
     }
     .padding(theme.panelPadding)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .sizing(x: .grow)
     .background(backgroundColor)
     .border(theme.border)
   }

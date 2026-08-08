@@ -479,8 +479,7 @@ struct MarkdownText: PrimitiveBlock {
   /// hit testing and text selection.
   var itemID: WidgetID? = nil
 
-  private func lines(forWidth width: Float) -> [VisualLine] {
-    let metrics = FontMetrics()
+  private func lines(forWidth width: Float, metrics: FontMetrics) -> [VisualLine] {
     let columns = Int(width / (metrics.cellAdvance * scale))
     return layoutMarkdown(
       segmentMarkdown(sanitizeASCII(markdown)),
@@ -489,18 +488,18 @@ struct MarkdownText: PrimitiveBlock {
       baseColor: baseColor)
   }
 
-  @MainActor func sizeThatFits(_ proposal: Size) -> Size {
-    let metrics = FontMetrics()
+  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+    let metrics = context.fontMetrics
     let lineHeight = metrics.lineAdvance * scale + lineSpacing
-    let laidOut = lines(forWidth: proposal.width)
+    let laidOut = lines(forWidth: proposal.width, metrics: metrics)
     return Size(width: proposal.width, height: max(1, Float(laidOut.count)) * lineHeight)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect) {
-    let metrics = FontMetrics()
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+    let metrics = context.fontMetrics
     let cellWidth = metrics.cellAdvance * scale
     let lineHeight = metrics.lineAdvance * scale + lineSpacing
-    let laidOut = lines(forWidth: rect.size.width)
+    let laidOut = lines(forWidth: rect.size.width, metrics: metrics)
     let layout = MarkdownLayout(
       lines: laidOut, lineHeight: lineHeight, cellWidth: cellWidth,
       scale: scale, rect: rect)
@@ -547,9 +546,9 @@ final class SelectionManager {
   private init() {}
 
   /// Call at the start of each frame to update selection from drag state.
-  func updateFromDrag() {
-    let interaction = Interaction.current
-    guard interaction.isDragging else {
+  func updateFromDrag(context: RenderContext) {
+    let input = context.input
+    guard input.pointerDown && input.pointerPosition != input.pointerPressPosition else {
       if isSelecting {
         isSelecting = false
       }
@@ -563,8 +562,8 @@ final class SelectionManager {
       selectionEnd = nil
     }
 
-    guard let origin = interaction.dragOrigin else { return }
-    let current = interaction.dragCurrent
+    let origin = input.pointerPressPosition
+    let current = input.pointerPosition
 
     if originLayoutRect == nil {
       // First drag frame — find the layout under the origin

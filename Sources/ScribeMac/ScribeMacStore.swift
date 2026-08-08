@@ -357,8 +357,8 @@ final class ScribeMacStore {
   /// Focus must be requested after a frame has registered the target leaf.
   func applyPendingFocus() {
     if directoryFocusPending {
-      Interaction.current.focus(Self.directoryPaletteID, editing: true)
-      if Interaction.current.isTextEditing {
+      MacRenderContext.current?.focus(Self.directoryPaletteID, editing: true)
+      if MacRenderContext.current != nil {
         directoryFocusPending = false
       }
       return
@@ -368,8 +368,8 @@ final class ScribeMacStore {
       composerFocusPending = true
     }
     guard composerFocusPending else { return }
-    Interaction.current.focus(Self.composerID, editing: true)
-    if Interaction.current.isTextEditing {
+    MacRenderContext.current?.focus(Self.composerID, editing: true)
+    if MacRenderContext.current != nil {
       composerFocusPending = false
     }
   }

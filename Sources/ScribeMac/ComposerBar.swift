@@ -16,7 +16,7 @@ struct BottomChrome: Block {
       ComposerBar(session: session, theme: theme)
       StatusBar(store: store, session: session, theme: theme)
     }
-    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .sizing(x: .grow)
   }
 }
 
@@ -39,17 +39,17 @@ struct ComposerBar: Block {
           HStack(spacing: 6) {
             Button(
               "Queue", id: WidgetID("queue"), fontScale: theme.textScale,
-              pressedColor: theme.accent
+              style: theme.buttonStyle(pressedColor: theme.accent)
             ) { session.submit() }
             Button(
               "Stop", id: WidgetID("stop"), fontScale: theme.textScale,
-              pressedColor: theme.red
+              style: theme.buttonStyle(pressedColor: theme.red)
             ) { session.stop() }
           }
         } else {
           Button(
             "Send", id: WidgetID("send"), fontScale: theme.textScale,
-            pressedColor: theme.accent
+            style: theme.buttonStyle(pressedColor: theme.accent)
           ) { session.submit() }
         }
         Text(session.isRunning ? "Cmd+Return queue | Esc stop" : "Cmd+Return send")
@@ -58,7 +58,7 @@ struct ComposerBar: Block {
       }
     }
     .padding(theme.margin)
-    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .sizing(x: .grow)
     .background(theme.composerBackground)
     .border(theme.border)
   }
@@ -78,7 +78,7 @@ struct QueuedTray: Block {
         Spacer()
         Button(
           "Send next", id: WidgetID("force-send-queue"), fontScale: theme.smallScale,
-          pressedColor: theme.accent,
+          style: theme.buttonStyle(pressedColor: theme.accent),
           padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
         ) { session.forceSendNext() }
         Button(
@@ -93,7 +93,7 @@ struct QueuedTray: Block {
       }
     }
     .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
-    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .sizing(x: .grow)
     .background(theme.statusBackground)
     .border(theme.border)
   }

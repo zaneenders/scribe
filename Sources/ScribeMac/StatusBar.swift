@@ -36,8 +36,8 @@ struct StatusBar: Block {
       }
     }
     .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
-    .frame(height: theme.statusHeight, alignment: .topLeading)
-    .frame(maxWidth: .infinity, alignment: .topLeading)
+    .sizing(y: .fixed(theme.statusHeight))
+    .sizing(x: .grow)
     .background(theme.statusBackground)
   }
 }

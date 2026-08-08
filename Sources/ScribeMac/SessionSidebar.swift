@@ -18,20 +18,20 @@ struct SessionSidebar: Block {
           Text("R")
             .fontScale(theme.smallScale)
             .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-            .frame(width: 24, height: 24)
+            .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
         }
         Interactive(id: WidgetID("sidebar-new"), action: { store.newSession() }) { phase in
           Text("+")
             .fontScale(theme.textScale)
             .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-            .frame(width: 24, height: 24)
+            .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
         }
       }
       .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 6))
-      .frame(height: 40, alignment: .leading)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .sizing(y: .fixed(40))
+      .sizing(x: .grow)
       .border(theme.border)
 
       ScrollView(
@@ -82,11 +82,11 @@ struct SessionSidebar: Block {
               .padding(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 8))
           }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .sizing(x: .grow)
       }
     }
-    .frame(width: 210)
-    .frame(maxHeight: .infinity, alignment: .topLeading)
+    .sizing(x: .fixed(210))
+    .sizing(y: .grow)
     .background(theme.sidebarBackground)
     .border(theme.border)
   }
@@ -116,7 +116,7 @@ struct ProjectHeader: Block {
           .foregroundColor(theme.textSecondary)
       }
       .padding(EdgeInsets(top: 7, leading: 8, bottom: 5, trailing: 8))
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .sizing(x: .grow)
       .background(phase == .hovered ? theme.sidebarHover : .clear)
     }
   }
@@ -147,8 +147,8 @@ struct SessionRow: Block {
           }
         }
         .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 28))
-        .frame(height: 30, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .sizing(y: .fixed(30))
+        .sizing(x: .grow)
         .background(isActive ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
         .border(isActive ? theme.accent : .clear, width: isActive ? 1 : 0)
       }
@@ -159,12 +159,12 @@ struct SessionRow: Block {
         Text("×")
           .fontScale(theme.smallScale)
           .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-          .frame(width: 24, height: 28)
+          .sizing(x: .fixed(24), y: .fixed(28))
           .background(phase == .idle ? .clear : theme.sidebarHover)
       }
       .padding(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4))
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .sizing(x: .grow)
   }
 }
 
@@ -191,8 +191,8 @@ struct SavedSessionRow: Block {
           .foregroundColor(theme.textSecondary)
       }
       .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
-      .frame(height: 30, alignment: .leading)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .sizing(y: .fixed(30))
+      .sizing(x: .grow)
       .background(phase == .hovered ? theme.sidebarHover : .clear)
     }
   }
@@ -221,8 +221,8 @@ struct ShowMoreSessionsRow: Block {
           .foregroundColor(theme.textSecondary)
       }
       .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
-      .frame(height: 30, alignment: .leading)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .sizing(y: .fixed(30))
+      .sizing(x: .grow)
       .background(phase == .hovered ? theme.sidebarHover : .clear)
     }
   }

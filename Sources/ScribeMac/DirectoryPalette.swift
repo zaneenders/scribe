@@ -69,7 +69,10 @@ struct DirectoryPalette: Block {
       }
     }
     .padding(theme.margin)
-    .frame(maxWidth: required ? .infinity : 640, maxHeight: required ? .infinity : nil, alignment: .topLeading)
+    .sizing(
+      x: required ? .grow : .fixed(640),
+      y: required ? .grow : .fit
+    )
     .background(theme.headerBackground)
     .border(theme.border)
   }

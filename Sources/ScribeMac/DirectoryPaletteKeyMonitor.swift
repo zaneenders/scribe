@@ -20,9 +20,8 @@ final class DirectoryPaletteKeyMonitor {
   func install() {
     guard monitor == nil else { return }
     monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      guard Interaction.current.isTextEditing else { return event }
-      let leaf = Interaction.current.editingLeaf
-      if leaf == ScribeMacStore.directoryPaletteID {
+      let store = ScribeMacStore.shared
+      if store.showDirectoryPicker {
         if event.keyCode == 48 {
           self?.onTab?()
           return nil
@@ -33,7 +32,9 @@ final class DirectoryPaletteKeyMonitor {
         }
         return event
       }
-      guard leaf == ScribeMacStore.composerID else { return event }
+      guard MacRenderContext.activeTextInput == ScribeMacStore.composerID, store.active != nil else {
+        return event
+      }
       switch event.keyCode {
       case 36, 76:  // Return / keypad Enter
         guard event.modifierFlags.contains(.command) else { return event }

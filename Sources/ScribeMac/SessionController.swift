@@ -111,7 +111,7 @@ final class SessionController {
     draft.append("\n")
     historyIndex = nil
     draftBeforeHistory = ""
-    Interaction.current.focus(ScribeMacStore.composerID, editing: true)
+    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
   }
 
   /// Recalls submitted prompts only when the composer is empty or already in
@@ -127,7 +127,7 @@ final class SessionController {
       historyIndex = index - 1
     }
     if let historyIndex { draft = promptHistory[historyIndex] }
-    Interaction.current.focus(ScribeMacStore.composerID, editing: true)
+    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
     return true
   }
 
@@ -142,7 +142,7 @@ final class SessionController {
       draft = draftBeforeHistory
       draftBeforeHistory = ""
     }
-    Interaction.current.focus(ScribeMacStore.composerID, editing: true)
+    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
     return true
   }
 

@@ -61,8 +61,8 @@ struct GrowingTextField: PrimitiveBlock {
 
   @MainActor var expandsHorizontally: Bool { true }
 
-  @MainActor func sizeThatFits(_ proposal: Size) -> Size {
-    let metrics = FontMetrics()
+  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+    let metrics = context.fontMetrics
     let rows = wrappedRows(text: getText(), width: proposal.width, metrics: metrics)
     let lineCount = min(maxLines, max(minLines, rows.count))
     return Size(
@@ -70,14 +70,19 @@ struct GrowingTextField: PrimitiveBlock {
       height: Float(lineCount) * metrics.lineAdvance * fontScale + 2 * padding + 2)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect) {
-    let metrics = FontMetrics()
-    let state = Interaction.current.textInputBehavior(
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+    let metrics = context.fontMetrics
+    let state = context.textInputState(
       id: id,
-      rect: rect,
+      in: rect,
       text: getText(),
       onChange: onChange,
       onSubmit: { _ in onNewline() })
+    if state.editing {
+      MacRenderContext.activeTextInput = id
+    } else if MacRenderContext.activeTextInput == id {
+      MacRenderContext.activeTextInput = nil
+    }
 
     drawList.fillRect(
       rect,

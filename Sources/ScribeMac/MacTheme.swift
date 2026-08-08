@@ -56,4 +56,15 @@ struct MacTheme: Sendable {
     case .pressed: accent
     }
   }
+
+  func buttonStyle(pressedColor: Color? = nil) -> ButtonStyle {
+    ButtonStyle(
+      idleBackground: buttonIdle,
+      hoveredBackground: buttonHover,
+      pressedBackground: pressedColor ?? buttonPressed,
+      foreground: textPrimary,
+      border: border,
+      cornerRadius: 0
+    )
+  }
 }

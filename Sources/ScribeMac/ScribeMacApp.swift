@@ -54,23 +54,7 @@ struct ScribeMacRoot: Block {
   let theme = MacTheme()
 
   @MainActor var body: some Block {
-    let interaction = Interaction.current
-    // Hit testing uses the layouts retained from the preceding frame. Update
-    // the selection before clearing the registry for this frame's draw pass.
-    if interaction.input.pointerPressed {
-      SelectionManager.shared.clear()
-    }
-    SelectionManager.shared.updateFromDrag()
-    MarkdownLayoutRegistry.clear()
-
-    // Handle Cmd+C copy — check both selection managers
-    interaction.onCopy = {
-      if let markdown = SelectionManager.shared.selectedText() { return markdown }
-      return TextSelectionManager.shared.selectedText()
-    }
-
-    store.applyPendingFocus()
-    return VStack(spacing: 0, alignment: .leading) {
+    RenderContextBridge(content: VStack(spacing: 0, alignment: .leading) {
       header
       if store.showModelPicker {
         modelPicker
@@ -91,7 +75,7 @@ struct ScribeMacRoot: Block {
             Text("Starting Scribe...").fontScale(theme.textScale).foregroundColor(theme.textSecondary)
             Spacer()
           }
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .sizing(x: .grow, y: .grow)
         }
       case .failed(let message):
         VStack(spacing: 14, alignment: .leading) {
@@ -108,7 +92,7 @@ struct ScribeMacRoot: Block {
           Spacer()
         }
         .padding(theme.margin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sizing(x: .grow, y: .grow)
       case .ready:
         HStack(spacing: 0) {
           SessionSidebar(store: store, theme: theme)
@@ -118,10 +102,18 @@ struct ScribeMacRoot: Block {
             emptyState
           }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sizing(x: .grow, y: .grow)
       }
     }
-    .background(theme.background)
+    .background(theme.background)) { context in
+      // Hit testing uses layouts retained from the preceding frame.
+      if context.input.pointerPressed {
+        SelectionManager.shared.clear()
+      }
+      SelectionManager.shared.updateFromDrag(context: context)
+      MarkdownLayoutRegistry.clear()
+      store.applyPendingFocus()
+    }
   }
 
   @MainActor private var emptyState: some Block {
@@ -138,7 +130,7 @@ struct ScribeMacRoot: Block {
       }
       Spacer()
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .sizing(x: .grow, y: .grow)
   }
 
   @MainActor private var header: some Block {
@@ -171,8 +163,8 @@ struct ScribeMacRoot: Block {
       ) { store.resumeLatest() }
     }
     .padding(EdgeInsets(top: 8, leading: theme.margin, bottom: 8, trailing: theme.margin))
-    .frame(height: theme.headerHeight, alignment: .leading)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .sizing(y: .fixed(theme.headerHeight))
+    .sizing(x: .grow)
     .background(theme.headerBackground)
     .border(theme.border)
   }
@@ -194,7 +186,7 @@ struct ScribeMacRoot: Block {
       ) { store.dismissError() }
     }
     .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .sizing(x: .grow)
     .background(theme.statusBackground)
     .border(theme.border)
   }
@@ -229,8 +221,8 @@ struct ScribeMacRoot: Block {
               .foregroundColor(theme.textSecondary)
           }
           .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
-          .frame(height: itemHeight, alignment: .leading)
-          .frame(maxWidth: .infinity, alignment: .leading)
+          .sizing(y: .fixed(itemHeight))
+          .sizing(x: .grow)
           .background(
             phase == .hovered
               ? theme.buttonHover
@@ -238,7 +230,7 @@ struct ScribeMacRoot: Block {
         }
       }
     }
-    .frame(maxWidth: 300, alignment: .leading)
+    .sizing(x: .fixed(300))
     .background(theme.headerBackground)
     .border(theme.border)
   }
