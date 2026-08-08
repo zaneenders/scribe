@@ -13,7 +13,7 @@ import ScribeKit
 @MainActor
 final class SessionController {
 
-  enum ItemKind {
+  enum ItemKind: Sendable {
     case user
     case answer
     case reasoning
@@ -23,7 +23,7 @@ final class SessionController {
     case error
   }
 
-  struct TranscriptItem: Identifiable {
+  struct TranscriptItem: Identifiable, Sendable {
     let id = UUID()
     var kind: ItemKind
     var title: String
@@ -47,6 +47,7 @@ final class SessionController {
   let boot: BootstrappedSession
 
   var transcript: [TranscriptItem]
+  private(set) var isLoadingTranscript = false
   /// Composer text, already sanitized to ASCII by the TextField's `onChange`.
   /// This is the single sanitization boundary: `submit` reads the draft (via
   /// the no-argument call path) rather than the field's raw buffer, so
@@ -93,9 +94,26 @@ final class SessionController {
     self.boot = boot
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
-    self.transcript = Self.replay(boot.initialMessages)
+    self.transcript = []
     self.promptHistory = boot.initialMessages.compactMap { message in
       message.role == .user && !message.content.isEmpty ? message.content : nil
+    }
+    let initialMessages = boot.initialMessages
+    if initialMessages.count <= 40 {
+      transcript = Self.replay(initialMessages)
+    } else {
+      isLoadingTranscript = true
+      // Transcript conversion can be substantial for old tool-heavy sessions.
+      // Keep installation cheap and publish the rows after yielding a frame.
+      Task.detached { [weak self] in
+        let replayed = Self.replay(initialMessages)
+        await MainActor.run {
+          guard let self else { return }
+          self.transcript = replayed
+          self.isLoadingTranscript = false
+          self.scroll.scrollToBottom()
+        }
+      }
     }
   }
 
@@ -447,13 +465,13 @@ final class SessionController {
   /// Human-readable summary of a tool call's arguments (e.g. the shell
   /// command or file path), falling back to the raw JSON for tools without a
   /// known summary format.
-  static func argumentSummaryText(name: String, arguments: String) -> String? {
+  nonisolated static func argumentSummaryText(name: String, arguments: String) -> String? {
     let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
     return ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: trimmed) ?? trimmed
   }
 
-  private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
+  nonisolated private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
     var result: [TranscriptItem] = []
     for message in messages {
       switch message.role {

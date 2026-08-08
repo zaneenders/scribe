@@ -242,24 +242,23 @@ public enum ChatSessionStore {
     guard (try? await fs.info(forFileAt: sessionsRoot)) != nil else {
       return []
     }
-    var sessionDirs: [FilePath] = []
+    // Capture the directory stat during discovery and reuse it for sorting.
+    // Calling stat from the sort comparator turns a scan into thousands of
+    // redundant filesystem calls for a large session history.
+    var sessions: [(directory: FilePath, modifiedAt: Date)] = []
     let names = try listDirectoryContents(sessionsRoot)
     for name in names where !name.hasPrefix(".") {
       let dir = sessionsRoot.appendingPathComponent(name)
-      let st = FileStat.stat(dir)
-      guard st.exists, st.isDirectory else { continue }
+      let directoryStat = FileStat.stat(dir)
+      guard directoryStat.exists, directoryStat.isDirectory else { continue }
       let meta = metadataFile(in: dir)
       guard FileStat.stat(meta).exists else { continue }
-      sessionDirs.append(dir)
-    }
-    if let cwd = cwdFilter {
-      sessionDirs = sessionDirs.filter { dir in
-        (try? loadMetadata(from: dir).cwd) == cwd
+      if let cwd = cwdFilter, (try? loadMetadata(from: dir).cwd) != cwd {
+        continue
       }
+      sessions.append((directory: dir, modifiedAt: directoryStat.modificationDate))
     }
-    return sessionDirs.sorted { a, b in
-      modificationDate(of: a) > modificationDate(of: b)
-    }
+    return sessions.sorted { $0.modifiedAt > $1.modifiedAt }.map(\.directory)
   }
 
   public static func sessionDirectory(

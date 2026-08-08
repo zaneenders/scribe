@@ -28,9 +28,12 @@ struct TranscriptView: Block {
         LazyVStack.Row(
           id: WidgetID("transcript-empty"),
           content: VStack(spacing: 8, alignment: .leading) {
-            Text("Ready").fontScale(theme.textScale).foregroundColor(theme.accent)
+            Text(session.isLoadingTranscript ? "Loading transcript..." : "Ready")
+              .fontScale(theme.textScale).foregroundColor(theme.accent)
             WrappedText(
-              text: "Ask Scribe to inspect, explain, or change the current project.",
+              text: session.isLoadingTranscript
+                ? "The session is ready; conversation history is still being prepared."
+                : "Ask Scribe to inspect, explain, or change the current project.",
               theme: theme, color: theme.textSecondary)
           }
           .padding(theme.panelPadding)

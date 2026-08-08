@@ -1,8 +1,8 @@
 import Chroma
 import Foundation
 
-/// Groups open and saved sessions by project. Selecting a saved session loads
-/// it from ~/.scribe/sessions; open sessions continue running in memory.
+/// Groups open and saved sessions by working directory. Selecting a saved
+/// session loads it from ~/.scribe/sessions; open sessions keep running.
 struct SessionSidebar: Block {
   let store: ScribeMacStore
   let theme: MacTheme
@@ -10,7 +10,7 @@ struct SessionSidebar: Block {
   @MainActor var body: some Block {
     VStack(spacing: 0, alignment: .leading) {
       HStack(spacing: 6) {
-        Text("PROJECTS")
+        Text("SESSIONS")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
         Spacer()
@@ -35,30 +35,30 @@ struct SessionSidebar: Block {
       .border(theme.border)
 
       ScrollView(
-        id: WidgetID("sidebar-project-scroll"),
+        id: WidgetID("sidebar-session-scroll"),
         showsIndicator: true,
         controller: store.sidebarScroll
       ) {
         VStack(spacing: 1, alignment: .leading) {
-          for project in store.projectSessions {
-            ProjectHeader(
+          for group in store.sessionGroups {
+            SessionGroupHeader(
               store: store,
-              project: project,
+              group: group,
               theme: theme,
-              isCollapsed: store.isProjectCollapsed(project.cwd))
-            if !store.isProjectCollapsed(project.cwd) {
-              for session in project.open {
+              isCollapsed: store.isGroupCollapsed(group.cwd))
+            if !store.isGroupCollapsed(group.cwd) {
+              for session in group.open {
                 SessionRow(
                   store: store,
                   session: session,
                   theme: theme,
                   isActive: session.sessionId == store.activeSessionID)
               }
-              for saved in project.saved {
+              for saved in group.saved {
                 SavedSessionRow(store: store, saved: saved, theme: theme)
               }
-              if project.canShowMore {
-                ShowMoreSessionsRow(store: store, project: project, theme: theme)
+              if group.canShowMore {
+                ShowMoreSessionsRow(store: store, group: group, theme: theme)
               }
             }
           }
@@ -73,7 +73,7 @@ struct SessionSidebar: Block {
             .padding(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8))
           }
 
-          if store.projectSessions.isEmpty && store.pendingSessionCount == 0
+          if store.sessionGroups.isEmpty && store.pendingSessionCount == 0
             && !store.isLoadingSavedSessions
           {
             Text("No sessions found")
@@ -92,26 +92,28 @@ struct SessionSidebar: Block {
   }
 }
 
-struct ProjectHeader: Block {
+struct SessionGroupHeader: Block {
   let store: ScribeMacStore
-  let project: ScribeMacStore.ProjectSessions
+  let group: ScribeMacStore.SessionGroup
   let theme: MacTheme
   let isCollapsed: Bool
 
   @MainActor var body: some Block {
     Interactive(
-      id: WidgetID("project-toggle:\(project.cwd)"),
-      action: { store.toggleProject(project.cwd) }
+      id: WidgetID("group-toggle:\(group.cwd)"),
+      action: { store.toggleGroup(group.cwd) }
     ) { phase in
       HStack(spacing: 5) {
         Text(isCollapsed ? ">" : "v")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
-        Text(sanitizeASCII(project.title))
+        Text(sanitizeASCII(group.title))
           .fontScale(theme.smallScale)
-          .foregroundColor(phase == .hovered ? theme.accent : theme.textPrimary)
+          .foregroundColor(
+            group.open.contains(where: \.isRunning)
+              ? theme.yellow : phase == .hovered ? theme.accent : theme.textPrimary)
         Spacer()
-        Text("\(project.open.count + project.totalSavedCount)")
+        Text("\(group.open.count + group.totalSavedCount)")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
       }
@@ -128,6 +130,12 @@ struct SessionRow: Block {
   let theme: MacTheme
   let isActive: Bool
 
+  private var workingIndicator: String {
+    let frames = ["|", "/", "-", "\\"]
+    let tick = Int(Date().timeIntervalSinceReferenceDate * 5)
+    return frames[tick % frames.count]
+  }
+
   @MainActor var body: some Block {
     ZStack(alignment: .trailing) {
       Interactive(
@@ -135,12 +143,14 @@ struct SessionRow: Block {
         action: { store.switchTo(session.sessionId) }
       ) { phase in
         HStack(spacing: 5) {
-          Text(session.isRunning ? "●" : "○")
+          Text(session.isRunning ? workingIndicator : "○")
             .fontScale(theme.smallScale)
             .foregroundColor(session.isRunning ? theme.yellow : theme.textSecondary)
           Text(session.sessionIdText)
             .fontScale(theme.smallScale)
-            .foregroundColor(isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
+            .foregroundColor(
+              session.isRunning
+                ? theme.yellow : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
           Spacer()
           if session.hasUnreadActivity && !isActive {
             Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
@@ -174,7 +184,8 @@ struct SavedSessionRow: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    Interactive(
+    let isSelected = store.selectedSavedSession?.id == saved.id
+    return Interactive(
       id: WidgetID("saved-session:\(saved.id.uuidString)"),
       action: { store.openSavedSession(saved) }
     ) { phase in
@@ -193,20 +204,21 @@ struct SavedSessionRow: Block {
       .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
       .sizing(y: .fixed(30))
       .sizing(x: .grow)
-      .background(phase == .hovered ? theme.sidebarHover : .clear)
+      .background(isSelected ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
+      .border(isSelected ? theme.accent : .clear, width: isSelected ? 1 : 0)
     }
   }
 }
 
 struct ShowMoreSessionsRow: Block {
   let store: ScribeMacStore
-  let project: ScribeMacStore.ProjectSessions
+  let group: ScribeMacStore.SessionGroup
   let theme: MacTheme
 
   @MainActor var body: some Block {
     Interactive(
-      id: WidgetID("show-more-sessions:\(project.cwd)"),
-      action: { store.showMoreSavedSessions(for: project.cwd) }
+      id: WidgetID("show-more-sessions:\(group.cwd)"),
+      action: { store.showMoreSavedSessions(for: group.cwd) }
     ) { phase in
       HStack(spacing: 5) {
         Text("+")
@@ -216,7 +228,7 @@ struct ShowMoreSessionsRow: Block {
           .fontScale(theme.smallScale)
           .foregroundColor(phase == .hovered ? theme.textPrimary : theme.textSecondary)
         Spacer()
-        Text("\(project.hiddenSavedCount) older")
+        Text("\(group.hiddenSavedCount) older")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
       }

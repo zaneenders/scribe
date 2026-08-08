@@ -98,6 +98,8 @@ struct ScribeMacRoot: Block {
           SessionSidebar(store: store, theme: theme)
           if let active = store.active {
             ReadyLayout(store: store, session: active, theme: theme)
+          } else if let selected = store.selectedSavedSession {
+            sessionLoadingState(selected)
           } else {
             emptyState
           }
@@ -114,6 +116,21 @@ struct ScribeMacRoot: Block {
       MarkdownLayoutRegistry.clear()
       store.applyPendingFocus()
     }
+  }
+
+  @MainActor private func sessionLoadingState(_ saved: ScribeMacStore.SavedSession) -> some Block {
+    VStack(spacing: 10) {
+      Spacer()
+      Text("Opening session...").fontScale(theme.textScale).foregroundColor(theme.accent)
+      Text(String(saved.id.uuidString.prefix(8)).uppercased())
+        .fontScale(theme.smallScale)
+        .foregroundColor(theme.textSecondary)
+      Text("Loading transcript and preparing the agent")
+        .fontScale(theme.smallScale)
+        .foregroundColor(theme.textSecondary)
+      Spacer()
+    }
+    .sizing(x: .grow, y: .grow)
   }
 
   @MainActor private var emptyState: some Block {

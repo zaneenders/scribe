@@ -25,7 +25,7 @@ struct ComposerBar: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    HStack(spacing: 8, alignment: .bottom) {
+    ComposerRow(spacing: 8) {
       GrowingTextField(
         session.isRunning ? "Queue a message..." : "Message Scribe",
         id: ScribeMacStore.composerID,
@@ -34,6 +34,7 @@ struct ComposerBar: Block {
         onChange: { session.updateDraft($0) },
         onNewline: { session.insertComposerNewline() }
       )
+    } controls: {
       VStack(spacing: 4, alignment: .trailing) {
         if session.isRunning {
           HStack(spacing: 6) {
@@ -61,6 +62,66 @@ struct ComposerBar: Block {
     .sizing(x: .grow)
     .background(theme.composerBackground)
     .border(theme.border)
+  }
+}
+
+/// Measures the fixed composer controls first, then proposes only the remaining
+/// width to the text field. Chroma's `HStack` measures every child with the full
+/// row width, which made the field wrap as though the send area did not exist.
+private struct ComposerRow<Input: Block, Controls: Block>: PrimitiveBlock {
+  let spacing: Float
+  let input: Input
+  let controls: Controls
+
+  init(
+    spacing: Float,
+    @BlockBuilder input: () -> Input,
+    @BlockBuilder controls: () -> Controls
+  ) {
+    self.spacing = spacing
+    self.input = input()
+    self.controls = controls()
+  }
+
+  @MainActor var expandsHorizontally: Bool { true }
+
+  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+    let sizes = measuredSizes(for: proposal, context: context)
+    return Size(
+      width: proposal.width,
+      height: max(sizes.input.height, sizes.controls.height))
+  }
+
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+    let sizes = measuredSizes(for: rect.size, context: context)
+    let inputRect = Rect(
+      x: rect.minX,
+      y: rect.maxY - sizes.input.height,
+      width: sizes.input.width,
+      height: sizes.input.height)
+    let controlsRect = Rect(
+      x: rect.maxX - sizes.controls.width,
+      y: rect.maxY - sizes.controls.height,
+      width: sizes.controls.width,
+      height: sizes.controls.height)
+
+    BlockEngine.draw(input, into: &drawList, in: inputRect, context: context)
+    BlockEngine.draw(controls, into: &drawList, in: controlsRect, context: context)
+  }
+
+  @MainActor private func measuredSizes(
+    for proposal: Size, context: RenderContext
+  ) -> (input: Size, controls: Size) {
+    let controlsSize = BlockEngine.measure(controls, proposal: proposal, context: context)
+    let inputWidth = max(0, proposal.width - controlsSize.width - spacing)
+    let inputSize = BlockEngine.measure(
+      input,
+      proposal: Size(width: inputWidth, height: proposal.height),
+      context: context)
+    return (
+      input: Size(width: inputWidth, height: inputSize.height),
+      controls: controlsSize
+    )
   }
 }
 

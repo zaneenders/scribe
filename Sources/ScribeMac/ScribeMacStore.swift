@@ -12,14 +12,14 @@ import SystemPackage
 /// activity for the sidebar.
 @MainActor
 final class ScribeMacStore {
-  struct SavedSession: Identifiable {
+  struct SavedSession: Identifiable, Sendable {
     let id: UUID
     let directory: FilePath
     let metadata: ChatSessionMetadata
     let modifiedAt: Date
   }
 
-  struct ProjectSessions: Identifiable {
+  struct SessionGroup: Identifiable {
     let cwd: String
     let open: [SessionController]
     /// The newest saved sessions currently exposed in the sidebar.
@@ -27,6 +27,7 @@ final class ScribeMacStore {
     let totalSavedCount: Int
 
     var id: String { cwd }
+    var totalSessionCount: Int { open.count + totalSavedCount }
     var hiddenSavedCount: Int { max(0, totalSavedCount - saved.count) }
     var canShowMore: Bool { hiddenSavedCount > 0 }
     var title: String {
@@ -63,10 +64,14 @@ final class ScribeMacStore {
   /// Session metadata discovered on disk but not currently open.
   private(set) var savedSessions: [SavedSession] = []
   private(set) var isLoadingSavedSessions = false
+  /// The saved session selected while its transcript and agent harness load.
+  /// Keeping this separate from `active` lets the UI acknowledge selection on
+  /// the very next frame instead of leaving the previous conversation visible.
+  private(set) var selectedSavedSession: SavedSession?
   private var openingSavedSessionIDs: Set<UUID> = []
   private var visibleSavedSessionCounts: [String: Int] = [:]
-  /// Projects start collapsed and are added here only after the user opens them.
-  private var expandedProjectCWDs: Set<String> = []
+  /// Session groups start collapsed and are added here only after the user opens them.
+  private var expandedGroupCWDs: Set<String> = []
   private let savedSessionPageSize = 5
   let sidebarScroll = ScrollViewController()
   /// Non-fatal failure shown as a dismissible banner over the session UI.
@@ -126,7 +131,7 @@ final class ScribeMacStore {
     #endif
     let launchCWD = FilePath.currentDirectory.string
     // Finder launches at `/`, which is not a useful default for a new session.
-    // Use the home directory until the user picks a project from Directory.
+    // Use the home directory until the user picks a directory from Directory.
     directoryBaseCWD = launchCWD == "/" ? NSHomeDirectory() : launchCWD
 
     // The session sidebar is now the launch screen: users can open history,
@@ -146,42 +151,68 @@ final class ScribeMacStore {
     openSessionInBackground(workingDirectory: active?.workingDirectory ?? directoryBaseCWD)
   }
 
-  var projectSessions: [ProjectSessions] {
-    let cwdValues = Set(sessions.map(\.workingDirectory) + savedSessions.map { $0.metadata.cwd })
+  var sessionGroups: [SessionGroup] {
+    // Build the grouping tables once. Filtering the entire saved-session list
+    // once per directory made every sidebar frame quadratic as history grew.
+    let openIDs = Set(sessions.map(\.sessionId))
+    var savedByCWD: [String: [SavedSession]] = [:]
+    for saved in savedSessions where !openIDs.contains(saved.id) {
+      savedByCWD[saved.metadata.cwd, default: []].append(saved)
+    }
+    var openByCWD: [String: [(offset: Int, element: SessionController)]] = [:]
+    for entry in sessions.enumerated() {
+      openByCWD[entry.element.workingDirectory, default: []].append(entry)
+    }
+    let cwdValues = Set(savedByCWD.keys).union(openByCWD.keys)
     return cwdValues.map { cwd in
-      let allSaved = savedSessions.filter { saved in
-        saved.metadata.cwd == cwd && !sessions.contains { $0.sessionId == saved.id }
-      }
+      let allSaved = savedByCWD[cwd, default: []]
       let visibleCount = visibleSavedSessionCounts[cwd, default: savedSessionPageSize]
-      return ProjectSessions(
+      let open = openByCWD[cwd, default: []]
+        .sorted { lhs, rhs in
+          let lhsRank = sessionSortRank(lhs.element)
+          let rhsRank = sessionSortRank(rhs.element)
+          if lhsRank != rhsRank { return lhsRank < rhsRank }
+          // Most recently opened first within the same state.
+          return lhs.offset > rhs.offset
+        }
+        .map(\.element)
+      return SessionGroup(
         cwd: cwd,
-        open: sessions.filter { $0.workingDirectory == cwd },
+        open: open,
         saved: Array(allSaved.prefix(visibleCount)),
         totalSavedCount: allSaved.count)
     }.sorted { lhs, rhs in
-      let lhsActive = lhs.open.contains { $0.sessionId == activeSessionID }
-      let rhsActive = rhs.open.contains { $0.sessionId == activeSessionID }
-      if lhsActive != rhsActive { return lhsActive }
-      let lhsDate = lhs.saved.first?.modifiedAt ?? .distantPast
-      let rhsDate = rhs.saved.first?.modifiedAt ?? .distantPast
-      if lhsDate != rhsDate { return lhsDate > rhsDate }
+      if lhs.totalSessionCount != rhs.totalSessionCount {
+        return lhs.totalSessionCount > rhs.totalSessionCount
+      }
       return lhs.cwd.localizedCaseInsensitiveCompare(rhs.cwd) == .orderedAscending
     }
+  }
+
+  private func sessionSortRank(_ session: SessionController) -> Int {
+    if session.isRunning { return 0 }
+    if session.hasUnreadActivity { return 1 }
+    if session.sessionId == activeSessionID { return 2 }
+    return 3
   }
 
   func showMoreSavedSessions(for cwd: String) {
     visibleSavedSessionCounts[cwd, default: savedSessionPageSize] += savedSessionPageSize
   }
 
-  func isProjectCollapsed(_ cwd: String) -> Bool {
-    !expandedProjectCWDs.contains(cwd)
+  func isGroupCollapsed(_ cwd: String) -> Bool {
+    // Running sessions stay visible even if their directory was collapsed.
+    if sessions.contains(where: { $0.workingDirectory == cwd && $0.isRunning }) {
+      return false
+    }
+    return !expandedGroupCWDs.contains(cwd)
   }
 
-  func toggleProject(_ cwd: String) {
-    if expandedProjectCWDs.contains(cwd) {
-      expandedProjectCWDs.remove(cwd)
+  func toggleGroup(_ cwd: String) {
+    if expandedGroupCWDs.contains(cwd) {
+      expandedGroupCWDs.remove(cwd)
     } else {
-      expandedProjectCWDs.insert(cwd)
+      expandedGroupCWDs.insert(cwd)
     }
   }
 
@@ -191,16 +222,21 @@ final class ScribeMacStore {
     Task {
       defer { isLoadingSavedSessions = false }
       do {
-        let directories = try await ChatSessionStore.listSessionDirectories(
-          sessionsRoot: ScribePaths.resolve().sessionsDirectory)
-        savedSessions = directories.compactMap { directory in
-          guard let metadata = try? ChatSessionStore.loadMetadata(from: directory) else { return nil }
-          return SavedSession(
-            id: metadata.id,
-            directory: directory,
-            metadata: metadata,
-            modifiedAt: FileStat.stat(directory).modificationDate)
-        }
+        let sessionsRoot = ScribePaths.resolve().sessionsDirectory
+        // Directory enumeration, stat, and metadata decoding are synchronous.
+        // Keep all of them off the main actor so launch can draw immediately.
+        savedSessions = try await Task.detached {
+          let directories = try await ChatSessionStore.listSessionDirectories(
+            sessionsRoot: sessionsRoot)
+          return directories.compactMap { directory in
+            guard let metadata = try? ChatSessionStore.loadMetadata(from: directory) else { return nil }
+            return SavedSession(
+              id: metadata.id,
+              directory: directory,
+              metadata: metadata,
+              modifiedAt: FileStat.stat(directory).modificationDate)
+          }
+        }.value
       } catch {
         reportError("Could not load saved sessions: \(error.localizedDescription)")
       }
@@ -212,6 +248,12 @@ final class ScribeMacStore {
       switchTo(existing.sessionId)
       return
     }
+    // Update selection synchronously so the click never appears to be ignored.
+    selectedSavedSession = saved
+    activeSessionID = nil
+    active = nil
+    for session in sessions { session.isActive = false }
+
     guard openingSavedSessionIDs.insert(saved.id).inserted else { return }
     pendingSessionCount += 1
     Task {
@@ -221,12 +263,19 @@ final class ScribeMacStore {
       }
       do {
         try ensureShellCapture()
-        let opened = try await ScribeSessionBootstrap.open(
-          resumeDirectory: saved.directory,
-          workingDirectory: saved.metadata.cwd,
-          version: GitVersion.hash)
-        install(opened)
+        // Bootstrap performs synchronous file decoding internally. Run it on a
+        // detached executor so multi-megabyte transcripts do not block drawing.
+        let version = GitVersion.hash
+        let opened = try await Task.detached {
+          try await ScribeSessionBootstrap.open(
+            resumeDirectory: saved.directory,
+            workingDirectory: saved.metadata.cwd,
+            version: version)
+        }.value
+        let shouldActivate = selectedSavedSession?.id == saved.id
+        install(opened, refreshHistory: false, activate: shouldActivate)
       } catch {
+        if selectedSavedSession?.id == saved.id { selectedSavedSession = nil }
         reportError("Could not open session \(saved.id.uuidString.prefix(8)): \(error.localizedDescription)")
       }
     }
@@ -267,6 +316,7 @@ final class ScribeMacStore {
   /// the previously visible session keeps streaming in the background.
   func switchTo(_ id: UUID) {
     guard let target = sessions.first(where: { $0.sessionId == id }) else { return }
+    selectedSavedSession = nil
     activeSessionID = id
     active = target
     for session in sessions {
@@ -295,15 +345,21 @@ final class ScribeMacStore {
     refreshSavedSessions()
   }
 
-  private func install(_ opened: BootstrappedSession) {
+  private func install(
+    _ opened: BootstrappedSession,
+    refreshHistory: Bool = true,
+    activate: Bool = true
+  ) {
     let controller = SessionController(boot: opened)
     sessions.append(controller)
     profileCatalog = opened.profileCatalog
     requiresDirectoryBeforeStart = false
     lastError = nil
     phase = .ready
-    switchTo(controller.sessionId)
-    refreshSavedSessions()
+    if activate { switchTo(controller.sessionId) }
+    // Opening an existing item does not change the set of sessions on disk.
+    // Avoid rereading metadata for every saved session after each selection.
+    if refreshHistory { refreshSavedSessions() }
   }
 
   private func openSessionInBackground(workingDirectory: String, reopenPaletteOnError: Bool = false) {
