@@ -1,5 +1,7 @@
 import Chroma
 import Foundation
+import Logging
+import ProfileRecorderServer
 import ScribeCore
 import ScribeKit
 import SystemPackage
@@ -120,6 +122,7 @@ final class ScribeMacStore {
   var requiresDirectoryBeforeStart = false
 
   private var didStart = false
+  private var profileRecorderTask: Task<Void, Never>?
   private var didSetupShellCapture = false
   private var composerFocusPending = false
   private var directoryFocusPending = false
@@ -131,6 +134,7 @@ final class ScribeMacStore {
   func start() {
     guard !didStart else { return }
     didStart = true
+    startProfileRecorder()
     #if canImport(AppKit)
     DirectoryPaletteKeyMonitor.shared.install()
     DirectoryPaletteKeyMonitor.shared.onTab = { [weak self] in
@@ -152,6 +156,9 @@ final class ScribeMacStore {
     }
     DirectoryPaletteKeyMonitor.shared.onComposerHistoryNext = { [weak self] in
       self?.active?.recallNextPrompt() ?? false
+    }
+    DirectoryPaletteKeyMonitor.shared.copyText = {
+      SelectionManager.shared.selectedText()
     }
     #endif
     let launchCWD = FilePath.currentDirectory.string
@@ -546,7 +553,32 @@ final class ScribeMacStore {
 
   // MARK: - App teardown
 
+  private func startProfileRecorder() {
+    profileRecorderTask = Task.detached {
+      let logger = Logger(label: "scribe.mac.profile-recorder")
+      do {
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        if environment["PROFILE_RECORDER_SERVER_URL"] == nil
+          && environment["PROFILE_RECORDER_SERVER_URL_PATTERN"] == nil
+        {
+          setenv(
+            "PROFILE_RECORDER_SERVER_URL_PATTERN",
+            "unix:///tmp/scribe-mac-{PID}.sock",
+            0)
+        }
+        #endif
+        let configuration = try await ProfileRecorderServerConfiguration.parseFromEnvironment()
+        await ProfileRecorderServer(configuration: configuration).runIgnoringFailures(logger: logger)
+      } catch {
+        logger.warning("profile-recorder.configuration.failed", metadata: ["error": "\(error)"])
+      }
+    }
+  }
+
   func close() {
+    profileRecorderTask?.cancel()
+    profileRecorderTask = nil
     #if canImport(AppKit)
     DirectoryPaletteKeyMonitor.shared.uninstall()
     #endif

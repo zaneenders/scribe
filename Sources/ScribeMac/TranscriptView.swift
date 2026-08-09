@@ -9,7 +9,7 @@ struct ReadyLayout: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    VStack(spacing: 0, alignment: .leading) {
+    VStack(spacing: 0) {
       TranscriptView(session: session, theme: theme)
       BottomChrome(store: store, session: session, theme: theme)
     }
@@ -27,7 +27,7 @@ struct TranscriptView: Block {
       rows = [
         LazyVStack.Row(
           id: WidgetID("transcript-empty"),
-          content: VStack(spacing: 8, alignment: .leading) {
+          content: VStack(spacing: 8) {
             Text(session.isLoadingTranscript ? "Loading transcript..." : "Ready")
               .fontScale(theme.textScale).foregroundColor(theme.accent)
             WrappedText(
@@ -70,7 +70,7 @@ struct TranscriptItemBlock: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    VStack(spacing: 6, alignment: .leading) {
+    VStack(spacing: 6) {
       Text(label).fontScale(theme.smallScale).foregroundColor(labelColor)
       if item.text.isEmpty {
         Text(item.running ? "running..." : "(empty)")

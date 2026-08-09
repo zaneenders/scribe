@@ -9,7 +9,7 @@ struct DirectoryPalette: Block {
   let required: Bool
 
   @MainActor var body: some Block {
-    VStack(spacing: 10, alignment: .leading) {
+    VStack(spacing: 10) {
       if required {
         Text("Choose a project directory").fontScale(theme.textScale).foregroundColor(theme.accent)
         WrappedText(
@@ -41,7 +41,7 @@ struct DirectoryPalette: Block {
           .foregroundColor(theme.errorText)
       }
       if !store.directoryMatches.isEmpty {
-        VStack(spacing: 2, alignment: .leading) {
+        VStack(spacing: 2) {
           Text("Matches")
             .fontScale(theme.smallScale)
             .foregroundColor(theme.textSecondary)

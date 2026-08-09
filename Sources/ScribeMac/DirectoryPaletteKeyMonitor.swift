@@ -14,12 +14,22 @@ final class DirectoryPaletteKeyMonitor {
   var onComposerStop: (() -> Bool)?
   var onComposerHistoryPrevious: (() -> Bool)?
   var onComposerHistoryNext: (() -> Bool)?
+  var copyText: (() -> String?)?
 
   private init() {}
 
   func install() {
     guard monitor == nil else { return }
     monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      if event.modifierFlags.contains(.command),
+        event.charactersIgnoringModifiers?.lowercased() == "c",
+        let text = self?.copyText?(),
+        !text.isEmpty
+      {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        return nil
+      }
       let store = ScribeMacStore.shared
       if store.showDirectoryPicker {
         if event.keyCode == 48 {
@@ -63,6 +73,7 @@ final class DirectoryPaletteKeyMonitor {
     onComposerStop = nil
     onComposerHistoryPrevious = nil
     onComposerHistoryNext = nil
+    copyText = nil
   }
 }
 #endif

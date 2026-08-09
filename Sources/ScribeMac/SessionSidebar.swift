@@ -8,7 +8,7 @@ struct SessionSidebar: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    VStack(spacing: 0, alignment: .leading) {
+    VStack(spacing: 0) {
       HStack(spacing: 6) {
         Text("SESSIONS")
           .fontScale(theme.smallScale)
@@ -43,7 +43,7 @@ struct SessionSidebar: Block {
         showsIndicator: true,
         controller: store.sidebarScroll
       ) {
-        VStack(spacing: 1, alignment: .leading) {
+        VStack(spacing: 1) {
           for group in store.sessionGroups {
             SessionGroupHeader(
               store: store,
@@ -137,7 +137,7 @@ struct SessionRow: Block {
   let isActive: Bool
 
   @MainActor var body: some Block {
-    ZStack(alignment: .trailing) {
+    ZStack() {
       Interactive(
         id: WidgetID("session-row:\(session.sessionId.uuidString)"),
         action: { store.switchTo(session.sessionId) }

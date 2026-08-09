@@ -1,60 +1,36 @@
 import Chroma
 import Foundation
-import Logging
 import MetalBackend
-import ProfileRecorderServer
 
 @main
 struct ScribeMacApp: MetalApp {
   var title: String { "Scribe" }
   var windowSize: Size { Size(width: 1100, height: 760) }
+  var minimumRefreshRate: Double { 30 }
+
+  var keyBindings: KeyBindings {
+    KeyBindings {
+      bind("c", modifiers: .command, to: .editing(.copy))
+      bind("v", modifiers: .command, to: .editing(.paste))
+      bind("a", modifiers: .command, to: .editing(.selectAll))
+      bind(.backspace, to: .editing(.backspace))
+      bind(.delete, to: .editing(.deleteForward))
+      bind(.leftArrow, to: .editing(.moveCaretLeft))
+      bind(.rightArrow, to: .editing(.moveCaretRight))
+      bind(.home, to: .editing(.moveCaretToStart))
+      bind(.end, to: .editing(.moveCaretToEnd))
+      bind(.enter, to: .editing(.submit))
+      bind(.escape, to: .editing(.endEditing))
+      bind(.space, to: .action(.activate))
+      bind(.pageUp, to: .navigation(.pageUp))
+      bind(.pageDown, to: .navigation(.pageDown))
+    }
+  }
 
   @MainActor var body: some Block {
     let store = ScribeMacStore.shared
     store.start()
     return ScribeMacRoot(store: store)
-  }
-
-  @MainActor static func main() {
-    let profileRecorderTask = Task.detached {
-      let logger = Logger(label: "scribe.mac.profile-recorder")
-      do {
-        #if DEBUG
-        let environment = ProcessInfo.processInfo.environment
-        if environment["PROFILE_RECORDER_SERVER_URL"] == nil
-          && environment["PROFILE_RECORDER_SERVER_URL_PATTERN"] == nil
-        {
-          setenv(
-            "PROFILE_RECORDER_SERVER_URL_PATTERN",
-            "unix:///tmp/scribe-mac-{PID}.sock",
-            0
-          )
-        }
-        #endif
-        let configuration = try await ProfileRecorderServerConfiguration.parseFromEnvironment()
-        await ProfileRecorderServer(configuration: configuration).runIgnoringFailures(logger: logger)
-      } catch {
-        logger.warning("profile-recorder.configuration.failed", metadata: ["error": "\(error)"])
-      }
-    }
-    defer { profileRecorderTask.cancel() }
-
-    let app = Self()
-    guard let renderer = MetalRenderer(size: app.windowSize) else {
-      fatalError("Metal requires Apple Silicon or supported GPU.")
-    }
-    renderer.content = app.body
-    renderer.onClose = { ScribeMacStore.shared.close() }
-    let activityAnimationTask = Task { @MainActor in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(90))
-        if ScribeMacStore.shared.sessions.contains(where: \.isRunning) {
-          renderer.contentView.needsDisplay = true
-        }
-      }
-    }
-    defer { activityAnimationTask.cancel() }
-    renderer.run(title: app.title)
   }
 }
 
@@ -63,7 +39,7 @@ struct ScribeMacRoot: Block {
   let theme = MacTheme()
 
   @MainActor var body: some Block {
-    RenderContextBridge(content: VStack(spacing: 0, alignment: .leading) {
+    RenderContextBridge(content: VStack(spacing: 0) {
       header
       if store.showModelPicker {
         modelPicker
@@ -87,7 +63,7 @@ struct ScribeMacRoot: Block {
           .sizing(x: .grow, y: .grow)
         }
       case .failed(let message):
-        VStack(spacing: 14, alignment: .leading) {
+        VStack(spacing: 14) {
           Text("Could not start Scribe").fontScale(theme.textScale).foregroundColor(theme.errorText)
           WrappedText(text: message, theme: theme, color: theme.textPrimary)
           HStack(spacing: 8) {
@@ -224,7 +200,7 @@ struct ScribeMacRoot: Block {
   @MainActor private var modelPicker: some Block {
     let itemHeight: Float = 34
     let profiles = store.profileCatalog
-    return VStack(spacing: 0, alignment: .leading) {
+    return VStack(spacing: 0) {
       for (_, profile) in profiles.enumerated() {
         let isActive = profile.name == store.active?.profileName
         Interactive(

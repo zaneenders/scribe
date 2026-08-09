@@ -9,7 +9,7 @@ struct BottomChrome: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    VStack(spacing: 0, alignment: .leading) {
+    VStack(spacing: 0) {
       if !session.queuedTexts.isEmpty {
         QueuedTray(session: session, theme: theme)
       }
@@ -35,7 +35,7 @@ struct ComposerBar: Block {
         onNewline: { session.insertComposerNewline() }
       )
     } controls: {
-      VStack(spacing: 4, alignment: .trailing) {
+      VStack(spacing: 4) {
         if session.isRunning {
           HStack(spacing: 6) {
             Button(
@@ -131,7 +131,7 @@ struct QueuedTray: Block {
 
   @MainActor var body: some Block {
     let queued = session.queuedTexts
-    return VStack(spacing: 4, alignment: .leading) {
+    return VStack(spacing: 4) {
       HStack(spacing: 8) {
         Text("QUEUED (\(queued.count)) · sent in order after each turn")
           .fontScale(theme.smallScale)
