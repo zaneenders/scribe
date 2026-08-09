@@ -55,6 +55,9 @@ final class SessionController {
   /// passed text that already crossed that boundary (e.g. queued messages).
   var draft = ""
   var isRunning = false
+  /// Conversation recency used by the sidebar. Selecting or opening a session
+  /// does not change this value.
+  private(set) var lastMessageAt: Date
   var usageText = ""
   /// Set by the store. While false, incoming stream activity raises
   /// `hasUnreadActivity` so the sidebar can flag background progress.
@@ -94,6 +97,7 @@ final class SessionController {
     self.boot = boot
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
+    self.lastMessageAt = ChatSessionStore.lastMessageDate(in: boot.sessionDirectory)
     self.transcript = []
     self.promptHistory = boot.initialMessages.compactMap { message in
       message.role == .user && !message.content.isEmpty ? message.content : nil
@@ -349,9 +353,11 @@ final class SessionController {
     case .userPrompt(let text):
       // Echoes both the submitted message and queued messages as the harness
       // dispatches them at the start of each turn.
+      lastMessageAt = Date()
       transcript.append(TranscriptItem(kind: .user, title: "You", text: text))
       scroll.scrollToBottom()
     case .agent(let event):
+      lastMessageAt = Date()
       reduce(event)
     case .finished(let outcome):
       isRunning = false

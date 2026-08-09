@@ -3,10 +3,10 @@ import Foundation
 
 // MARK: - ASCII sanitization
 
-/// Chroma's bitmap font covers printable ASCII (0x20–0x7E) and the renderer
-/// advances one cell per UTF-8 *byte*, so anything else breaks both display
-/// and caret math. Transliterate the usual LLM punctuation to ASCII and map
-/// everything else to `?` until Chroma grows a real font stack.
+/// Scribe's editable and generated prose is restricted to printable ASCII so
+/// caret math and text interchange remain predictable. Chroma may also contain
+/// a small set of UI glyphs, but those are used only by fixed interface labels.
+/// Transliterate usual LLM punctuation and map unsupported prose to `?`.
 func sanitizeASCII(_ text: String) -> String {
   var out = String()
   out.reserveCapacity(text.count)

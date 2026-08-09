@@ -45,6 +45,15 @@ struct ScribeMacApp: MetalApp {
     }
     renderer.content = app.body
     renderer.onClose = { ScribeMacStore.shared.close() }
+    let activityAnimationTask = Task { @MainActor in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(90))
+        if ScribeMacStore.shared.sessions.contains(where: \.isRunning) {
+          renderer.contentView.needsDisplay = true
+        }
+      }
+    }
+    defer { activityAnimationTask.cancel() }
     renderer.run(title: app.title)
   }
 }

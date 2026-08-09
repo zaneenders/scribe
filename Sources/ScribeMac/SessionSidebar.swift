@@ -15,18 +15,22 @@ struct SessionSidebar: Block {
           .foregroundColor(theme.textSecondary)
         Spacer()
         Interactive(id: WidgetID("sidebar-refresh"), action: { store.refreshSavedSessions() }) { phase in
-          Text("R")
-            .fontScale(theme.smallScale)
-            .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-            .sizing(x: .fixed(24), y: .fixed(24))
-            .background(phase == .idle ? .clear : theme.sidebarHover)
+          ZStack {
+            Text("↻")
+              .fontScale(theme.smallScale)
+              .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
+          }
+          .sizing(x: .fixed(24), y: .fixed(24))
+          .background(phase == .idle ? .clear : theme.sidebarHover)
         }
         Interactive(id: WidgetID("sidebar-new"), action: { store.newSession() }) { phase in
-          Text("+")
-            .fontScale(theme.textScale)
-            .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-            .sizing(x: .fixed(24), y: .fixed(24))
-            .background(phase == .idle ? .clear : theme.sidebarHover)
+          ZStack {
+            Text("+")
+              .fontScale(theme.textScale)
+              .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
+          }
+          .sizing(x: .fixed(24), y: .fixed(24))
+          .background(phase == .idle ? .clear : theme.sidebarHover)
         }
       }
       .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 6))
@@ -47,15 +51,17 @@ struct SessionSidebar: Block {
               theme: theme,
               isCollapsed: store.isGroupCollapsed(group.cwd))
             if !store.isGroupCollapsed(group.cwd) {
-              for session in group.open {
-                SessionRow(
-                  store: store,
-                  session: session,
-                  theme: theme,
-                  isActive: session.sessionId == store.activeSessionID)
-              }
-              for saved in group.saved {
-                SavedSessionRow(store: store, saved: saved, theme: theme)
+              for (_, entry) in group.entries.enumerated() {
+                switch entry {
+                case .open(let session):
+                  SessionRow(
+                    store: store,
+                    session: session,
+                    theme: theme,
+                    isActive: session.sessionId == store.activeSessionID)
+                case .saved(let saved):
+                  SavedSessionRow(store: store, saved: saved, theme: theme)
+                }
               }
               if group.canShowMore {
                 ShowMoreSessionsRow(store: store, group: group, theme: theme)
@@ -111,7 +117,7 @@ struct SessionGroupHeader: Block {
           .fontScale(theme.smallScale)
           .foregroundColor(
             group.open.contains(where: \.isRunning)
-              ? theme.yellow : phase == .hovered ? theme.accent : theme.textPrimary)
+              ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary)
         Spacer()
         Text("\(group.open.count + group.totalSavedCount)")
           .fontScale(theme.smallScale)
@@ -130,12 +136,6 @@ struct SessionRow: Block {
   let theme: MacTheme
   let isActive: Bool
 
-  private var workingIndicator: String {
-    let frames = ["|", "/", "-", "\\"]
-    let tick = Int(Date().timeIntervalSinceReferenceDate * 5)
-    return frames[tick % frames.count]
-  }
-
   @MainActor var body: some Block {
     ZStack(alignment: .trailing) {
       Interactive(
@@ -143,15 +143,22 @@ struct SessionRow: Block {
         action: { store.switchTo(session.sessionId) }
       ) { phase in
         HStack(spacing: 5) {
-          Text(session.isRunning ? workingIndicator : "○")
-            .fontScale(theme.smallScale)
-            .foregroundColor(session.isRunning ? theme.yellow : theme.textSecondary)
+          if session.isRunning {
+            ActivitySpinner(color: theme.purple)
+          } else {
+            Text("○")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
           Text(session.sessionIdText)
             .fontScale(theme.smallScale)
             .foregroundColor(
               session.isRunning
-                ? theme.yellow : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
+                ? theme.purple : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
           Spacer()
+          Text(sanitizeASCII(session.modelName))
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
           if session.hasUnreadActivity && !isActive {
             Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
           }

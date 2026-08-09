@@ -368,9 +368,8 @@ extension ScribeCLI {
     for directory in files {
       guard let meta = try? ChatSessionStore.loadMetadata(from: directory) else { continue }
       let shortId = String(meta.id.uuidString.prefix(8))
-      let st = FileStat.stat(directory)
-      let updatedAt = st.exists ? st.modificationDate : meta.createdAt
-      let when = relativeTime(from: updatedAt)
+      let when = relativeTime(
+        from: ChatSessionStore.lastMessageDate(in: directory, metadata: meta))
       let displayCwd = meta.cwd.replacingOccurrences(of: home, with: "~")
 
       let logFile = resolved.paths.logFile(sessionId: meta.id).string

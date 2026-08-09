@@ -1,5 +1,4 @@
 import Chroma
-import Foundation
 
 /// The bottom-most bar: run state, working directory, session id, and usage.
 struct StatusBar: Block {
@@ -9,9 +8,13 @@ struct StatusBar: Block {
 
   @MainActor var body: some Block {
     HStack(spacing: 10) {
-      Text(session.isRunning ? "WORKING" : "READY")
-        .fontScale(theme.smallScale)
-        .foregroundColor(session.isRunning ? theme.yellow : theme.green)
+      if session.isRunning {
+        ActivitySpinner(color: theme.purple)
+      } else {
+        Text("READY")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.green)
+      }
       Interactive(
         id: WidgetID("cwd-toggle"),
         action: { store.toggleDirectoryPicker() }

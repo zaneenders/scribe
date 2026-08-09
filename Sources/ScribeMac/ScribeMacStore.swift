@@ -16,19 +16,44 @@ final class ScribeMacStore {
     let id: UUID
     let directory: FilePath
     let metadata: ChatSessionMetadata
-    let modifiedAt: Date
+    let lastMessageAt: Date
+  }
+
+  @MainActor
+  enum SessionEntry {
+    case open(SessionController)
+    case saved(SavedSession)
+
+    var id: UUID {
+      switch self {
+      case .open(let session): session.sessionId
+      case .saved(let session): session.id
+      }
+    }
+
+    var lastMessageAt: Date {
+      switch self {
+      case .open(let session): session.lastMessageAt
+      case .saved(let session): session.lastMessageAt
+      }
+    }
   }
 
   struct SessionGroup: Identifiable {
     let cwd: String
     let open: [SessionController]
-    /// The newest saved sessions currently exposed in the sidebar.
-    let saved: [SavedSession]
+    /// Open and currently exposed saved sessions, newest message first.
+    let entries: [SessionEntry]
     let totalSavedCount: Int
 
     var id: String { cwd }
     var totalSessionCount: Int { open.count + totalSavedCount }
-    var hiddenSavedCount: Int { max(0, totalSavedCount - saved.count) }
+    var visibleSavedCount: Int {
+      entries.reduce(into: 0) { count, entry in
+        if case .saved = entry { count += 1 }
+      }
+    }
+    var hiddenSavedCount: Int { max(0, totalSavedCount - visibleSavedCount) }
     var canShowMore: Bool { hiddenSavedCount > 0 }
     var title: String {
       if cwd == "/" { return "/" }
@@ -167,19 +192,19 @@ final class ScribeMacStore {
     return cwdValues.map { cwd in
       let allSaved = savedByCWD[cwd, default: []]
       let visibleCount = visibleSavedSessionCounts[cwd, default: savedSessionPageSize]
-      let open = openByCWD[cwd, default: []]
-        .sorted { lhs, rhs in
-          let lhsRank = sessionSortRank(lhs.element)
-          let rhsRank = sessionSortRank(rhs.element)
-          if lhsRank != rhsRank { return lhsRank < rhsRank }
-          // Most recently opened first within the same state.
-          return lhs.offset > rhs.offset
+      let open = openByCWD[cwd, default: []].map(\.element)
+      var entries = open.map(SessionEntry.open)
+      entries.append(contentsOf: allSaved.prefix(visibleCount).map(SessionEntry.saved))
+      entries.sort { lhs, rhs in
+        if lhs.lastMessageAt != rhs.lastMessageAt {
+          return lhs.lastMessageAt > rhs.lastMessageAt
         }
-        .map(\.element)
+        return lhs.id.uuidString > rhs.id.uuidString
+      }
       return SessionGroup(
         cwd: cwd,
         open: open,
-        saved: Array(allSaved.prefix(visibleCount)),
+        entries: entries,
         totalSavedCount: allSaved.count)
     }.sorted { lhs, rhs in
       if lhs.totalSessionCount != rhs.totalSessionCount {
@@ -189,12 +214,8 @@ final class ScribeMacStore {
     }
   }
 
-  private func sessionSortRank(_ session: SessionController) -> Int {
-    if session.isRunning { return 0 }
-    if session.hasUnreadActivity { return 1 }
-    if session.sessionId == activeSessionID { return 2 }
-    return 3
-  }
+  // Open sessions are ordered solely by conversation recency above; UI state
+  // such as running, unread, or selected must not reorder them.
 
   func showMoreSavedSessions(for cwd: String) {
     visibleSavedSessionCounts[cwd, default: savedSessionPageSize] += savedSessionPageSize
@@ -234,7 +255,8 @@ final class ScribeMacStore {
               id: metadata.id,
               directory: directory,
               metadata: metadata,
-              modifiedAt: FileStat.stat(directory).modificationDate)
+              lastMessageAt: ChatSessionStore.lastMessageDate(
+                in: directory, metadata: metadata))
           }
         }.value
       } catch {

@@ -3,14 +3,6 @@ import ScribeCore
 import SystemPackage
 import _NIOFileSystem
 
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#elseif canImport(Musl)
-import Musl
-#endif
-
 public struct ChatSessionMetadata: Codable, Sendable {
   public var schemaVersion: Int
   public var id: UUID
@@ -19,6 +11,9 @@ public struct ChatSessionMetadata: Codable, Sendable {
   public var cwd: String
   public var baseURL: String?
   public var scribeVersion: String?
+  /// Written only when conversation messages are appended. Unlike a directory
+  /// modification date, opening or otherwise touching a session cannot change it.
+  public var lastMessageAt: Date?
 
   public var parentSessionId: UUID?
 
@@ -32,6 +27,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     cwd: String,
     baseURL: String?,
     scribeVersion: String?,
+    lastMessageAt: Date? = nil,
     parentSessionId: UUID? = nil,
     forkedAtIndex: Int? = nil
   ) {
@@ -42,6 +38,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     self.cwd = cwd
     self.baseURL = baseURL
     self.scribeVersion = scribeVersion
+    self.lastMessageAt = lastMessageAt
     self.parentSessionId = parentSessionId
     self.forkedAtIndex = forkedAtIndex
   }
@@ -242,23 +239,24 @@ public enum ChatSessionStore {
     guard (try? await fs.info(forFileAt: sessionsRoot)) != nil else {
       return []
     }
-    // Capture the directory stat during discovery and reuse it for sorting.
-    // Calling stat from the sort comparator turns a scan into thousands of
-    // redundant filesystem calls for a large session history.
-    var sessions: [(directory: FilePath, modifiedAt: Date)] = []
+    // Capture the last-message date during discovery so the comparator does no
+    // filesystem work. Directory mtimes are intentionally ignored: opening or
+    // touching a session must not move it in conversation history.
+    var sessions: [(directory: FilePath, lastMessageAt: Date)] = []
     let names = try listDirectoryContents(sessionsRoot)
     for name in names where !name.hasPrefix(".") {
       let dir = sessionsRoot.appendingPathComponent(name)
       let directoryStat = FileStat.stat(dir)
       guard directoryStat.exists, directoryStat.isDirectory else { continue }
-      let meta = metadataFile(in: dir)
-      guard FileStat.stat(meta).exists else { continue }
-      if let cwd = cwdFilter, (try? loadMetadata(from: dir).cwd) != cwd {
+      let metaPath = metadataFile(in: dir)
+      guard FileStat.stat(metaPath).exists, let metadata = try? loadMetadata(from: dir) else { continue }
+      if let cwd = cwdFilter, metadata.cwd != cwd {
         continue
       }
-      sessions.append((directory: dir, modifiedAt: directoryStat.modificationDate))
+      sessions.append(
+        (directory: dir, lastMessageAt: lastMessageDate(in: dir, metadata: metadata)))
     }
-    return sessions.sorted { $0.modifiedAt > $1.modifiedAt }.map(\.directory)
+    return sessions.sorted { $0.lastMessageAt > $1.lastMessageAt }.map(\.directory)
   }
 
   public static func sessionDirectory(
@@ -280,6 +278,20 @@ public enum ChatSessionStore {
   public static func loadMetadata(from directory: FilePath) throws -> ChatSessionMetadata {
     let metaData = try Data(contentsOf: URL(fileURLWithPath: metadataFile(in: directory).string))
     return try dec.decode(ChatSessionMetadata.self, from: metaData)
+  }
+
+  /// Returns the time conversation messages were last appended. Older sessions
+  /// predate `lastMessageAt`, so use the messages file's modification time as a
+  /// migration fallback; neither value changes merely because a session opens.
+  public static func lastMessageDate(
+    in directory: FilePath,
+    metadata: ChatSessionMetadata? = nil
+  ) -> Date {
+    let metadata = metadata ?? (try? loadMetadata(from: directory))
+    if let lastMessageAt = metadata?.lastMessageAt { return lastMessageAt }
+    let messagesStat = FileStat.stat(messagesFile(in: directory))
+    if messagesStat.exists { return messagesStat.modificationDate }
+    return metadata?.createdAt ?? .distantPast
   }
 
   public static func loadMessages(from directory: FilePath) throws -> [ScribeMessage] {
@@ -320,7 +332,7 @@ public enum ChatSessionStore {
         data.append(UInt8(ascii: "\n"))
         try writer.append(data)
       }
-      try ChatSessionStore.touchModificationDate(of: directory)
+      try ChatSessionStore.recordLastMessageDate(in: directory, date: Date())
     }
   }
 
@@ -333,18 +345,15 @@ public enum ChatSessionStore {
     try appender.append(messages)
   }
 
-  private static func touchModificationDate(of directory: FilePath) throws {
-    let now = Date().timeIntervalSince1970
-    let frac = (now - Double(Int(now))) * 1_000_000
-    #if canImport(Darwin)
-    let times = timeval(tv_sec: Int(now), tv_usec: Int32(frac))
-    #else
-    let times = timeval(tv_sec: Int(now), tv_usec: Int(frac))
-    #endif
-    var timevals = [times, times]
-    if utimes(directory.string, &timevals) != 0 {
-      throw ScribeError.generic("utimes failed for \(directory.string): errno \(errno)")
-    }
+  private static func recordLastMessageDate(in directory: FilePath, date: Date) throws {
+    // `appendMessages` is also a low-level utility used before metadata exists.
+    guard FileStat.stat(metadataFile(in: directory)).exists else { return }
+    var metadata = try loadMetadata(from: directory)
+    metadata.lastMessageAt = date
+    let data = try enc.encode(metadata)
+    try data.write(
+      to: URL(fileURLWithPath: metadataFile(in: directory).string),
+      options: [.atomic])
   }
 
   public struct ForkResult: Sendable {
