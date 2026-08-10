@@ -15,22 +15,20 @@ struct SessionSidebar: Block {
           .foregroundColor(theme.textSecondary)
         Spacer()
         Interactive(id: WidgetID("sidebar-refresh"), action: { store.refreshSavedSessions() }) { phase in
-          ZStack {
-            Text("↻")
-              .fontScale(theme.smallScale)
-              .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-          }
-          .sizing(x: .fixed(24), y: .fixed(24))
-          .background(phase == .idle ? .clear : theme.sidebarHover)
+          Text("↻")
+            .fontScale(theme.smallScale)
+            .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
+            .padding(EdgeInsets(top: 5, leading: 6.5, bottom: 5, trailing: 6.5))
+            .sizing(x: .fixed(24), y: .fixed(24))
+            .background(phase == .idle ? .clear : theme.sidebarHover)
         }
         Interactive(id: WidgetID("sidebar-new"), action: { store.newSession() }) { phase in
-          ZStack {
-            Text("+")
-              .fontScale(theme.textScale)
-              .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-          }
-          .sizing(x: .fixed(24), y: .fixed(24))
-          .background(phase == .idle ? .clear : theme.sidebarHover)
+          Text("+")
+            .fontScale(theme.textScale)
+            .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
+            .padding(EdgeInsets(top: 5, leading: 6.5, bottom: 5, trailing: 6.5))
+            .sizing(x: .fixed(24), y: .fixed(24))
+            .background(phase == .idle ? .clear : theme.sidebarHover)
         }
       }
       .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 6))

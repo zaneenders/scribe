@@ -20,6 +20,7 @@ struct ScribeMacApp: MetalApp {
       bind(.home, to: .editing(.moveCaretToStart))
       bind(.end, to: .editing(.moveCaretToEnd))
       bind(.enter, to: .editing(.submit))
+      bind(.enter, modifiers: .shift, to: .editing(.submit))
       bind(.escape, to: .editing(.endEditing))
       bind(.space, to: .action(.activate))
       bind(.pageUp, to: .navigation(.pageUp))
