@@ -13,6 +13,9 @@ struct BottomChrome: Block {
       if !session.queuedTexts.isEmpty {
         QueuedTray(session: session, theme: theme)
       }
+      if let picker = session.commandPicker {
+        CommandPickerBar(session: session, picker: picker, theme: theme)
+      }
       ComposerBar(session: session, theme: theme)
       StatusBar(store: store, session: session, theme: theme)
     }
@@ -25,17 +28,17 @@ struct ComposerBar: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    ComposerRow(spacing: 8) {
-      GrowingTextField(
-        session.isRunning ? "Queue a message..." : "Message Scribe",
-        id: ScribeMacStore.composerID,
-        fontScale: theme.textScale,
-        text: { session.draft },
-        onChange: { session.updateDraft($0) },
-        onNewline: { session.insertComposerNewline() }
-      )
-    } controls: {
-      VStack(spacing: 4) {
+    VStack(spacing: 6) {
+      ComposerRow(spacing: 8) {
+        GrowingTextField(
+          session.isRunning ? "Queue a message..." : "Message Scribe",
+          id: ScribeMacStore.composerID,
+          fontScale: theme.textScale,
+          text: { session.draft },
+          onChange: { session.updateDraft($0) },
+          onNewline: { session.insertComposerNewline() }
+        )
+      } controls: {
         if session.isRunning {
           HStack(spacing: 6) {
             Button(
@@ -53,6 +56,22 @@ struct ComposerBar: Block {
             style: theme.buttonStyle(pressedColor: theme.accent)
           ) { session.submit() }
         }
+      }
+
+      HStack(spacing: 6) {
+        if !session.isRunning {
+          Button(
+            "TLDR", id: WidgetID("tldr"), fontScale: theme.smallScale,
+            style: theme.buttonStyle(pressedColor: theme.purple),
+            padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
+          ) { session.openCommandPicker(.tldr) }
+          Button(
+            "Fork", id: WidgetID("fork"), fontScale: theme.smallScale,
+            style: theme.buttonStyle(pressedColor: theme.orange),
+            padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
+          ) { session.openCommandPicker(.fork) }
+        }
+        Spacer()
         Text(session.isRunning ? "Cmd+Return queue | Esc stop" : "Cmd+Return send")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
@@ -62,6 +81,57 @@ struct ComposerBar: Block {
     .sizing(x: .grow)
     .background(theme.composerBackground)
     .border(theme.border)
+  }
+}
+
+struct CommandPickerBar: Block {
+  let session: SessionController
+  let picker: SessionController.CommandPickerState
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
+    HStack(spacing: 0) {
+      Text("[\(picker.command.rawValue.uppercased())] ")
+        .fontScale(theme.smallScale)
+        .foregroundColor(picker.command == .tldr ? theme.purple : theme.orange)
+      if picker.command == .fork {
+        Text("msg \(picker.startBoundary) / \(picker.messageCount)")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.textPrimary)
+      } else {
+        boundaryLabel("start", value: picker.startBoundary, active: !picker.activeIsEnd)
+        Text(" · ")
+          .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+        boundaryLabel("end", value: picker.endBoundary, active: picker.activeIsEnd)
+        Text(" of \(picker.messageCount)")
+          .fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
+      }
+      Spacer()
+      Text(commandHint)
+        .fontScale(theme.smallScale)
+        .foregroundColor(theme.textSecondary)
+    }
+    .padding(EdgeInsets(top: 7, leading: theme.margin, bottom: 7, trailing: theme.margin))
+    .sizing(x: .grow)
+    .background(theme.statusBackground)
+    .border(theme.border)
+  }
+
+  @MainActor private func boundaryLabel(_ label: String, value: Int, active: Bool) -> some Block {
+    HStack(spacing: 0) {
+      Text("\(label) ")
+        .fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
+      Text("\(value)")
+        .fontScale(theme.smallScale)
+        .foregroundColor(active ? theme.yellow : theme.textPrimary)
+    }
+  }
+
+  @MainActor private var commandHint: String {
+    if session.isRunningCommand { return "working..." }
+    return picker.command == .tldr
+      ? "f/j move · Tab switch · Enter confirm · Esc cancel"
+      : "f/j move · Enter confirm · Esc cancel"
   }
 }
 

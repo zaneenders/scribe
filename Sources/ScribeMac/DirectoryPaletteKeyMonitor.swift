@@ -14,6 +14,10 @@ final class DirectoryPaletteKeyMonitor {
   var onComposerStop: (() -> Bool)?
   var onComposerHistoryPrevious: (() -> Bool)?
   var onComposerHistoryNext: (() -> Bool)?
+  var onCommandPickerMove: ((Int) -> Void)?
+  var onCommandPickerToggle: (() -> Void)?
+  var onCommandPickerConfirm: (() -> Void)?
+  var onCommandPickerCancel: (() -> Void)?
   var copyText: (() -> String?)?
 
   private init() {}
@@ -41,6 +45,27 @@ final class DirectoryPaletteKeyMonitor {
           return nil
         }
         return event
+      }
+      if store.active?.commandPicker != nil {
+        switch event.keyCode {
+        case 3:  // f
+          self?.onCommandPickerMove?(-1)
+          return nil
+        case 38:  // j
+          self?.onCommandPickerMove?(1)
+          return nil
+        case 48:  // Tab
+          self?.onCommandPickerToggle?()
+          return nil
+        case 36, 76:  // Return / keypad Enter
+          self?.onCommandPickerConfirm?()
+          return nil
+        case 53:  // Escape
+          self?.onCommandPickerCancel?()
+          return nil
+        default:
+          return event
+        }
       }
       guard MacRenderContext.activeTextInput == ScribeMacStore.composerID, store.active != nil else {
         return event
@@ -73,6 +98,10 @@ final class DirectoryPaletteKeyMonitor {
     onComposerStop = nil
     onComposerHistoryPrevious = nil
     onComposerHistoryNext = nil
+    onCommandPickerMove = nil
+    onCommandPickerToggle = nil
+    onCommandPickerConfirm = nil
+    onCommandPickerCancel = nil
     copyText = nil
   }
 }

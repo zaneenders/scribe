@@ -1,5 +1,6 @@
 import Chroma
 import Foundation
+import Logging
 import ScribeCore
 import ScribeKit
 
@@ -30,6 +31,7 @@ final class SessionController {
     var text: String
     var running = false
     var layoutRevision = 0
+    var sourceMessageIndex: Int?
 
     var layoutID: WidgetID {
       WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
@@ -41,6 +43,25 @@ final class SessionController {
     case agent(AgentEvent)
     case finished(TurnOutcome)
     case failed(String)
+  }
+
+  enum SessionCommand: String, Sendable {
+    case fork = "Fork"
+    case tldr = "TLDR"
+  }
+
+  struct CommandPickerState: Sendable {
+    var command: SessionCommand
+    var boundaries: [Int]
+    var startCursor: Int
+    var endCursor: Int?
+    var activeIsEnd: Bool
+    var messageCount: Int
+    var needsReveal = true
+
+    var startBoundary: Int { boundaries[startCursor] }
+    var endBoundary: Int { endCursor.map { boundaries[$0] } ?? startBoundary }
+    var activeBoundary: Int { activeIsEnd ? endBoundary : startBoundary }
   }
 
   /// The bootstrapped session this controller drives.
@@ -70,7 +91,11 @@ final class SessionController {
 
   var profileName: String
   var modelName: String
+  private(set) var commandPicker: CommandPickerState?
+  private(set) var isRunningCommand = false
+  var onIdentityChange: ((UUID, UUID) -> Void)?
 
+  private var currentSessionId: UUID
   private var runTask: Task<Void, Never>?
   private var promptHistory: [String]
   private var historyIndex: Int?
@@ -81,7 +106,7 @@ final class SessionController {
   /// lost.
   private var pendingForceSend: String?
 
-  var sessionId: UUID { boot.sessionId }
+  var sessionId: UUID { currentSessionId }
   var workingDirectory: String { boot.workingDirectory }
   /// Messages queued while a turn is running, oldest first.
   var queuedTexts: [String] { boot.messageQueues.steeringPreviewTexts() }
@@ -97,6 +122,7 @@ final class SessionController {
     self.boot = boot
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
+    self.currentSessionId = boot.sessionId
     self.lastMessageAt = ChatSessionStore.lastMessageDate(in: boot.sessionDirectory)
     self.transcript = []
     self.promptHistory = boot.initialMessages.compactMap { message in
@@ -168,9 +194,145 @@ final class SessionController {
     return true
   }
 
+  // MARK: - Fork / TLDR commands
+
+  func openCommandPicker(_ command: SessionCommand) {
+    guard !isRunning, !isRunningCommand else { return }
+    commandPicker = nil
+    Task {
+      let snapshot = await boot.harness.snapshot()
+      let boundaries = snapshot.safeForkBoundaries
+      let minimumCount = command == .tldr ? 2 : 1
+      guard boundaries.count >= minimumCount else {
+        transcript.append(
+          TranscriptItem(
+            kind: .warning, title: command.rawValue,
+            text: command == .tldr
+              ? "TLDR needs at least two safe message boundaries."
+              : "This session does not have a safe fork boundary yet."))
+        scroll.scrollToBottom()
+        return
+      }
+      let endCursor = boundaries.count - 1
+      let startCursor: Int
+      if command == .tldr {
+        let lastUser = snapshot.messages.lastIndex { $0.role == .user }
+        if let lastUser,
+          let index = boundaries.firstIndex(of: lastUser + 1),
+          index < endCursor
+        {
+          startCursor = index
+        } else {
+          startCursor = max(0, endCursor - 1)
+        }
+      } else {
+        startCursor = endCursor
+      }
+      commandPicker = CommandPickerState(
+        command: command, boundaries: boundaries, startCursor: startCursor,
+        endCursor: command == .tldr ? endCursor : nil, activeIsEnd: false,
+        messageCount: snapshot.count)
+      transcript = Self.replay(snapshot.messages)
+    }
+  }
+
+  func moveCommandCursor(by delta: Int) {
+    guard !isRunningCommand, var picker = commandPicker else { return }
+    if picker.activeIsEnd, let end = picker.endCursor {
+      picker.endCursor = max(
+        picker.startCursor + 1,
+        min(picker.boundaries.count - 1, end + delta))
+    } else {
+      let upper =
+        picker.command == .tldr
+        ? (picker.endCursor ?? 1) - 1
+        : picker.boundaries.count - 1
+      picker.startCursor = max(0, min(upper, picker.startCursor + delta))
+    }
+    picker.needsReveal = true
+    commandPicker = picker
+  }
+
+  func toggleCommandBoundary() {
+    guard !isRunningCommand, var picker = commandPicker, picker.command == .tldr else { return }
+    picker.activeIsEnd.toggle()
+    picker.needsReveal = true
+    commandPicker = picker
+  }
+
+  func consumeCommandReveal() -> Bool {
+    guard var picker = commandPicker, picker.needsReveal else { return false }
+    picker.needsReveal = false
+    commandPicker = picker
+    return true
+  }
+
+  func cancelCommandPicker() {
+    guard !isRunningCommand else { return }
+    commandPicker = nil
+  }
+
+  func confirmCommandPicker() {
+    guard let picker = commandPicker, !isRunning, !isRunningCommand else { return }
+    isRunningCommand = true
+    Task {
+      defer { isRunningCommand = false }
+      do {
+        let harness = boot.harness
+        let snapshot = await harness.snapshot()
+        let newId = UUID()
+        let change: SessionIdentityChange?
+        switch picker.command {
+        case .fork:
+          change = try await harness.applyEdit(
+            .fork(cutAt: picker.startBoundary, newSessionId: newId))
+        case .tldr:
+          let start = picker.startBoundary
+          let end = picker.endBoundary
+          guard start >= 0, end <= snapshot.messages.count, start < end else {
+            throw ScribeError.generic("The selected TLDR range is no longer valid.")
+          }
+          let configuration = await harness.configurationSnapshot()
+          let summary = try await SessionSummarizer.summarize(
+            slice: Array(snapshot.messages[start..<end]),
+            configuration: configuration,
+            logger: Logger(label: "scribe.mac.tldr"))
+          change = try await harness.applyEdit(
+            .forkSplice(
+              startCut: start, endCut: end,
+              replacement: [ScribeMessage(role: .assistant, content: summary)],
+              newSessionId: newId))
+        }
+        if let change {
+          let previous = currentSessionId
+          currentSessionId = change.newSessionId
+          onIdentityChange?(previous, change.newSessionId)
+        }
+        let updated = await harness.snapshot()
+        transcript = Self.replay(updated.messages)
+        transcript.append(
+          TranscriptItem(
+            kind: .notice, title: picker.command.rawValue,
+            text: picker.command == .fork
+              ? "Created a new session at message boundary \(picker.startBoundary)."
+              : "Collapsed messages \(picker.startBoundary)-\(picker.endBoundary) into a summary."))
+        commandPicker = nil
+        lastMessageAt = Date()
+        scroll.scrollToBottom()
+      } catch {
+        transcript.append(
+          TranscriptItem(
+            kind: .error, title: picker.command.rawValue,
+            text: error.localizedDescription))
+        scroll.scrollToBottom()
+      }
+    }
+  }
+
   // MARK: - Sending
 
   func submit(_ proposed: String? = nil) {
+    guard commandPicker == nil, !isRunningCommand else { return }
     let text = (proposed ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
     if isRunning {
@@ -479,25 +641,34 @@ final class SessionController {
 
   nonisolated private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
     var result: [TranscriptItem] = []
-    for message in messages {
+    for (messageIndex, message) in messages.enumerated() {
       switch message.role {
       case .system:
         continue
       case .user:
-        result.append(TranscriptItem(kind: .user, title: "You", text: message.content))
+        result.append(
+          TranscriptItem(
+            kind: .user, title: "You", text: message.content,
+            sourceMessageIndex: messageIndex))
       case .assistant:
         if let reasoning = message.reasoning, !reasoning.isEmpty {
-          result.append(TranscriptItem(kind: .reasoning, title: "Reasoning", text: reasoning))
+          result.append(
+            TranscriptItem(
+              kind: .reasoning, title: "Reasoning", text: reasoning,
+              sourceMessageIndex: messageIndex))
         }
         if !message.content.isEmpty {
-          result.append(TranscriptItem(kind: .answer, title: "Scribe", text: message.content))
+          result.append(
+            TranscriptItem(
+              kind: .answer, title: "Scribe", text: message.content,
+              sourceMessageIndex: messageIndex))
         }
         for call in message.toolCalls ?? [] {
           result.append(
             TranscriptItem(
               kind: .tool, title: call.name,
               text: argumentSummaryText(name: call.name, arguments: call.arguments) ?? "",
-              running: true))
+              running: true, sourceMessageIndex: messageIndex))
         }
       case .tool:
         if let index = result.lastIndex(where: { $0.kind == .tool && $0.running }) {
@@ -514,7 +685,8 @@ final class SessionController {
             TranscriptItem(
               kind: .tool, title: name,
               text: ToolInvocationFormatting.outputLines(name: name, jsonOutput: message.content)
-                .joined(separator: "\n")))
+                .joined(separator: "\n"),
+              sourceMessageIndex: messageIndex))
         }
       }
     }

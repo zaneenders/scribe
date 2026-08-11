@@ -157,6 +157,18 @@ final class ScribeMacStore {
     DirectoryPaletteKeyMonitor.shared.onComposerHistoryNext = { [weak self] in
       self?.active?.recallNextPrompt() ?? false
     }
+    DirectoryPaletteKeyMonitor.shared.onCommandPickerMove = { [weak self] delta in
+      self?.active?.moveCommandCursor(by: delta)
+    }
+    DirectoryPaletteKeyMonitor.shared.onCommandPickerToggle = { [weak self] in
+      self?.active?.toggleCommandBoundary()
+    }
+    DirectoryPaletteKeyMonitor.shared.onCommandPickerConfirm = { [weak self] in
+      self?.active?.confirmCommandPicker()
+    }
+    DirectoryPaletteKeyMonitor.shared.onCommandPickerCancel = { [weak self] in
+      self?.active?.cancelCommandPicker()
+    }
     DirectoryPaletteKeyMonitor.shared.copyText = {
       SelectionManager.shared.selectedText()
     }
@@ -380,6 +392,14 @@ final class ScribeMacStore {
     activate: Bool = true
   ) {
     let controller = SessionController(boot: opened)
+    controller.onIdentityChange = { [weak self, weak controller] previous, successor in
+      guard let self, let controller else { return }
+      if self.activeSessionID == previous {
+        self.activeSessionID = successor
+        self.active = controller
+      }
+      self.refreshSavedSessions()
+    }
     sessions.append(controller)
     profileCatalog = opened.profileCatalog
     requiresDirectoryBeforeStart = false
