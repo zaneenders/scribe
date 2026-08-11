@@ -11,6 +11,7 @@ let package = Package(
     .executable(name: "scribe-mac", targets: ["ScribeMac"]),
     .library(name: "ScribeCore", targets: ["ScribeCore"]),
     .library(name: "ScribeKit", targets: ["ScribeKit"]),
+    .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
   ],
   dependencies: [
     .package(url: "https://github.com/zaneenders/chroma", revision: "c211901"),
@@ -134,17 +135,17 @@ let package = Package(
         "GitVersionPlugin"
       ]
     ),
-    .executableTarget(
-      name: "ScribeMac",
+    .target(
+      name: "ScribeBlocks",
       dependencies: [
         "ScribeCore",
         "ScribeKit",
         .product(name: "Chroma", package: "chroma"),
-        .product(name: "MetalBackend", package: "chroma"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
         .product(name: "SystemPackage", package: "swift-system"),
       ],
+      path: "Sources/ScribeMac",
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
@@ -152,6 +153,19 @@ let package = Package(
       ],
       plugins: [
         "GitVersionPlugin"
+      ]
+    ),
+    .executableTarget(
+      name: "ScribeMac",
+      dependencies: [
+        "ScribeBlocks",
+        .product(name: "Chroma", package: "chroma"),
+        .product(name: "MetalBackend", package: "chroma"),
+      ],
+      path: "Sources/ScribeMacApp",
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
       ]
     ),
     .testTarget(

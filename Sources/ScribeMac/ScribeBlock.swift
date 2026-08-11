@@ -1,0 +1,39 @@
+import Chroma
+
+/// The embeddable Scribe macOS interface.
+///
+/// Hosts can place this block anywhere in a larger Chroma hierarchy. Scribe
+/// retains its own session store, so switching a host-level tab does not stop
+/// turns that are running in the background.
+public struct ScribeBlock: Block {
+  public init() {}
+
+  @MainActor public var body: some Block {
+    let store = ScribeMacStore.shared
+    store.start()
+    return ScribeMacRoot(store: store)
+  }
+}
+
+extension ScribeBlock {
+  /// Recommended editing and navigation bindings for a host Chroma app.
+  public static var keyBindings: KeyBindings {
+    KeyBindings {
+      bind("c", modifiers: .command, to: .editing(.copy))
+      bind("v", modifiers: .command, to: .editing(.paste))
+      bind("a", modifiers: .command, to: .editing(.selectAll))
+      bind(.backspace, to: .editing(.backspace))
+      bind(.delete, to: .editing(.deleteForward))
+      bind(.leftArrow, to: .editing(.moveCaretLeft))
+      bind(.rightArrow, to: .editing(.moveCaretRight))
+      bind(.home, to: .editing(.moveCaretToStart))
+      bind(.end, to: .editing(.moveCaretToEnd))
+      bind(.enter, to: .editing(.submit))
+      bind(.enter, modifiers: .shift, to: .editing(.submit))
+      bind(.escape, to: .editing(.endEditing))
+      bind(.space, to: .action(.activate))
+      bind(.pageUp, to: .navigation(.pageUp))
+      bind(.pageDown, to: .navigation(.pageDown))
+    }
+  }
+}
