@@ -15,7 +15,8 @@ let package = Package(
     .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/zaneenders/chroma", revision: "ea1ab071"),
+    //.package(url: "https://github.com/zaneenders/chroma", revision: "d15b0228"),
+    .package(path: "../chroma/"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -167,6 +168,9 @@ let package = Package(
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
+      ],
+      plugins: [
+        "GhosttyVtPresencePlugin"
       ]
     ),
     .target(
@@ -182,7 +186,11 @@ let package = Package(
         .unsafeFlags(
           ["-L", "Vendor/GhosttyVt/Libraries/macos", "-lghostty-vt"],
           .when(platforms: [.macOS])
-        )
+        ),
+        .unsafeFlags(
+          ["-L", "Vendor/GhosttyVt/Libraries/linux", "-lghostty-vt"],
+          .when(platforms: [.linux])
+        ),
       ]
     ),
     .executableTarget(
@@ -233,6 +241,24 @@ let package = Package(
     .plugin(
       name: "GitVersionPlugin",
       capability: .buildTool()
+    ),
+    .plugin(
+      name: "GhosttyVtPresencePlugin",
+      capability: .buildTool()
+    ),
+    .plugin(
+      name: "GhosttyVtRefreshPlugin",
+      capability: .command(
+        intent: .custom(
+          verb: "refresh-ghostty-vt",
+          description: "Rebuild the checked-in libghostty-vt static library and headers"
+        ),
+        permissions: [
+          .writeToPackageDirectory(
+            reason: "Updates Vendor/GhosttyVt libraries, headers, and provenance"
+          )
+        ]
+      )
     ),
     .plugin(
       name: "ScribeAppBundlerPlugin",

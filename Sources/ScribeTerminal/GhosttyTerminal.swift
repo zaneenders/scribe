@@ -409,7 +409,11 @@ public struct GhosttyTerminalView: PrimitiveBlock {
         guard !text.isEmpty else { return }
         model.onInput?(text)
       },
-      onSubmit: { _ in model.onInput?("\r") }
+      onSubmit: { _ in model.onInput?("\r") },
+      onEndEditing: {
+        model.onInput?("\u{1B}")
+        return .handled
+      }
     )
     onEditingChanged?(state.editing)
 

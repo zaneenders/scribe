@@ -8,9 +8,9 @@ Ai Agent written in Swift
 
 - [Swift 6.3](https://www.swift.org/install/) or newer
 - macOS 26+ or Linux (x86_64 or aarch64)
-
-Clone Scribe into `~/.scribe/scribe` so it shares the same root as config, logs, and
-sessions — this lets Scribe find and modify its own source.
+- For the graphical app/terminal on a fresh checkout: Zig 0.16.0+; macOS also
+  needs `lipo` from Xcode command-line tools. Zig is only used once to generate
+  the ignored libghostty-vt archive, or again when updating Ghostty.
 
 On first run Scribe writes a default `scribe.config.json` targeting Ollama at
 `http://localhost:11434` with the **`gemma4:e2b`** model.  Edit the file or set
@@ -26,9 +26,14 @@ mkdir -p ~/.local/bin
 ### macOS
 
 ```bash
-mkdir -p ~/.scribe
-git clone https://github.com/zaneenders/scribe.git ~/.scribe/scribe
-cd ~/.scribe/scribe
+git clone --recurse-submodules https://github.com/zaneenders/scribe.git
+cd scribe
+
+# One-time graphical app/terminal dependency build. This installs a pinned,
+# checksummed Zig under Vendor/.tools and generates the ignored static archive.
+# Normal incremental builds do not run Zig.
+./Scripts/bootstrap-zig.sh
+swift package --allow-writing-to-package-directory refresh-ghostty-vt
 
 # CLI
 swift build -c release
@@ -61,9 +66,8 @@ Install the Swift static SDK once, then build for your architecture:
 swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
   --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
 
-mkdir -p ~/.scribe
-git clone https://github.com/zaneenders/scribe.git ~/.scribe/scribe
-cd ~/.scribe/scribe
+git clone --recurse-submodules https://github.com/zaneenders/scribe.git
+cd scribe
 ARCH=$(uname -m)   # x86_64 or aarch64
 swift build -c release --swift-sdk "${ARCH}-swift-linux-musl"
 install -m 755 .build/release/scribe ~/.local/bin/scribe
@@ -150,7 +154,6 @@ Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
 
 ```
 ~/.scribe/
-├── scribe/                              # source clone (git clone ... ~/.scribe/scribe)
 ├── scribe.config.json
 └── sessions/{uuid}/
     ├── metadata.json
@@ -186,11 +189,24 @@ docc preview Sources/ScribeCore/ScribeCore.docc
 docc preview Sources/ScribeCLI/ScribeCLI.docc
 ```
 
-## Vendored components
+## Ghostty terminal dependency
 
-`Vendor/GhosttyVt` contains a prebuilt [libghostty-vt](https://github.com/ghostty-org/ghostty)
-static library and its public C headers, used by the macOS app's terminal tab.
-libghostty-vt is MIT licensed; the license and its embedded dependency
-notices (uucode, Höhrmann UTF-8 decoder, Unicode data) are kept alongside the
-library in `Vendor/GhosttyVt`. Refresh instructions are in
-`Vendor/GhosttyVt/README.md`.
+Ghostty source is pinned as the `Vendor/GhosttySource` Git submodule. Scribe
+does not commit generated `libghostty-vt.a` archives. After a fresh recursive
+clone, install the pinned project-local Zig toolchain and generate the platform
+archive once:
+
+```sh
+./Scripts/bootstrap-zig.sh
+swift package --allow-writing-to-package-directory refresh-ghostty-vt
+```
+
+Normal `swift build` calls only verify the archive exists and never invoke Zig.
+If it is missing, the build prints the bootstrap command. Run the refresh again
+when the Ghostty submodule is updated.
+
+The public headers and third-party notices remain committed under
+`Vendor/GhosttyVt` so API and license changes are reviewable. libghostty-vt is
+MIT licensed; embedded dependency notices cover uucode, Höhrmann's UTF-8
+decoder, and Unicode data. Detailed build, update, Linux, and provenance
+instructions are in `Vendor/GhosttyVt/README.md`.

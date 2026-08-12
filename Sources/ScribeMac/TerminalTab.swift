@@ -163,7 +163,7 @@ struct SessionTabStrip: Block {
       tabButton(.terminal)
       Spacer()
       if session.selectedTab == .terminal {
-        Text("type into the pane · Esc stops editing · Ctrl-C interrupts")
+        Text("type into the pane · Esc passes through · Ctrl-C interrupts")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
           .padding(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: theme.margin))
