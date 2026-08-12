@@ -471,7 +471,7 @@ func isImageInputUnsupportedError(_ error: ScribeError) -> Bool {
   case .apiHTTPError(let statusCode, let message, _):
     guard statusCode == 400 || statusCode == 422 else { return false }
     detail = message
-  case .generic(let message):
+  case .generic(let message), .providerStreamError(let message, _, _):
     detail = message
   default:
     return false
@@ -542,7 +542,7 @@ func isContextLengthError(_ error: ScribeError) -> Bool {
   case .apiHTTPError(let statusCode, let message, _):
     guard statusCode == 400 || statusCode == 413 else { return false }
     detail = message
-  case .generic(let message):
+  case .generic(let message), .providerStreamError(let message, _, _):
     detail = message
   default:
     return false
@@ -665,11 +665,14 @@ private func contextOverflowReplacement(
 }
 
 extension ScribeError {
-  /// True for failures reported inside the provider's event stream, which surface as
-  /// `.generic`. HTTP-level failures remain `.apiHTTPError` so callers can inspect the
-  /// status code.
+  /// True for failures reported inside the provider's event stream. HTTP-level failures
+  /// remain `.apiHTTPError` so callers can inspect the status code.
   fileprivate var isInBandStreamError: Bool {
-    if case .generic = self { return true }
-    return false
+    switch self {
+    case .generic, .providerStreamError:
+      return true
+    default:
+      return false
+    }
   }
 }

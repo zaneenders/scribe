@@ -185,3 +185,12 @@ docc preview Sources/ScribeCore/ScribeCore.docc
 ```bash
 docc preview Sources/ScribeCLI/ScribeCLI.docc
 ```
+
+## Vendored components
+
+`Vendor/GhosttyVt` contains a prebuilt [libghostty-vt](https://github.com/ghostty-org/ghostty)
+static library and its public C headers, used by the macOS app's terminal tab.
+libghostty-vt is MIT licensed; the license and its embedded dependency
+notices (uucode, Höhrmann UTF-8 decoder, Unicode data) are kept alongside the
+library in `Vendor/GhosttyVt`. Refresh instructions are in
+`Vendor/GhosttyVt/README.md`.

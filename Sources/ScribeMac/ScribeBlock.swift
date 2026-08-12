@@ -34,6 +34,10 @@ extension ScribeBlock {
       bind(.space, to: .action(.activate))
       bind(.pageUp, to: .navigation(.pageUp))
       bind(.pageDown, to: .navigation(.pageDown))
+      // Terminal tab: routed by focus scope, inert outside it.
+      bind("c", modifiers: .control, to: ScribeTerminalCommand.interrupt)
+      bind(.upArrow, to: ScribeTerminalCommand.lineUp)
+      bind(.downArrow, to: ScribeTerminalCommand.lineDown)
     }
   }
 }

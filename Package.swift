@@ -12,9 +12,12 @@ let package = Package(
     .library(name: "ScribeCore", targets: ["ScribeCore"]),
     .library(name: "ScribeKit", targets: ["ScribeKit"]),
     .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
+    .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/zaneenders/chroma", revision: "c211901"),
+    // Local checkout while the terminal support settles; restore the pinned
+    // revision once chroma is republished.
+    .package(path: "../chroma"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -140,6 +143,7 @@ let package = Package(
       dependencies: [
         "ScribeCore",
         "ScribeKit",
+        "ScribeTerminal",
         .product(name: "Chroma", package: "chroma"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
@@ -155,6 +159,34 @@ let package = Package(
         "GitVersionPlugin"
       ]
     ),
+    .target(
+      name: "ScribeTerminal",
+      dependencies: [
+        "GhosttyVt",
+        "PTYShim",
+        .product(name: "Chroma", package: "chroma"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ]
+    ),
+    .target(
+      name: "PTYShim",
+      path: "Vendor/PTYShim",
+      publicHeadersPath: "include"
+    ),
+    .target(
+      name: "GhosttyVt",
+      path: "Vendor/GhosttyVt",
+      publicHeadersPath: "Headers",
+      linkerSettings: [
+        .unsafeFlags(
+          ["-L", "Vendor/GhosttyVt/Libraries/macos", "-lghostty-vt"],
+          .when(platforms: [.macOS])
+        )
+      ]
+    ),
     .executableTarget(
       name: "ScribeMac",
       dependencies: [
@@ -163,6 +195,14 @@ let package = Package(
         .product(name: "MetalBackend", package: "chroma"),
       ],
       path: "Sources/ScribeMacApp",
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ]
+    ),
+    .testTarget(
+      name: "ScribeTerminalTests",
+      dependencies: ["ScribeTerminal"],
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),

@@ -276,7 +276,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         "stream_started": "\(streamStarted)",
         "raw_event": "\(rawEvent ?? "unavailable")",
       ])
-    return .generic(description)
+    return .providerStreamError(detail: description, code: code, type: errorType)
   }
 
   private func firstNonEmptyString(_ values: Any?...) -> String? {

@@ -104,4 +104,60 @@ struct CodexProviderTests {
       assistantMessages[0].content == "Hello world",
       "Expected assistant content to match streamed deltas")
   }
+
+  @Test("retries a Codex server_error event before visible output")
+  func retriesCodexServerErrorEvent() async throws {
+    let transport = ScriptedTransport(responses: [
+      .init(
+        status: 200,
+        chunks: sseChunks(
+          #"{"type":"error","code":"server_error","message":"An error occurred while processing your request."}"#
+        )),
+      .init(
+        status: 200,
+        chunks: sseChunks(
+          #"{"type":"response.output_text.delta","delta":"Recovered"}"#,
+          #"{"type":"response.completed","response":{"id":"resp_retry"}}"#
+        )),
+    ])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport,
+      middlewares: []
+    )
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "codex-test-model",
+      reasoningEnabled: false,
+      reasoningEffort: nil,
+      contextWindow: 128_000,
+      retryPolicy: .fastTestPolicy
+    )
+
+    let stream = provider.run(
+      promptMessages: [
+        ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
+      ],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: testLogger,
+      abortNotifier: AbortNotifier()
+    )
+
+    var retryAttempts: [Int] = []
+    for await event in stream.events {
+      if case .lifecycle(.retrying(let attempt, _, _, _)) = event {
+        retryAttempts.append(attempt)
+      }
+    }
+    let result = try await stream.result.value
+
+    #expect(transport.capturedRequests.count == 2)
+    #expect(retryAttempts == [1])
+    #expect(result.outcome == .completed)
+    #expect(result.newMessages.last?.content == "Recovered")
+  }
 }

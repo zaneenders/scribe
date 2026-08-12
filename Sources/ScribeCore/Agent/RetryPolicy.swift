@@ -71,8 +71,14 @@ extension RetryPolicy {
     case is CancellationError, is AgentTurnInterruptedError:
       return false
     case let scribeError as ScribeError:
-      guard case .apiHTTPError(let statusCode, _, _) = scribeError else { return false }
-      return statusCode == 408 || statusCode == 429 || (500...599).contains(statusCode)
+      switch scribeError {
+      case .apiHTTPError(let statusCode, _, _):
+        return statusCode == 408 || statusCode == 429 || (500...599).contains(statusCode)
+      case .providerStreamError(_, let code, let type):
+        return Self.isRetryableProviderStreamError(code: code, type: type)
+      default:
+        return false
+      }
     case let clientError as ClientError:
       // OpenAPIRuntime wraps transport and middleware failures; classify the cause.
       return isRetryable(clientError.underlyingError)
@@ -107,6 +113,23 @@ extension RetryPolicy {
     default:
       return false
     }
+  }
+
+  private static func isRetryableProviderStreamError(code: String?, type: String?) -> Bool {
+    let normalizedCode = code?.lowercased()
+    let normalizedType = type?.lowercased()
+    let retryableValues: Set<String> = [
+      "server_error",
+      "internal_server_error",
+      "service_unavailable",
+      "overloaded",
+      "rate_limit_error",
+      "rate_limit_exceeded",
+      "timeout",
+      "request_timeout",
+    ]
+    return normalizedCode.map(retryableValues.contains) == true
+      || normalizedType.map(retryableValues.contains) == true
   }
 }
 
