@@ -8,6 +8,9 @@ import ScribeTerminal
 enum ScribeTerminalCommand {
   /// Ctrl-C: delivered to the PTY's foreground process group as SIGINT.
   static let interrupt = Command.application("scribe.terminal.interrupt")
+  /// Ctrl-/ is encoded by legacy terminals as US (0x1F), the same byte as
+  /// Ctrl-_. Neovim plugins commonly bind this chord to toggle a terminal.
+  static let controlSlash = Command.application("scribe.terminal.controlSlash")
   /// Arrow keys forwarded as ANSI cursor keys so shells get history recall.
   static let lineUp = Command.application("scribe.terminal.lineUp")
   static let lineDown = Command.application("scribe.terminal.lineDown")
@@ -128,6 +131,11 @@ struct TerminalTabContent: PrimitiveBlock {
     let content = view
       .onCommand(ScribeTerminalCommand.interrupt) {
         terminal.interrupt()
+        return .handled
+      }
+      .onCommand(ScribeTerminalCommand.controlSlash) {
+        guard terminal.isEditing else { return .ignored }
+        terminal.send("\u{1F}")
         return .handled
       }
       .onCommand(ScribeTerminalCommand.lineUp) {

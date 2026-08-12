@@ -15,9 +15,7 @@ let package = Package(
     .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
   ],
   dependencies: [
-    // Local checkout while the terminal support settles; restore the pinned
-    // revision once chroma is republished.
-    .package(path: "../chroma"),
+    .package(url: "https://github.com/zaneenders/chroma", revision: "ea1ab071"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),

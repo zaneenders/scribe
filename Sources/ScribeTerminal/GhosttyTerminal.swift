@@ -55,8 +55,9 @@ public final class GhosttyTerminal: @unchecked Sendable {
     self.terminal = terminal
 
     var scrollbackLines: Int = 10_000
-    guard ghostty_terminal_set(
-      terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &scrollbackLines) == GHOSTTY_SUCCESS
+    guard
+      ghostty_terminal_set(
+        terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &scrollbackLines) == GHOSTTY_SUCCESS
     else {
       ghostty_terminal_free(terminal)
       self.terminal = nil
@@ -195,13 +196,22 @@ public final class GhosttyTerminal: @unchecked Sendable {
   fileprivate struct Cell {
     let text: String
     let foreground: Color
+    let background: Color
   }
 
-  fileprivate func styledRows(fallback: Color) -> [[Cell]] {
-    withStateLock { styledRowsUnlocked(fallback: fallback) }
+  fileprivate func styledRows(foreground: Color, background: Color) -> [[Cell]] {
+    withStateLock {
+      styledRowsUnlocked(foreground: foreground, background: background)
+    }
   }
 
-  private func styledRowsUnlocked(fallback: Color) -> [[Cell]] {
+  private static func color(_ rgb: GhosttyColorRgb) -> Color {
+    Color(
+      r: Float(rgb.r) / 255, g: Float(rgb.g) / 255,
+      b: Float(rgb.b) / 255, a: 1)
+  }
+
+  private func styledRowsUnlocked(foreground: Color, background: Color) -> [[Cell]] {
     guard let terminal, let renderState, let rowIterator, let rowCells,
       ghostty_render_state_update(renderState, terminal) == GHOSTTY_SUCCESS,
       ghostty_render_state_get(
@@ -210,46 +220,70 @@ public final class GhosttyTerminal: @unchecked Sendable {
 
     var result: [[Cell]] = []
     while ghostty_render_state_row_iterator_next(rowIterator) {
-      guard ghostty_render_state_row_get(
-        rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS, &self.rowCells) == GHOSTTY_SUCCESS
+      guard
+        ghostty_render_state_row_get(
+          rowIterator, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS, &self.rowCells) == GHOSTTY_SUCCESS
       else { continue }
 
       var row: [Cell] = []
       while ghostty_render_state_row_cells_next(rowCells) {
         var length: UInt32 = 0
-        guard ghostty_render_state_row_cells_get(
-          rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, &length) == GHOSTTY_SUCCESS
-        else { continue }
-        if length == 0 {
-          row.append(Cell(text: " ", foreground: fallback))
-          continue
-        }
-
-        var codepoints = [UInt32](repeating: 0, count: Int(length))
-        let graphemeResult = codepoints.withUnsafeMutableBufferPointer { buffer in
+        guard
           ghostty_render_state_row_cells_get(
-            rowCells,
-            GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,
-            buffer.baseAddress
-          )
+            rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, &length) == GHOSTTY_SUCCESS
+        else { continue }
+        let text: String
+        if length == 0 {
+          text = " "
+        } else {
+          var codepoints = [UInt32](repeating: 0, count: Int(length))
+          let graphemeResult = codepoints.withUnsafeMutableBufferPointer { buffer in
+            ghostty_render_state_row_cells_get(
+              rowCells,
+              GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,
+              buffer.baseAddress
+            )
+          }
+          guard graphemeResult == GHOSTTY_SUCCESS else { continue }
+          text = String(codepoints.compactMap(UnicodeScalar.init).map(Character.init))
         }
-        guard graphemeResult == GHOSTTY_SUCCESS else { continue }
-        let text = String(codepoints.compactMap(UnicodeScalar.init).map(Character.init))
 
         var rgb = GhosttyColorRgb()
-        let color: Color
+        var resolvedForeground = foreground
         if ghostty_render_state_row_cells_get(
           rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &rgb) == GHOSTTY_SUCCESS
         {
-          color = Color(
-            r: Float(rgb.r) / 255, g: Float(rgb.g) / 255,
-            b: Float(rgb.b) / 255, a: 1)
-        } else {
-          color = fallback
+          resolvedForeground = Self.color(rgb)
         }
-        row.append(Cell(text: text, foreground: color))
+        var resolvedBackground = background
+        if ghostty_render_state_row_cells_get(
+          rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &rgb) == GHOSTTY_SUCCESS
+        {
+          resolvedBackground = Self.color(rgb)
+        }
+
+        var style = GhosttyStyle()
+        style.size = MemoryLayout<GhosttyStyle>.size
+        if ghostty_render_state_row_cells_get(
+          rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &style) == GHOSTTY_SUCCESS
+        {
+          if style.inverse {
+            swap(&resolvedForeground, &resolvedBackground)
+          }
+          if style.invisible {
+            resolvedForeground = resolvedBackground
+          } else if style.faint {
+            resolvedForeground = Color(
+              r: resolvedForeground.r, g: resolvedForeground.g,
+              b: resolvedForeground.b, a: 0.55)
+          }
+        }
+        row.append(
+          Cell(
+            text: text,
+            foreground: resolvedForeground,
+            background: resolvedBackground))
       }
-      while row.last?.text == " " { row.removeLast() }
       result.append(row)
     }
     return result
@@ -266,8 +300,9 @@ public final class GhosttyTerminal: @unchecked Sendable {
 
     var visible = false
     var inViewport = false
-    guard ghostty_render_state_get(
-      renderState, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE, &visible) == GHOSTTY_SUCCESS,
+    guard
+      ghostty_render_state_get(
+        renderState, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE, &visible) == GHOSTTY_SUCCESS,
       ghostty_render_state_get(
         renderState, GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE, &inViewport) == GHOSTTY_SUCCESS,
       inViewport
@@ -275,8 +310,9 @@ public final class GhosttyTerminal: @unchecked Sendable {
 
     var column: UInt16 = 0
     var row: UInt16 = 0
-    guard ghostty_render_state_get(
-      renderState, GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X, &column) == GHOSTTY_SUCCESS,
+    guard
+      ghostty_render_state_get(
+        renderState, GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X, &column) == GHOSTTY_SUCCESS,
       ghostty_render_state_get(
         renderState, GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y, &row) == GHOSTTY_SUCCESS
     else { return nil }
@@ -405,10 +441,40 @@ public struct GhosttyTerminalView: PrimitiveBlock {
 
     drawList.fillRect(rect, color: colors.background)
     drawList.pushClip(rect)
-    for (rowIndex, row) in model.styledRows(fallback: colors.foreground)
-      .prefix(Int(rows)).enumerated()
-    {
+    for (rowIndex, row) in model.styledRows(
+      foreground: colors.foreground, background: colors.background
+    ).prefix(Int(rows)).enumerated() {
+      let rowY = rect.minY + 6 + Float(rowIndex) * lineHeight
+
+      // Terminal UIs paint structure primarily with cell backgrounds. Draw
+      // contiguous background spans first, including otherwise blank cells.
+      var backgroundStart = 0
+      var backgroundColor: Color?
+      for (column, cell) in row.enumerated() {
+        if let backgroundColor, backgroundColor != cell.background {
+          drawList.fillRect(
+            Rect(
+              x: rect.minX + 8 + Float(backgroundStart) * cellWidth,
+              y: rowY,
+              width: Float(column - backgroundStart) * cellWidth,
+              height: lineHeight),
+            color: backgroundColor)
+          backgroundStart = column
+        }
+        backgroundColor = cell.background
+      }
+      if let backgroundColor, backgroundStart < row.count {
+        drawList.fillRect(
+          Rect(
+            x: rect.minX + 8 + Float(backgroundStart) * cellWidth,
+            y: rowY,
+            width: Float(row.count - backgroundStart) * cellWidth,
+            height: lineHeight),
+          color: backgroundColor)
+      }
+
       var column = 0
+      var runStart = 0
       var run = ""
       var runColor: Color?
 
@@ -417,8 +483,8 @@ public struct GhosttyTerminalView: PrimitiveBlock {
         drawList.text(
           run,
           at: Point(
-            x: rect.minX + 8 + Float(column - run.count) * cellWidth,
-            y: rect.minY + 6 + Float(rowIndex) * lineHeight),
+            x: rect.minX + 8 + Float(runStart) * cellWidth,
+            y: rowY),
           color: runColor,
           scale: effectiveScale
         )
@@ -426,7 +492,12 @@ public struct GhosttyTerminalView: PrimitiveBlock {
       }
 
       for cell in row {
-        if let runColor, runColor != cell.foreground { flushRun() }
+        if let runColor, runColor != cell.foreground {
+          flushRun()
+          runStart = column
+        } else if run.isEmpty {
+          runStart = column
+        }
         runColor = cell.foreground
         run += cell.text
         column += 1

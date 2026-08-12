@@ -36,6 +36,9 @@ extension ScribeBlock {
       bind(.pageDown, to: .navigation(.pageDown))
       // Terminal tab: routed by focus scope, inert outside it.
       bind("c", modifiers: .control, to: ScribeTerminalCommand.interrupt)
+      bind("/", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
+      // Ctrl-/ and Ctrl-_ share the terminal byte 0x1F; accept either chord.
+      bind("_", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
       bind(.upArrow, to: ScribeTerminalCommand.lineUp)
       bind(.downArrow, to: ScribeTerminalCommand.lineDown)
     }
