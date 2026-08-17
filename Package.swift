@@ -175,7 +175,6 @@ let package = Package(
     ),
     .target(
       name: "PTYShim",
-      path: "Vendor/PTYShim",
       publicHeadersPath: "include"
     ),
     .target(
