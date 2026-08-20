@@ -12,6 +12,9 @@ public struct ScribeConfig: Sendable {
   public var reasoningEnabled: Bool?
   public var reasoningEffort: String?
   public var maxTokens: Int?
+  /// Optional per-profile sampling temperature. When `nil`, the agent run
+  /// options default applies (currently 0 for deterministic coding).
+  public var temperature: Double?
   /// Retries per provider round on transient networking failures; `nil` uses the
   /// default policy, `0` disables retrying.
   public var maxRetries: Int?
@@ -27,6 +30,7 @@ public struct ScribeConfig: Sendable {
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
     maxTokens: Int? = nil,
+    temperature: Double? = nil,
     maxRetries: Int? = nil
   ) {
     self.agentModel = agentModel
@@ -40,6 +44,7 @@ public struct ScribeConfig: Sendable {
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEffort = reasoningEffort
     self.maxTokens = maxTokens
+    self.temperature = temperature
     self.maxRetries = maxRetries
   }
 }

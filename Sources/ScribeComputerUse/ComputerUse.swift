@@ -1,0 +1,482 @@
+import AppKit
+import ApplicationServices
+import Foundation
+import Logging
+import ScreenCaptureKit
+import ScribeCore
+import SystemPackage
+
+public enum ComputerUseError: Error, LocalizedError {
+  case accessibilityPermissionMissing
+  case screenRecordingPermissionMissing
+  case windowNotFound(Int)
+  case stateNotFound(String)
+  case elementNotFound(String)
+  case unsupportedAction(String)
+  case accessibilityFailure(String)
+  case captureFailure(String)
+
+  public var errorDescription: String? {
+    switch self {
+    case .accessibilityPermissionMissing:
+      return
+        "Scribe needs Accessibility permission in System Settings → Privacy & Security → Accessibility. Enable Scribe (or the terminal running the scribe CLI), then retry."
+    case .screenRecordingPermissionMissing:
+      return
+        "Scribe needs Screen Recording permission in System Settings → Privacy & Security → Screen & System Audio Recording. Enable Scribe (or the terminal running the scribe CLI), then retry."
+    case .windowNotFound(let id): return "Window id \(id) is no longer available. Call find_windows again."
+    case .stateNotFound(let id): return "UI state \(id) is unavailable. Call observe_ui again."
+    case .elementNotFound(let ref):
+      return "Element \(ref) is unavailable or does not belong to that UI state. Call observe_ui again."
+    case .unsupportedAction(let action): return "Unsupported UI action: \(action)."
+    case .accessibilityFailure(let message): return "Accessibility operation failed: \(message)"
+    case .captureFailure(let message): return "Window capture failed: \(message)"
+    }
+  }
+}
+
+private struct WindowRecord {
+  let id: CGWindowID
+  let pid: pid_t
+  let app: String
+  let title: String
+  let frame: CGRect
+  let layer: Int
+  let onscreen: Bool
+}
+
+private struct Observation {
+  let window: WindowRecord
+  let elements: [String: AXUIElement]
+}
+
+private struct OutlineNode {
+  let ref: String
+  let role: String
+  let title: String
+  let value: String
+  let description: String
+  let frame: CGRect?
+  let actions: [String]
+  let depth: Int
+}
+
+/// Owns all live AX references. Tool implementations share one actor so refs remain
+/// valid across find/observe/act calls without exposing AXUIElement as Sendable.
+public actor ComputerUseSession {
+  private var observations: [String: Observation] = [:]
+  private var observationOrder: [String] = []
+
+  public init() {}
+
+  fileprivate func findWindows(query: String?) throws -> [WindowRecord] {
+    guard accessibilityTrusted(prompt: true) else {
+      throw ComputerUseError.accessibilityPermissionMissing
+    }
+    let needle = query?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let raw = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+      return []
+    }
+    return raw.compactMap { entry in
+      guard let id = (entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+        let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+        let app = entry[kCGWindowOwnerName as String] as? String,
+        let bounds = entry[kCGWindowBounds as String] as? [String: Any],
+        let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+      else { return nil }
+      let title = entry[kCGWindowName as String] as? String ?? ""
+      let layer = (entry[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+      let onscreen = (entry[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? true
+      guard layer == 0, frame.width >= 80, frame.height >= 60 else { return nil }
+      if !needle.isEmpty && !app.lowercased().contains(needle) && !title.lowercased().contains(needle) {
+        return nil
+      }
+      return WindowRecord(
+        id: id, pid: pid, app: app, title: title, frame: frame, layer: layer, onscreen: onscreen)
+    }.prefix(30).map { $0 }
+  }
+
+  func observe(windowID: Int, includeImage: Bool) async throws -> ObserveUIResult {
+    guard accessibilityTrusted(prompt: true) else {
+      throw ComputerUseError.accessibilityPermissionMissing
+    }
+    guard let window = try findWindows(query: nil).first(where: { $0.id == CGWindowID(windowID) }) else {
+      throw ComputerUseError.windowNotFound(windowID)
+    }
+    guard let root = accessibilityWindow(for: window) else {
+      throw ComputerUseError.accessibilityFailure(
+        "Could not match \(window.app) window \(window.title.debugDescription) to an AX window.")
+    }
+
+    var elements: [String: AXUIElement] = [:]
+    let nodes = buildOutline(root: root, elements: &elements)
+    let stateID = UUID().uuidString
+    observations[stateID] = Observation(window: window, elements: elements)
+    observationOrder.append(stateID)
+    while observationOrder.count > 16 {
+      observations.removeValue(forKey: observationOrder.removeFirst())
+    }
+
+    let image: CapturedImage?
+    if includeImage {
+      image = try await capture(windowID: window.id)
+    } else {
+      image = nil
+    }
+    return ObserveUIResult(
+      stateID: stateID,
+      app: window.app,
+      title: window.title,
+      windowID: Int(window.id),
+      outline: render(nodes),
+      nodeCount: nodes.count,
+      image: image)
+  }
+
+  func act(stateID: String, ref: String, action: String, text: String?) throws -> ActUIResult {
+    guard accessibilityTrusted(prompt: true) else {
+      throw ComputerUseError.accessibilityPermissionMissing
+    }
+    guard let observation = observations[stateID] else { throw ComputerUseError.stateNotFound(stateID) }
+    guard let element = observation.elements[ref] else { throw ComputerUseError.elementNotFound(ref) }
+
+    let status: AXError
+    switch action {
+    case "press":
+      status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+    case "focus":
+      status = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    case "set_text":
+      guard let text else {
+        throw ComputerUseError.accessibilityFailure("set_text requires the text argument.")
+      }
+      status = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, text as CFTypeRef)
+    case "increment":
+      status = AXUIElementPerformAction(element, kAXIncrementAction as CFString)
+    case "decrement":
+      status = AXUIElementPerformAction(element, kAXDecrementAction as CFString)
+    case "scroll_down":
+      status = AXUIElementPerformAction(element, "AXScrollDownByPage" as CFString)
+    case "scroll_up":
+      status = AXUIElementPerformAction(element, "AXScrollUpByPage" as CFString)
+    default:
+      throw ComputerUseError.unsupportedAction(action)
+    }
+    guard status == .success else {
+      throw ComputerUseError.accessibilityFailure("\(action) on \(ref) returned AXError \(status.rawValue).")
+    }
+    return ActUIResult(
+      ok: true, stateID: stateID, ref: ref, action: action,
+      message: "Performed \(action) on \(ref) in \(observation.window.app). Observe again to inspect the resulting UI.")
+  }
+
+  private func accessibilityWindow(for window: WindowRecord) -> AXUIElement? {
+    let app = AXUIElementCreateApplication(window.pid)
+    AXUIElementSetMessagingTimeout(app, 1.0)
+    guard let windows = copyAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] else {
+      return nil
+    }
+    var best: (element: AXUIElement, score: Double)?
+    for candidate in windows {
+      let title = stringAttribute(candidate, kAXTitleAttribute as CFString) ?? ""
+      let frame = frameAttribute(candidate)
+      var score = 0.0
+      if !window.title.isEmpty && title == window.title { score += 100 }
+      if let frame {
+        score += max(0, 50 - abs(frame.minX - window.frame.minX) - abs(frame.minY - window.frame.minY))
+        score += max(0, 50 - abs(frame.width - window.frame.width) - abs(frame.height - window.frame.height))
+      }
+      if best == nil || score > best!.score { best = (candidate, score) }
+    }
+    return best?.element
+  }
+
+  private func buildOutline(root: AXUIElement, elements: inout [String: AXUIElement]) -> [OutlineNode] {
+    // TODO: is inout best here? is anything in elements on start?
+    var output: [OutlineNode] = []
+    var queue: [(AXUIElement, Int)] = [(root, 0)]
+    var index = 0
+    while index < queue.count && output.count < 600 {
+      let (element, depth) = queue[index]
+      index += 1
+      let ref = "@e\(output.count + 1)"
+      elements[ref] = element
+      output.append(
+        OutlineNode(
+          ref: ref,
+          role: stringAttribute(element, kAXRoleAttribute as CFString) ?? "unknown",
+          title: stringAttribute(element, kAXTitleAttribute as CFString) ?? "",
+          value: displayString(copyAttribute(element, kAXValueAttribute as CFString)),
+          description: stringAttribute(element, kAXDescriptionAttribute as CFString) ?? "",
+          frame: frameAttribute(element),
+          actions: actionNames(element),
+          depth: depth))
+      if depth < 12, let children = copyAttribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement] {
+        queue.append(contentsOf: children.prefix(200).map { ($0, depth + 1) })
+      }
+    }
+    return output
+  }
+
+  private func render(_ nodes: [OutlineNode]) -> String {
+    nodes.map { node in
+      var fields = [node.ref, normalizeRole(node.role)]
+      if !node.title.isEmpty { fields.append("title=\(quoted(node.title))") }
+      if !node.value.isEmpty { fields.append("value=\(quoted(node.value))") }
+      if !node.description.isEmpty && node.description != node.title {
+        fields.append("description=\(quoted(node.description))")
+      }
+      if !node.actions.isEmpty {
+        fields.append("actions=[\(node.actions.map(normalizeAction).joined(separator: ","))]")
+      }
+      if let frame = node.frame {
+        fields.append("rect=(\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height)))")
+      }
+      return String(repeating: "  ", count: node.depth) + fields.joined(separator: " ")
+    }.joined(separator: "\n")
+  }
+
+  private func normalizeRole(_ role: String) -> String {
+    role.hasPrefix("AX") ? String(role.dropFirst(2)).lowercased() : role.lowercased()
+  }
+
+  private func normalizeAction(_ action: String) -> String {
+    action.hasPrefix("AX") ? String(action.dropFirst(2)) : action
+  }
+
+  private func quoted(_ string: String) -> String {
+    let compact = string.replacingOccurrences(of: "\n", with: "\\n")
+    return String(reflecting: String(compact.prefix(500)))
+  }
+
+  private func copyAttribute(_ element: AXUIElement, _ attribute: CFString) -> AnyObject? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return nil }
+    return value
+  }
+
+  private func stringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
+    copyAttribute(element, attribute) as? String
+  }
+
+  private func displayString(_ value: AnyObject?) -> String {
+    guard let value else { return "" }
+    if CFGetTypeID(value) == AXUIElementGetTypeID() { return "" }
+    if let string = value as? String { return string }
+    if let number = value as? NSNumber { return number.stringValue }
+    return ""
+  }
+
+  private func actionNames(_ element: AXUIElement) -> [String] {
+    var names: CFArray?
+    guard AXUIElementCopyActionNames(element, &names) == .success else { return [] }
+    return names as? [String] ?? []
+  }
+
+  private func frameAttribute(_ element: AXUIElement) -> CGRect? {
+    guard let position = copyAttribute(element, kAXPositionAttribute as CFString),
+      let size = copyAttribute(element, kAXSizeAttribute as CFString),
+      CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID()
+    else { return nil }
+    var point = CGPoint.zero
+    var dimensions = CGSize.zero
+    guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
+      AXValueGetValue(size as! AXValue, .cgSize, &dimensions)
+    else { return nil }
+    return CGRect(origin: point, size: dimensions)
+  }
+
+  private func capture(windowID: CGWindowID) async throws -> CapturedImage {
+    guard CGPreflightScreenCaptureAccess() else {
+      _ = CGRequestScreenCaptureAccess()
+      throw ComputerUseError.screenRecordingPermissionMissing
+    }
+    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+    guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+      throw ComputerUseError.windowNotFound(Int(windowID))
+    }
+    let filter = SCContentFilter(desktopIndependentWindow: window)
+    let configuration = SCStreamConfiguration()
+    configuration.width = max(1, Int(window.frame.width * 2))
+    configuration.height = max(1, Int(window.frame.height * 2))
+    configuration.showsCursor = false
+    let image = try await SCScreenshotManager.captureImage(
+      contentFilter: filter, configuration: configuration)
+    let representation = NSBitmapImageRep(cgImage: image)
+    guard let data = representation.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
+      throw ComputerUseError.captureFailure("Could not encode the captured window as JPEG.")
+    }
+    return CapturedImage(base64: data.base64EncodedString(), width: image.width, height: image.height)
+  }
+}
+
+struct CapturedImage: Sendable {
+  let base64: String
+  let width: Int
+  let height: Int
+}
+
+public struct FindWindowsResult: Encodable, Sendable {
+  public struct Window: Encodable, Sendable {
+    let windowID: Int
+    let pid: Int32
+    let app: String
+    let title: String
+    let x: Int
+    let y: Int
+    let width: Int
+    let height: Int
+    let onscreen: Bool
+  }
+  let ok = true
+  let windows: [Window]
+}
+
+public struct ObserveUIResult: Encodable, AttachableToolResult, Sendable {
+  let ok = true
+  let stateID: String
+  let app: String
+  let title: String
+  let windowID: Int
+  let outline: String
+  let nodeCount: Int
+  let image: CapturedImage?
+
+  public var toolAttachments: [ToolAttachment] {
+    guard let image else { return [] }
+    return [ToolAttachment(mimeType: "image/jpeg", base64: image.base64)]
+  }
+
+  public var attachmentToolResultText: String? {
+    "Observed \(app) — \(title) (window \(windowID), stateId \(stateID), \(nodeCount) nodes).\n\(outline)"
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case ok, app, title, outline
+    case stateID = "state_id"
+    case windowID = "window_id"
+    case nodeCount = "node_count"
+  }
+}
+
+public struct ActUIResult: Encodable, Sendable {
+  let ok: Bool
+  let stateID: String
+  let ref: String
+  let action: String
+  let message: String
+
+  enum CodingKeys: String, CodingKey {
+    case ok, ref, action, message
+    case stateID = "state_id"
+  }
+}
+
+public struct FindWindowsTool: ScribeTool {
+  public static let name = "find_windows"
+  public static let description = "Find visible macOS app windows using native WindowServer and Accessibility APIs."
+  public static let parameters = [
+    ScribeToolParameter(
+      name: "query", type: .string,
+      description: "Optional case-insensitive app-name or window-title filter.", required: false)
+  ]
+  public static let promptHint: String? =
+    "For macOS computer use, call find_windows, then observe_ui with a returned window_id. Use only refs from that observation with its state_id. Prefer semantic act_ui actions over shell-driven UI automation."
+  private let session: ComputerUseSession
+
+  public init(session: ComputerUseSession) { self.session = session }
+
+  public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    let arguments = try parseArguments(arguments)
+    let records = try await session.findWindows(query: arguments["query"] as? String)
+    return FindWindowsResult(
+      windows: records.map {
+        .init(
+          windowID: Int($0.id), pid: $0.pid, app: $0.app, title: $0.title,
+          x: Int($0.frame.minX), y: Int($0.frame.minY), width: Int($0.frame.width),
+          height: Int($0.frame.height), onscreen: $0.onscreen)
+      })
+  }
+}
+
+public struct ObserveUITool: ScribeTool {
+  public static let name = "observe_ui"
+  public static let description =
+    "Observe one macOS window through Accessibility and optionally attach a native ScreenCaptureKit image. Returns a state_id and element refs for act_ui."
+  public static let parameters = [
+    ScribeToolParameter(name: "window_id", type: .integer, description: "Window id returned by find_windows."),
+    ScribeToolParameter(
+      name: "include_image", type: .boolean, description: "Attach a window screenshot; defaults to true.",
+      required: false),
+  ]
+  public static let promptHint: String? = nil
+  private let session: ComputerUseSession
+
+  public init(session: ComputerUseSession) { self.session = session }
+
+  public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    let arguments = try parseArguments(arguments)
+    guard let id = integer(arguments["window_id"]) else {
+      throw ComputerUseError.accessibilityFailure("observe_ui requires integer window_id.")
+    }
+    return try await session.observe(windowID: id, includeImage: arguments["include_image"] as? Bool ?? true)
+  }
+}
+
+public struct ActUITool: ScribeTool {
+  public static let name = "act_ui"
+  public static let description =
+    "Perform a native semantic Accessibility action on an element from observe_ui. Supported actions: press, focus, set_text, increment, decrement, scroll_down, scroll_up."
+  public static let parameters = [
+    ScribeToolParameter(name: "state_id", type: .string, description: "State id returned by observe_ui."),
+    ScribeToolParameter(name: "ref", type: .string, description: "Element ref such as @e12 from the same observation."),
+    ScribeToolParameter(
+      name: "action", type: .string,
+      description: "press, focus, set_text, increment, decrement, scroll_down, or scroll_up."),
+    ScribeToolParameter(
+      name: "text", type: .string, description: "Text for set_text; omit for other actions.", required: false),
+  ]
+  public static let promptHint: String? = nil
+  private let session: ComputerUseSession
+
+  public init(session: ComputerUseSession) { self.session = session }
+
+  public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
+    let arguments = try parseArguments(arguments)
+    guard let stateID = arguments["state_id"] as? String,
+      let ref = arguments["ref"] as? String,
+      let action = arguments["action"] as? String
+    else { throw ComputerUseError.accessibilityFailure("act_ui requires state_id, ref, and action.") }
+    return try await session.act(
+      stateID: stateID, ref: ref, action: action, text: arguments["text"] as? String)
+  }
+}
+
+private func accessibilityTrusted(prompt: Bool) -> Bool {
+  guard prompt else { return AXIsProcessTrusted() }
+  return AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+}
+
+private func parseArguments(_ arguments: String) throws -> [String: Any] {
+  let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+  if trimmed.isEmpty { return [:] }
+  guard let object = try JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [String: Any] else {
+    throw ComputerUseError.accessibilityFailure("Tool arguments must be a JSON object.")
+  }
+  return object
+}
+
+private func integer(_ value: Any?) -> Int? {
+  if let value = value as? Int { return value }
+  if let value = value as? NSNumber { return value.intValue }
+  return nil
+}
+
+public enum ComputerUseTools {
+  // TODO: Is this needed? Can we put the tools in there own files.
+  public static func make() -> [any ScribeTool] {
+    let session = ComputerUseSession()
+    return [FindWindowsTool(session: session), ObserveUITool(session: session), ActUITool(session: session)]
+  }
+}

@@ -11,12 +11,12 @@ let package = Package(
     .executable(name: "scribe-mac", targets: ["ScribeMac"]),
     .library(name: "ScribeCore", targets: ["ScribeCore"]),
     .library(name: "ScribeKit", targets: ["ScribeKit"]),
+    .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
     .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
     .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
   ],
   dependencies: [
-    //.package(url: "https://github.com/zaneenders/chroma", revision: "d15b0228"),
-    .package(path: "../chroma/"),
+    .package(url: "https://github.com/zaneenders/chroma", revision: "58ed607"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -83,6 +83,7 @@ let package = Package(
       name: "ScribeKit",
       dependencies: [
         "ScribeCore",
+        "ScribeComputerUse",
         "ScribeLLM",
         .product(name: "Logging", package: "swift-log"),
         .product(name: "SystemPackage", package: "swift-system"),
@@ -91,6 +92,23 @@ let package = Package(
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),
+      ]
+    ),
+    .target(
+      name: "ScribeComputerUse",
+      dependencies: [
+        "ScribeCore",
+        .product(name: "Logging", package: "swift-log"),
+        .product(name: "SystemPackage", package: "swift-system"),
+      ],
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ],
+      linkerSettings: [
+        .linkedFramework("AppKit"),
+        .linkedFramework("ApplicationServices"),
+        .linkedFramework("ScreenCaptureKit"),
       ]
     ),
     .target(

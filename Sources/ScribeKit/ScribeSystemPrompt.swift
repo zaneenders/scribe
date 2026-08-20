@@ -1,4 +1,5 @@
 import Foundation
+import ScribeComputerUse
 import ScribeCore
 
 /// Builds the system prompt every Scribe front-end (CLI, macOS app) shares.
@@ -29,6 +30,6 @@ public enum ScribeSystemPrompt {
 
   /// The default tool set every front-end offers the agent.
   public static func defaultTools() -> [any ScribeTool] {
-    [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()]
+    [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()] + ComputerUseTools.make()
   }
 }
