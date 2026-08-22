@@ -226,6 +226,8 @@ private struct CommandRevealTranscript: PrimitiveBlock {
     }
     let stack = LazyVStack(
       id: id, sticksToBottom: true, controller: controller, rows: rows)
+    TranscriptViewportRegistry.current = rect
+    defer { TranscriptViewportRegistry.current = nil }
     BlockEngine.draw(stack, into: &drawList, in: rect, context: context)
   }
 }
@@ -236,8 +238,12 @@ struct TranscriptItemBlock: Block {
   var selection: TranscriptSelection = .none
 
   @MainActor var body: some Block {
-    VStack(spacing: 6) {
-      Text(label).fontScale(theme.smallScale).foregroundColor(labelColor)
+    VStack(spacing: 7) {
+      HStack(spacing: 6) {
+        Text(labelMarker).fontScale(theme.smallScale).foregroundColor(labelColor)
+        Text(label).fontScale(theme.smallScale).foregroundColor(labelColor)
+        Spacer()
+      }
       if item.text.isEmpty {
         Text(item.running ? "running..." : "(empty)")
           .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
@@ -258,7 +264,19 @@ struct TranscriptItemBlock: Block {
   }
 
   private var label: String {
-    item.running ? "\(sanitizeASCII(item.title)) (running)" : sanitizeASCII(item.title)
+    item.running ? "\(sanitizeASCII(item.title)) · running" : sanitizeASCII(item.title)
+  }
+
+  private var labelMarker: String {
+    switch item.kind {
+    case .user: "›"
+    case .answer: "◆"
+    case .reasoning: "◇"
+    case .tool: "⌘"
+    case .notice: "·"
+    case .warning: "!"
+    case .error: "×"
+    }
   }
 
   private var labelColor: Color {

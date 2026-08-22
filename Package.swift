@@ -16,7 +16,7 @@ let package = Package(
     .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/zaneenders/chroma", revision: "58ed607"),
+    .package(url: "https://github.com/zaneenders/chroma", revision: "bc89eed"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),

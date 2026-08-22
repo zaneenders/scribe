@@ -42,17 +42,17 @@ struct ComposerBar: Block {
         if session.isRunning {
           HStack(spacing: 6) {
             Button(
-              "Queue", id: WidgetID("queue"), fontScale: theme.textScale,
+              "Queue ↵", id: WidgetID("queue"), fontScale: theme.textScale,
               style: theme.buttonStyle(pressedColor: theme.accent)
             ) { session.submit() }
             Button(
-              "Stop", id: WidgetID("stop"), fontScale: theme.textScale,
+              "Stop ■", id: WidgetID("stop"), fontScale: theme.textScale,
               style: theme.buttonStyle(pressedColor: theme.red)
             ) { session.stop() }
           }
         } else {
           Button(
-            "Send", id: WidgetID("send"), fontScale: theme.textScale,
+            "Send ↵", id: WidgetID("send"), fontScale: theme.textScale,
             style: theme.buttonStyle(pressedColor: theme.accent)
           ) { session.submit() }
         }
@@ -72,7 +72,7 @@ struct ComposerBar: Block {
           ) { session.openCommandPicker(.fork) }
         }
         Spacer()
-        Text(session.isRunning ? "Cmd+Return queue | Esc stop" : "Cmd+Return send")
+        Text(session.isRunning ? "⌘↵ queue  ·  Esc stop" : "⌘↵ send  ·  Shift↵ newline")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
       }

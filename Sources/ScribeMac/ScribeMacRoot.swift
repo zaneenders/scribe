@@ -48,7 +48,9 @@ struct ScribeMacRoot: Block {
       case .ready:
         HStack(spacing: 0) {
           SessionSidebar(store: store, theme: theme)
-          if let active = store.active {
+          if store.requiresDirectoryBeforeStart && store.showDirectoryPicker {
+            DirectoryPalette(store: store, theme: theme, required: true)
+          } else if let active = store.active {
             ReadyLayout(store: store, session: active, theme: theme)
           } else if let selected = store.selectedSavedSession {
             sessionLoadingState(selected)
@@ -86,48 +88,94 @@ struct ScribeMacRoot: Block {
   }
 
   @MainActor private var emptyState: some Block {
-    VStack(spacing: 12) {
+    VStack(spacing: 0) {
       Spacer()
-      Text("No session open").fontScale(theme.textScale).foregroundColor(theme.textSecondary)
-      HStack(spacing: 8) {
-        Button("New session", id: WidgetID("empty-new"), fontScale: theme.textScale) {
-          store.newSession()
+      HStack(spacing: 0) {
+        Spacer()
+        VStack(spacing: 14) {
+          HStack(spacing: 8) {
+            Text("◆").fontScale(theme.smallScale).foregroundColor(theme.accent)
+            Text("START A WORKSPACE")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.accent)
+            Spacer()
+          }
+          HStack(spacing: 0) {
+            Text("No session open")
+              .fontScale(theme.textScale)
+              .foregroundColor(theme.textPrimary)
+            Spacer()
+          }
+          WrappedText(
+            text: "Choose a project folder to start a new session, or continue your most recent conversation.",
+            theme: theme, color: theme.textSecondary, scale: theme.smallScale)
+          HStack(spacing: 8) {
+            Button(
+              "Choose project", id: WidgetID("empty-new"), fontScale: theme.textScale,
+              style: theme.buttonStyle(pressedColor: theme.accent),
+              padding: EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+            ) { store.newSession() }
+            Button(
+              "Resume latest", id: WidgetID("empty-resume"), fontScale: theme.textScale,
+              padding: EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+            ) { store.resumeLatest() }
+            Spacer()
+          }
+          WrappedText(
+            text: "Tip: select any saved session in the sidebar to open it directly.",
+            theme: theme, color: theme.textSecondary, scale: theme.smallScale)
         }
-        Button("Resume latest", id: WidgetID("empty-resume"), fontScale: theme.textScale) {
-          store.resumeLatest()
-        }
+        .padding(EdgeInsets(top: 22, leading: 24, bottom: 22, trailing: 24))
+        .sizing(x: .fixed(560))
+        .background(theme.panelBackground)
+        .border(theme.border)
+        Spacer()
       }
       Spacer()
     }
     .sizing(x: .grow, y: .grow)
+    .background(theme.background)
   }
 
   @MainActor private var header: some Block {
     HStack(spacing: 10) {
-      Text("SCRIBE").fontScale(theme.titleScale).foregroundColor(theme.accent)
-      Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
-        HStack(spacing: 4) {
-          Text(profileLabel)
-            .fontScale(theme.smallScale)
-            .foregroundColor(phase == .hovered ? theme.accent : theme.textSecondary)
-          Text(store.showModelPicker ? "▲" : "▼")
-            .fontScale(theme.smallScale)
-            .foregroundColor(theme.textSecondary)
+      Text("SCRIBE")
+        .fontScale(theme.titleScale)
+        .foregroundColor(theme.accent)
+        .sizing(x: .fixed(theme.sidebarWidth - theme.margin))
+      if store.active == nil {
+        Text("no session")
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.textSecondary)
+          .padding(EdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9))
+          .background(theme.buttonIdle)
+          .border(theme.border)
+      } else {
+        Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
+          HStack(spacing: 6) {
+            Text(profileLabel)
+              .fontScale(theme.smallScale)
+              .foregroundColor(phase == .hovered ? theme.accent : theme.textPrimary)
+            Text(store.showModelPicker ? "▲" : "▼")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+          .padding(EdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9))
+          .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
+          .border(theme.border)
         }
-        .padding(EdgeInsets(top: 4, leading: 6, bottom: 4, trailing: 6))
-        .background(phase == .hovered ? theme.buttonHover : theme.headerBackground)
       }
       Spacer()
       Button(
-        "Directory", id: WidgetID("directory-toggle"), fontScale: theme.smallScale,
+        "Folder", id: WidgetID("directory-toggle"), fontScale: theme.smallScale,
         padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
       ) { store.toggleDirectoryPicker() }
       Button(
-        "New", id: WidgetID("new-session"), fontScale: theme.smallScale,
+        "+ New", id: WidgetID("new-session"), fontScale: theme.smallScale,
         padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
       ) { store.newSession() }
       Button(
-        "Resume latest", id: WidgetID("resume-latest"), fontScale: theme.smallScale,
+        "Resume", id: WidgetID("resume-latest"), fontScale: theme.smallScale,
         padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
       ) { store.resumeLatest() }
     }

@@ -89,7 +89,7 @@ struct SessionSidebar: Block {
         .sizing(x: .grow)
       }
     }
-    .sizing(x: .fixed(210))
+    .sizing(x: .fixed(theme.sidebarWidth))
     .sizing(y: .grow)
     .background(theme.sidebarBackground)
     .border(theme.border)

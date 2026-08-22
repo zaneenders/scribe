@@ -34,28 +34,54 @@ final class SessionTerminal {
   private(set) var isEditing = false
 
   private let model: GhosttyTerminal?
+  private let workingDirectory: String
+  private var columns: UInt16 = 80
+  private var rows: UInt16 = 24
   private var pty: PTYSession?
   private(set) var startupError: String?
 
   init(sessionId: UUID, workingDirectory: String) {
     inputID = WidgetID("terminal.input.\(sessionId.uuidString)")
+    self.workingDirectory = workingDirectory
     do {
       let model = try GhosttyTerminal()
-      let pty = try PTYSession(workingDirectory: workingDirectory)
-      pty.onOutput = { [weak model] data in model?.write(data) }
-      pty.onExit = { [weak model] status in
-        model?.write("\r\n\u{1B}[31m[shell exited: \(status)]\u{1B}[0m\r\n")
-      }
-      model.onInput = { [weak pty] input in pty?.write(input) }
-      model.onResize = { [weak pty] columns, rows in
-        pty?.resize(columns: columns, rows: rows)
-      }
       self.model = model
-      self.pty = pty
+      self.pty = nil
+      startShell(in: model)
     } catch {
       self.model = nil
       self.pty = nil
       self.startupError = String(describing: error)
+    }
+  }
+
+  /// Starts a shell and connects it to the existing terminal grid. Keeping the
+  /// grid lets scrollback survive an `exit`, while replacing the PTY makes the
+  /// terminal immediately usable again.
+  private func startShell(in model: GhosttyTerminal) {
+    do {
+      let pty = try PTYSession(
+        workingDirectory: workingDirectory, columns: columns, rows: rows)
+      pty.onOutput = { [weak model] data in model?.write(data) }
+      pty.onExit = { [weak self, weak model, weak pty] status in
+        Task { @MainActor in
+          guard let self, let model, let pty, self.pty === pty else { return }
+          model.write("\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
+          self.pty = nil
+          self.startShell(in: model)
+        }
+      }
+      model.onInput = { [weak pty] input in pty?.write(input) }
+      model.onResize = { [weak self, weak pty] columns, rows in
+        self?.columns = columns
+        self?.rows = rows
+        pty?.resize(columns: columns, rows: rows)
+      }
+      startupError = nil
+      self.pty = pty
+    } catch {
+      startupError = String(describing: error)
+      model.write("\r\n\u{1B}[31m[could not start shell: \(error)]\u{1B}[0m\r\n")
     }
   }
 
@@ -162,14 +188,16 @@ struct SessionTabStrip: Block {
       tabButton(.chat)
       tabButton(.terminal)
       Spacer()
-      if session.selectedTab == .terminal {
-        Text("type into the pane · Esc passes through · Ctrl-C interrupts")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
-          .padding(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: theme.margin))
-      }
+      Text(
+        session.selectedTab == .terminal
+          ? "Esc passes through · Ctrl-C interrupts"
+          : sanitizeASCII(session.workingDirectory)
+      )
+      .fontScale(theme.smallScale)
+      .foregroundColor(theme.textSecondary)
+      .padding(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: theme.margin))
     }
-    .sizing(y: .fixed(28))
+    .sizing(y: .fixed(34))
     .sizing(x: .grow)
     .background(theme.headerBackground)
     .border(theme.border)
@@ -181,7 +209,7 @@ struct SessionTabStrip: Block {
       id: WidgetID("session-tab-\(tab.rawValue).\(session.sessionId.uuidString)"),
       action: { session.selectTab(tab) }
     ) { phase in
-      Text(tab.rawValue)
+      Text(tab == .chat ? "Chat" : "Terminal")
         .fontScale(theme.smallScale)
         .foregroundColor(
           active ? theme.accent : phase == .hovered ? theme.textPrimary : theme.textSecondary

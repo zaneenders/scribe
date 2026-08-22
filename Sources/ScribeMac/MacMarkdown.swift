@@ -41,6 +41,8 @@ enum MDBlock: Equatable {
   case paragraph(String)
   case code(language: String?, code: String)
   case heading(level: Int, text: String)
+  case listItem(marker: String, text: String, depth: Int)
+  case quote(String)
   case rule
 }
 
@@ -103,6 +105,16 @@ func segmentMarkdown(_ source: String) -> [MDBlock] {
         .heading(level: level, text: String(trimmed.dropFirst(level + 1))))
       continue
     }
+    if trimmed.hasPrefix("> ") {
+      flushParagraph()
+      blocks.append(.quote(String(trimmed.dropFirst(2))))
+      continue
+    }
+    if let item = markdownListItem(in: s) {
+      flushParagraph()
+      blocks.append(item)
+      continue
+    }
     paragraphLines.append(s)
   }
   flushParagraph()
@@ -110,6 +122,21 @@ func segmentMarkdown(_ source: String) -> [MDBlock] {
     blocks.append(.code(language: codeLanguage, code: codeLines.joined(separator: "\n")))
   }
   return blocks
+}
+
+private func markdownListItem(in line: String) -> MDBlock? {
+  let indentation = line.prefix { $0 == " " }.count
+  let trimmed = line.dropFirst(indentation)
+  if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
+    return .listItem(marker: "•", text: String(trimmed.dropFirst(2)), depth: indentation / 2)
+  }
+
+  let digits = trimmed.prefix { $0.isNumber }
+  guard !digits.isEmpty else { return nil }
+  let suffix = trimmed.dropFirst(digits.count)
+  guard suffix.hasPrefix(". ") || suffix.hasPrefix(") ") else { return nil }
+  return .listItem(
+    marker: "\(digits).", text: String(suffix.dropFirst(2)), depth: indentation / 2)
 }
 
 // MARK: - Inline runs
@@ -239,14 +266,38 @@ func layoutMarkdown(
     if line.columnCount > 0 || lines.isEmpty { emit() }
   }
 
-  for block in blocks {
+  var previousWasListItem = false
+  for (index, block) in blocks.enumerated() {
+    let isListItem: Bool
+    if case .listItem = block { isListItem = true } else { isListItem = false }
+    if index > 0 && !(isListItem && previousWasListItem) {
+      lines.append(VisualLine())
+    }
+
     switch block {
     case .paragraph(let text):
       wrapRuns(inlineRuns(text), colorFor: { run in
         run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
       }, kind: .plain)
-    case .heading(_, let text):
-      wrapRuns([MDRun(text: text, bold: true)], colorFor: { _ in theme.accent }, kind: .heading)
+    case .heading(let level, let text):
+      let prefix = String(repeating: "#", count: level) + " "
+      wrapRuns(
+        [MDRun(text: prefix), MDRun(text: text, bold: true)],
+        colorFor: { run in run.bold ? theme.accent : theme.green }, kind: .heading)
+    case .listItem(let marker, let text, let depth):
+      let indentation = String(repeating: "  ", count: min(depth, 4))
+      var runs = [MDRun(text: indentation + marker + " ")]
+      runs.append(contentsOf: inlineRuns(text))
+      wrapRuns(runs, colorFor: { run in
+        if run.text == indentation + marker + " " { return theme.orange }
+        return run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+      }, kind: .plain)
+    case .quote(let text):
+      var runs = [MDRun(text: "| ")]
+      runs.append(contentsOf: inlineRuns(text))
+      wrapRuns(runs, colorFor: { run in
+        run.text == "| " ? theme.green : run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+      }, kind: .plain)
     case .code(_, let code):
       let codeLines = code.split(separator: "\n", omittingEmptySubsequences: false)
       if codeLines.isEmpty {
@@ -272,14 +323,23 @@ func layoutMarkdown(
       lines.append(
         VisualLine(
           kind: .plain,
-          runs: [VisualRun(text: String(repeating: "-", count: min(columns, 40)), color: theme.border)],
+          runs: [VisualRun(text: String(repeating: "─", count: min(columns, 40)), color: theme.green)],
           columnCount: min(columns, 40)))
     }
+    previousWasListItem = isListItem
   }
+  while lines.last?.columnCount == 0 { lines.removeLast() }
   return lines
 }
 
 // MARK: - Blocks
+
+/// The active transcript clip while LazyVStack draws its visible rows.
+/// MarkdownText also uses it to cull lines inside an unusually tall row.
+@MainActor
+enum TranscriptViewportRegistry {
+  static var current: Rect?
+}
 
 /// The computed layout of a MarkdownText block for one frame, cached for
 /// hit testing and text extraction by the selection system.
@@ -352,8 +412,15 @@ struct MarkdownLayout {
     return result
   }
 
-  /// Draws the layout into `drawList`, optionally highlighting a selection range.
-  func draw(into drawList: inout DrawList, selection: (start: (line: Int, column: Int), end: (line: Int, column: Int))?, theme: MacTheme) {
+  /// Draws only lines intersecting the transcript viewport. The full layout is
+  /// retained for measurement and selection, but off-screen lines produce no
+  /// draw commands.
+  func draw(
+    into drawList: inout DrawList,
+    selection: (start: (line: Int, column: Int), end: (line: Int, column: Int))?,
+    theme: MacTheme,
+    visibleRect: Rect?
+  ) {
     let sel: (start: (line: Int, column: Int), end: (line: Int, column: Int))?
     if let selection {
       if selection.start.line < selection.end.line
@@ -367,7 +434,18 @@ struct MarkdownLayout {
     } else {
       sel = nil
     }
-    for (index, line) in lines.enumerated() {
+    let visibleRange: Range<Int>
+    if let visibleRect {
+      let first = max(0, Int(floor((visibleRect.minY - rect.minY) / lineHeight)))
+      let last = min(lines.count, Int(ceil((visibleRect.maxY - rect.minY) / lineHeight)))
+      guard first < last else { return }
+      visibleRange = first..<last
+    } else {
+      visibleRange = lines.indices
+    }
+
+    for index in visibleRange {
+      let line = lines[index]
       let y = rect.minY + Float(index) * lineHeight
       if case .code = line.kind {
         drawList.fillRect(
@@ -506,9 +584,14 @@ struct MarkdownText: PrimitiveBlock {
     if let id = itemID {
       MarkdownLayoutRegistry.register(id, layout: layout)
     }
-    // Check for a selection that overlaps this block
+    // LazyVStack already skips whole off-screen transcript rows. Limit this
+    // potentially large row to the viewport as well, so a single long answer
+    // does not emit draw commands for every markdown line.
+    let visibleRect = TranscriptViewportRegistry.current
     let selection = SelectionManager.shared.selection(for: layout)
-    layout.draw(into: &drawList, selection: selection, theme: theme)
+    layout.draw(
+      into: &drawList, selection: selection, theme: theme,
+      visibleRect: visibleRect)
   }
 }
 

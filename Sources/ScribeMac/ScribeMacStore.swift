@@ -192,7 +192,15 @@ final class ScribeMacStore {
   /// in another session keeps running untouched.
   func newSession() {
     guard !isStarting else { return }
-    openSessionInBackground(workingDirectory: active?.workingDirectory ?? directoryBaseCWD)
+    // The launch screen should not silently create a session in Finder's or the
+    // process's working directory. Make the project choice explicit; once a
+    // session is open, New keeps the convenient same-project behavior.
+    guard let active else {
+      requiresDirectoryBeforeStart = true
+      openDirectoryPicker()
+      return
+    }
+    openSessionInBackground(workingDirectory: active.workingDirectory)
   }
 
   var sessionGroups: [SessionGroup] {
