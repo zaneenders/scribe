@@ -10,7 +10,6 @@ struct ReadyLayout: Block {
 
   @MainActor var body: some Block {
     VStack(spacing: 0) {
-      SessionTabStrip(session: session, theme: theme)
       switch session.selectedTab {
       case .chat:
         TranscriptView(session: session, theme: theme)

@@ -8,9 +8,6 @@ struct ScribeMacRoot: Block {
   @MainActor var body: some Block {
     RenderContextBridge(content: VStack(spacing: 0) {
       header
-      if store.showModelPicker {
-        modelPicker
-      }
       if store.showDirectoryPicker && !store.requiresDirectoryBeforeStart {
         directoryPicker
       }
@@ -47,7 +44,9 @@ struct ScribeMacRoot: Block {
         .sizing(x: .grow, y: .grow)
       case .ready:
         HStack(spacing: 0) {
-          SessionSidebar(store: store, theme: theme)
+          if store.isSessionSidebarVisible {
+            SessionSidebar(store: store, theme: theme)
+          }
           if store.requiresDirectoryBeforeStart && store.showDirectoryPicker {
             DirectoryPalette(store: store, theme: theme, required: true)
           } else if let active = store.active {
@@ -138,58 +137,54 @@ struct ScribeMacRoot: Block {
   }
 
   @MainActor private var header: some Block {
-    HStack(spacing: 10) {
+    HStack(spacing: 8) {
       Text("SCRIBE")
         .fontScale(theme.titleScale)
         .fontFace(.display)
         .foregroundColor(theme.accent)
-        .sizing(x: .fixed(theme.sidebarWidth - theme.margin))
-      if store.active == nil {
-        Text("no session")
+      Button(
+        store.isSessionSidebarVisible ? "Sessions ◀" : "Sessions ▶",
+        id: WidgetID("sidebar-toggle"), fontScale: theme.smallScale,
+        padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+      ) { store.toggleSessionSidebar() }
+      if let session = store.active {
+        Text("│")
           .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
-          .padding(EdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9))
-          .background(theme.buttonIdle)
-          .border(theme.border)
-      } else {
-        Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
-          HStack(spacing: 6) {
-            Text(profileLabel)
-              .fontScale(theme.smallScale)
-              .foregroundColor(phase == .hovered ? theme.accent : theme.textPrimary)
-            Text(store.showModelPicker ? "▲" : "▼")
-              .fontScale(theme.smallScale)
-              .foregroundColor(theme.textSecondary)
-          }
-          .padding(EdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9))
-          .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
-          .border(theme.border)
+          .foregroundColor(theme.border)
+          .padding(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+        HStack(spacing: 0) {
+          headerTabButton(.chat, session: session)
+          headerTabButton(.terminal, session: session)
         }
       }
       Spacer()
-      Button(
-        "Folder", id: WidgetID("directory-toggle"), fontScale: theme.smallScale,
-        padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
-      ) { store.toggleDirectoryPicker() }
-      Button(
-        "+ New", id: WidgetID("new-session"), fontScale: theme.smallScale,
-        padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
-      ) { store.newSession() }
-      Button(
-        "Resume", id: WidgetID("resume-latest"), fontScale: theme.smallScale,
-        padding: EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
-      ) { store.resumeLatest() }
     }
-    .padding(EdgeInsets(top: 8, leading: theme.margin, bottom: 8, trailing: theme.margin))
+    .padding(EdgeInsets(top: 2, leading: theme.margin, bottom: 2, trailing: theme.margin))
     .sizing(y: .fixed(theme.headerHeight))
     .sizing(x: .grow)
     .background(theme.headerBackground)
     .border(theme.border)
   }
 
-  @MainActor private var profileLabel: String {
-    guard let active = store.active else { return "no session" }
-    return "\(sanitizeASCII(active.profileName)) / \(sanitizeASCII(active.modelName))"
+  @MainActor private func headerTabButton(
+    _ tab: SessionController.ContentTab, session: SessionController
+  ) -> some Block {
+    let active = session.selectedTab == tab
+    return Interactive(
+      id: WidgetID("session-tab-\(tab.rawValue).\(session.sessionId.uuidString)"),
+      action: { session.selectTab(tab) }
+    ) { phase in
+      Text(tab == .chat ? "Chat" : "Terminal")
+        .fontScale(theme.smallScale)
+        .foregroundColor(
+          active ? theme.accent : phase == .hovered ? theme.textPrimary : theme.textSecondary
+        )
+        .padding(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
+        .background(
+          active ? theme.panelBackground : phase == .hovered ? theme.sidebarHover : .clear
+        )
+        .border(active ? theme.accent : .clear, width: active ? 1 : 0)
+    }
   }
 
   @MainActor private func errorBanner(_ message: String) -> some Block {
@@ -213,43 +208,4 @@ struct ScribeMacRoot: Block {
     DirectoryPalette(store: store, theme: theme, required: false)
   }
 
-  @MainActor private var modelPicker: some Block {
-    let itemHeight: Float = 34
-    let profiles = store.profileCatalog
-    return VStack(spacing: 0) {
-      for (_, profile) in profiles.enumerated() {
-        let isActive = profile.name == store.active?.profileName
-        Interactive(
-          id: WidgetID("model-picker-item-\(profile.name)"),
-          action: { store.selectProfile(profile.name) }
-        ) { phase in
-          HStack(spacing: 6) {
-            Text(isActive ? "●" : " ")
-              .fontScale(theme.smallScale)
-              .foregroundColor(isActive ? theme.accent : .clear)
-            Text(sanitizeASCII(profile.name))
-              .fontScale(theme.smallScale)
-              .foregroundColor(
-                isActive
-                  ? theme.accent
-                  : phase == .hovered ? theme.textPrimary : theme.textSecondary)
-            Spacer()
-            Text(sanitizeASCII(profile.model))
-              .fontScale(theme.smallScale)
-              .foregroundColor(theme.textSecondary)
-          }
-          .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
-          .sizing(y: .fixed(itemHeight))
-          .sizing(x: .grow)
-          .background(
-            phase == .hovered
-              ? theme.buttonHover
-              : isActive ? theme.buttonIdle : theme.panelBackground)
-        }
-      }
-    }
-    .sizing(x: .fixed(300))
-    .background(theme.headerBackground)
-    .border(theme.border)
-  }
 }

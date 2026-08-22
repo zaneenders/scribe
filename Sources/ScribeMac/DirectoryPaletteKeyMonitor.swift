@@ -67,6 +67,24 @@ final class DirectoryPaletteKeyMonitor {
           return event
         }
       }
+      // Chroma's command routing is focus-scoped. A pointer move over the tab bar can
+      // move that focus away from the terminal even though the Terminal tab remains
+      // active, causing cursor keys to be dropped before they reach the PTY. Route
+      // shell history keys directly while the terminal pane is on screen.
+      if let session = store.active, session.selectedTab == .terminal,
+        let terminal = session.terminal
+      {
+        switch event.keyCode {
+        case 126:  // Up
+          terminal.send(key: .arrowUp)
+          return nil
+        case 125:  // Down
+          terminal.send(key: .arrowDown)
+          return nil
+        default:
+          break
+        }
+      }
       guard MacRenderContext.activeTextInput == ScribeMacStore.composerID, store.active != nil else {
         return event
       }

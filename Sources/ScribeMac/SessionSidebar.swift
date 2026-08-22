@@ -10,6 +10,22 @@ struct SessionSidebar: Block {
   @MainActor var body: some Block {
     VStack(spacing: 0) {
       HStack(spacing: 6) {
+        Button(
+          "Folder", id: WidgetID("directory-toggle"), fontScale: theme.smallScale,
+          padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
+        ) { store.toggleDirectoryPicker() }
+        Button(
+          "Resume", id: WidgetID("resume-latest"), fontScale: theme.smallScale,
+          padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
+        ) { store.resumeLatest() }
+        Spacer()
+      }
+      .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+      .sizing(y: .fixed(44))
+      .sizing(x: .grow)
+      .border(theme.border)
+
+      HStack(spacing: 6) {
         Text("SESSIONS")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
@@ -22,8 +38,8 @@ struct SessionSidebar: Block {
             .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
         }
-        Interactive(id: WidgetID("sidebar-new"), action: { store.newSession() }) { phase in
-          Text("+")
+        Interactive(id: WidgetID("sidebar-close"), action: { store.closeSessionSidebar() }) { phase in
+          Text("×")
             .fontScale(theme.textScale)
             .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
             .padding(EdgeInsets(top: 5, leading: 6.5, bottom: 5, trailing: 6.5))
@@ -31,8 +47,8 @@ struct SessionSidebar: Block {
             .background(phase == .idle ? .clear : theme.sidebarHover)
         }
       }
-      .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 6))
-      .sizing(y: .fixed(40))
+      .padding(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 6))
+      .sizing(y: .fixed(36))
       .sizing(x: .grow)
       .border(theme.border)
 
@@ -103,28 +119,51 @@ struct SessionGroupHeader: Block {
   let isCollapsed: Bool
 
   @MainActor var body: some Block {
-    Interactive(
-      id: WidgetID("group-toggle:\(group.cwd)"),
-      action: { store.toggleGroup(group.cwd) }
-    ) { phase in
-      HStack(spacing: 5) {
-        Text(isCollapsed ? ">" : "v")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
-        Text(sanitizeASCII(group.title))
-          .fontScale(theme.smallScale)
-          .foregroundColor(
-            group.open.contains(where: \.isRunning)
-              ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary)
-        Spacer()
-        Text("\(group.open.count + group.totalSavedCount)")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
+    HStack(spacing: 0) {
+      Interactive(
+        id: WidgetID("group-toggle:\(group.cwd)"),
+        action: { store.toggleGroup(group.cwd) }
+      ) { phase in
+        HStack(spacing: 5) {
+          Text(isCollapsed ? ">" : "v")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+          Text(sanitizeASCII(group.title))
+            .fontScale(theme.smallScale)
+            .foregroundColor(
+              group.open.contains(where: \.isRunning)
+                ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary)
+          Spacer()
+          Text("\(group.open.count + group.totalSavedCount)")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+        }
+        .padding(EdgeInsets(top: 7, leading: 8, bottom: 5, trailing: 4))
+        .sizing(x: .grow)
+        .background(phase == .hovered ? theme.sidebarHover : .clear)
       }
-      .padding(EdgeInsets(top: 7, leading: 8, bottom: 5, trailing: 8))
-      .sizing(x: .grow)
-      .background(phase == .hovered ? theme.sidebarHover : .clear)
+      Interactive(
+        id: WidgetID("group-new-session:\(group.cwd)"),
+        action: { store.newSession(in: group.cwd) }
+      ) { phase in
+        VStack(spacing: 0) {
+          Spacer()
+          HStack(spacing: 0) {
+            Spacer()
+            Text("+")
+              .fontScale(theme.textScale)
+              .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
+            Spacer()
+          }
+          .sizing(x: .grow)
+          Spacer()
+        }
+        .sizing(x: .fixed(28), y: .fixed(28))
+        .background(phase == .idle ? .clear : theme.sidebarHover)
+      }
+      .padding(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 4))
     }
+    .sizing(x: .grow)
   }
 }
 
@@ -135,7 +174,7 @@ struct SessionRow: Block {
   let isActive: Bool
 
   @MainActor var body: some Block {
-    ZStack() {
+    ZStack {
       Interactive(
         id: WidgetID("session-row:\(session.sessionId.uuidString)"),
         action: { store.switchTo(session.sessionId) }

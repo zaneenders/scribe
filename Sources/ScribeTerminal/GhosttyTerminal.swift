@@ -1,18 +1,36 @@
 import Chroma
 import Foundation
 import GhosttyVt
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// A small terminal model backed by libghostty-vt.
 ///
 /// `GhosttyTerminal` owns Ghostty's VT state machine and exposes it as a Chroma
 /// block. It is intentionally transport-agnostic: feed bytes received from a
 /// PTY with `write(_:)`, and use `onInput` to forward keyboard input to the PTY.
+public enum GhosttyTerminalKey: Sendable {
+  case tab
+  case arrowUp
+  case arrowDown
+}
+
+private let ghosttyClipboardWriteCallback: GhosttyTerminalClipboardWriteFn = {
+  _, userdata, write in
+  guard let userdata, let write else { return GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA }
+  let model = Unmanaged<GhosttyTerminal>.fromOpaque(userdata).takeUnretainedValue()
+  return model.handleClipboardWrite(write.pointee)
+}
+
 public final class GhosttyTerminal: @unchecked Sendable {
   // libghostty and the reusable render iterators are not safe for concurrent access.
   // Keep every access to their state behind this lock so the model can safely be
   // written by a transport task while the UI produces a render snapshot.
   private let stateLock = NSLock()
   private var terminal: OpaquePointer?
+  private var keyEncoder: OpaquePointer?
+  private var keyEvent: OpaquePointer?
   private var formatter: OpaquePointer?
   private var renderState: OpaquePointer?
   private var rowIterator: OpaquePointer?
@@ -54,12 +72,48 @@ public final class GhosttyTerminal: @unchecked Sendable {
     }
     self.terminal = terminal
 
+    var keyEncoder: OpaquePointer?
+    var keyEvent: OpaquePointer?
+    guard ghostty_key_encoder_new(nil, &keyEncoder) == GHOSTTY_SUCCESS,
+      ghostty_key_event_new(nil, &keyEvent) == GHOSTTY_SUCCESS,
+      let keyEncoder, let keyEvent
+    else {
+      if let keyEncoder { ghostty_key_encoder_free(keyEncoder) }
+      if let keyEvent { ghostty_key_event_free(keyEvent) }
+      ghostty_terminal_free(terminal)
+      self.terminal = nil
+      throw GhosttyTerminalError.keyEncoderInitializationFailed
+    }
+    self.keyEncoder = keyEncoder
+    self.keyEvent = keyEvent
+
+    let userdata = Unmanaged.passUnretained(self).toOpaque()
+    let clipboardCallback = unsafeBitCast(
+      ghosttyClipboardWriteCallback, to: UnsafeRawPointer.self)
+    guard ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_USERDATA, userdata) == GHOSTTY_SUCCESS,
+      ghostty_terminal_set(
+        terminal, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, clipboardCallback)
+        == GHOSTTY_SUCCESS
+    else {
+      ghostty_key_event_free(keyEvent)
+      ghostty_key_encoder_free(keyEncoder)
+      ghostty_terminal_free(terminal)
+      self.keyEvent = nil
+      self.keyEncoder = nil
+      self.terminal = nil
+      throw GhosttyTerminalError.initializationFailed
+    }
+
     var scrollbackLines: Int = 10_000
     guard
       ghostty_terminal_set(
         terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &scrollbackLines) == GHOSTTY_SUCCESS
     else {
+      ghostty_key_event_free(keyEvent)
+      ghostty_key_encoder_free(keyEncoder)
       ghostty_terminal_free(terminal)
+      self.keyEvent = nil
+      self.keyEncoder = nil
       self.terminal = nil
       throw GhosttyTerminalError.initializationFailed
     }
@@ -73,7 +127,11 @@ public final class GhosttyTerminal: @unchecked Sendable {
     guard ghostty_formatter_terminal_new(nil, &formatter, terminal, options) == GHOSTTY_SUCCESS,
       let formatter
     else {
+      ghostty_key_event_free(keyEvent)
+      ghostty_key_encoder_free(keyEncoder)
       ghostty_terminal_free(terminal)
+      self.keyEvent = nil
+      self.keyEncoder = nil
       self.terminal = nil
       throw GhosttyTerminalError.formatterInitializationFailed
     }
@@ -84,8 +142,12 @@ public final class GhosttyTerminal: @unchecked Sendable {
       let renderState
     else {
       ghostty_formatter_free(formatter)
+      ghostty_key_event_free(keyEvent)
+      ghostty_key_encoder_free(keyEncoder)
       ghostty_terminal_free(terminal)
       self.formatter = nil
+      self.keyEvent = nil
+      self.keyEncoder = nil
       self.terminal = nil
       throw GhosttyTerminalError.renderStateInitializationFailed
     }
@@ -101,9 +163,13 @@ public final class GhosttyTerminal: @unchecked Sendable {
       if let rowCells { ghostty_render_state_row_cells_free(rowCells) }
       ghostty_render_state_free(renderState)
       ghostty_formatter_free(formatter)
+      ghostty_key_event_free(keyEvent)
+      ghostty_key_encoder_free(keyEncoder)
       ghostty_terminal_free(terminal)
       self.renderState = nil
       self.formatter = nil
+      self.keyEvent = nil
+      self.keyEncoder = nil
       self.terminal = nil
       throw GhosttyTerminalError.renderStateInitializationFailed
     }
@@ -116,6 +182,8 @@ public final class GhosttyTerminal: @unchecked Sendable {
     if let rowIterator { ghostty_render_state_row_iterator_free(rowIterator) }
     if let renderState { ghostty_render_state_free(renderState) }
     if let formatter { ghostty_formatter_free(formatter) }
+    if let keyEvent { ghostty_key_event_free(keyEvent) }
+    if let keyEncoder { ghostty_key_encoder_free(keyEncoder) }
     if let terminal { ghostty_terminal_free(terminal) }
   }
 
@@ -144,6 +212,79 @@ public final class GhosttyTerminal: @unchecked Sendable {
     withStateLock {
       guard let terminal else { return }
       ghostty_terminal_reset(terminal)
+    }
+  }
+
+  fileprivate func handleClipboardWrite(
+    _ write: GhosttyClipboardWrite
+  ) -> GhosttyClipboardWriteResult {
+    #if canImport(AppKit)
+    guard write.location == GHOSTTY_CLIPBOARD_LOCATION_STANDARD else {
+      return GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED
+    }
+    guard write.contents_len > 0, let contents = write.contents else {
+      NSPasteboard.general.clearContents()
+      return GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS
+    }
+    for content in UnsafeBufferPointer(start: contents, count: write.contents_len) {
+      guard content.mime.len > 0, let mimeBytes = content.mime.ptr,
+        String(decoding: UnsafeBufferPointer(start: mimeBytes, count: content.mime.len), as: UTF8.self)
+          == "text/plain"
+      else { continue }
+      let text: String
+      if content.data.len == 0 {
+        text = ""
+      } else {
+        guard let dataBytes = content.data.ptr else {
+          return GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+        }
+        text = String(
+          decoding: UnsafeBufferPointer(start: dataBytes, count: content.data.len), as: UTF8.self)
+      }
+      NSPasteboard.general.clearContents()
+      return NSPasteboard.general.setString(text, forType: .string)
+        ? GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS
+        : GHOSTTY_CLIPBOARD_WRITE_RESULT_IO_ERROR
+    }
+    return GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED
+    #else
+    return GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED
+    #endif
+  }
+
+  /// Encodes a functional key using Ghostty's keyboard encoder and the terminal's
+  /// current modes (DECCKM, modifyOtherKeys, and the Kitty keyboard protocol).
+  public func encodeKey(_ key: GhosttyTerminalKey) -> Data? {
+    withStateLock {
+      guard let terminal, let keyEncoder, let keyEvent else { return nil }
+      ghostty_key_encoder_setopt_from_terminal(keyEncoder, terminal)
+      ghostty_key_event_set_action(keyEvent, GHOSTTY_KEY_ACTION_PRESS)
+      ghostty_key_event_set_mods(keyEvent, 0)
+      ghostty_key_event_set_consumed_mods(keyEvent, 0)
+      ghostty_key_event_set_composing(keyEvent, false)
+      ghostty_key_event_set_utf8(keyEvent, nil, 0)
+      ghostty_key_event_set_unshifted_codepoint(keyEvent, 0)
+      switch key {
+      case .tab:
+        ghostty_key_event_set_key(keyEvent, GHOSTTY_KEY_TAB)
+      case .arrowUp:
+        ghostty_key_event_set_key(keyEvent, GHOSTTY_KEY_ARROW_UP)
+      case .arrowDown:
+        ghostty_key_event_set_key(keyEvent, GHOSTTY_KEY_ARROW_DOWN)
+      }
+
+      var buffer = [UInt8](repeating: 0, count: 128)
+      var written = 0
+      let result = buffer.withUnsafeMutableBytes { bytes in
+        ghostty_key_encoder_encode(
+          keyEncoder,
+          keyEvent,
+          bytes.baseAddress?.assumingMemoryBound(to: CChar.self),
+          bytes.count,
+          &written)
+      }
+      guard result == GHOSTTY_SUCCESS else { return nil }
+      return Data(buffer.prefix(written))
     }
   }
 
@@ -342,6 +483,7 @@ public final class GhosttyTerminal: @unchecked Sendable {
 
 public enum GhosttyTerminalError: Error, Equatable {
   case initializationFailed
+  case keyEncoderInitializationFailed
   case formatterInitializationFailed
   case renderStateInitializationFailed
 }

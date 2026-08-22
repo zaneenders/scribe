@@ -11,7 +11,9 @@ enum ScribeTerminalCommand {
   /// Ctrl-/ is encoded by legacy terminals as US (0x1F), the same byte as
   /// Ctrl-_. Neovim plugins commonly bind this chord to toggle a terminal.
   static let controlSlash = Command.application("scribe.terminal.controlSlash")
-  /// Arrow keys forwarded as ANSI cursor keys so shells get history recall.
+  /// Tab is forwarded to the shell for command and path completion.
+  static let complete = Command.application("scribe.terminal.complete")
+  /// Arrow keys encoded from the active Ghostty terminal modes so shells get history recall.
   static let lineUp = Command.application("scribe.terminal.lineUp")
   static let lineDown = Command.application("scribe.terminal.lineDown")
 }
@@ -98,6 +100,10 @@ final class SessionTerminal {
 
   func interrupt() { pty?.interrupt() }
   func send(_ text: String) { pty?.write(text) }
+  func send(key: GhosttyTerminalKey) {
+    guard let input = model?.encodeKey(key) else { return }
+    pty?.write(input)
+  }
 
   /// Hangs up the shell; called when the owning session closes.
   func close() {
@@ -164,61 +170,21 @@ struct TerminalTabContent: PrimitiveBlock {
         terminal.send("\u{1F}")
         return .handled
       }
+      .onCommand(ScribeTerminalCommand.complete) {
+        guard terminal.isEditing else { return .ignored }
+        terminal.send(key: .tab)
+        return .handled
+      }
       .onCommand(ScribeTerminalCommand.lineUp) {
         guard terminal.isEditing else { return .ignored }
-        terminal.send("\u{1B}[A")
+        terminal.send(key: .arrowUp)
         return .handled
       }
       .onCommand(ScribeTerminalCommand.lineDown) {
         guard terminal.isEditing else { return .ignored }
-        terminal.send("\u{1B}[B")
+        terminal.send(key: .arrowDown)
         return .handled
       }
     BlockEngine.draw(content, into: &drawList, in: rect, context: context)
-  }
-}
-
-/// The Chat | Terminal switcher above a ready session's content.
-struct SessionTabStrip: Block {
-  let session: SessionController
-  let theme: MacTheme
-
-  @MainActor var body: some Block {
-    HStack(spacing: 0) {
-      tabButton(.chat)
-      tabButton(.terminal)
-      Spacer()
-      Text(
-        session.selectedTab == .terminal
-          ? "Esc passes through · Ctrl-C interrupts"
-          : sanitizeASCII(session.workingDirectory)
-      )
-      .fontScale(theme.smallScale)
-      .foregroundColor(theme.textSecondary)
-      .padding(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: theme.margin))
-    }
-    .sizing(y: .fixed(34))
-    .sizing(x: .grow)
-    .background(theme.headerBackground)
-    .border(theme.border)
-  }
-
-  @MainActor private func tabButton(_ tab: SessionController.ContentTab) -> some Block {
-    let active = session.selectedTab == tab
-    return Interactive(
-      id: WidgetID("session-tab-\(tab.rawValue).\(session.sessionId.uuidString)"),
-      action: { session.selectTab(tab) }
-    ) { phase in
-      Text(tab == .chat ? "Chat" : "Terminal")
-        .fontScale(theme.smallScale)
-        .foregroundColor(
-          active ? theme.accent : phase == .hovered ? theme.textPrimary : theme.textSecondary
-        )
-        .padding(EdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14))
-        .background(
-          active ? theme.panelBackground : phase == .hovered ? theme.sidebarHover : .clear
-        )
-        .border(active ? theme.accent : .clear, width: active ? 1 : 0)
-    }
   }
 }

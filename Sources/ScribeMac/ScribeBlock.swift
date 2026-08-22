@@ -39,6 +39,7 @@ extension ScribeBlock {
       bind("/", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
       // Ctrl-/ and Ctrl-_ share the terminal byte 0x1F; accept either chord.
       bind("_", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
+      bind(.tab, to: ScribeTerminalCommand.complete)
       bind(.upArrow, to: ScribeTerminalCommand.lineUp)
       bind(.downArrow, to: ScribeTerminalCommand.lineDown)
     }

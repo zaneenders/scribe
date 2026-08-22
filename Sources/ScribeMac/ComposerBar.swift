@@ -16,7 +16,10 @@ struct BottomChrome: Block {
       if let picker = session.commandPicker {
         CommandPickerBar(session: session, picker: picker, theme: theme)
       }
-      ComposerBar(session: session, theme: theme)
+      if store.showModelPicker {
+        BottomModelPicker(store: store, session: session, theme: theme)
+      }
+      ComposerBar(store: store, session: session, theme: theme)
       StatusBar(store: store, session: session, theme: theme)
     }
     .sizing(x: .grow)
@@ -24,6 +27,7 @@ struct BottomChrome: Block {
 }
 
 struct ComposerBar: Block {
+  let store: ScribeMacStore
   let session: SessionController
   let theme: MacTheme
 
@@ -60,6 +64,19 @@ struct ComposerBar: Block {
 
       HStack(spacing: 6) {
         if !session.isRunning {
+          Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
+            HStack(spacing: 5) {
+              Text(sanitizeASCII(session.profileName))
+                .fontScale(theme.smallScale)
+                .foregroundColor(phase == .hovered ? theme.accent : theme.textPrimary)
+              Text(store.showModelPicker ? "▼" : "▲")
+                .fontScale(theme.smallScale)
+                .foregroundColor(theme.textSecondary)
+            }
+            .padding(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10))
+            .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
+            .border(theme.border)
+          }
           Button(
             "TLDR", id: WidgetID("tldr"), fontScale: theme.smallScale,
             style: theme.buttonStyle(pressedColor: theme.purple),
@@ -80,6 +97,50 @@ struct ComposerBar: Block {
     .padding(theme.margin)
     .sizing(x: .grow)
     .background(theme.composerBackground)
+    .border(theme.border)
+  }
+}
+
+struct BottomModelPicker: Block {
+  let store: ScribeMacStore
+  let session: SessionController
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
+    VStack(spacing: 0) {
+      for (_, profile) in store.profileCatalog.enumerated() {
+        let isActive = profile.name == session.profileName
+        Interactive(
+          id: WidgetID("model-picker-item-\(profile.name)"),
+          action: { store.selectProfile(profile.name) }
+        ) { phase in
+          HStack(spacing: 6) {
+            Text(isActive ? "●" : " ")
+              .fontScale(theme.smallScale)
+              .foregroundColor(isActive ? theme.accent : .clear)
+            Text(sanitizeASCII(profile.name))
+              .fontScale(theme.smallScale)
+              .foregroundColor(
+                isActive
+                  ? theme.accent
+                  : phase == .hovered ? theme.textPrimary : theme.textSecondary)
+            Spacer()
+            Text(sanitizeASCII(profile.model))
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+          .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
+          .sizing(y: .fixed(34))
+          .sizing(x: .grow)
+          .background(
+            phase == .hovered
+              ? theme.buttonHover
+              : isActive ? theme.buttonIdle : theme.panelBackground)
+        }
+      }
+    }
+    .sizing(x: .grow)
+    .background(theme.headerBackground)
     .border(theme.border)
   }
 }

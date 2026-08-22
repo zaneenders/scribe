@@ -6,7 +6,7 @@ struct MacTheme: Sendable {
   var margin: Float = 16
   var spacing: Float = 10
   var panelPadding: Float = 14
-  var headerHeight: Float = 64
+  var headerHeight: Float = 40
   var statusHeight: Float = 44
   var itemHeight: Float = 48
   var sidebarWidth: Float = 320

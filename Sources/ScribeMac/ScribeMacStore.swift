@@ -101,6 +101,8 @@ final class ScribeMacStore {
   private var expandedGroupCWDs: Set<String> = []
   private let savedSessionPageSize = 5
   let sidebarScroll = ScrollViewController()
+  /// Whether the session browser is visible alongside the active conversation.
+  private(set) var isSessionSidebarVisible = true
   /// Non-fatal failure shown as a dismissible banner over the session UI.
   var lastError: String?
 
@@ -188,6 +190,14 @@ final class ScribeMacStore {
 
   // MARK: - Session lifecycle
 
+  func toggleSessionSidebar() {
+    isSessionSidebarVisible.toggle()
+  }
+
+  func closeSessionSidebar() {
+    isSessionSidebarVisible = false
+  }
+
   /// Opens a brand-new session in the background. Any turn already streaming
   /// in another session keeps running untouched.
   func newSession() {
@@ -200,7 +210,13 @@ final class ScribeMacStore {
       openDirectoryPicker()
       return
     }
-    openSessionInBackground(workingDirectory: active.workingDirectory)
+    newSession(in: active.workingDirectory)
+  }
+
+  /// Opens a brand-new chat in a specific session-sidebar directory.
+  func newSession(in workingDirectory: String) {
+    guard !isStarting else { return }
+    openSessionInBackground(workingDirectory: workingDirectory)
   }
 
   var sessionGroups: [SessionGroup] {
