@@ -3,20 +3,22 @@ import Chroma
 /// The macOS app's palette and metrics, mirroring the CLI's dark theme
 /// where Chroma's immediate-mode blocks allow.
 struct MacTheme: Sendable {
-  var margin: Float = 14
-  var spacing: Float = 8
-  var panelPadding: Float = 12
-  var headerHeight: Float = 50
-  var statusHeight: Float = 34
-  var itemHeight: Float = 36
-  var sidebarWidth: Float = 236
+  var margin: Float = 16
+  var spacing: Float = 10
+  var panelPadding: Float = 14
+  var headerHeight: Float = 64
+  var statusHeight: Float = 44
+  var itemHeight: Float = 48
+  var sidebarWidth: Float = 320
 
-  // Render the native 20×28 artwork at an exact half scale. Unlike the former
-  // fractional scales, this maps each 2×2 source area consistently and keeps
-  // the bitmap's corners crisp instead of producing uneven rounded edges.
-  var titleScale: Float = 0.5
-  var textScale: Float = 0.5
-  var smallScale: Float = 0.5
+  // Large, high-contrast defaults are deliberate: the app should remain easy
+  // to scan without leaning toward the display. Body text lands around 17 pt.
+  var titleScale: Float = 0.7
+  var textScale: Float = 0.85
+  var smallScale: Float = 0.75
+  // Keep the surrounding app comfortably large, but give full-screen terminal
+  // programs such as Neovim enough rows and columns to be useful.
+  var terminalScale: Float = 0.65
 
   var background = Color(r: 0.055, g: 0.063, b: 0.085, a: 1)
   var panelBackground = Color(r: 0.070, g: 0.080, b: 0.105, a: 1)
@@ -38,8 +40,10 @@ struct MacTheme: Sendable {
   var orange = Color(r: 1, g: 0.55, b: 0.15, a: 1)
   var purple = Color(r: 0.7, g: 0.3, b: 0.9, a: 1)
 
-  var textPrimary = Color(r: 0.92, g: 0.93, b: 0.97, a: 1)
-  var textSecondary = Color(r: 0.57, g: 0.59, b: 0.68, a: 1)
+  // Body copy is intentionally softer than pure white. The display face and
+  // colored status accents can stay crisp without making long answers glare.
+  var textPrimary = Color(r: 0.90, g: 0.91, b: 0.94, a: 1)
+  var textSecondary = Color(r: 0.63, g: 0.66, b: 0.73, a: 1)
   var userBubbleBackground = Color(r: 0.105, g: 0.15, b: 0.22, a: 1)
   var reasoningText = Color(r: 0.55, g: 0.45, b: 0.75, a: 1)
   var codeBackground = Color(r: 0.06, g: 0.07, b: 0.10, a: 1)

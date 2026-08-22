@@ -108,7 +108,7 @@ final class SessionTerminal {
   func makeView(theme: MacTheme) -> GhosttyTerminalView? {
     model?.view(
       id: inputID,
-      fontScale: theme.textScale,
+      fontScale: theme.terminalScale,
       colors: GhosttyTerminalColors(
         background: theme.codeBackground,
         foreground: theme.textPrimary,

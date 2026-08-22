@@ -269,7 +269,7 @@ struct TranscriptItemBlock: Block {
 
   private var labelMarker: String {
     switch item.kind {
-    case .user: "›"
+    case .user: ">"
     case .answer: "◆"
     case .reasoning: "◇"
     case .tool: "⌘"

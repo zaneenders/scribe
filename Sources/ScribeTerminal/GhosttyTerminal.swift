@@ -490,7 +490,8 @@ public struct GhosttyTerminalView: PrimitiveBlock {
             x: rect.minX + 8 + Float(runStart) * cellWidth,
             y: rowY),
           color: runColor,
-          scale: effectiveScale
+          scale: effectiveScale,
+          face: .readable
         )
         run = ""
       }

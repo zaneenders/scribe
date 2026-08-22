@@ -141,6 +141,7 @@ struct ScribeMacRoot: Block {
     HStack(spacing: 10) {
       Text("SCRIBE")
         .fontScale(theme.titleScale)
+        .fontFace(.display)
         .foregroundColor(theme.accent)
         .sizing(x: .fixed(theme.sidebarWidth - theme.margin))
       if store.active == nil {
