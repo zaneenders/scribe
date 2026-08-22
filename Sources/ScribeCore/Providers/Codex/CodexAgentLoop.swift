@@ -65,6 +65,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let workingDirectory: FilePath
   let reasoningEnabled: Bool?
   let reasoningEffort: String?
+  let temperature: Double?
   let hooks: AgentLoopHooks
   let contextWindow: Int
   let retryPolicy: RetryPolicy
@@ -78,6 +79,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
+    temperature: Double? = nil,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0,
     retryPolicy: RetryPolicy = .default
@@ -90,6 +92,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.workingDirectory = workingDirectory
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEffort = reasoningEffort
+    self.temperature = temperature
     self.hooks = hooks
     self.contextWindow = contextWindow
     self.retryPolicy = retryPolicy
@@ -155,7 +158,7 @@ private func runSingleCodexRound(
     tools: codexTools,
     toolChoice: .auto,
     parallelToolCalls: true,
-    temperature: nil,
+    temperature: config.temperature.map(Float.init),
     reasoning: config.reasoningEnabled == true
       ? {
         var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()

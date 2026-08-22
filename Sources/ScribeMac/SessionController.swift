@@ -515,7 +515,9 @@ final class SessionController {
         workingDirectory: workingDirectory,
         reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
         reasoningEffort: loaded.scribeConfig.reasoningEffort,
-        maxTokens: loaded.scribeConfig.maxTokens
+        maxTokens: loaded.scribeConfig.maxTokens,
+        temperature: loaded.scribeConfig.temperature,
+        maxRetries: loaded.scribeConfig.maxRetries
       )
       try await boot.harness.reconfigure(configuration: newConfig)
       profileName = loaded.activeProfileName

@@ -927,7 +927,10 @@ extension SlateChatHost {
       newConfig.apiKey = loaded.scribeConfig.apiKey
       newConfig.apiType = loaded.apiType
       newConfig.reasoningEnabled = loaded.scribeConfig.reasoningEnabled
+      newConfig.reasoningEffort = loaded.scribeConfig.reasoningEffort
       newConfig.maxTokens = loaded.scribeConfig.maxTokens
+      newConfig.temperature = loaded.scribeConfig.temperature
+      newConfig.maxRetries = loaded.scribeConfig.maxRetries
       try await harness.reconfigure(configuration: newConfig)
       configuration = newConfig
       contextWindow = newConfig.contextWindow

@@ -101,7 +101,10 @@ public actor ComputerUseSession {
     guard accessibilityTrusted(prompt: true) else {
       throw ComputerUseError.accessibilityPermissionMissing
     }
-    guard let window = try findWindows(query: nil).first(where: { $0.id == CGWindowID(windowID) }) else {
+    guard let requestedWindowID = CGWindowID(exactly: windowID) else {
+      throw ComputerUseError.windowNotFound(windowID)
+    }
+    guard let window = try findWindows(query: nil).first(where: { $0.id == requestedWindowID }) else {
       throw ComputerUseError.windowNotFound(windowID)
     }
     guard let root = accessibilityWindow(for: window) else {
@@ -177,19 +180,32 @@ public actor ComputerUseSession {
     guard let windows = copyAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] else {
       return nil
     }
-    var best: (element: AXUIElement, score: Double)?
+    var matches: [(element: AXUIElement, score: Double)] = []
     for candidate in windows {
       let title = stringAttribute(candidate, kAXTitleAttribute as CFString) ?? ""
-      let frame = frameAttribute(candidate)
-      var score = 0.0
-      if !window.title.isEmpty && title == window.title { score += 100 }
-      if let frame {
-        score += max(0, 50 - abs(frame.minX - window.frame.minX) - abs(frame.minY - window.frame.minY))
-        score += max(0, 50 - abs(frame.width - window.frame.width) - abs(frame.height - window.frame.height))
+      let exactTitleMatch = !window.title.isEmpty && title == window.title
+
+      var frameScore = 0.0
+      var closeFrameMatch = false
+      if let frame = frameAttribute(candidate) {
+        let positionDelta = abs(frame.minX - window.frame.minX) + abs(frame.minY - window.frame.minY)
+        let sizeDelta = abs(frame.width - window.frame.width) + abs(frame.height - window.frame.height)
+        frameScore = max(0, 50 - positionDelta) + max(0, 50 - sizeDelta)
+        closeFrameMatch = positionDelta <= 20 && sizeDelta <= 20
       }
-      if best == nil || score > best!.score { best = (candidate, score) }
+
+      // Never fall back to the first AX window. Acting on a weak or ambiguous
+      // match is worse than asking the caller to observe again.
+      guard exactTitleMatch || closeFrameMatch else { continue }
+      matches.append((candidate, (exactTitleMatch ? 100 : 0) + frameScore))
     }
-    return best?.element
+
+    let ranked = matches.sorted { $0.score > $1.score }
+    guard let best = ranked.first else { return nil }
+    if ranked.count > 1, abs(best.score - ranked[1].score) < 0.001 {
+      return nil
+    }
+    return best.element
   }
 
   private func buildOutline(root: AXUIElement, elements: inout [String: AXUIElement]) -> [OutlineNode] {

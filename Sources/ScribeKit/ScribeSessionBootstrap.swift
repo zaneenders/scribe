@@ -59,7 +59,9 @@ public enum ScribeSessionBootstrap {
       workingDirectory: workingDirectory,
       reasoningEnabled: base.reasoningEnabled,
       reasoningEffort: base.reasoningEffort,
-      maxTokens: base.maxTokens
+      maxTokens: base.maxTokens,
+      temperature: base.temperature,
+      maxRetries: base.maxRetries
     )
 
     let sessionId: UUID

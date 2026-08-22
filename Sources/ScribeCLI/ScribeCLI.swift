@@ -123,7 +123,9 @@ enum LoginProvider: String, ExpressibleByArgument {
       workingDirectory: cwd,
       reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
       reasoningEffort: loaded.scribeConfig.reasoningEffort,
-      maxTokens: loaded.scribeConfig.maxTokens
+      maxTokens: loaded.scribeConfig.maxTokens,
+      temperature: loaded.scribeConfig.temperature,
+      maxRetries: loaded.scribeConfig.maxRetries
     )
 
     let sessionDirectory: FilePath
