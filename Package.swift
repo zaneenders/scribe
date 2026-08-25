@@ -1,14 +1,295 @@
 // swift-tools-version: 6.3
 import PackageDescription
 
-var scribeWaylandDependencies: [Target.Dependency] = [
-  "ScribeBlocks",
-  .product(name: "Chroma", package: "chroma"),
+var products: [Product] = [
+  .executable(name: "scribe", targets: ["ScribeCLI"]),
+  .library(name: "ScribeCore", targets: ["ScribeCore"]),
+  .library(name: "ScribeKit", targets: ["ScribeKit"]),
+  .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
+  .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
+  .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
 ]
 
-#if os(Linux)
-scribeWaylandDependencies.append(
-  .product(name: "WaylandBackend", package: "chroma")
+var targets: [Target] = [
+  .target(
+    name: "ScribeLLM",
+    dependencies: [
+      .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+      .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ],
+    plugins: [
+      .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
+    ]
+  ),
+  .target(
+    name: "ScribeLLMCodex",
+    dependencies: [
+      .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+      .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ],
+    plugins: [
+      .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
+    ]
+  ),
+  .target(
+    name: "ScribeCodexAuth",
+    dependencies: [
+      .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+      .product(name: "AsyncHTTPClient", package: "async-http-client"),
+      .product(name: "NIOCore", package: "swift-nio"),
+      .product(name: "Subprocess", package: "swift-subprocess"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .target(
+    name: "ScribeKit",
+    dependencies: [
+      "ScribeCore",
+      "ScribeComputerUse",
+      "ScribeLLM",
+      .product(name: "Logging", package: "swift-log"),
+      .product(name: "SystemPackage", package: "swift-system"),
+      .product(name: "_NIOFileSystem", package: "swift-nio"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .target(
+    name: "ScribeComputerUse",
+    dependencies: [
+      "ScribeCore",
+      .product(name: "Logging", package: "swift-log"),
+      .product(name: "SystemPackage", package: "swift-system"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ],
+    linkerSettings: [
+      .linkedFramework("AppKit"),
+      .linkedFramework("ApplicationServices"),
+      .linkedFramework("ScreenCaptureKit"),
+    ]
+  ),
+  .target(
+    name: "ScribeCore",
+    dependencies: [
+      "ScribeLLM",
+      "ScribeLLMCodex",
+      "ScribeCodexAuth",
+      .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+      .product(name: "SystemPackage", package: "swift-system"),
+      .product(name: "Configuration", package: "swift-configuration"),
+      .product(name: "Subprocess", package: "swift-subprocess"),
+      .product(name: "Logging", package: "swift-log"),
+      .product(name: "NIOCore", package: "swift-nio"),
+      .product(name: "_NIOFileSystem", package: "swift-nio"),
+      .product(name: "AsyncHTTPClient", package: "async-http-client"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .executableTarget(
+    name: "ScribeCLI",
+    dependencies: [
+      "ScribeCore",
+      "ScribeCodexAuth",
+      "ScribeKit",
+      .product(name: "SystemPackage", package: "swift-system"),
+      .product(name: "Subprocess", package: "swift-subprocess"),
+      .product(name: "SlateCore", package: "slate"),
+      .product(name: "ArgumentParser", package: "swift-argument-parser"),
+      .product(name: "Markdown", package: "swift-markdown"),
+      .product(name: "_RopeModule", package: "swift-collections"),
+      .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
+      .product(name: "_NIOFileSystem", package: "swift-nio"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+      .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
+    ],
+    plugins: [
+      "GitVersionPlugin"
+    ]
+  ),
+  .target(
+    name: "ScribeBlocks",
+    dependencies: [
+      "ScribeCore",
+      "ScribeKit",
+      "ScribeTerminal",
+      .product(name: "Chroma", package: "chroma"),
+      .product(name: "Logging", package: "swift-log"),
+      .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
+      .product(name: "SystemPackage", package: "swift-system"),
+    ],
+    path: "Sources/ScribeMac",
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+      .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
+    ],
+    plugins: [
+      "GitVersionPlugin"
+    ]
+  ),
+  .target(
+    name: "ScribeTerminal",
+    dependencies: [
+      "GhosttyVt",
+      "PTYShim",
+      .product(name: "Chroma", package: "chroma"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ],
+    plugins: [
+      "GhosttyVtPresencePlugin"
+    ]
+  ),
+  .target(
+    name: "PTYShim",
+    publicHeadersPath: "include"
+  ),
+  .target(
+    name: "GhosttyVt",
+    path: "Vendor/GhosttyVt",
+    publicHeadersPath: "Headers",
+    linkerSettings: [
+      .unsafeFlags(
+        ["-L", "Vendor/GhosttyVt/Libraries/macos", "-lghostty-vt"],
+        .when(platforms: [.macOS])
+      ),
+      .unsafeFlags(
+        ["-L", "Vendor/GhosttyVt/Libraries/linux", "-lghostty-vt"],
+        .when(platforms: [.linux])
+      ),
+    ]
+  ),
+  .testTarget(
+    name: "ScribeTerminalTests",
+    dependencies: ["ScribeTerminal"],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .testTarget(
+    name: "ScribeCoreTests",
+    dependencies: [
+      "ScribeCore",
+      "ScribeLLM",
+      "ScribeLLMCodex",
+      "ScribeCodexAuth",
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .testTarget(
+    name: "ScribeCLITests",
+    dependencies: [
+      "ScribeCLI",
+      "ScribeKit",
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .plugin(
+    name: "GitVersionPlugin",
+    capability: .buildTool()
+  ),
+  .plugin(
+    name: "GhosttyVtPresencePlugin",
+    capability: .buildTool()
+  ),
+  .plugin(
+    name: "GhosttyVtRefreshPlugin",
+    capability: .command(
+      intent: .custom(
+        verb: "refresh-ghostty-vt",
+        description: "Rebuild the checked-in libghostty-vt static library and headers"
+      ),
+      permissions: [
+        .writeToPackageDirectory(
+          reason: "Updates Vendor/GhosttyVt libraries, headers, and provenance"
+        )
+      ]
+    )
+  ),
+  .plugin(
+    name: "ScribeAppBundlerPlugin",
+    capability: .command(
+      intent: .custom(
+        verb: "bundle",
+        description: "Build Scribe.app from the scribe-mac and scribe executables"
+      ),
+      permissions: [
+        .writeToPackageDirectory(
+          reason: "Writes the assembled Scribe.app bundle under the package directory"
+        )
+      ]
+    )
+  ),
+]
+
+var chromaTraits: Set<Package.Dependency.Trait> = []
+
+#if os(macOS)
+chromaTraits.insert("MetalBackend")
+products.append(.executable(name: "scribe-mac", targets: ["ScribeMac"]))
+targets.append(
+  .executableTarget(
+    name: "ScribeMac",
+    dependencies: [
+      "ScribeBlocks",
+      .product(name: "Chroma", package: "chroma"),
+      .product(name: "MetalBackend", package: "chroma"),
+    ],
+    path: "Sources/ScribeMacApp",
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  )
+)
+#elseif os(Linux)
+chromaTraits.insert("WaylandBackend")
+products.append(.executable(name: "scribe-wayland", targets: ["ScribeWayland"]))
+targets.append(
+  .executableTarget(
+    name: "ScribeWayland",
+    dependencies: [
+      "ScribeBlocks",
+      .product(name: "Chroma", package: "chroma"),
+      .product(name: "WaylandBackend", package: "chroma"),
+    ],
+    path: "Sources/ScribeWaylandApp",
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  )
 )
 #endif
 
@@ -17,18 +298,9 @@ let package = Package(
   platforms: [
     .macOS(.v26)
   ],
-  products: [
-    .executable(name: "scribe", targets: ["ScribeCLI"]),
-    .executable(name: "scribe-mac", targets: ["ScribeMac"]),
-    .executable(name: "scribe-wayland", targets: ["ScribeWayland"]),
-    .library(name: "ScribeCore", targets: ["ScribeCore"]),
-    .library(name: "ScribeKit", targets: ["ScribeKit"]),
-    .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
-    .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
-    .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
-  ],
+  products: products,
   dependencies: [
-    .package(path: "../chroma", traits: ["MetalBackend", "WaylandBackend"]),
+    .package(path: "../chroma", traits: chromaTraits),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -49,268 +321,5 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-crypto.git", from: "3.10.0"),
     .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
   ],
-  targets: [
-    .target(
-      name: "ScribeLLM",
-      dependencies: [
-        .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
-        .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ],
-      plugins: [
-        .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
-      ]
-    ),
-    .target(
-      name: "ScribeLLMCodex",
-      dependencies: [
-        .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
-        .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ],
-      plugins: [
-        .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
-      ]
-    ),
-    .target(
-      name: "ScribeCodexAuth",
-      dependencies: [
-        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
-        .product(name: "AsyncHTTPClient", package: "async-http-client"),
-        .product(name: "NIOCore", package: "swift-nio"),
-        .product(name: "Subprocess", package: "swift-subprocess"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .target(
-      name: "ScribeKit",
-      dependencies: [
-        "ScribeCore",
-        "ScribeComputerUse",
-        "ScribeLLM",
-        .product(name: "Logging", package: "swift-log"),
-        .product(name: "SystemPackage", package: "swift-system"),
-        .product(name: "_NIOFileSystem", package: "swift-nio"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .target(
-      name: "ScribeComputerUse",
-      dependencies: [
-        "ScribeCore",
-        .product(name: "Logging", package: "swift-log"),
-        .product(name: "SystemPackage", package: "swift-system"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ],
-      linkerSettings: [
-        .linkedFramework("AppKit"),
-        .linkedFramework("ApplicationServices"),
-        .linkedFramework("ScreenCaptureKit"),
-      ]
-    ),
-    .target(
-      name: "ScribeCore",
-      dependencies: [
-        "ScribeLLM",
-        "ScribeLLMCodex",
-        "ScribeCodexAuth",
-        .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
-        .product(name: "SystemPackage", package: "swift-system"),
-        .product(name: "Configuration", package: "swift-configuration"),
-        .product(name: "Subprocess", package: "swift-subprocess"),
-        .product(name: "Logging", package: "swift-log"),
-        .product(name: "NIOCore", package: "swift-nio"),
-        .product(name: "_NIOFileSystem", package: "swift-nio"),
-        .product(name: "AsyncHTTPClient", package: "async-http-client"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .executableTarget(
-      name: "ScribeCLI",
-      dependencies: [
-        "ScribeCore",
-        "ScribeCodexAuth",
-        "ScribeKit",
-        .product(name: "SystemPackage", package: "swift-system"),
-        .product(name: "Subprocess", package: "swift-subprocess"),
-        .product(name: "SlateCore", package: "slate"),
-        .product(name: "ArgumentParser", package: "swift-argument-parser"),
-        .product(name: "Markdown", package: "swift-markdown"),
-        .product(name: "_RopeModule", package: "swift-collections"),
-        .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
-        .product(name: "_NIOFileSystem", package: "swift-nio"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-        .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
-      ],
-      plugins: [
-        "GitVersionPlugin"
-      ]
-    ),
-    .target(
-      name: "ScribeBlocks",
-      dependencies: [
-        "ScribeCore",
-        "ScribeKit",
-        "ScribeTerminal",
-        .product(name: "Chroma", package: "chroma"),
-        .product(name: "Logging", package: "swift-log"),
-        .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
-        .product(name: "SystemPackage", package: "swift-system"),
-      ],
-      path: "Sources/ScribeMac",
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-        .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
-      ],
-      plugins: [
-        "GitVersionPlugin"
-      ]
-    ),
-    .target(
-      name: "ScribeTerminal",
-      dependencies: [
-        "GhosttyVt",
-        "PTYShim",
-        .product(name: "Chroma", package: "chroma"),
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ],
-      plugins: [
-        "GhosttyVtPresencePlugin"
-      ]
-    ),
-    .target(
-      name: "PTYShim",
-      publicHeadersPath: "include"
-    ),
-    .target(
-      name: "GhosttyVt",
-      path: "Vendor/GhosttyVt",
-      publicHeadersPath: "Headers",
-      linkerSettings: [
-        .unsafeFlags(
-          ["-L", "Vendor/GhosttyVt/Libraries/macos", "-lghostty-vt"],
-          .when(platforms: [.macOS])
-        ),
-        .unsafeFlags(
-          ["-L", "Vendor/GhosttyVt/Libraries/linux", "-lghostty-vt"],
-          .when(platforms: [.linux])
-        ),
-      ]
-    ),
-    .executableTarget(
-      name: "ScribeMac",
-      dependencies: [
-        "ScribeBlocks",
-        .product(name: "Chroma", package: "chroma"),
-        .product(name: "MetalBackend", package: "chroma"),
-      ],
-      path: "Sources/ScribeMacApp",
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .executableTarget(
-      name: "ScribeWayland",
-      dependencies: scribeWaylandDependencies,
-      path: "Sources/ScribeWaylandApp",
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .testTarget(
-      name: "ScribeTerminalTests",
-      dependencies: ["ScribeTerminal"],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .testTarget(
-      name: "ScribeCoreTests",
-      dependencies: [
-        "ScribeCore",
-        "ScribeLLM",
-        "ScribeLLMCodex",
-        "ScribeCodexAuth",
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .testTarget(
-      name: "ScribeCLITests",
-      dependencies: [
-        "ScribeCLI",
-        "ScribeKit",
-      ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-        .treatAllWarnings(as: .error),
-      ]
-    ),
-    .plugin(
-      name: "GitVersionPlugin",
-      capability: .buildTool()
-    ),
-    .plugin(
-      name: "GhosttyVtPresencePlugin",
-      capability: .buildTool()
-    ),
-    .plugin(
-      name: "GhosttyVtRefreshPlugin",
-      capability: .command(
-        intent: .custom(
-          verb: "refresh-ghostty-vt",
-          description: "Rebuild the checked-in libghostty-vt static library and headers"
-        ),
-        permissions: [
-          .writeToPackageDirectory(
-            reason: "Updates Vendor/GhosttyVt libraries, headers, and provenance"
-          )
-        ]
-      )
-    ),
-    .plugin(
-      name: "ScribeAppBundlerPlugin",
-      capability: .command(
-        intent: .custom(
-          verb: "bundle",
-          description: "Build Scribe.app from the scribe-mac and scribe executables"
-        ),
-        permissions: [
-          .writeToPackageDirectory(
-            reason: "Writes the assembled Scribe.app bundle under the package directory"
-          )
-        ]
-      )
-    ),
-  ]
+  targets: targets
 )
