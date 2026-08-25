@@ -9,6 +9,7 @@ let package = Package(
   products: [
     .executable(name: "scribe", targets: ["ScribeCLI"]),
     .executable(name: "scribe-mac", targets: ["ScribeMac"]),
+    .executable(name: "scribe-wayland", targets: ["ScribeWayland"]),
     .library(name: "ScribeCore", targets: ["ScribeCore"]),
     .library(name: "ScribeKit", targets: ["ScribeKit"]),
     .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
@@ -16,7 +17,7 @@ let package = Package(
     .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/zaneenders/chroma", revision: "0aca505"),
+    .package(path: "../chroma", traits: ["WaylandBackend"]),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -218,6 +219,19 @@ let package = Package(
         .product(name: "MetalBackend", package: "chroma"),
       ],
       path: "Sources/ScribeMacApp",
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+        .treatAllWarnings(as: .error),
+      ]
+    ),
+    .executableTarget(
+      name: "ScribeWayland",
+      dependencies: [
+        "ScribeBlocks",
+        .product(name: "Chroma", package: "chroma"),
+        .product(name: "WaylandBackend", package: "chroma"),
+      ],
+      path: "Sources/ScribeWaylandApp",
       swiftSettings: [
         .swiftLanguageMode(.v6),
         .treatAllWarnings(as: .error),

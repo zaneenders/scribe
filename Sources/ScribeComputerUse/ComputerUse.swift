@@ -1,3 +1,4 @@
+#if canImport(AppKit)
 import AppKit
 import ApplicationServices
 import Foundation
@@ -496,3 +497,10 @@ public enum ComputerUseTools {
     return [FindWindowsTool(session: session), ObserveUITool(session: session), ActUITool(session: session)]
   }
 }
+#else
+import ScribeCore
+
+public enum ComputerUseTools {
+  public static func make() -> [any ScribeTool] { [] }
+}
+#endif

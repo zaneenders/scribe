@@ -43,7 +43,11 @@ url="https://ziglang.org/download/$version/zig-$platform-$version.tar.xz"
 echo "Downloading Zig $version for $platform…"
 curl --fail --location --retry 3 --output "$archive" "$url"
 
-actual=$(shasum -a 256 "$archive" | awk '{print $1}')
+if command -v shasum >/dev/null 2>&1; then
+  actual=$(shasum -a 256 "$archive" | awk '{print $1}')
+else
+  actual=$(sha256sum "$archive" | awk '{print $1}')
+fi
 if [ "$actual" != "$sha256" ]; then
   rm -f "$archive"
   echo "error: Zig archive checksum mismatch" >&2

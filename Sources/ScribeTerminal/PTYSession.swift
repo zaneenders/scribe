@@ -1,5 +1,18 @@
-#if os(macOS)
+#if canImport(Darwin)
 import Darwin
+private let systemWrite = Darwin.write
+private let systemRead = Darwin.read
+private let systemClose = Darwin.close
+private let systemKill = Darwin.kill
+#elseif canImport(Glibc)
+import Glibc
+private let systemWrite = Glibc.write
+private let systemRead = Glibc.read
+private let systemClose = Glibc.close
+private let systemKill = Glibc.kill
+#endif
+
+#if canImport(Darwin) || canImport(Glibc)
 import Dispatch
 import Foundation
 import PTYShim
@@ -50,11 +63,10 @@ public final class PTYSession: @unchecked Sendable {
   private var masterFD: Int32
   private var childPID: pid_t
   private var readSource: DispatchSourceRead?
-  private var waitSource: DispatchSourceProcess?
   private var closed = false
 
   public init(
-    shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
+    shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/sh",
     workingDirectory: String = FileManager.default.currentDirectoryPath,
     columns: UInt16 = 80,
     rows: UInt16 = 24
@@ -110,7 +122,7 @@ public final class PTYSession: @unchecked Sendable {
       guard var pointer = bytes.baseAddress else { return }
       var remaining = bytes.count
       while remaining > 0 {
-        let count = Darwin.write(fd, pointer, remaining)
+        let count = systemWrite(fd, pointer, remaining)
         if count > 0 {
           pointer = pointer.advanced(by: count)
           remaining -= count
@@ -147,22 +159,20 @@ public final class PTYSession: @unchecked Sendable {
     let pid = childPID
     masterFD = -1
     readSource?.cancel()
-    waitSource?.cancel()
     readSource = nil
-    waitSource = nil
     lock.unlock()
 
-    Darwin.close(fd)
-    if pid > 0 { Darwin.kill(pid, SIGHUP) }
+    _ = systemClose(fd)
+    if pid > 0 { _ = systemKill(pid, SIGHUP) }
   }
 
   private func startReading() {
     let source = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: .global(qos: .userInitiated))
-    source.setEventHandler { [weak self, weak source] in
-      guard let self, let source else { return }
+    source.setEventHandler { [weak self] in
+      guard let self else { return }
       let available = max(1, min(Int(source.data), 64 * 1024))
       var buffer = [UInt8](repeating: 0, count: available)
-      let count = Darwin.read(masterFD, &buffer, buffer.count)
+      let count = systemRead(masterFD, &buffer, buffer.count)
       if count > 0 {
         let data = Data(buffer.prefix(count))
         let handler = lock.withLock { () -> (@Sendable (Data) -> Void)? in
@@ -182,16 +192,11 @@ public final class PTYSession: @unchecked Sendable {
   }
 
   private func startWaiting() {
-    let source = DispatchSource.makeProcessSource(
-      identifier: childPID,
-      eventMask: .exit,
-      queue: .global(qos: .utility)
-    )
-    source.setEventHandler { [weak self, weak source] in
+    let pid = childPID
+    DispatchQueue.global(qos: .utility).async { [weak self] in
       guard let self else { return }
       var status: Int32 = 0
-      _ = waitpid(childPID, &status, 0)
-      source?.cancel()
+      _ = waitpid(pid, &status, 0)
       let handler = lock.withLock { () -> (@Sendable (Int32) -> Void)? in
         guard let exitHandler else {
           pendingExitStatus = status
@@ -202,8 +207,6 @@ public final class PTYSession: @unchecked Sendable {
       handler?(status)
       close()
     }
-    waitSource = source
-    source.resume()
   }
 
   private static func withCStringArray<Result>(

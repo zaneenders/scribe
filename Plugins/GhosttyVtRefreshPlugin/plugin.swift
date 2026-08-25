@@ -120,10 +120,16 @@ struct GhosttyVtRefreshPlugin: CommandPlugin {
       try fileManager.copyItem(at: upstreamLicense, to: destinationLicense)
     }
 
-    let checksum = try Self.capture(
-      findExecutable("shasum", extraPaths: ["/usr/bin/shasum"]) ?? URL(fileURLWithPath: "/usr/bin/shasum"),
-      ["-a", "256", destinationLibrary.path]
-    ).split(separator: " ").first.map(String.init) ?? "unknown"
+    let checksumTool: (URL, [String])
+    if let shasum = findExecutable("shasum", extraPaths: ["/usr/bin/shasum"]) {
+      checksumTool = (shasum, ["-a", "256", destinationLibrary.path])
+    } else if let sha256sum = findExecutable("sha256sum", extraPaths: ["/usr/bin/sha256sum"]) {
+      checksumTool = (sha256sum, [destinationLibrary.path])
+    } else {
+      throw RefreshError.missingTool("shasum or sha256sum")
+    }
+    let checksum = try Self.capture(checksumTool.0, checksumTool.1)
+      .split(separator: " ").first.map(String.init) ?? "unknown"
     let provenance = """
     # Generated libghostty-vt provenance
 

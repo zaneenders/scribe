@@ -1,3 +1,7 @@
+#if defined(__linux__)
+#define _XOPEN_SOURCE 600
+#endif
+
 #include "pty_shim.h"
 
 #include <errno.h>

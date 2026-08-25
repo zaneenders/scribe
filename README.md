@@ -60,14 +60,27 @@ prefer a single install artifact over a separate `~/.local/bin/scribe`.
 
 ### Linux
 
-Install the Swift static SDK once, then build for your architecture:
+The Wayland app uses Chroma's native Wayland/EGL/OpenGL ES backend. Install the
+Wayland, EGL, and OpenGL ES development packages for your distribution, then
+build it natively:
+
+```bash
+# One-time terminal dependency build on a fresh checkout.
+./Scripts/bootstrap-zig.sh
+swift package --allow-writing-to-package-directory refresh-ghostty-vt
+
+swift build -c release --product scribe-wayland
+install -m 755 .build/release/scribe-wayland ~/.local/bin/scribe-wayland
+scribe-wayland
+```
+
+For CLI-only static builds, install the Swift static SDK once and build for your
+architecture:
 
 ```bash
 swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
   --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
 
-git clone --recurse-submodules https://github.com/zaneenders/scribe.git
-cd scribe
 ARCH=$(uname -m)   # x86_64 or aarch64
 swift build -c release --swift-sdk "${ARCH}-swift-linux-musl"
 install -m 755 .build/release/scribe ~/.local/bin/scribe
