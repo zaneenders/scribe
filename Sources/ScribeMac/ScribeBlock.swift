@@ -15,6 +15,11 @@ public struct ScribeBlock: Block {
   }
 }
 
+enum ScribeCommandPickerCommand {
+  static let previous: Command = .application("scribe.command-picker.previous")
+  static let next: Command = .application("scribe.command-picker.next")
+}
+
 extension ScribeBlock {
   /// Recommended editing and navigation bindings for a host Chroma app.
   public static var keyBindings: KeyBindings {
@@ -34,6 +39,10 @@ extension ScribeBlock {
       bind(.space, to: .action(.activate))
       bind(.pageUp, to: .navigation(.pageUp))
       bind(.pageDown, to: .navigation(.pageDown))
+      // Fork/TLDR picker commands. Their handlers are scoped to the ready layout,
+      // so these remain inert whenever no picker is open.
+      bind("f", to: ScribeCommandPickerCommand.previous)
+      bind("j", to: ScribeCommandPickerCommand.next)
       // Terminal tab: routed by focus scope, inert outside it.
       bind("c", modifiers: .control, to: ScribeTerminalCommand.interrupt)
       bind("/", modifiers: .control, to: ScribeTerminalCommand.controlSlash)

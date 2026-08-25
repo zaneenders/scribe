@@ -264,6 +264,11 @@ final class SessionController {
         command: command, boundaries: boundaries, startCursor: startCursor,
         endCursor: command == .tldr ? endCursor : nil, activeIsEnd: false,
         messageCount: snapshot.count)
+      // Leave composer editing while the picker owns f/j, Enter, and Escape.
+      // Otherwise printable picker keys are inserted into the draft and the
+      // editing submit/end events are consumed by the text field.
+      MacRenderContext.activeTextInput = nil
+      MacRenderContext.current?.focus(ScribeMacStore.composerID)
       transcript = Self.replay(snapshot.messages)
     }
   }

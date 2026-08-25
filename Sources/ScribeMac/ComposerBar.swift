@@ -14,13 +14,19 @@ struct BottomChrome: Block {
         QueuedTray(session: session, theme: theme)
       }
       if let picker = session.commandPicker {
-        CommandPickerBar(session: session, picker: picker, theme: theme)
+        CommandPickerInput(session: session) {
+          VStack(spacing: 0) {
+            CommandPickerBar(session: session, picker: picker, theme: theme)
+            StatusBar(store: store, session: session, theme: theme)
+          }
+        }
+      } else {
+        if store.showModelPicker {
+          BottomModelPicker(store: store, session: session, theme: theme)
+        }
+        ComposerBar(store: store, session: session, theme: theme)
+        StatusBar(store: store, session: session, theme: theme)
       }
-      if store.showModelPicker {
-        BottomModelPicker(store: store, session: session, theme: theme)
-      }
-      ComposerBar(store: store, session: session, theme: theme)
-      StatusBar(store: store, session: session, theme: theme)
     }
     .sizing(x: .grow)
   }
@@ -142,6 +148,49 @@ struct BottomModelPicker: Block {
     .sizing(x: .grow)
     .background(theme.headerBackground)
     .border(theme.border)
+  }
+}
+
+private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
+  let session: SessionController
+  let content: Content
+
+  init(session: SessionController, @BlockBuilder content: () -> Content) {
+    self.session = session
+    self.content = content()
+  }
+
+  @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
+  @MainActor var expandsVertically: Bool { BlockEngine.expandsVertically(content) }
+
+  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+    BlockEngine.measure(content, proposal: proposal, context: context)
+  }
+
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+    for command in context.input.commands {
+      switch command {
+      case ScribeCommandPickerCommand.previous, ScribeTerminalCommand.lineUp:
+        session.moveCommandCursor(by: -1)
+      case ScribeCommandPickerCommand.next, ScribeTerminalCommand.lineDown:
+        session.moveCommandCursor(by: 1)
+      case ScribeTerminalCommand.complete:
+        session.toggleCommandBoundary()
+      default:
+        break
+      }
+    }
+    for event in context.input.textEvents {
+      switch event {
+      case .submit:
+        session.confirmCommandPicker()
+      case .endEditing:
+        session.cancelCommandPicker()
+      default:
+        break
+      }
+    }
+    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
   }
 }
 

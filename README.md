@@ -60,18 +60,45 @@ prefer a single install artifact over a separate `~/.local/bin/scribe`.
 
 ### Linux
 
-The Wayland app uses Chroma's native Wayland/EGL/OpenGL ES backend. Install the
-Wayland, EGL, and OpenGL ES development packages for your distribution, then
-build it natively:
+Scribe's graphical app currently targets Wayland and uses Chroma's native
+Wayland/EGL/OpenGL ES backend.
+
+#### Release archive
+
+Download the archive for your architecture from the GitHub release, verify its
+adjacent `.sha256` file, then install it for your user:
 
 ```bash
+tar -xzf scribe-linux-$(uname -m)-*.tar.gz
+cd scribe-linux-$(uname -m)
+./install.sh
+```
+
+This installs the CLI and Wayland app under `~/.local/bin`, plus a desktop entry
+and icon under `~/.local/share`. The target system needs a Wayland session and
+the standard runtime libraries for Wayland client/cursor/EGL, EGL, OpenGL ES 2,
+and xkbcommon. Swift itself is embedded in the binaries and is not required on
+the target machine. Set `PREFIX=/another/prefix` when running `install.sh` for a
+non-default installation.
+
+#### Build from source
+
+Install Swift 6.3 and your distribution's Wayland, EGL, OpenGL ES, xkbcommon,
+and pkg-config development packages. Then:
+
+```bash
+git clone --recurse-submodules https://github.com/zaneenders/scribe.git
+cd scribe
+
 # One-time terminal dependency build on a fresh checkout.
 ./Scripts/bootstrap-zig.sh
 swift package --allow-writing-to-package-directory refresh-ghostty-vt
 
-swift build -c release --product scribe-wayland
-install -m 755 .build/release/scribe-wayland ~/.local/bin/scribe-wayland
-scribe-wayland
+# Build a redistributable archive with CLI, app, desktop entry, and icon.
+./Scripts/package-linux.sh
+
+# Or build and run only the app locally.
+swift run -c release scribe-wayland
 ```
 
 For CLI-only static builds, install the Swift static SDK once and build for your
