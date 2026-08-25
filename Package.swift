@@ -1,6 +1,17 @@
 // swift-tools-version: 6.3
 import PackageDescription
 
+var scribeWaylandDependencies: [Target.Dependency] = [
+  "ScribeBlocks",
+  .product(name: "Chroma", package: "chroma"),
+]
+
+#if os(Linux)
+scribeWaylandDependencies.append(
+  .product(name: "WaylandBackend", package: "chroma")
+)
+#endif
+
 let package = Package(
   name: "scribe",
   platforms: [
@@ -17,7 +28,7 @@ let package = Package(
     .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
   ],
   dependencies: [
-    .package(path: "../chroma", traits: ["WaylandBackend"]),
+    .package(path: "../chroma", traits: ["MetalBackend", "WaylandBackend"]),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -226,11 +237,7 @@ let package = Package(
     ),
     .executableTarget(
       name: "ScribeWayland",
-      dependencies: [
-        "ScribeBlocks",
-        .product(name: "Chroma", package: "chroma"),
-        .product(name: "WaylandBackend", package: "chroma"),
-      ],
+      dependencies: scribeWaylandDependencies,
       path: "Sources/ScribeWaylandApp",
       swiftSettings: [
         .swiftLanguageMode(.v6),
