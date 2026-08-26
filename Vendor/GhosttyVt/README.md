@@ -1,9 +1,10 @@
 # Vendored libghostty-vt interface
 
 Scribe pins Ghostty source as the Git submodule at `Vendor/GhosttySource` and
-generates the platform static library locally. Generated archives are ignored
-by Git; the small public C headers, module map, and third-party notices remain
-committed so API and license changes are reviewable.
+generates the platform static library and public C headers locally. Generated
+archives and upstream headers are ignored by Git; the narrow module map and
+third-party notices remain committed. Review header changes against the pinned
+submodule when updating Ghostty.
 
 Normal incremental builds never invoke Zig. They only run a cheap presence
 check and use the previously generated archive.
