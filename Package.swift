@@ -300,7 +300,7 @@ let package = Package(
   ],
   products: products,
   dependencies: [
-    .package(path: "../chroma", traits: chromaTraits),
+    .package(url: "https://github.com/zaneenders/chroma", revision: "30250e2"),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
