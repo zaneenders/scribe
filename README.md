@@ -59,41 +59,51 @@ prefer a single install artifact over a separate `~/.local/bin/scribe`.
 Scribe's graphical app currently targets Wayland and uses Chroma's native
 Wayland/EGL/OpenGL ES backend.
 
-#### Release archive
-
-Download the archive for your architecture from the GitHub release, verify its
-adjacent `.sha256` file, then install it for your user:
-
-```bash
-tar -xzf scribe-linux-$(uname -m)-*.tar.gz
-cd scribe-linux-$(uname -m)
-./install.sh
-```
-
-This installs the CLI and Wayland app under `~/.local/bin`, plus a desktop entry
-and icon under `~/.local/share`. The target system needs a Wayland session and
-the standard runtime libraries for Wayland client/cursor/EGL, EGL, OpenGL ES 2,
-and xkbcommon. Swift itself is embedded in the binaries and is not required on
-the target machine. Set `PREFIX=/another/prefix` when running `install.sh` for a
-non-default installation.
-
 #### Build from source
 
-Install Swift 6.3 and your distribution's Wayland, EGL, OpenGL ES, xkbcommon,
-and pkg-config development packages. Then:
+Install Swift 6.3 and the native development packages first. Scribe's HTTP
+stack uses Swift's `FoundationNetworking` on Linux for `URLError` handling;
+that module adds the `libcurl` linker dependency. The OpenAI-compatible and
+Codex clients themselves send requests with AsyncHTTPClient.
+
+On Fedora/RHEL (including Fedora Asahi Remix):
 
 ```bash
-git clone --recurse-submodules https://github.com/zaneenders/scribe.git
-cd scribe
+sudo dnf install binutils file libcurl-devel libglvnd-devel \
+  libxkbcommon-devel pkgconf-pkg-config wayland-devel
+```
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt-get install binutils file libcurl4-openssl-dev libegl1-mesa-dev \
+  libgles2-mesa-dev libwayland-dev libxkbcommon-dev pkg-config
+```
+
+The `-devel`/`-dev` curl package is required when building even if the libcurl
+runtime is already installed: it provides the unversioned `libcurl.so` linker
+entry and `libcurl.pc` metadata. Installing a prebuilt Scribe archive only
+requires the libcurl runtime package (`libcurl` on Fedora/RHEL or `libcurl4` on
+Debian/Ubuntu), not the development package. Then build Scribe:
+
+```bash
+git submodule update --init --recursive
 
 # One-time terminal dependency build on a fresh checkout.
 ./Scripts/bootstrap-zig.sh
-swift package --allow-writing-to-package-directory refresh-ghostty-vt
+swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt
 
 # Build a redistributable archive with CLI, app, desktop entry, and icon.
+# The package script statically links the Swift runtime and rejects a build
+# containing a machine-specific Swift runtime path.
 ./Scripts/package-linux.sh
 
-# Or build and run only the app locally.
+# Install the archive created under dist/.
+tar -xzf dist/scribe-linux-$(uname -m)-*.tar.gz -C dist
+cd dist/scribe-linux-$(uname -m)-*/
+./install.sh
+
+# Or build and run only the app locally (Swift remains required in this case).
 swift run -c release scribe-wayland
 ```
 
