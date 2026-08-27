@@ -147,8 +147,12 @@ public actor ComputerUseSession {
 
     let status: AXError
     switch action {
-    case "press":
-      status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+    case "press", "confirm", "show_menu", "scroll_to_visible", "increment", "decrement", "scroll_down",
+      "scroll_up":
+      guard let actionName = semanticAccessibilityActionName(for: action) else {
+        throw ComputerUseError.unsupportedAction(action)
+      }
+      status = AXUIElementPerformAction(element, actionName as CFString)
     case "focus":
       status = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     case "set_text":
@@ -156,14 +160,6 @@ public actor ComputerUseSession {
         throw ComputerUseError.accessibilityFailure("set_text requires the text argument.")
       }
       status = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, text as CFTypeRef)
-    case "increment":
-      status = AXUIElementPerformAction(element, kAXIncrementAction as CFString)
-    case "decrement":
-      status = AXUIElementPerformAction(element, kAXDecrementAction as CFString)
-    case "scroll_down":
-      status = AXUIElementPerformAction(element, "AXScrollDownByPage" as CFString)
-    case "scroll_up":
-      status = AXUIElementPerformAction(element, "AXScrollUpByPage" as CFString)
     default:
       throw ComputerUseError.unsupportedAction(action)
     }
@@ -210,30 +206,26 @@ public actor ComputerUseSession {
   }
 
   private func buildOutline(root: AXUIElement, elements: inout [String: AXUIElement]) -> [OutlineNode] {
-    // TODO: is inout best here? is anything in elements on start?
-    var output: [OutlineNode] = []
-    var queue: [(AXUIElement, Int)] = [(root, 0)]
-    var index = 0
-    while index < queue.count && output.count < 600 {
-      let (element, depth) = queue[index]
-      index += 1
-      let ref = "@e\(output.count + 1)"
-      elements[ref] = element
-      output.append(
-        OutlineNode(
-          ref: ref,
-          role: stringAttribute(element, kAXRoleAttribute as CFString) ?? "unknown",
-          title: stringAttribute(element, kAXTitleAttribute as CFString) ?? "",
-          value: displayString(copyAttribute(element, kAXValueAttribute as CFString)),
-          description: stringAttribute(element, kAXDescriptionAttribute as CFString) ?? "",
-          frame: frameAttribute(element),
-          actions: actionNames(element),
-          depth: depth))
-      if depth < 12, let children = copyAttribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement] {
-        queue.append(contentsOf: children.prefix(200).map { ($0, depth + 1) })
-      }
+    // Render in depth-first preorder so indentation represents the real AX
+    // hierarchy. The traversal itself is platform-independent and unit tested.
+    let traversal = depthFirstPreorder(
+      root: root, maxDepth: 12, maxCount: 600, maxChildren: 200,
+      children: { element in
+        self.copyAttribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement] ?? []
+      })
+    return traversal.enumerated().map { index, item in
+      let ref = "@e\(index + 1)"
+      elements[ref] = item.element
+      return OutlineNode(
+        ref: ref,
+        role: stringAttribute(item.element, kAXRoleAttribute as CFString) ?? "unknown",
+        title: stringAttribute(item.element, kAXTitleAttribute as CFString) ?? "",
+        value: displayString(copyAttribute(item.element, kAXValueAttribute as CFString)),
+        description: stringAttribute(item.element, kAXDescriptionAttribute as CFString) ?? "",
+        frame: frameAttribute(item.element),
+        actions: actionNames(item.element),
+        depth: item.depth)
     }
-    return output
   }
 
   private func render(_ nodes: [OutlineNode]) -> String {
@@ -444,13 +436,13 @@ public struct ObserveUITool: ScribeTool {
 public struct ActUITool: ScribeTool {
   public static let name = "act_ui"
   public static let description =
-    "Perform a native semantic Accessibility action on an element from observe_ui. Supported actions: press, focus, set_text, increment, decrement, scroll_down, scroll_up."
+    "Perform a native semantic Accessibility action on an element from observe_ui. Supported actions: press, confirm, show_menu, scroll_to_visible, focus, set_text, increment, decrement, scroll_down, scroll_up. Use an action advertised on the element when possible."
   public static let parameters = [
     ScribeToolParameter(name: "state_id", type: .string, description: "State id returned by observe_ui."),
     ScribeToolParameter(name: "ref", type: .string, description: "Element ref such as @e12 from the same observation."),
     ScribeToolParameter(
       name: "action", type: .string,
-      description: "press, focus, set_text, increment, decrement, scroll_down, or scroll_up."),
+      description: "press, confirm, show_menu, scroll_to_visible, focus, set_text, increment, decrement, scroll_down, or scroll_up. Prefer an action listed by observe_ui."),
     ScribeToolParameter(
       name: "text", type: .string, description: "Text for set_text; omit for other actions.", required: false),
   ]
