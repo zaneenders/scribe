@@ -17,6 +17,7 @@ git submodule update --init --recursive
 
 swift package \
   --allow-writing-to-package-directory \
+  --allow-network-connections all:443 \
   refresh-ghostty-vt
 
 swift build
@@ -43,6 +44,7 @@ git add Vendor/GhosttySource
 
 swift package \
   --allow-writing-to-package-directory \
+  --allow-network-connections all:443 \
   refresh-ghostty-vt
 ```
 
@@ -67,6 +69,7 @@ To compile and verify without replacing generated files:
 ```sh
 swift package \
   --allow-writing-to-package-directory \
+  --allow-network-connections all:443 \
   refresh-ghostty-vt --dry-run
 ```
 

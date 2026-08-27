@@ -36,7 +36,7 @@ struct GhosttyVtPresencePlugin: BuildToolPlugin {
       printf >&2 'error: Missing generated libghostty-vt artifacts:%b\\n\\n' "$missing"
       printf >&2 'Initialize the pinned Ghostty source and build the library once:\n'
       printf >&2 '  git submodule update --init --recursive\n'
-      printf >&2 '  swift package --allow-writing-to-package-directory refresh-ghostty-vt\n\\n'
+      printf >&2 '  swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt\n\\n'
       printf >&2 'Run the same refresh command whenever the Ghostty submodule is updated.\n'
       exit 1
     fi

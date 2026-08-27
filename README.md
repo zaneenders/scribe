@@ -26,14 +26,10 @@ mkdir -p ~/.local/bin
 ### macOS
 
 ```bash
-git clone --recurse-submodules https://github.com/zaneenders/scribe.git
-cd scribe
+git submodule update --init --recursive
 
-# One-time graphical app/terminal dependency build. This installs a pinned,
-# checksummed Zig under Vendor/.tools and generates the ignored static archive.
-# Normal incremental builds do not run Zig.
 ./Scripts/bootstrap-zig.sh
-swift package --allow-writing-to-package-directory refresh-ghostty-vt
+swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt
 
 # CLI
 swift build -c release

@@ -337,7 +337,7 @@ private enum RefreshError: Error, CustomStringConvertible {
 
       Install the pinned, checksummed project-local Zig toolchain and retry:
         ./Scripts/bootstrap-zig.sh
-        swift package --allow-writing-to-package-directory refresh-ghostty-vt
+        swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt
 
       Normal `swift build` calls do not require Zig after the archive is generated.
       """

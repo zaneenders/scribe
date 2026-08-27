@@ -40,7 +40,7 @@ fi
 
 mkdir -p "$root/Vendor/.tools"
 url="https://ziglang.org/download/$version/zig-$platform-$version.tar.xz"
-echo "Downloading Zig $version for $platform…"
+echo "Downloading Zig $version for ${platform}…"
 curl --fail --location --retry 3 --output "$archive" "$url"
 
 if command -v shasum >/dev/null 2>&1; then

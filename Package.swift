@@ -233,7 +233,11 @@ var targets: [Target] = [
       permissions: [
         .writeToPackageDirectory(
           reason: "Updates Vendor/GhosttyVt libraries, headers, and provenance"
-        )
+        ),
+        .allowNetworkConnections(
+          scope: .all(ports: [443]),
+          reason: "Downloads checksummed dependencies declared by Ghostty's Zig package manifest"
+        ),
       ]
     )
   ),
