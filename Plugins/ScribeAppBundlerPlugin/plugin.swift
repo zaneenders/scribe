@@ -87,6 +87,8 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
   }
 
+  // Signing is intentionally ad-hoc here because SwiftPM command plugins run sandboxed.
+
   private static func run(_ executable: String, arguments: [String]) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
