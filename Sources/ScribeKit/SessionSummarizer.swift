@@ -2,7 +2,7 @@ import Foundation
 import Logging
 import ScribeCore
 
-enum SessionSummarizer {
+public enum SessionSummarizer {
 
   private static let summarizerSystemPrompt = """
     You are describing the PATH an AI coding assistant took through a slice \
@@ -33,7 +33,7 @@ enum SessionSummarizer {
     paths and command shapes beat adjectives.
     """
 
-  static func renderSlice(_ messages: [ScribeMessage]) -> String {
+  public static func renderSlice(_ messages: [ScribeMessage]) -> String {
     var lines: [String] = []
     for msg in messages {
       switch msg.role {
@@ -60,7 +60,7 @@ enum SessionSummarizer {
     return lines.joined(separator: "\n\n")
   }
 
-  static func summarize(
+  public static func summarize(
     slice: [ScribeMessage],
     configuration: ScribeConfig,
     logger: Logger

@@ -86,7 +86,7 @@ internal enum SlateChatRenderer {
         break
       }
       if lines.count == queuedTrayMaxRows - 1, index < total {
-        hidden = total - index
+        hidden = total - index + 1
         break
       }
       let label = "[\(index)/\(total)] "
@@ -116,7 +116,7 @@ internal enum SlateChatRenderer {
         break
       }
       if lines.count == queuedTrayMaxRows - 1, index < total {
-        hidden = total - index
+        hidden = total - index + 1
         break
       }
       let label = "[\(index)/\(total)] "

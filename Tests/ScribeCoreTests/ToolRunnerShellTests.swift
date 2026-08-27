@@ -28,6 +28,26 @@ struct ToolRunnerShellTests {
     #expect(stderr == "")
   }
 
+  @Test func defaultsToLogicalWorkingDirectory() async throws {
+    let registry = ToolRegistry(
+      tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
+    try await withTemporaryDirectory { dir in
+      let marker = dir.appendingPathComponent("only_here.txt")
+      try "cwd_ok".write(to: marker, atomically: true, encoding: .utf8)
+
+      let args = try jsonArguments(["command": "/bin/cat only_here.txt"])
+      let json = try! await registry.run(
+        name: "shell", arguments: args, workingDirectory: FilePath(dir.path), logger: toolRunnerTestLogger,
+        abortObserver: AbortNotifier()
+      ).text
+      let out = try decodeShell(json)
+      #expect(out.ok == true)
+      #expect(out.exitCode == 0)
+      let stdout = try readFileIfExists(out.stdoutFile)
+      #expect(stdout == "cwd_ok")
+    }
+  }
+
   @Test func honorsWorkingDirectory() async throws {
     let registry = ToolRegistry(
       tools: [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()], logger: toolRunnerTestLogger)
@@ -249,36 +269,6 @@ struct ToolRunnerShellTests {
 private struct InterruptTimeoutError: Error, CustomStringConvertible {
   var description: String {
     "Interrupt test timed out after 15 seconds — the long-running process was not killed."
-  }
-}
-
-final class SpyProcessKiller: ProcessKiller, Sendable {
-  struct Invocation: Sendable {
-    let rootPid: pid_t
-    let shellID: UUID
-  }
-
-  private struct State {
-    var invocations: [Invocation] = []
-  }
-  private let state = Mutex(State())
-  private let forward = DefaultProcessKiller()
-
-  init() {}
-
-  func killTree(
-    rootPid: pid_t,
-    execution: ShellSubprocessExecution,
-    logger: Logger,
-    shellID: UUID
-  ) -> Int {
-    state.withLock { $0.invocations.append(.init(rootPid: rootPid, shellID: shellID)) }
-    return forward.killTree(
-      rootPid: rootPid, execution: execution, logger: logger, shellID: shellID)
-  }
-
-  func snapshot() -> [Invocation] {
-    state.withLock { $0.invocations }
   }
 }
 

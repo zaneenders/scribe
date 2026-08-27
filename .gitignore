@@ -7,3 +7,11 @@
 scribe-edit
 *.perf
 *.profraw
+/dist
+
+# Generated from the pinned Ghostty submodule by `swift package
+# refresh-ghostty-vt`; normal builds only verify these artifacts exist.
+/Vendor/GhosttyVt/Libraries/
+/Vendor/GhosttyVt/Headers/ghostty/
+/Vendor/GhosttyVt/PROVENANCE.md
+/Vendor/.tools/

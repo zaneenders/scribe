@@ -60,6 +60,27 @@ func codexStreamEmitsFinalizedOnResponseCompletedWithReasoningDelta() async thro
 }
 
 @Test
+func codexStreamSeparatesAdjacentReasoningSummaryParts() async throws {
+  let sse = makeSSE(
+    #"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"**Planning font catalog redesign**"}"#,
+    #"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":1,"delta":"**Designing custom glyph**"}"#,
+    #"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":1,"delta":" and atlas"}"#,
+    #"{"type":"response.completed","response":{"id":"resp_summary"}}"#
+  )
+
+  let (events, turn, _) = try await driveProcessor(sse: sse)
+
+  #expect(
+    turn.reasoningText
+      == "**Planning font catalog redesign**\n\n**Designing custom glyph** and atlas")
+  let reasoningText = events.compactMap { event -> String? in
+    guard case .output(.text(.reasoning, let text)) = event else { return nil }
+    return text
+  }.joined()
+  #expect(reasoningText == turn.reasoningText)
+}
+
+@Test
 func codexStreamEmitsFinalizedOnResponseCompletedWithToolCallDeltas() async throws {
   let sse = makeSSE(
     #"{"type":"response.function_call_arguments.delta","delta":"{\"com","output_index":0}"#,

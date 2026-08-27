@@ -19,6 +19,11 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   private(set) var isIncomplete = false
   private(set) var incompleteReason: String?
   private var receivedTerminalEvent = false
+  /// Identity of the last reasoning-summary part whose text was emitted.
+  /// Codex sends each summary heading as a separate part, but the text deltas do
+  /// not contain whitespace between parts. Preserve that structural boundary so
+  /// adjacent Markdown headings do not become `**first****second**`.
+  private var lastReasoningSummaryPart: String?
   let streamWallStart: ContinuousClock.Instant
 
   init(
@@ -141,6 +146,11 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         case "response.reasoning_summary_text.delta":
           if let delta = json["delta"] as? String {
             markStreamStarted()
+            let separator = reasoningSummarySeparator(for: json)
+            if !separator.isEmpty {
+              emitReasoningDelta(separator)
+              turn.reasoningText += separator
+            }
             emitReasoningDelta(delta)
             turn.reasoningText += delta
           }
@@ -266,7 +276,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         "stream_started": "\(streamStarted)",
         "raw_event": "\(rawEvent ?? "unavailable")",
       ])
-    return .generic(description)
+    return .providerStreamError(detail: description, code: code, type: errorType)
   }
 
   private func firstNonEmptyString(_ values: Any?...) -> String? {
@@ -307,6 +317,22 @@ struct CodexStreamProcessor<AO: AbortObserver> {
       streamSection = .reasoning
     }
     onEvent(.output(.text(.reasoning, text)))
+  }
+
+  private mutating func reasoningSummarySeparator(for event: [String: Any]) -> String {
+    let partID: String?
+    if let summaryIndex = event["summary_index"] as? Int {
+      partID = "summary:\(summaryIndex)"
+    } else if let contentIndex = event["content_index"] as? Int {
+      partID = "content:\(contentIndex)"
+    } else {
+      partID = nil
+    }
+
+    guard let partID else { return "" }
+    defer { lastReasoningSummaryPart = partID }
+    guard let previous = lastReasoningSummaryPart, previous != partID else { return "" }
+    return "\n\n"
   }
 
   private mutating func emitToolCallDelta(outputIndex: Int, delta: String) {

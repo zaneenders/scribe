@@ -1,4 +1,5 @@
 import Foundation
+import ScribeKit
 
 struct ProfilePickerSnapshot: Sendable, Equatable {
   var profiles: [ProfileSummary]

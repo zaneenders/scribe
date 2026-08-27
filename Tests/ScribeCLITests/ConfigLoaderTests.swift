@@ -4,6 +4,7 @@ import SystemPackage
 import Testing
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 @Suite(.serialized)
 struct ConfigLoaderTests {
