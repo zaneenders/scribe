@@ -27,6 +27,11 @@ extension ScribeBlock {
       bind("c", modifiers: .command, to: .editing(.copy))
       bind("v", modifiers: .command, to: .editing(.paste))
       bind("a", modifiers: .command, to: .editing(.selectAll))
+      #if os(Linux)
+      bind("c", modifiers: [.control, .shift], to: .editing(.copy))
+      bind("v", modifiers: [.control, .shift], to: .editing(.paste))
+      bind("a", modifiers: [.control, .shift], to: .editing(.selectAll))
+      #endif
       bind(.backspace, to: .editing(.backspace))
       bind(.delete, to: .editing(.deleteForward))
       bind(.leftArrow, to: .editing(.moveCaretLeft))

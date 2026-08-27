@@ -61,6 +61,9 @@ struct ScribeMacRoot: Block {
       }
     }
     .background(theme.background)) { context in
+      context.setCopyTextProvider {
+        SelectionManager.shared.selectedText()
+      }
       // Hit testing uses layouts retained from the preceding frame.
       if context.input.pointerPressed {
         SelectionManager.shared.clear()
