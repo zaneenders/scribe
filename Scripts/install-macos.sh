@@ -27,10 +27,11 @@ EOF
 fi
 
 cd "$repo_root"
-swift package --allow-writing-to-package-directory bundle
+SCRIBE_SKIP_ADHOC_SIGNING=1 \
+  swift package --allow-writing-to-package-directory bundle
 
-# The SwiftPM plugin creates an ad-hoc-signed assembly. Re-sign outside the plugin
-# sandbox, where codesign can access the user's login keychain.
+# Sign outside the SwiftPM plugin sandbox, where codesign can access the user's
+# login keychain.
 printf 'Signing Scribe with "%s"...\n' "$identity"
 /usr/bin/codesign --force --sign "$identity" "$app/Contents/Helpers/scribe"
 /usr/bin/codesign --force --sign "$identity" "$app"
