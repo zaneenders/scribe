@@ -93,15 +93,12 @@ git submodule update --init --recursive
 ./Scripts/bootstrap-zig.sh
 swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt
 
-# Build a redistributable archive with CLI, app, desktop entry, and icon.
-# The package script statically links the Swift runtime and rejects a build
-# containing a machine-specific Swift runtime path.
-./Scripts/package-linux.sh
+# Build a redistributable archive with CLI, app, desktop entry, and icon, then
+# install it to ~/.local. The package script statically links the Swift runtime
+# and rejects a build containing a machine-specific Swift runtime path.
+./Scripts/package-linux.sh --install
 
-# Install the archive created under dist/.
-tar -xzf dist/scribe-linux-$(uname -m)-*.tar.gz -C dist
-cd dist/scribe-linux-$(uname -m)-*/
-./install.sh
+# To create the archive under dist/ without installing it, omit --install.
 
 # Or build and run only the app locally (Swift remains required in this case).
 swift run -c release scribe-wayland
