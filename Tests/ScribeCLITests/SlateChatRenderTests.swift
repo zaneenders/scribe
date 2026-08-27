@@ -3,6 +3,7 @@ import SlateCore
 import Testing
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 @Suite
 struct SlateChatRenderTests {

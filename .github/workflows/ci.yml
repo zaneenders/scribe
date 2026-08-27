@@ -108,10 +108,62 @@ jobs:
           path: |
             .build/${{ matrix.arch }}-swift-linux-musl/release/scribe
 
+  linux-package:
+    name: Linux package (${{ matrix.arch }})
+    needs: setup
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: swift:latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Install graphical build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils curl file git libcurl4-openssl-dev libegl1-mesa-dev \
+            libgles2-mesa-dev libwayland-dev libxkbcommon-dev pkg-config xz-utils
+      - name: Restore Swift packages
+        uses: actions/cache@v6
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+          key: spm-${{ hashFiles('Package.resolved') }}-${{ matrix.arch }}-native
+      - name: Build Ghostty terminal library
+        run: |
+          ./Scripts/bootstrap-zig.sh
+          swift package --allow-writing-to-package-directory refresh-ghostty-vt
+      - name: Build release archive
+        run: ./Scripts/package-linux.sh
+      - name: Inspect release archive
+        run: |
+          tar -tzf dist/scribe-linux-${{ matrix.arch }}-*.tar.gz
+          sha256sum --check dist/scribe-linux-${{ matrix.arch }}-*.tar.gz.sha256
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v7
+        with:
+          name: scribe-linux-package-${{ matrix.arch }}
+          path: |
+            dist/scribe-linux-${{ matrix.arch }}-*.tar.gz
+            dist/scribe-linux-${{ matrix.arch }}-*.tar.gz.sha256
+
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, linux-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -125,4 +177,6 @@ jobs:
           files: |
             scribe-x86_64/*
             scribe-aarch64/*
+            scribe-linux-package-x86_64/*
+            scribe-linux-package-aarch64/*
           generate_release_notes: true

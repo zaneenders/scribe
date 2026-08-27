@@ -1,5 +1,4 @@
 import Foundation
-import ScribeCore
 import SystemPackage
 
 public enum ToolInvocationFormatting {

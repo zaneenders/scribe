@@ -5,6 +5,7 @@ import SystemPackage
 import Testing
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 @Suite
 struct ChatSessionPersistenceTests {
@@ -120,6 +121,38 @@ struct ChatSessionPersistenceTests {
 
       let files = try await ChatSessionStore.listSessionDirectories(sessionsRoot: FilePath(tempRoot.path))
       #expect(files.count == 1)
+    }
+  }
+
+  @Test func listSessionsOrdersByLastMessageInsteadOfDirectoryTouch() async throws {
+    try await withTemporaryDirectory { tempRoot in
+      let root = FilePath(tempRoot.path)
+      let olderID = UUID()
+      let newerID = UUID()
+      let olderDirectory = try await ChatSessionStore.sessionDirectory(
+        sessionId: olderID, sessionsRoot: root)
+      let newerDirectory = try await ChatSessionStore.sessionDirectory(
+        sessionId: newerID, sessionsRoot: root)
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: olderID, createdAt: Date(timeIntervalSince1970: 1), model: "m",
+          cwd: "/", baseURL: nil, scribeVersion: "test",
+          lastMessageAt: Date(timeIntervalSince1970: 10)),
+        to: olderDirectory)
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: newerID, createdAt: Date(timeIntervalSince1970: 2), model: "m",
+          cwd: "/", baseURL: nil, scribeVersion: "test",
+          lastMessageAt: Date(timeIntervalSince1970: 20)),
+        to: newerDirectory)
+
+      // Touching the older session directory must not promote it.
+      try FileManager.default.setAttributes(
+        [.modificationDate: Date(timeIntervalSince1970: 30)],
+        ofItemAtPath: olderDirectory.string)
+
+      let files = try await ChatSessionStore.listSessionDirectories(sessionsRoot: root)
+      #expect(files == [newerDirectory, olderDirectory])
     }
   }
 

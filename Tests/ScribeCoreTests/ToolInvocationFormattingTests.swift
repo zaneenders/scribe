@@ -1,5 +1,5 @@
 import Foundation
-import ScribeCLI
+import ScribeCore
 import Testing
 
 @Suite

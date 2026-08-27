@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Scribe
+Comment=AI coding agent
+Exec="@SCRIBE_WAYLAND_EXEC@"
+Icon=com.zaneenders.scribe
+Terminal=false
+Categories=Development;Utility;
+Keywords=AI;Agent;Development;
+StartupNotify=true

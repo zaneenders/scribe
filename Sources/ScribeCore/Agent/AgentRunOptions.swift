@@ -1,9 +1,11 @@
 public struct AgentRunOptions: Sendable {
-  public var temperature: Double
+  /// Per-run sampling temperature override. When nil, the active profile's
+  /// configured temperature is used.
+  public var temperature: Double?
   public var maxToolRounds: Int
 
   public init(
-    temperature: Double = 0,
+    temperature: Double? = nil,
     maxToolRounds: Int = .max
   ) {
     self.temperature = temperature

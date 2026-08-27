@@ -9,6 +9,7 @@ struct OpenAICompletionsProvider: AgentProvider {
   let contextWindow: Int
   let requestProfile: ChatCompletionRequestProfile
   let maxCompletionTokens: Int?
+  var defaultTemperature: Double = 0
   var retryPolicy: RetryPolicy = .default
 
   func run(
@@ -27,7 +28,7 @@ struct OpenAICompletionsProvider: AgentProvider {
       client: client,
       toolExecutor: toolExecutor,
       chatTools: chatTools,
-      temperature: options.temperature,
+      temperature: options.temperature ?? defaultTemperature,
       maxToolRounds: options.maxToolRounds,
       workingDirectory: workingDirectory,
       reasoningEnabled: reasoningEnabled,

@@ -36,6 +36,7 @@ enum AgentProviderFactory {
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEffort: configuration.reasoningEffort,
+        defaultTemperature: configuration.temperature,
         contextWindow: configuration.contextWindow,
         retryPolicy: retryPolicy)
 
@@ -67,6 +68,7 @@ enum AgentProviderFactory {
         contextWindow: configuration.contextWindow,
         requestProfile: profile,
         maxCompletionTokens: configuration.maxTokens,
+        defaultTemperature: configuration.temperature ?? 0,
         retryPolicy: retryPolicy)
 
     default:
@@ -79,6 +81,7 @@ enum AgentProviderFactory {
         contextWindow: configuration.contextWindow,
         requestProfile: .standard,
         maxCompletionTokens: nil,
+        defaultTemperature: configuration.temperature ?? 0,
         retryPolicy: retryPolicy)
     }
   }

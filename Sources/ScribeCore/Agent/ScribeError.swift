@@ -3,6 +3,10 @@ import Foundation
 public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
   case configuration(key: String?, reason: String)
   case apiHTTPError(statusCode: Int, detail: String, hint: String?)
+  /// An error reported inside an otherwise successful provider event stream.
+  /// `code` and `type` are retained so retry policy can distinguish transient
+  /// server failures from invalid requests and other permanent failures.
+  case providerStreamError(detail: String, code: String?, type: String?)
   case toolUnknown(name: String)
   case sessionCorrupted(reason: String)
   case resumeNotFound(specifier: String)
@@ -23,6 +27,8 @@ public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
         msg += ".\(hint)"
       }
       return msg
+    case .providerStreamError(let detail, _, _):
+      return detail
     case .toolUnknown(let name):
       return "Unknown tool \"\(name)\""
     case .sessionCorrupted(let reason):

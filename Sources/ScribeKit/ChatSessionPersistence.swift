@@ -3,28 +3,23 @@ import ScribeCore
 import SystemPackage
 import _NIOFileSystem
 
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#elseif canImport(Musl)
-import Musl
-#endif
+public struct ChatSessionMetadata: Codable, Sendable {
+  public var schemaVersion: Int
+  public var id: UUID
+  public var createdAt: Date
+  public var model: String
+  public var cwd: String
+  public var baseURL: String?
+  public var scribeVersion: String?
+  /// Written only when conversation messages are appended. Unlike a directory
+  /// modification date, opening or otherwise touching a session cannot change it.
+  public var lastMessageAt: Date?
 
-struct ChatSessionMetadata: Codable, Sendable {
-  var schemaVersion: Int
-  var id: UUID
-  var createdAt: Date
-  var model: String
-  var cwd: String
-  var baseURL: String?
-  var scribeVersion: String?
+  public var parentSessionId: UUID?
 
-  var parentSessionId: UUID?
+  public var forkedAtIndex: Int?
 
-  var forkedAtIndex: Int?
-
-  init(
+  public init(
     schemaVersion: Int = 2,
     id: UUID,
     createdAt: Date,
@@ -32,6 +27,7 @@ struct ChatSessionMetadata: Codable, Sendable {
     cwd: String,
     baseURL: String?,
     scribeVersion: String?,
+    lastMessageAt: Date? = nil,
     parentSessionId: UUID? = nil,
     forkedAtIndex: Int? = nil
   ) {
@@ -42,12 +38,13 @@ struct ChatSessionMetadata: Codable, Sendable {
     self.cwd = cwd
     self.baseURL = baseURL
     self.scribeVersion = scribeVersion
+    self.lastMessageAt = lastMessageAt
     self.parentSessionId = parentSessionId
     self.forkedAtIndex = forkedAtIndex
   }
 }
 
-enum ChatSessionStore {
+public enum ChatSessionStore {
 
   private static let enc: JSONEncoder = {
     let e = JSONEncoder()
@@ -227,13 +224,13 @@ enum ChatSessionStore {
     }
   }
 
-  static func ensureSessionsDirectory(_ sessionsRoot: FilePath) async throws {
+  public static func ensureSessionsDirectory(_ sessionsRoot: FilePath) async throws {
     try await FileSystem.shared.createDirectory(
       at: sessionsRoot,
       withIntermediateDirectories: true)
   }
 
-  static func listSessionDirectories(
+  public static func listSessionDirectories(
     sessionsRoot: FilePath,
     cwdFilter: String? = nil
   ) async throws -> [FilePath] {
@@ -242,27 +239,27 @@ enum ChatSessionStore {
     guard (try? await fs.info(forFileAt: sessionsRoot)) != nil else {
       return []
     }
-    var sessionDirs: [FilePath] = []
+    // Capture the last-message date during discovery so the comparator does no
+    // filesystem work. Directory mtimes are intentionally ignored: opening or
+    // touching a session must not move it in conversation history.
+    var sessions: [(directory: FilePath, lastMessageAt: Date)] = []
     let names = try listDirectoryContents(sessionsRoot)
     for name in names where !name.hasPrefix(".") {
       let dir = sessionsRoot.appendingPathComponent(name)
-      let st = FileStat.stat(dir)
-      guard st.exists, st.isDirectory else { continue }
-      let meta = metadataFile(in: dir)
-      guard FileStat.stat(meta).exists else { continue }
-      sessionDirs.append(dir)
-    }
-    if let cwd = cwdFilter {
-      sessionDirs = sessionDirs.filter { dir in
-        (try? loadMetadata(from: dir).cwd) == cwd
+      let directoryStat = FileStat.stat(dir)
+      guard directoryStat.exists, directoryStat.isDirectory else { continue }
+      let metaPath = metadataFile(in: dir)
+      guard FileStat.stat(metaPath).exists, let metadata = try? loadMetadata(from: dir) else { continue }
+      if let cwd = cwdFilter, metadata.cwd != cwd {
+        continue
       }
+      sessions.append(
+        (directory: dir, lastMessageAt: lastMessageDate(in: dir, metadata: metadata)))
     }
-    return sessionDirs.sorted { a, b in
-      modificationDate(of: a) > modificationDate(of: b)
-    }
+    return sessions.sorted { $0.lastMessageAt > $1.lastMessageAt }.map(\.directory)
   }
 
-  static func sessionDirectory(
+  public static func sessionDirectory(
     sessionId: UUID,
     sessionsRoot: FilePath
   ) async throws -> FilePath {
@@ -270,7 +267,7 @@ enum ChatSessionStore {
     return sessionsRoot.appendingPathComponent(sessionId.uuidString)
   }
 
-  static func saveMetadata(_ metadata: ChatSessionMetadata, to directory: FilePath) async throws {
+  public static func saveMetadata(_ metadata: ChatSessionMetadata, to directory: FilePath) async throws {
     try await FileSystem.shared.createDirectory(
       at: directory,
       withIntermediateDirectories: true)
@@ -278,12 +275,26 @@ enum ChatSessionStore {
     try metaData.write(to: URL(fileURLWithPath: metadataFile(in: directory).string), options: [.atomic])
   }
 
-  static func loadMetadata(from directory: FilePath) throws -> ChatSessionMetadata {
+  public static func loadMetadata(from directory: FilePath) throws -> ChatSessionMetadata {
     let metaData = try Data(contentsOf: URL(fileURLWithPath: metadataFile(in: directory).string))
     return try dec.decode(ChatSessionMetadata.self, from: metaData)
   }
 
-  static func loadMessages(from directory: FilePath) throws -> [ScribeMessage] {
+  /// Returns the time conversation messages were last appended. Older sessions
+  /// predate `lastMessageAt`, so use the messages file's modification time as a
+  /// migration fallback; neither value changes merely because a session opens.
+  public static func lastMessageDate(
+    in directory: FilePath,
+    metadata: ChatSessionMetadata? = nil
+  ) -> Date {
+    let metadata = metadata ?? (try? loadMetadata(from: directory))
+    if let lastMessageAt = metadata?.lastMessageAt { return lastMessageAt }
+    let messagesStat = FileStat.stat(messagesFile(in: directory))
+    if messagesStat.exists { return messagesStat.modificationDate }
+    return metadata?.createdAt ?? .distantPast
+  }
+
+  public static func loadMessages(from directory: FilePath) throws -> [ScribeMessage] {
     let path = messagesFile(in: directory)
     guard FileStat.stat(path).exists else {
       return []
@@ -321,11 +332,11 @@ enum ChatSessionStore {
         data.append(UInt8(ascii: "\n"))
         try writer.append(data)
       }
-      try ChatSessionStore.touchModificationDate(of: directory)
+      try ChatSessionStore.recordLastMessageDate(in: directory, date: Date())
     }
   }
 
-  static func appendMessages(
+  public static func appendMessages(
     _ messages: [ScribeMessage],
     to directory: FilePath
   ) throws {
@@ -334,27 +345,24 @@ enum ChatSessionStore {
     try appender.append(messages)
   }
 
-  private static func touchModificationDate(of directory: FilePath) throws {
-    let now = Date().timeIntervalSince1970
-    let frac = (now - Double(Int(now))) * 1_000_000
-    #if canImport(Darwin)
-    let times = timeval(tv_sec: Int(now), tv_usec: Int32(frac))
-    #else
-    let times = timeval(tv_sec: Int(now), tv_usec: Int(frac))
-    #endif
-    var timevals = [times, times]
-    if utimes(directory.string, &timevals) != 0 {
-      throw ScribeError.generic("utimes failed for \(directory.string): errno \(errno)")
-    }
+  private static func recordLastMessageDate(in directory: FilePath, date: Date) throws {
+    // `appendMessages` is also a low-level utility used before metadata exists.
+    guard FileStat.stat(metadataFile(in: directory)).exists else { return }
+    var metadata = try loadMetadata(from: directory)
+    metadata.lastMessageAt = date
+    let data = try enc.encode(metadata)
+    try data.write(
+      to: URL(fileURLWithPath: metadataFile(in: directory).string),
+      options: [.atomic])
   }
 
-  struct ForkResult: Sendable {
-    let sessionId: UUID
-    let sessionDirectory: FilePath
-    let cutAt: Int
+  public struct ForkResult: Sendable {
+    public let sessionId: UUID
+    public let sessionDirectory: FilePath
+    public let cutAt: Int
   }
 
-  static func forkSession(
+  public static func forkSession(
     from parentDirectory: FilePath,
     cutAt: Int,
     newSessionId: UUID,
@@ -391,7 +399,7 @@ enum ChatSessionStore {
     return ForkResult(sessionId: newSessionId, sessionDirectory: newDir, cutAt: cutAt)
   }
 
-  static func resolveResumeDirectory(
+  public static func resolveResumeDirectory(
     specifier: String,
     sessionsRoot: FilePath,
     preferCWD: String? = nil

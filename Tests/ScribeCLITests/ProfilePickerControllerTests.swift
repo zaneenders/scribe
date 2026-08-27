@@ -2,6 +2,7 @@ import SlateCore
 import Testing
 
 @testable import ScribeCLI
+@testable import ScribeKit
 
 @MainActor
 @Suite

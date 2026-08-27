@@ -47,12 +47,11 @@ enum Shell {
         "cancelled_at_entry": "\(Task.isCancelled)",
       ])
 
-    let shellCwd: FilePath?
+    let shellCwd: FilePath
     if let cwd {
-      let fp = try PathResolution.resolve(existingDirectory: cwd, cwd: workingDirectory)
-      shellCwd = FilePath(fp.string)
+      shellCwd = try PathResolution.resolve(existingDirectory: cwd, cwd: workingDirectory)
     } else {
-      shellCwd = nil
+      shellCwd = workingDirectory
     }
 
     let capture = try OutputCapture.create(

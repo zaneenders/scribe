@@ -16,7 +16,8 @@ struct AgentProviderFactoryTests {
     contextWindow: Int = 128_000,
     reasoningEnabled: Bool? = nil,
     reasoningEffort: String? = nil,
-    maxTokens: Int? = nil
+    maxTokens: Int? = nil,
+    temperature: Double? = nil
   ) -> ScribeConfig {
     ScribeConfig(
       agentModel: model,
@@ -28,7 +29,8 @@ struct AgentProviderFactoryTests {
       workingDirectory: "/tmp",
       reasoningEnabled: reasoningEnabled,
       reasoningEffort: reasoningEffort,
-      maxTokens: maxTokens
+      maxTokens: maxTokens,
+      temperature: temperature
     )
   }
 
@@ -141,5 +143,17 @@ struct AgentProviderFactoryTests {
     let provider = try AgentProviderFactory.make(configuration: config)
     let completionsProvider = try #require(provider as? OpenAICompletionsProvider)
     #expect(completionsProvider.contextWindow == 50000)
+  }
+
+  @Test("profile temperature is propagated to providers")
+  func temperaturePropagated() throws {
+    let openAI = try AgentProviderFactory.make(configuration: configuration(temperature: 0.7))
+    let completionsProvider = try #require(openAI as? OpenAICompletionsProvider)
+    #expect(completionsProvider.defaultTemperature == 0.7)
+
+    let codex = try AgentProviderFactory.make(
+      configuration: configuration(apiType: "codex", temperature: 0.4))
+    let codexProvider = try #require(codex as? CodexProvider)
+    #expect(codexProvider.defaultTemperature == 0.4)
   }
 }

@@ -15,6 +15,7 @@ struct CodexProvider: AgentProvider {
   let model: String
   let reasoningEnabled: Bool?
   let reasoningEffort: String?
+  var defaultTemperature: Double? = nil
   let contextWindow: Int
   var retryPolicy: RetryPolicy = .default
 
@@ -60,6 +61,7 @@ struct CodexProvider: AgentProvider {
         workingDirectory: workingDirectory,
         reasoningEnabled: reasoningEnabled,
         reasoningEffort: reasoningEffort,
+        temperature: options.temperature ?? defaultTemperature,
         hooks: .default,
         contextWindow: contextWindow,
         retryPolicy: retryPolicy

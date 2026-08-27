@@ -44,9 +44,9 @@ private final class SessionLogWriteBackend: Sendable {
   }
 }
 
-enum SessionLoggerFactory {
+public enum SessionLoggerFactory {
 
-  static func makeSessionLogger(
+  public static func makeSessionLogger(
     sessionId: UUID,
     minimumLevel: Logger.Level,
     logFile: FilePath
