@@ -4,6 +4,22 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 
+install_after_packaging=false
+case "$#" in
+  0) ;;
+  1)
+    if [ "$1" != --install ]; then
+      echo "usage: $0 [--install]" >&2
+      exit 2
+    fi
+    install_after_packaging=true
+    ;;
+  *)
+    echo "usage: $0 [--install]" >&2
+    exit 2
+    ;;
+esac
+
 if [ "$(uname -s)" != Linux ]; then
   echo "error: Linux packages must be built on Linux" >&2
   exit 1
@@ -151,3 +167,7 @@ fi
 
 printf 'Created %s\n' "$archive"
 printf 'Created %s\n' "$archive.sha256"
+
+if [ "$install_after_packaging" = true ]; then
+  "$staging/install.sh"
+fi
