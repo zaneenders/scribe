@@ -48,18 +48,10 @@ private struct WindowRecord {
 
 private struct Observation {
   let window: WindowRecord
+  let pageURL: String
   let elements: [String: AXUIElement]
-}
-
-private struct OutlineNode {
-  let ref: String
-  let role: String
-  let title: String
-  let value: String
-  let description: String
-  let frame: CGRect?
-  let actions: [String]
-  let depth: Int
+  let nodes: [UIOutlineNode]
+  let treeTruncated: Bool
 }
 
 /// Owns all live AX references. Tool implementations share one actor so refs remain
@@ -98,7 +90,12 @@ public actor ComputerUseSession {
     }.prefix(30).map { $0 }
   }
 
-  func observe(windowID: Int, includeImage: Bool) async throws -> ObserveUIResult {
+  func observe(
+    windowID: Int,
+    includeImage: Bool,
+    options: UIObservationOptions,
+    offset: Int
+  ) async throws -> ObserveUIResult {
     guard accessibilityTrusted(prompt: true) else {
       throw ComputerUseError.accessibilityPermissionMissing
     }
@@ -114,27 +111,83 @@ public actor ComputerUseSession {
     }
 
     var elements: [String: AXUIElement] = [:]
-    let nodes = buildOutline(root: root, elements: &elements)
+    let (allNodes, treeTruncated) = buildOutline(
+      root: root, elements: &elements, maximumDepth: options.maximumDepth)
+    let pageURL = normalizedURLString(copyAttribute(root, kAXDocumentAttribute as CFString))
+    return try await storeObservation(
+      window: window,
+      pageURL: pageURL,
+      elements: elements,
+      nodes: allNodes,
+      treeTruncated: treeTruncated,
+      includeImage: includeImage,
+      options: options,
+      offset: offset)
+  }
+
+  func continueObservation(
+    stateID: String,
+    includeImage: Bool,
+    options: UIObservationOptions,
+    offset: Int
+  ) async throws -> ObserveUIResult {
+    guard let observation = observations[stateID] else { throw ComputerUseError.stateNotFound(stateID) }
+    return try await result(
+      stateID: stateID,
+      observation: observation,
+      includeImage: includeImage,
+      options: options,
+      offset: offset)
+  }
+
+  private func storeObservation(
+    window: WindowRecord,
+    pageURL: String,
+    elements: [String: AXUIElement],
+    nodes: [UIOutlineNode],
+    treeTruncated: Bool,
+    includeImage: Bool,
+    options: UIObservationOptions,
+    offset: Int
+  ) async throws -> ObserveUIResult {
     let stateID = UUID().uuidString
-    observations[stateID] = Observation(window: window, elements: elements)
+    let observation = Observation(
+      window: window, pageURL: pageURL, elements: elements, nodes: nodes, treeTruncated: treeTruncated)
+    observations[stateID] = observation
     observationOrder.append(stateID)
     while observationOrder.count > 16 {
       observations.removeValue(forKey: observationOrder.removeFirst())
     }
+    return try await result(
+      stateID: stateID,
+      observation: observation,
+      includeImage: includeImage,
+      options: options,
+      offset: offset)
+  }
 
-    let image: CapturedImage?
-    if includeImage {
-      image = try await capture(windowID: window.id)
-    } else {
-      image = nil
-    }
+  private func result(
+    stateID: String,
+    observation: Observation,
+    includeImage: Bool,
+    options: UIObservationOptions,
+    offset: Int
+  ) async throws -> ObserveUIResult {
+    let window = observation.window
+    let page = observationPage(
+      nodes: observation.nodes, options: options, windowFrame: window.frame, offset: offset)
+    let image = includeImage ? try await capture(windowID: window.id) : nil
     return ObserveUIResult(
       stateID: stateID,
       app: window.app,
       title: window.title,
+      pageURL: observation.pageURL,
       windowID: Int(window.id),
-      outline: render(nodes),
-      nodeCount: nodes.count,
+      outline: render(page.nodes, windowFrame: window.frame),
+      nodeCount: page.nodes.count,
+      matchedNodeCount: page.matchedNodeCount,
+      nextOffset: page.nextOffset,
+      treeTruncated: observation.treeTruncated,
       image: image)
   }
 
@@ -205,41 +258,63 @@ public actor ComputerUseSession {
     return best.element
   }
 
-  private func buildOutline(root: AXUIElement, elements: inout [String: AXUIElement]) -> [OutlineNode] {
-    // Render in depth-first preorder so indentation represents the real AX
-    // hierarchy. The traversal itself is platform-independent and unit tested.
+  private func buildOutline(
+    root: AXUIElement,
+    elements: inout [String: AXUIElement],
+    maximumDepth: Int
+  ) -> ([UIOutlineNode], Bool) {
+    // Keep depth-first preorder so indentation represents the real AX hierarchy,
+    // while retaining the larger, configurable bounds used by filtered observations.
+    let traversalLimit = 5_000
     let traversal = depthFirstPreorder(
-      root: root, maxDepth: 12, maxCount: 600, maxChildren: 200,
+      root: root, maxDepth: maximumDepth, maxCount: traversalLimit, maxChildren: 500,
       children: { element in
         self.copyAttribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement] ?? []
       })
-    return traversal.enumerated().map { index, item in
+    let output = traversal.enumerated().map { index, item in
+      let element = item.element
       let ref = "@e\(index + 1)"
-      elements[ref] = item.element
-      return OutlineNode(
+      elements[ref] = element
+      return UIOutlineNode(
         ref: ref,
-        role: stringAttribute(item.element, kAXRoleAttribute as CFString) ?? "unknown",
-        title: stringAttribute(item.element, kAXTitleAttribute as CFString) ?? "",
-        value: displayString(copyAttribute(item.element, kAXValueAttribute as CFString)),
-        description: stringAttribute(item.element, kAXDescriptionAttribute as CFString) ?? "",
-        frame: frameAttribute(item.element),
-        actions: actionNames(item.element),
-        depth: item.depth)
+        role: stringAttribute(element, kAXRoleAttribute as CFString) ?? "unknown",
+        title: stringAttribute(element, kAXTitleAttribute as CFString) ?? "",
+        value: displayString(copyAttribute(element, kAXValueAttribute as CFString)),
+        nodeDescription: stringAttribute(element, kAXDescriptionAttribute as CFString) ?? "",
+        url: normalizedURLString(copyAttribute(element, kAXURLAttribute as CFString)),
+        frame: frameAttribute(element),
+        actions: actionNames(element),
+        depth: item.depth,
+        hidden: boolAttribute(element, kAXHiddenAttribute as CFString) ?? false,
+        enabled: boolAttribute(element, kAXEnabledAttribute as CFString) ?? true,
+        focused: boolAttribute(element, kAXFocusedAttribute as CFString) ?? false,
+        selected: boolAttribute(element, kAXSelectedAttribute as CFString) ?? false)
     }
+    return (output, traversal.count == traversalLimit)
   }
 
-  private func render(_ nodes: [OutlineNode]) -> String {
+  private func render(_ nodes: [UIOutlineNode], windowFrame: CGRect) -> String {
     nodes.map { node in
       var fields = [node.ref, normalizeRole(node.role)]
       if !node.title.isEmpty { fields.append("title=\(quoted(node.title))") }
       if !node.value.isEmpty { fields.append("value=\(quoted(node.value))") }
-      if !node.description.isEmpty && node.description != node.title {
-        fields.append("description=\(quoted(node.description))")
+      if !node.nodeDescription.isEmpty && node.nodeDescription != node.title {
+        fields.append("description=\(quoted(node.nodeDescription))")
       }
+      if !node.url.isEmpty { fields.append("url=\(quoted(node.url))") }
       if !node.actions.isEmpty {
         fields.append("actions=[\(node.actions.map(normalizeAction).joined(separator: ","))]")
       }
+      if node.hidden { fields.append("hidden=true") }
+      if !node.enabled { fields.append("disabled=true") }
+      if node.focused { fields.append("focused=true") }
+      if node.selected { fields.append("selected=true") }
       if let frame = node.frame {
+        if !frame.intersects(windowFrame) {
+          fields.append("offscreen=true")
+        } else if !windowFrame.contains(frame) {
+          fields.append("clipped=true")
+        }
         fields.append("rect=(\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width)),\(Int(frame.height)))")
       }
       return String(repeating: "  ", count: node.depth) + fields.joined(separator: " ")
@@ -267,6 +342,10 @@ public actor ComputerUseSession {
 
   private func stringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
     copyAttribute(element, attribute) as? String
+  }
+
+  private func boolAttribute(_ element: AXUIElement, _ attribute: CFString) -> Bool? {
+    (copyAttribute(element, attribute) as? NSNumber)?.boolValue
   }
 
   private func displayString(_ value: AnyObject?) -> String {
@@ -347,9 +426,13 @@ public struct ObserveUIResult: Encodable, AttachableToolResult, Sendable {
   let stateID: String
   let app: String
   let title: String
+  let pageURL: String
   let windowID: Int
   let outline: String
   let nodeCount: Int
+  let matchedNodeCount: Int
+  let nextOffset: Int?
+  let treeTruncated: Bool
   let image: CapturedImage?
 
   public var toolAttachments: [ToolAttachment] {
@@ -358,14 +441,20 @@ public struct ObserveUIResult: Encodable, AttachableToolResult, Sendable {
   }
 
   public var attachmentToolResultText: String? {
-    "Observed \(app) — \(title) (window \(windowID), stateId \(stateID), \(nodeCount) nodes).\n\(outline)"
+    let location = pageURL.isEmpty ? "" : " — \(pageURL)"
+    return
+      "Observed \(app) — \(title)\(location) (window \(windowID), stateId \(stateID), \(nodeCount) of \(matchedNodeCount) matching nodes).\n\(outline)"
   }
 
   enum CodingKeys: String, CodingKey {
     case ok, app, title, outline
+    case pageURL = "page_url"
     case stateID = "state_id"
     case windowID = "window_id"
     case nodeCount = "node_count"
+    case matchedNodeCount = "matched_node_count"
+    case nextOffset = "next_offset"
+    case treeTruncated = "tree_truncated"
   }
 }
 
@@ -412,12 +501,43 @@ public struct FindWindowsTool: ScribeTool {
 public struct ObserveUITool: ScribeTool {
   public static let name = "observe_ui"
   public static let description =
-    "Observe one macOS window through Accessibility and optionally attach a native ScreenCaptureKit image. Returns a state_id and element refs for act_ui."
+    "Observe and search one macOS window through Accessibility, with deterministic pagination and an optional ScreenCaptureKit image. Returns a state_id and element refs for act_ui."
   public static let parameters = [
-    ScribeToolParameter(name: "window_id", type: .integer, description: "Window id returned by find_windows."),
     ScribeToolParameter(
-      name: "include_image", type: .boolean, description: "Attach a window screenshot; defaults to true.",
+      name: "window_id", type: .integer,
+      description: "Window id returned by find_windows; required for a new observation.", required: false),
+    ScribeToolParameter(
+      name: "state_id", type: .string,
+      description: "Prior observation state to paginate without rebuilding the Accessibility tree.",
       required: false),
+    ScribeToolParameter(
+      name: "include_image", type: .boolean, description: "Attach a window screenshot; defaults to false.",
+      required: false),
+    ScribeToolParameter(
+      name: "visible_only", type: .boolean,
+      description: "Only include non-hidden nodes intersecting the window.", required: false),
+    ScribeToolParameter(
+      name: "viewport_only", type: .boolean,
+      description: "Only include nodes whose frames intersect the observed window.", required: false),
+    ScribeToolParameter(
+      name: "interactive_only", type: .boolean,
+      description: "Only include enabled actionable controls and links.", required: false),
+    ScribeToolParameter(
+      name: "roles", type: .array,
+      description: "Optional role names such as link, button, or textfield (case-insensitive).",
+      required: false),
+    ScribeToolParameter(
+      name: "query", type: .string,
+      description: "Case-insensitive search across title, value, and description.", required: false),
+    ScribeToolParameter(
+      name: "max_depth", type: .integer,
+      description: "Maximum Accessibility-tree depth; defaults to 12, maximum 30.", required: false),
+    ScribeToolParameter(
+      name: "max_nodes", type: .integer,
+      description: "Maximum matching nodes returned; defaults to 200, maximum 500.", required: false),
+    ScribeToolParameter(
+      name: "offset", type: .integer,
+      description: "Matching-node offset returned as next_offset by a prior observation.", required: false),
   ]
   public static let promptHint: String? = nil
   private let session: ComputerUseSession
@@ -426,10 +546,35 @@ public struct ObserveUITool: ScribeTool {
 
   public func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
     let arguments = try parseArguments(arguments)
-    guard let id = integer(arguments["window_id"]) else {
-      throw ComputerUseError.accessibilityFailure("observe_ui requires integer window_id.")
+    let roles = (arguments["roles"] as? [String] ?? []).map {
+      $0.hasPrefix("AX") ? String($0.dropFirst(2)).lowercased() : $0.lowercased()
     }
-    return try await session.observe(windowID: id, includeImage: arguments["include_image"] as? Bool ?? true)
+    let options = UIObservationOptions(
+      visibleOnly: arguments["visible_only"] as? Bool ?? false,
+      viewportOnly: arguments["viewport_only"] as? Bool ?? false,
+      interactiveOnly: arguments["interactive_only"] as? Bool ?? false,
+      roles: Set(roles),
+      query: arguments["query"] as? String,
+      maximumDepth: min(30, max(0, integer(arguments["max_depth"]) ?? 12)),
+      maximumNodeCount: min(500, max(1, integer(arguments["max_nodes"]) ?? 200)))
+    let offset = max(0, integer(arguments["offset"]) ?? 0)
+    let includeImage = arguments["include_image"] as? Bool ?? false
+    if let stateID = arguments["state_id"] as? String {
+      return try await session.continueObservation(
+        stateID: stateID,
+        includeImage: includeImage,
+        options: options,
+        offset: offset)
+    }
+    guard let id = integer(arguments["window_id"]) else {
+      throw ComputerUseError.accessibilityFailure(
+        "observe_ui requires window_id for a new observation or state_id for continuation.")
+    }
+    return try await session.observe(
+      windowID: id,
+      includeImage: includeImage,
+      options: options,
+      offset: offset)
   }
 }
 
@@ -442,7 +587,9 @@ public struct ActUITool: ScribeTool {
     ScribeToolParameter(name: "ref", type: .string, description: "Element ref such as @e12 from the same observation."),
     ScribeToolParameter(
       name: "action", type: .string,
-      description: "press, confirm, show_menu, scroll_to_visible, focus, set_text, increment, decrement, scroll_down, or scroll_up. Prefer an action listed by observe_ui."),
+      description:
+        "press, confirm, show_menu, scroll_to_visible, focus, set_text, increment, decrement, scroll_down, or scroll_up. Prefer an action listed by observe_ui."
+    ),
     ScribeToolParameter(
       name: "text", type: .string, description: "Text for set_text; omit for other actions.", required: false),
   ]
