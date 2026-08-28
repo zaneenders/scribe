@@ -35,10 +35,8 @@ swift package --allow-writing-to-package-directory --allow-network-connections a
 swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
 
-# Mac app (double-clickable, installable in /Applications)
-swift package --allow-writing-to-package-directory bundle
-rm -rf /Applications/Scribe.app
-ditto dist/Scribe.app /Applications/Scribe.app
+# Mac app (build, stably sign, and install in /Applications)
+./Scripts/install-macos.sh
 ```
 
 Quit any development instance started with `swift run scribe-mac` before opening
@@ -53,6 +51,22 @@ Using the explicit path prevents Launch Services from selecting the copy under
 copying also prevents stale files from a previous bundle from surviving an
 upgrade. The bundle embeds the CLI at `Scribe.app/Contents/Helpers/scribe` if you
 prefer a single install artifact over a separate `~/.local/bin/scribe`.
+
+The install script signs with the first **Apple Development** identity in your
+login keychain. This gives Scribe a stable designated requirement so macOS keeps
+its Accessibility and Screen Recording approvals across rebuilds. If you have
+multiple matching identities, set one explicitly:
+
+```bash
+SCRIBE_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" \
+  ./Scripts/install-macos.sh
+```
+
+Create an Apple Development certificate in Xcode if the script cannot find one.
+Unlike the bundler's ad-hoc signature, a development-signed app's identity does
+not change whenever its executable changes. Keep launching the installed copy at
+the same path (`/Applications/Scribe.app`) rather than granting access separately
+to `dist` or `swift run` builds.
 
 ### Linux
 
