@@ -614,8 +614,11 @@ final class SessionController {
       transcript.append(TranscriptItem(kind: .notice, title: "Scribe", text: "Empty response."))
     case .output(.finalized):
       break
-    case .tool(.invocation(let name, let arguments, let output)):
-      upsertTool(name: name, arguments: arguments, output: output, running: false)
+    case .tool(.invocation):
+      // Tool execution boundaries own the live transcript row. The invocation event
+      // carries the same arguments and output after toolExecutionEnd; rendering it
+      // again would append a duplicate completed row.
+      break
     case .tool(.warning(let warning)):
       transcript.append(TranscriptItem(kind: .warning, title: "Warning", text: warning))
     case .lifecycle(.usage(let usage, let rate)):
