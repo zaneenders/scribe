@@ -91,6 +91,8 @@ final class SessionController {
 
   var profileName: String
   var modelName: String
+  private(set) var sessionName: String?
+  private(set) var isPinned: Bool
   private(set) var commandPicker: CommandPickerState?
   private(set) var isRunningCommand = false
   var onIdentityChange: ((UUID, UUID) -> Void)?
@@ -111,6 +113,8 @@ final class SessionController {
   /// Messages queued while a turn is running, oldest first.
   var queuedTexts: [String] { boot.messageQueues.steeringPreviewTexts() }
   var sessionIdText: String { sessionId.uuidString.prefix(8).uppercased() }
+  /// Uses the session hash until the user assigns a custom name.
+  var displayName: String { sessionName ?? sessionIdText }
   /// Short label for the session list: the working directory's basename.
   var directoryTitle: String {
     if workingDirectory == "/" { return "/" }
@@ -122,8 +126,12 @@ final class SessionController {
     self.boot = boot
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
+    let metadata = try? ChatSessionStore.loadMetadata(from: boot.sessionDirectory)
+    self.sessionName = metadata?.name
+    self.isPinned = metadata?.isPinned ?? false
     self.currentSessionId = boot.sessionId
-    self.lastMessageAt = ChatSessionStore.lastMessageDate(in: boot.sessionDirectory)
+    self.lastMessageAt = ChatSessionStore.lastMessageDate(
+      in: boot.sessionDirectory, metadata: metadata)
     self.transcript = []
     self.promptHistory = boot.initialMessages.compactMap { message in
       message.role == .user && !message.content.isEmpty ? message.content : nil
@@ -145,6 +153,11 @@ final class SessionController {
         }
       }
     }
+  }
+
+  func applyPresentation(name: String?, isPinned: Bool) {
+    sessionName = name
+    self.isPinned = isPinned
   }
 
   // MARK: - Content tabs

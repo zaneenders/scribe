@@ -187,7 +187,12 @@ struct SessionRow: Block {
               .fontScale(theme.smallScale)
               .foregroundColor(theme.textSecondary)
           }
-          Text(session.sessionIdText)
+          if session.isPinned {
+            Text("◆")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.accent)
+          }
+          Text(sanitizeASCII(session.displayName))
             .fontScale(theme.smallScale)
             .foregroundColor(
               session.isRunning
@@ -199,6 +204,7 @@ struct SessionRow: Block {
           if session.hasUnreadActivity && !isActive {
             Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
           }
+          sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
         }
         .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 28))
         .sizing(y: .fixed(30))
@@ -234,22 +240,52 @@ struct SavedSessionRow: Block {
       action: { store.openSavedSession(saved) }
     ) { phase in
       HStack(spacing: 5) {
-        Text("-")
+        Text(saved.metadata.isPinned ? "◆" : "-")
           .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
-        Text(String(saved.id.uuidString.prefix(8)).uppercased())
+          .foregroundColor(saved.metadata.isPinned ? theme.accent : theme.textSecondary)
+        Text(sanitizeASCII(saved.metadata.displayName))
           .fontScale(theme.smallScale)
           .foregroundColor(phase == .hovered ? theme.textPrimary : theme.textSecondary)
         Spacer()
         Text(sanitizeASCII(saved.metadata.model))
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
+        sessionActions(
+          store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
       }
       .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
       .sizing(y: .fixed(30))
       .sizing(x: .grow)
       .background(isSelected ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
       .border(isSelected ? theme.accent : .clear, width: isSelected ? 1 : 0)
+    }
+  }
+}
+
+@MainActor
+private func sessionActions(
+  store: ScribeMacStore, id: UUID, pinned: Bool, theme: MacTheme
+) -> some Block {
+  HStack(spacing: 2) {
+    Interactive(
+      id: WidgetID("session-pin:\(id.uuidString)"),
+      action: { store.toggleSessionPin(id) }
+    ) { phase in
+      Text(pinned ? "Unpin" : "Pin")
+        .fontScale(theme.smallScale)
+        .foregroundColor(pinned ? theme.accent : theme.textSecondary)
+        .sizing(x: .fixed(pinned ? 42 : 28), y: .fixed(24))
+        .background(phase == .idle ? .clear : theme.sidebarHover)
+    }
+    Interactive(
+      id: WidgetID("session-rename:\(id.uuidString)"),
+      action: { store.renameSession(id) }
+    ) { phase in
+      Text("Rename")
+        .fontScale(theme.smallScale)
+        .foregroundColor(theme.textSecondary)
+        .sizing(x: .fixed(50), y: .fixed(24))
+        .background(phase == .idle ? .clear : theme.sidebarHover)
     }
   }
 }

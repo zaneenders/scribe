@@ -1,5 +1,8 @@
 import Chroma
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 import Logging
 import ProfileRecorderServer
 import ScribeCore
@@ -37,6 +40,13 @@ final class ScribeMacStore {
       switch self {
       case .open(let session): session.lastMessageAt
       case .saved(let session): session.lastMessageAt
+      }
+    }
+
+    var isPinned: Bool {
+      switch self {
+      case .open(let session): session.isPinned
+      case .saved(let session): session.metadata.isPinned
       }
     }
   }
@@ -239,6 +249,7 @@ final class ScribeMacStore {
       var entries = open.map(SessionEntry.open)
       entries.append(contentsOf: allSaved.prefix(visibleCount).map(SessionEntry.saved))
       entries.sort { lhs, rhs in
+        if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
         if lhs.lastMessageAt != rhs.lastMessageAt {
           return lhs.lastMessageAt > rhs.lastMessageAt
         }
@@ -262,6 +273,55 @@ final class ScribeMacStore {
 
   func showMoreSavedSessions(for cwd: String) {
     visibleSavedSessionCounts[cwd, default: savedSessionPageSize] += savedSessionPageSize
+  }
+
+  func renameSession(_ id: UUID) {
+    let currentName = sessions.first(where: { $0.sessionId == id })?.sessionName
+      ?? savedSessions.first(where: { $0.id == id })?.metadata.name
+    #if canImport(AppKit)
+    let alert = NSAlert()
+    alert.messageText = "Rename Session"
+    alert.informativeText = "The current name defaults to the session hash. Enter a custom name, or leave it blank to restore the hash."
+    alert.addButton(withTitle: "Rename")
+    alert.addButton(withTitle: "Cancel")
+    let field = NSTextField(string: currentName ?? "")
+    field.placeholderString = String(id.uuidString.prefix(8)).uppercased()
+    field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+    alert.accessoryView = field
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    updateSessionPresentation(id, name: field.stringValue)
+    #else
+    _ = currentName
+    #endif
+  }
+
+  func toggleSessionPin(_ id: UUID) {
+    let pinned = sessions.first(where: { $0.sessionId == id })?.isPinned
+      ?? savedSessions.first(where: { $0.id == id })?.metadata.isPinned
+      ?? false
+    updateSessionPresentation(id, isPinned: !pinned)
+  }
+
+  private func updateSessionPresentation(_ id: UUID, name: String? = nil, isPinned: Bool? = nil) {
+    guard let directory = sessionDirectory(for: id) else { return }
+    Task {
+      do {
+        let metadata = try await ChatSessionStore.updatePresentation(
+          in: directory, name: name, isPinned: isPinned)
+        sessions.first(where: { $0.sessionId == id })?.applyPresentation(
+          name: metadata.name, isPinned: metadata.isPinned)
+        refreshSavedSessions()
+      } catch {
+        reportError("Could not update session: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  private func sessionDirectory(for id: UUID) -> FilePath? {
+    if let session = sessions.first(where: { $0.sessionId == id }) {
+      return session.boot.sessionDirectory
+    }
+    return savedSessions.first(where: { $0.id == id })?.directory
   }
 
   func isGroupCollapsed(_ cwd: String) -> Bool {
