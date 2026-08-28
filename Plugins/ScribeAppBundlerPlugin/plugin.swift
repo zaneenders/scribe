@@ -55,18 +55,20 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     try FileManager.default.copyItem(at: infoPlist, to: contentsURL.appendingPathComponent("Info.plist"))
     try FileManager.default.copyItem(at: appIcon, to: resourcesURL.appendingPathComponent("AppIcon.icns"))
 
-    Diagnostics.remark("Signing embedded CLI…")
-    try Self.run(
-      "/usr/bin/codesign",
-      arguments: ["--force", "--sign", "-", helpersURL.appendingPathComponent("scribe").path]
-    )
-    Diagnostics.remark("Signing app bundle…")
-    try Self.run("/usr/bin/codesign", arguments: ["--force", "--sign", "-", outputURL.path])
-    Diagnostics.remark("Verifying app signature…")
-    try Self.run(
-      "/usr/bin/codesign",
-      arguments: ["--verify", "--deep", "--strict", "--verbose=2", outputURL.path]
-    )
+    if ProcessInfo.processInfo.environment["SCRIBE_SKIP_ADHOC_SIGNING"] != "1" {
+      Diagnostics.remark("Signing embedded CLI…")
+      try Self.run(
+        "/usr/bin/codesign",
+        arguments: ["--force", "--sign", "-", helpersURL.appendingPathComponent("scribe").path]
+      )
+      Diagnostics.remark("Signing app bundle…")
+      try Self.run("/usr/bin/codesign", arguments: ["--force", "--sign", "-", outputURL.path])
+      Diagnostics.remark("Verifying app signature…")
+      try Self.run(
+        "/usr/bin/codesign",
+        arguments: ["--verify", "--deep", "--strict", "--verbose=2", outputURL.path]
+      )
+    }
 
     Diagnostics.remark("Created \(outputURL.path)")
     #endif
@@ -86,6 +88,8 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     try FileManager.default.copyItem(at: source, to: destination)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
   }
+
+  // Signing is intentionally ad-hoc here because SwiftPM command plugins run sandboxed.
 
   private static func run(_ executable: String, arguments: [String]) throws {
     let process = Process()
