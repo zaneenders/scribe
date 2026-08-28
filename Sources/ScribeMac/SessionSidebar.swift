@@ -174,57 +174,34 @@ struct SessionRow: Block {
   let isActive: Bool
 
   @MainActor var body: some Block {
-    ZStack {
-      Interactive(
-        id: WidgetID("session-row:\(session.sessionId.uuidString)"),
-        action: { store.switchTo(session.sessionId) }
-      ) { phase in
-        HStack(spacing: 5) {
-          if session.isRunning {
-            ActivitySpinner(color: theme.purple)
-          } else {
-            Text("○")
-              .fontScale(theme.smallScale)
-              .foregroundColor(theme.textSecondary)
-          }
-          if session.isPinned {
-            Text("◆")
-              .fontScale(theme.smallScale)
-              .foregroundColor(theme.accent)
-          }
-          Text(sanitizeASCII(session.displayName))
-            .fontScale(theme.smallScale)
-            .foregroundColor(
-              session.isRunning
-                ? theme.purple : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
-          Spacer()
-          Text(sanitizeASCII(session.modelName))
-            .fontScale(theme.smallScale)
-            .foregroundColor(theme.textSecondary)
-          if session.hasUnreadActivity && !isActive {
-            Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
-          }
-          sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
+    Interactive(
+      id: WidgetID("session-row:\(session.sessionId.uuidString)"),
+      action: { store.switchTo(session.sessionId) }
+    ) { phase in
+      HStack(spacing: 5) {
+        if session.isRunning {
+          ActivitySpinner(color: theme.purple)
         }
-        .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 28))
-        .sizing(y: .fixed(30))
-        .sizing(x: .grow)
-        .background(isActive ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
-        .border(isActive ? theme.accent : .clear, width: isActive ? 1 : 0)
-      }
-      Interactive(
-        id: WidgetID("session-close:\(session.sessionId.uuidString)"),
-        action: { store.closeSession(session.sessionId) }
-      ) { phase in
-        Text("×")
+        Text(sanitizeASCII(session.displayName))
           .fontScale(theme.smallScale)
-          .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
-          .sizing(x: .fixed(24), y: .fixed(28))
-          .background(phase == .idle ? .clear : theme.sidebarHover)
+          .foregroundColor(
+            session.isRunning
+              ? theme.purple : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
+        if session.hasUnreadActivity && !isActive {
+          Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
+        }
+        Spacer()
+        Text(sanitizeASCII(session.modelName))
+          .fontScale(theme.smallScale)
+          .foregroundColor(theme.textSecondary)
+        sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
       }
-      .padding(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4))
+      .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 6))
+      .sizing(y: .fixed(30))
+      .sizing(x: .grow)
+      .background(isActive ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
+      .border(isActive ? theme.accent : .clear, width: isActive ? 1 : 0)
     }
-    .sizing(x: .grow)
   }
 }
 
@@ -240,9 +217,9 @@ struct SavedSessionRow: Block {
       action: { store.openSavedSession(saved) }
     ) { phase in
       HStack(spacing: 5) {
-        Text(saved.metadata.isPinned ? "◆" : "-")
+        Text("-")
           .fontScale(theme.smallScale)
-          .foregroundColor(saved.metadata.isPinned ? theme.accent : theme.textSecondary)
+          .foregroundColor(theme.textSecondary)
         Text(sanitizeASCII(saved.metadata.displayName))
           .fontScale(theme.smallScale)
           .foregroundColor(phase == .hovered ? theme.textPrimary : theme.textSecondary)
@@ -271,20 +248,20 @@ private func sessionActions(
       id: WidgetID("session-pin:\(id.uuidString)"),
       action: { store.toggleSessionPin(id) }
     ) { phase in
-      Text(pinned ? "Unpin" : "Pin")
+      Text(pinned ? "◆" : "◇")
         .fontScale(theme.smallScale)
-        .foregroundColor(pinned ? theme.accent : theme.textSecondary)
-        .sizing(x: .fixed(pinned ? 42 : 28), y: .fixed(24))
+        .foregroundColor(pinned ? theme.yellow : theme.orange)
+        .sizing(x: .fixed(24), y: .fixed(24))
         .background(phase == .idle ? .clear : theme.sidebarHover)
     }
     Interactive(
       id: WidgetID("session-rename:\(id.uuidString)"),
       action: { store.renameSession(id) }
     ) { phase in
-      Text("Rename")
+      Text("✎")
         .fontScale(theme.smallScale)
-        .foregroundColor(theme.textSecondary)
-        .sizing(x: .fixed(50), y: .fixed(24))
+        .foregroundColor(phase == .idle ? theme.green : theme.textPrimary)
+        .sizing(x: .fixed(24), y: .fixed(24))
         .background(phase == .idle ? .clear : theme.sidebarHover)
     }
   }

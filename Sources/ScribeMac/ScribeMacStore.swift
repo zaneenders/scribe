@@ -1,8 +1,5 @@
 import Chroma
 import Foundation
-#if canImport(AppKit)
-import AppKit
-#endif
 import Logging
 import ProfileRecorderServer
 import ScribeCore
@@ -83,6 +80,7 @@ final class ScribeMacStore {
   static let shared = ScribeMacStore()
   static let composerID = WidgetID("scribe-composer")
   static let directoryPaletteID = WidgetID("directory-palette")
+  static let renameSessionFieldID = WidgetID("rename-session-field")
 
   /// Startup phase. Only the initial bootstrap blanks the UI; later session
   /// opens run in the background and report through `pendingSessionCount`
@@ -122,6 +120,10 @@ final class ScribeMacStore {
   /// Whether the model picker overlay is visible.
   var showModelPicker = false
 
+  /// Session currently being renamed in the app-owned modal overlay.
+  private(set) var renamingSessionID: UUID?
+  var renameSessionDraft = ""
+
   /// Whether the directory palette is visible.
   var showDirectoryPicker = false
   /// Path typed into the palette's `$ cd` field.
@@ -138,6 +140,7 @@ final class ScribeMacStore {
   private var didSetupShellCapture = false
   private var composerFocusPending = false
   private var directoryFocusPending = false
+  private var renameFocusPending = false
   /// Cwd anchor for palette resolution before the first session exists.
   private var directoryBaseCWD = FilePath.currentDirectory.string
 
@@ -276,27 +279,37 @@ final class ScribeMacStore {
   }
 
   func renameSession(_ id: UUID) {
-    let currentName = sessions.first(where: { $0.sessionId == id })?.sessionName
+    renameSessionDraft =
+      sessions.first(where: { $0.sessionId == id })?.sessionName
       ?? savedSessions.first(where: { $0.id == id })?.metadata.name
-    #if canImport(AppKit)
-    let alert = NSAlert()
-    alert.messageText = "Rename Session"
-    alert.informativeText = "The current name defaults to the session hash. Enter a custom name, or leave it blank to restore the hash."
-    alert.addButton(withTitle: "Rename")
-    alert.addButton(withTitle: "Cancel")
-    let field = NSTextField(string: currentName ?? "")
-    field.placeholderString = String(id.uuidString.prefix(8)).uppercased()
-    field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
-    alert.accessoryView = field
-    guard alert.runModal() == .alertFirstButtonReturn else { return }
-    updateSessionPresentation(id, name: field.stringValue)
-    #else
-    _ = currentName
-    #endif
+      ?? ""
+    renamingSessionID = id
+    showDirectoryPicker = false
+    showModelPicker = false
+    renameFocusPending = true
+  }
+
+  func updateRenameSessionDraft(_ text: String) {
+    renameSessionDraft = sanitizeASCII(text.replacingOccurrences(of: "\n", with: ""))
+  }
+
+  func submitSessionRename(_ proposed: String? = nil) {
+    guard let id = renamingSessionID else { return }
+    let name = sanitizeASCII(proposed ?? renameSessionDraft)
+    cancelSessionRename(refocusComposer: false)
+    updateSessionPresentation(id, name: name)
+  }
+
+  func cancelSessionRename(refocusComposer: Bool = true) {
+    renamingSessionID = nil
+    renameSessionDraft = ""
+    renameFocusPending = false
+    if refocusComposer { composerFocusPending = true }
   }
 
   func toggleSessionPin(_ id: UUID) {
-    let pinned = sessions.first(where: { $0.sessionId == id })?.isPinned
+    let pinned =
+      sessions.first(where: { $0.sessionId == id })?.isPinned
       ?? savedSessions.first(where: { $0.id == id })?.metadata.isPinned
       ?? false
     updateSessionPresentation(id, isPinned: !pinned)
@@ -374,10 +387,12 @@ final class ScribeMacStore {
       return
     }
     // Update selection synchronously so the click never appears to be ignored.
+    let previousID = activeSessionID
     selectedSavedSession = saved
     activeSessionID = nil
     active = nil
     for session in sessions { session.isActive = false }
+    if let previousID { unloadIfIdle(previousID) }
 
     guard openingSavedSessionIDs.insert(saved.id).inserted else { return }
     pendingSessionCount += 1
@@ -437,10 +452,11 @@ final class ScribeMacStore {
     }
   }
 
-  /// Brings a session on screen. Its turn — running or not — is unaffected;
-  /// the previously visible session keeps streaming in the background.
+  /// Brings a session on screen. A previous controller is retained only while
+  /// its model is running; idle sessions return to their lightweight saved row.
   func switchTo(_ id: UUID) {
     guard let target = sessions.first(where: { $0.sessionId == id }) else { return }
+    let previousID = activeSessionID
     selectedSavedSession = nil
     activeSessionID = id
     active = target
@@ -449,7 +465,20 @@ final class ScribeMacStore {
       session.isActive = isActive
       if isActive { session.hasUnreadActivity = false }
     }
+    if let previousID, previousID != id {
+      unloadIfIdle(previousID)
+    }
     composerFocusPending = true
+  }
+
+  private func unloadIfIdle(_ id: UUID) {
+    guard id != activeSessionID,
+      let index = sessions.firstIndex(where: { $0.sessionId == id && !$0.isRunning })
+    else { return }
+    let controller = sessions.remove(at: index)
+    // An idle controller has no model task to interrupt. Closing its optional
+    // terminal is the only live resource that may remain.
+    controller.shutdown(cancelTask: true)
   }
 
   /// Removes a session. An in-flight turn is interrupted but its streaming
@@ -483,6 +512,10 @@ final class ScribeMacStore {
         self.active = controller
       }
       self.refreshSavedSessions()
+    }
+    controller.onRunningChange = { [weak self, weak controller] running in
+      guard let self, let controller, !running else { return }
+      self.unloadIfIdle(controller.sessionId)
     }
     sessions.append(controller)
     profileCatalog = opened.profileCatalog
@@ -545,9 +578,16 @@ final class ScribeMacStore {
 
   /// Focus must be requested after a frame has registered the target leaf.
   func applyPendingFocus() {
+    if renameFocusPending {
+      ScribeRenderContext.current?.focus(Self.renameSessionFieldID, editing: true)
+      if ScribeRenderContext.current != nil {
+        renameFocusPending = false
+      }
+      return
+    }
     if directoryFocusPending {
-      MacRenderContext.current?.focus(Self.directoryPaletteID, editing: true)
-      if MacRenderContext.current != nil {
+      ScribeRenderContext.current?.focus(Self.directoryPaletteID, editing: true)
+      if ScribeRenderContext.current != nil {
         directoryFocusPending = false
       }
       return
@@ -557,8 +597,8 @@ final class ScribeMacStore {
       composerFocusPending = true
     }
     guard composerFocusPending else { return }
-    MacRenderContext.current?.focus(Self.composerID, editing: true)
-    if MacRenderContext.current != nil {
+    ScribeRenderContext.current?.focus(Self.composerID, editing: true)
+    if ScribeRenderContext.current != nil {
       composerFocusPending = false
     }
   }

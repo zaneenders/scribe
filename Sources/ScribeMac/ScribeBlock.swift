@@ -1,6 +1,6 @@
 import Chroma
 
-/// The embeddable Scribe macOS interface.
+/// The embeddable, backend-independent Scribe interface.
 ///
 /// Hosts can place this block anywhere in a larger Chroma hierarchy. Scribe
 /// retains its own session store, so switching a host-level tab does not stop

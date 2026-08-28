@@ -85,7 +85,7 @@ final class DirectoryPaletteKeyMonitor {
           break
         }
       }
-      guard MacRenderContext.activeTextInput == ScribeMacStore.composerID, store.active != nil else {
+      guard ScribeRenderContext.activeTextInput == ScribeMacStore.composerID, store.active != nil else {
         return event
       }
       switch event.keyCode {

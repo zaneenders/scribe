@@ -96,6 +96,8 @@ final class SessionController {
   private(set) var commandPicker: CommandPickerState?
   private(set) var isRunningCommand = false
   var onIdentityChange: ((UUID, UUID) -> Void)?
+  /// Lets the store retain background controllers only while their model is running.
+  var onRunningChange: ((Bool) -> Void)?
 
   private var currentSessionId: UUID
   private var runTask: Task<Void, Never>?
@@ -179,7 +181,7 @@ final class SessionController {
     selectedTab = tab
     // The composer's editing identity is gone while the terminal is on screen;
     // drop it so the AppKit key monitor stops routing composer shortcuts.
-    MacRenderContext.activeTextInput = nil
+    ScribeRenderContext.activeTextInput = nil
     switch tab {
     case .chat:
       wantsComposerFocus = true
@@ -204,7 +206,7 @@ final class SessionController {
     draft.append("\n")
     historyIndex = nil
     draftBeforeHistory = ""
-    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
   }
 
   /// Recalls submitted prompts only when the composer is empty or already in
@@ -220,7 +222,7 @@ final class SessionController {
       historyIndex = index - 1
     }
     if let historyIndex { draft = promptHistory[historyIndex] }
-    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
     return true
   }
 
@@ -235,7 +237,7 @@ final class SessionController {
       draft = draftBeforeHistory
       draftBeforeHistory = ""
     }
-    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
     return true
   }
 
@@ -280,8 +282,8 @@ final class SessionController {
       // Leave composer editing while the picker owns f/j, Enter, and Escape.
       // Otherwise printable picker keys are inserted into the draft and the
       // editing submit/end events are consumed by the text field.
-      MacRenderContext.activeTextInput = nil
-      MacRenderContext.current?.focus(ScribeMacStore.composerID)
+      ScribeRenderContext.activeTextInput = nil
+      ScribeRenderContext.current?.focus(ScribeMacStore.composerID)
       transcript = Self.replay(snapshot.messages)
     }
   }
@@ -401,6 +403,7 @@ final class SessionController {
     historyIndex = nil
     draftBeforeHistory = ""
     isRunning = true
+    onRunningChange?(true)
 
     let harness = boot.harness
     let (events, continuation) = AsyncStream<StreamEvent>.makeStream()
@@ -583,12 +586,15 @@ final class SessionController {
       if let pending = pendingForceSend {
         pendingForceSend = nil
         submit(pending)
+      } else {
+        onRunningChange?(false)
       }
       if isActive {
         wantsComposerFocus = true
       }
     case .failed(let message):
       isRunning = false
+      onRunningChange?(false)
       transcript.append(TranscriptItem(kind: .error, title: "Error", text: message))
       runTask = nil
     }
