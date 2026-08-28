@@ -92,9 +92,9 @@ final class SessionTerminal {
     isEditing = editing
     if editing {
       wantsFocus = false
-      MacRenderContext.activeTextInput = inputID
-    } else if MacRenderContext.activeTextInput == inputID {
-      MacRenderContext.activeTextInput = nil
+      ScribeRenderContext.activeTextInput = inputID
+    } else if ScribeRenderContext.activeTextInput == inputID {
+      ScribeRenderContext.activeTextInput = nil
     }
   }
 

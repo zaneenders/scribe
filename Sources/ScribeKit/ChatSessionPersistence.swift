@@ -14,6 +14,14 @@ public struct ChatSessionMetadata: Codable, Sendable {
   /// Written only when conversation messages are appended. Unlike a directory
   /// modification date, opening or otherwise touching a session cannot change it.
   public var lastMessageAt: Date?
+  /// A user-supplied label shown instead of the abbreviated session UUID.
+  public var name: String?
+  /// Pinned sessions stay at the top of their working-directory group.
+  public var isPinned: Bool
+  /// The custom name when present, otherwise the session's abbreviated ID.
+  public var displayName: String {
+    name ?? String(id.uuidString.prefix(8)).uppercased()
+  }
 
   public var parentSessionId: UUID?
 
@@ -28,6 +36,8 @@ public struct ChatSessionMetadata: Codable, Sendable {
     baseURL: String?,
     scribeVersion: String?,
     lastMessageAt: Date? = nil,
+    name: String? = nil,
+    isPinned: Bool = false,
     parentSessionId: UUID? = nil,
     forkedAtIndex: Int? = nil
   ) {
@@ -39,8 +49,31 @@ public struct ChatSessionMetadata: Codable, Sendable {
     self.baseURL = baseURL
     self.scribeVersion = scribeVersion
     self.lastMessageAt = lastMessageAt
+    self.name = name
+    self.isPinned = isPinned
     self.parentSessionId = parentSessionId
     self.forkedAtIndex = forkedAtIndex
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case schemaVersion, id, createdAt, model, cwd, baseURL, scribeVersion, lastMessageAt
+    case name, isPinned, parentSessionId, forkedAtIndex
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+    id = try container.decode(UUID.self, forKey: .id)
+    createdAt = try container.decode(Date.self, forKey: .createdAt)
+    model = try container.decode(String.self, forKey: .model)
+    cwd = try container.decode(String.self, forKey: .cwd)
+    baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL)
+    scribeVersion = try container.decodeIfPresent(String.self, forKey: .scribeVersion)
+    lastMessageAt = try container.decodeIfPresent(Date.self, forKey: .lastMessageAt)
+    name = try container.decodeIfPresent(String.self, forKey: .name)
+    isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+    parentSessionId = try container.decodeIfPresent(UUID.self, forKey: .parentSessionId)
+    forkedAtIndex = try container.decodeIfPresent(Int.self, forKey: .forkedAtIndex)
   }
 }
 
@@ -232,7 +265,8 @@ public enum ChatSessionStore {
 
   public static func listSessionDirectories(
     sessionsRoot: FilePath,
-    cwdFilter: String? = nil
+    cwdFilter: String? = nil,
+    pinnedFirst: Bool = true
   ) async throws -> [FilePath] {
     try await ensureSessionsDirectory(sessionsRoot)
     let fs = FileSystem.shared
@@ -242,7 +276,7 @@ public enum ChatSessionStore {
     // Capture the last-message date during discovery so the comparator does no
     // filesystem work. Directory mtimes are intentionally ignored: opening or
     // touching a session must not move it in conversation history.
-    var sessions: [(directory: FilePath, lastMessageAt: Date)] = []
+    var sessions: [(directory: FilePath, isPinned: Bool, lastMessageAt: Date)] = []
     let names = try listDirectoryContents(sessionsRoot)
     for name in names where !name.hasPrefix(".") {
       let dir = sessionsRoot.appendingPathComponent(name)
@@ -254,9 +288,17 @@ public enum ChatSessionStore {
         continue
       }
       sessions.append(
-        (directory: dir, lastMessageAt: lastMessageDate(in: dir, metadata: metadata)))
+        (
+          directory: dir,
+          isPinned: metadata.isPinned,
+          lastMessageAt: lastMessageDate(in: dir, metadata: metadata)
+        ))
     }
-    return sessions.sorted { $0.lastMessageAt > $1.lastMessageAt }.map(\.directory)
+    return sessions.sorted {
+      if pinnedFirst, $0.isPinned != $1.isPinned { return $0.isPinned }
+      if $0.lastMessageAt != $1.lastMessageAt { return $0.lastMessageAt > $1.lastMessageAt }
+      return $0.directory.string > $1.directory.string
+    }.map(\.directory)
   }
 
   public static func sessionDirectory(
@@ -278,6 +320,23 @@ public enum ChatSessionStore {
   public static func loadMetadata(from directory: FilePath) throws -> ChatSessionMetadata {
     let metaData = try Data(contentsOf: URL(fileURLWithPath: metadataFile(in: directory).string))
     return try dec.decode(ChatSessionMetadata.self, from: metaData)
+  }
+
+  /// Updates user-controlled presentation metadata without changing conversation recency.
+  @discardableResult
+  public static func updatePresentation(
+    in directory: FilePath,
+    name: String? = nil,
+    isPinned: Bool? = nil
+  ) async throws -> ChatSessionMetadata {
+    var metadata = try loadMetadata(from: directory)
+    if let name {
+      let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+      metadata.name = trimmed.isEmpty ? nil : trimmed
+    }
+    if let isPinned { metadata.isPinned = isPinned }
+    try await saveMetadata(metadata, to: directory)
+    return metadata
   }
 
   /// Returns the time conversation messages were last appended. Older sessions
@@ -410,11 +469,13 @@ public enum ChatSessionStore {
     }
 
     if trimmed.lowercased() == "latest" {
-      let files = try await listSessionDirectories(sessionsRoot: sessionsRoot, cwdFilter: preferCWD)
+      let files = try await listSessionDirectories(
+        sessionsRoot: sessionsRoot, cwdFilter: preferCWD, pinnedFirst: false)
       if let first = files.first {
         return first
       }
-      let allFiles = try await listSessionDirectories(sessionsRoot: sessionsRoot)
+      let allFiles = try await listSessionDirectories(
+        sessionsRoot: sessionsRoot, pinnedFirst: false)
       guard let first = allFiles.first else {
         throw ScribeError.resumeNotFound(specifier: "latest")
       }
