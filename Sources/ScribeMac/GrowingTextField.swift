@@ -79,9 +79,9 @@ struct GrowingTextField: PrimitiveBlock {
       onChange: onChange,
       onSubmit: { _ in onNewline() })
     if state.editing {
-      MacRenderContext.activeTextInput = id
-    } else if MacRenderContext.activeTextInput == id {
-      MacRenderContext.activeTextInput = nil
+      ScribeRenderContext.activeTextInput = id
+    } else if ScribeRenderContext.activeTextInput == id {
+      ScribeRenderContext.activeTextInput = nil
     }
 
     drawList.fillRect(

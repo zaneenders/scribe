@@ -218,6 +218,12 @@ Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
     └── scribe.log                       # diagnostic log for that session
 ```
 
+Session names and pin state are stored in `metadata.json`. A session's default
+name is its abbreviated hash (the first eight characters of its UUID). In the
+graphical app, use **Rename** on a session row to assign a custom name; clearing
+it restores the hash. Use **Pin** to keep a session above unpinned sessions in
+the same workspace group.
+
 Per-session logs live under `sessions/{uuid}/scribe.log`. Older releases wrote
 `~/.scribe/logs/scribe-{uuid}.log`; those files are not moved automatically.
 

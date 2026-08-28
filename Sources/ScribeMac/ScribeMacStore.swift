@@ -39,6 +39,13 @@ final class ScribeMacStore {
       case .saved(let session): session.lastMessageAt
       }
     }
+
+    var isPinned: Bool {
+      switch self {
+      case .open(let session): session.isPinned
+      case .saved(let session): session.metadata.isPinned
+      }
+    }
   }
 
   struct SessionGroup: Identifiable {
@@ -73,6 +80,7 @@ final class ScribeMacStore {
   static let shared = ScribeMacStore()
   static let composerID = WidgetID("scribe-composer")
   static let directoryPaletteID = WidgetID("directory-palette")
+  static let renameSessionFieldID = WidgetID("rename-session-field")
 
   /// Startup phase. Only the initial bootstrap blanks the UI; later session
   /// opens run in the background and report through `pendingSessionCount`
@@ -112,6 +120,10 @@ final class ScribeMacStore {
   /// Whether the model picker overlay is visible.
   var showModelPicker = false
 
+  /// Session currently being renamed in the app-owned modal overlay.
+  private(set) var renamingSessionID: UUID?
+  var renameSessionDraft = ""
+
   /// Whether the directory palette is visible.
   var showDirectoryPicker = false
   /// Path typed into the palette's `$ cd` field.
@@ -128,6 +140,7 @@ final class ScribeMacStore {
   private var didSetupShellCapture = false
   private var composerFocusPending = false
   private var directoryFocusPending = false
+  private var renameFocusPending = false
   /// Cwd anchor for palette resolution before the first session exists.
   private var directoryBaseCWD = FilePath.currentDirectory.string
 
@@ -239,6 +252,7 @@ final class ScribeMacStore {
       var entries = open.map(SessionEntry.open)
       entries.append(contentsOf: allSaved.prefix(visibleCount).map(SessionEntry.saved))
       entries.sort { lhs, rhs in
+        if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
         if lhs.lastMessageAt != rhs.lastMessageAt {
           return lhs.lastMessageAt > rhs.lastMessageAt
         }
@@ -262,6 +276,65 @@ final class ScribeMacStore {
 
   func showMoreSavedSessions(for cwd: String) {
     visibleSavedSessionCounts[cwd, default: savedSessionPageSize] += savedSessionPageSize
+  }
+
+  func renameSession(_ id: UUID) {
+    renameSessionDraft =
+      sessions.first(where: { $0.sessionId == id })?.sessionName
+      ?? savedSessions.first(where: { $0.id == id })?.metadata.name
+      ?? ""
+    renamingSessionID = id
+    showDirectoryPicker = false
+    showModelPicker = false
+    renameFocusPending = true
+  }
+
+  func updateRenameSessionDraft(_ text: String) {
+    renameSessionDraft = sanitizeASCII(text.replacingOccurrences(of: "\n", with: ""))
+  }
+
+  func submitSessionRename(_ proposed: String? = nil) {
+    guard let id = renamingSessionID else { return }
+    let name = sanitizeASCII(proposed ?? renameSessionDraft)
+    cancelSessionRename(refocusComposer: false)
+    updateSessionPresentation(id, name: name)
+  }
+
+  func cancelSessionRename(refocusComposer: Bool = true) {
+    renamingSessionID = nil
+    renameSessionDraft = ""
+    renameFocusPending = false
+    if refocusComposer { composerFocusPending = true }
+  }
+
+  func toggleSessionPin(_ id: UUID) {
+    let pinned =
+      sessions.first(where: { $0.sessionId == id })?.isPinned
+      ?? savedSessions.first(where: { $0.id == id })?.metadata.isPinned
+      ?? false
+    updateSessionPresentation(id, isPinned: !pinned)
+  }
+
+  private func updateSessionPresentation(_ id: UUID, name: String? = nil, isPinned: Bool? = nil) {
+    guard let directory = sessionDirectory(for: id) else { return }
+    Task {
+      do {
+        let metadata = try await ChatSessionStore.updatePresentation(
+          in: directory, name: name, isPinned: isPinned)
+        sessions.first(where: { $0.sessionId == id })?.applyPresentation(
+          name: metadata.name, isPinned: metadata.isPinned)
+        refreshSavedSessions()
+      } catch {
+        reportError("Could not update session: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  private func sessionDirectory(for id: UUID) -> FilePath? {
+    if let session = sessions.first(where: { $0.sessionId == id }) {
+      return session.boot.sessionDirectory
+    }
+    return savedSessions.first(where: { $0.id == id })?.directory
   }
 
   func isGroupCollapsed(_ cwd: String) -> Bool {
@@ -314,10 +387,12 @@ final class ScribeMacStore {
       return
     }
     // Update selection synchronously so the click never appears to be ignored.
+    let previousID = activeSessionID
     selectedSavedSession = saved
     activeSessionID = nil
     active = nil
     for session in sessions { session.isActive = false }
+    if let previousID { unloadIfIdle(previousID) }
 
     guard openingSavedSessionIDs.insert(saved.id).inserted else { return }
     pendingSessionCount += 1
@@ -377,10 +452,11 @@ final class ScribeMacStore {
     }
   }
 
-  /// Brings a session on screen. Its turn — running or not — is unaffected;
-  /// the previously visible session keeps streaming in the background.
+  /// Brings a session on screen. A previous controller is retained only while
+  /// its model is running; idle sessions return to their lightweight saved row.
   func switchTo(_ id: UUID) {
     guard let target = sessions.first(where: { $0.sessionId == id }) else { return }
+    let previousID = activeSessionID
     selectedSavedSession = nil
     activeSessionID = id
     active = target
@@ -389,7 +465,20 @@ final class ScribeMacStore {
       session.isActive = isActive
       if isActive { session.hasUnreadActivity = false }
     }
+    if let previousID, previousID != id {
+      unloadIfIdle(previousID)
+    }
     composerFocusPending = true
+  }
+
+  private func unloadIfIdle(_ id: UUID) {
+    guard id != activeSessionID,
+      let index = sessions.firstIndex(where: { $0.sessionId == id && !$0.isRunning })
+    else { return }
+    let controller = sessions.remove(at: index)
+    // An idle controller has no model task to interrupt. Closing its optional
+    // terminal is the only live resource that may remain.
+    controller.shutdown(cancelTask: true)
   }
 
   /// Removes a session. An in-flight turn is interrupted but its streaming
@@ -423,6 +512,10 @@ final class ScribeMacStore {
         self.active = controller
       }
       self.refreshSavedSessions()
+    }
+    controller.onRunningChange = { [weak self, weak controller] running in
+      guard let self, let controller, !running else { return }
+      self.unloadIfIdle(controller.sessionId)
     }
     sessions.append(controller)
     profileCatalog = opened.profileCatalog
@@ -485,9 +578,16 @@ final class ScribeMacStore {
 
   /// Focus must be requested after a frame has registered the target leaf.
   func applyPendingFocus() {
+    if renameFocusPending {
+      ScribeRenderContext.current?.focus(Self.renameSessionFieldID, editing: true)
+      if ScribeRenderContext.current != nil {
+        renameFocusPending = false
+      }
+      return
+    }
     if directoryFocusPending {
-      MacRenderContext.current?.focus(Self.directoryPaletteID, editing: true)
-      if MacRenderContext.current != nil {
+      ScribeRenderContext.current?.focus(Self.directoryPaletteID, editing: true)
+      if ScribeRenderContext.current != nil {
         directoryFocusPending = false
       }
       return
@@ -497,8 +597,8 @@ final class ScribeMacStore {
       composerFocusPending = true
     }
     guard composerFocusPending else { return }
-    MacRenderContext.current?.focus(Self.composerID, editing: true)
-    if MacRenderContext.current != nil {
+    ScribeRenderContext.current?.focus(Self.composerID, editing: true)
+    if ScribeRenderContext.current != nil {
       composerFocusPending = false
     }
   }
