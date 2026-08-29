@@ -834,7 +834,8 @@ final class SelectionManager {
   /// Selects the complete transcript containing the active markdown layout.
   /// Returns whether there was custom content to select so Chroma can fall back
   /// to built-in selectable text.
-  func selectAll() -> Bool {
+  func selectAll(isTranscriptVisible: Bool) -> Bool {
+    guard isTranscriptVisible else { return false }
     let document = TranscriptSelectionDocumentRegistry.entries
     let documentIDs = Set(document.map(\.id))
     let anchor: (id: WidgetID, layout: MarkdownLayout)?
@@ -878,9 +879,11 @@ final class SelectionManager {
     return true
   }
 
-  /// Returns custom transcript text only when no editable control owns copy.
-  func copyText(interactionMode: InteractionMode) -> String? {
-    guard interactionMode != .editing else { return nil }
+  /// Returns custom transcript text. Chroma checks an editable selection before
+  /// consulting this fallback, so a focused editor without a selection must not
+  /// prevent copying a selection made in the transcript.
+  func copyText(isTranscriptVisible: Bool) -> String? {
+    guard isTranscriptVisible else { return nil }
     return selectedText()
   }
 
