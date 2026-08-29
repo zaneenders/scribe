@@ -5,12 +5,27 @@ var products: [Product] = [
   .executable(name: "scribe", targets: ["ScribeCLI"]),
   .library(name: "ScribeCore", targets: ["ScribeCore"]),
   .library(name: "ScribeKit", targets: ["ScribeKit"]),
+  .library(name: "ScribeAPI", targets: ["ScribeAPI"]),
   .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
   .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
   .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
 ]
 
 var targets: [Target] = [
+  .target(
+    name: "ScribeAPI",
+    dependencies: [
+      .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+      .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
+    ],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ],
+    plugins: [
+      .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
+    ]
+  ),
   .target(
     name: "ScribeLLM",
     dependencies: [
@@ -181,6 +196,14 @@ var targets: [Target] = [
         ["-L", "Vendor/GhosttyVt/Libraries/linux", "-lghostty-vt"],
         .when(platforms: [.linux])
       ),
+    ]
+  ),
+  .testTarget(
+    name: "ScribeAPITests",
+    dependencies: ["ScribeAPI"],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
     ]
   ),
   .testTarget(
