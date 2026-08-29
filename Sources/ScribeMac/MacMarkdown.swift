@@ -565,7 +565,7 @@ enum MarkdownLayoutRegistry {
 
   /// Returns the registered entry whose rect contains the given point, or nil.
   static func entry(at point: Point) -> (id: WidgetID, layout: MarkdownLayout)? {
-    for (id, layout) in layouts where layout.rect.contains(point) {
+    for (id, layout) in layouts where !layout.lines.isEmpty && layout.rect.contains(point) {
       return (id, layout)
     }
     return nil
@@ -573,8 +573,11 @@ enum MarkdownLayoutRegistry {
 
   /// Visible text layouts in transcript order. Dictionary iteration order is not
   /// stable, so selection spanning multiple transcript rows must use geometry.
+  /// Empty layouts have no valid text position and must not become drag endpoints.
   static func orderedEntries() -> [(id: WidgetID, layout: MarkdownLayout)] {
-    layouts.map { (id: $0.key, layout: $0.value) }.sorted {
+    layouts.compactMap { id, layout in
+      layout.lines.isEmpty ? nil : (id: id, layout: layout)
+    }.sorted {
       if $0.layout.rect.minY == $1.layout.rect.minY {
         return $0.layout.rect.minX < $1.layout.rect.minX
       }
