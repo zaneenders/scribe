@@ -363,10 +363,13 @@ enum TranscriptSelectionDocumentRegistry {
   private static var ownerID: UUID?
 
   static func setEntries(ownerID: UUID, _ entries: [Entry]) {
-    if self.ownerID != ownerID {
+    let entryIDs = Set(entries.map(\.id))
+    if self.ownerID != ownerID
+      || !SelectionManager.shared.selectionEndpointsAreContained(in: entryIDs)
+    {
       SelectionManager.shared.clear()
-      self.ownerID = ownerID
     }
+    self.ownerID = ownerID
     self.entries = entries
   }
 
@@ -803,20 +806,35 @@ final class SelectionManager {
     return (start, end)
   }
 
+  /// Whether both endpoints still belong to the current transcript document.
+  /// A missing endpoint means there is no active selection to invalidate.
+  func selectionEndpointsAreContained(in entryIDs: Set<WidgetID>) -> Bool {
+    guard let originLayoutID, let endLayoutID else { return true }
+    return entryIDs.contains(originLayoutID) && entryIDs.contains(endLayoutID)
+  }
+
   /// Selects the complete transcript containing the active markdown layout.
   /// Returns whether there was custom content to select so Chroma can fall back
   /// to built-in selectable text.
   func selectAll() -> Bool {
+    let document = TranscriptSelectionDocumentRegistry.entries
+    let documentIDs = Set(document.map(\.id))
     let anchor: (id: WidgetID, layout: MarkdownLayout)?
     if let layoutID = originLayoutID, let layout = MarkdownLayoutRegistry.layout(for: layoutID) {
       anchor = (layoutID, layout)
+    } else if let pointed = MarkdownLayoutRegistry.entry(
+      at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
+    {
+      anchor = pointed
     } else {
-      anchor = MarkdownLayoutRegistry.entry(
-        at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
+      // Keyboard select-all should not depend on the pointer landing directly on
+      // glyphs; transcript padding, headers, and blank space are valid anchors.
+      anchor = MarkdownLayoutRegistry.orderedEntries().first {
+        documentIDs.contains($0.id)
+      }
     }
     guard let anchor, !anchor.layout.lines.isEmpty else { return false }
 
-    let document = TranscriptSelectionDocumentRegistry.entries
     if document.contains(where: { $0.id == anchor.id }), !document.isEmpty {
       let columns = max(
         1, Int((anchor.layout.rect.size.width / anchor.layout.cellWidth).rounded(.down)))
