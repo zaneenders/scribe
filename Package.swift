@@ -313,7 +313,8 @@ let package = Package(
   products: products,
   dependencies: [
     .package(
-      path: "../chroma",
+      url: "https://github.com/zaneenders/chroma",
+      revision: "4598f51",
       traits: chromaTraits
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
