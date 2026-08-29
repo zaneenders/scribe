@@ -354,7 +354,9 @@ struct MarkdownLayout {
   /// Returns the (line index, column) for a point in window coordinates,
   /// or nil if the point is outside this block.
   func hitTest(point: Point) -> (line: Int, column: Int)? {
-    guard rect.contains(point) else { return nil }
+    guard rect.contains(point), lineHeight > 0, lineHeight.isFinite,
+      cellWidth > 0, cellWidth.isFinite
+    else { return nil }
     let lineIndex = Int((point.y - rect.minY) / lineHeight)
     guard lineIndex >= 0, lineIndex < lines.count else { return nil }
     let line = lines[lineIndex]
@@ -364,8 +366,8 @@ struct MarkdownLayout {
     for run in line.runs {
       let runWidth = Float(run.text.count) * cellWidth
       if xOffset < runX + runWidth {
-        col += Int((xOffset - runX) / cellWidth)
-        return (lineIndex, min(col, line.columnCount))
+        col += Int(((xOffset - runX) / cellWidth).rounded(.toNearestOrAwayFromZero))
+        return (lineIndex, max(0, min(col, line.columnCount)))
       }
       runX += runWidth
       col += run.text.count
@@ -524,18 +526,10 @@ enum MarkdownLayoutRegistry {
     layouts[id]
   }
 
-  /// Returns the layout whose rect contains the given point, or nil.
-  static func layout(at point: Point) -> MarkdownLayout? {
-    for (_, layout) in layouts {
-      if layout.rect.contains(point) { return layout }
-    }
-    return nil
-  }
-
-  /// Returns the layout with the given rect, or nil.
-  static func layout(withRect rect: Rect) -> MarkdownLayout? {
-    for (_, layout) in layouts {
-      if layout.rect == rect { return layout }
+  /// Returns the registered entry whose rect contains the given point, or nil.
+  static func entry(at point: Point) -> (id: WidgetID, layout: MarkdownLayout)? {
+    for (id, layout) in layouts where layout.rect.contains(point) {
+      return (id, layout)
     }
     return nil
   }
@@ -588,7 +582,7 @@ struct MarkdownText: PrimitiveBlock {
     // potentially large row to the viewport as well, so a single long answer
     // does not emit draw commands for every markdown line.
     let visibleRect = TranscriptViewportRegistry.current
-    let selection = SelectionManager.shared.selection(for: layout)
+    let selection = itemID.flatMap { SelectionManager.shared.selection(for: $0, layout: layout) }
     layout.draw(
       into: &drawList, selection: selection, theme: theme,
       visibleRect: visibleRect)
@@ -619,8 +613,9 @@ struct WrappedText: Block {
 final class SelectionManager {
   static let shared = SelectionManager()
 
-  /// The rect of the layout where the selection originated.
-  private var originLayoutRect: Rect? = nil
+  /// Stable identity of the layout where the selection originated. The rect can
+  /// change when the transcript scrolls or reflows between frames.
+  private var originLayoutID: WidgetID? = nil
   private(set) var selectionStart: (line: Int, column: Int)?
   private(set) var selectionEnd: (line: Int, column: Int)?
   /// Whether a drag is in progress (selection is being extended).
@@ -630,8 +625,9 @@ final class SelectionManager {
 
   /// Call at the start of each frame to update selection from drag state.
   func updateFromDrag(context: RenderContext) {
-    let input = context.input
-    guard input.pointerDown && input.pointerPosition != input.pointerPressPosition else {
+    guard context.isPointerDragging,
+      let origin = context.pointerDragOrigin
+    else {
       if isSelecting {
         isSelecting = false
       }
@@ -640,27 +636,28 @@ final class SelectionManager {
 
     if !isSelecting {
       isSelecting = true
-      originLayoutRect = nil
+      originLayoutID = nil
       selectionStart = nil
       selectionEnd = nil
     }
 
-    let origin = input.pointerPressPosition
-    let current = input.pointerPosition
+    let current = context.pointerDragPosition
 
-    if originLayoutRect == nil {
-      // First drag frame — find the layout under the origin
-      if let layout = MarkdownLayoutRegistry.layout(at: origin),
-        let hit = layout.hitTest(point: origin)
+    if originLayoutID == nil {
+      // First drag frame — find the layout under the origin.
+      if let entry = MarkdownLayoutRegistry.entry(at: origin),
+        let hit = entry.layout.hitTest(point: origin)
       {
-        originLayoutRect = layout.rect
+        originLayoutID = entry.id
         selectionStart = hit
+        selectionEnd = hit
       }
     }
 
-    guard let layoutRect = originLayoutRect else { return }
-    guard let layout = MarkdownLayoutRegistry.layout(withRect: layoutRect),
-      selectionStart != nil else { return }
+    guard let layoutID = originLayoutID,
+      let layout = MarkdownLayoutRegistry.layout(for: layoutID),
+      selectionStart != nil
+    else { return }
 
     if let endHit = layout.hitTest(point: current) {
       selectionEnd = endHit
@@ -668,13 +665,22 @@ final class SelectionManager {
       selectionEnd = (layout.lines.count - 1, layout.lines.last?.columnCount ?? 0)
     } else if current.y < layout.rect.minY {
       selectionEnd = (0, 0)
+    } else if current.x >= layout.rect.maxX {
+      let line = max(0, min(layout.lines.count - 1, Int((current.y - layout.rect.minY) / layout.lineHeight)))
+      selectionEnd = (line, layout.lines[line].columnCount)
+    } else if current.x < layout.rect.minX {
+      let line = max(0, min(layout.lines.count - 1, Int((current.y - layout.rect.minY) / layout.lineHeight)))
+      selectionEnd = (line, 0)
     }
   }
 
   /// Returns the normalized selection range if it overlaps the given layout,
   /// or nil. Normalized means start <= end.
-  func selection(for layout: MarkdownLayout) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
-    guard let rect = originLayoutRect, rect == layout.rect else { return nil }
+  func selection(
+    for id: WidgetID,
+    layout: MarkdownLayout
+  ) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
+    guard originLayoutID == id else { return nil }
     guard let start = selectionStart, let end = selectionEnd else { return nil }
     if start.line < end.line || (start.line == end.line && start.column <= end.column) {
       return (start, end)
@@ -682,13 +688,31 @@ final class SelectionManager {
     return (end, start)
   }
 
+  /// Selects all text in the active markdown layout. Returns whether there was
+  /// custom content to select so Chroma can fall back to built-in selectable text.
+  func selectAll() -> Bool {
+    let entry: (id: WidgetID, layout: MarkdownLayout)?
+    if let layoutID = originLayoutID, let layout = MarkdownLayoutRegistry.layout(for: layoutID) {
+      entry = (layoutID, layout)
+    } else {
+      entry = MarkdownLayoutRegistry.entry(at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
+    }
+    guard let entry, !entry.layout.lines.isEmpty else { return false }
+    originLayoutID = entry.id
+    selectionStart = (0, 0)
+    let lastLine = entry.layout.lines.count - 1
+    selectionEnd = (lastLine, entry.layout.lines[lastLine].columnCount)
+    isSelecting = false
+    return true
+  }
+
   /// Returns the currently selected text, or nil if nothing is selected.
   func selectedText() -> String? {
-    guard let rect = originLayoutRect,
+    guard let layoutID = originLayoutID,
+      let layout = MarkdownLayoutRegistry.layout(for: layoutID),
       let start = selectionStart,
-      let end = selectionEnd else { return nil }
-
-    guard let layout = MarkdownLayoutRegistry.layout(withRect: rect) else { return nil }
+      let end = selectionEnd
+    else { return nil }
 
     let s: (line: Int, column: Int)
     let e: (line: Int, column: Int)
@@ -702,7 +726,7 @@ final class SelectionManager {
 
   /// Clears the selection.
   func clear() {
-    originLayoutRect = nil
+    originLayoutID = nil
     selectionStart = nil
     selectionEnd = nil
     isSelecting = false

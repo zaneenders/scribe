@@ -68,6 +68,12 @@ struct ScribeMacRoot: Block {
         }
       }
     ) { context in
+      context.setCopyTextProvider {
+        SelectionManager.shared.selectedText()
+      }
+      context.setSelectAllHandler {
+        SelectionManager.shared.selectAll()
+      }
       // Hit testing uses layouts retained from the preceding frame.
       if context.input.pointerPressed {
         SelectionManager.shared.clear()

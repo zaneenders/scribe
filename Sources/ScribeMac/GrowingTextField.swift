@@ -72,12 +72,25 @@ struct GrowingTextField: PrimitiveBlock {
 
   @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
     let metrics = context.fontMetrics
+    let rows = wrappedRows(text: getText(), width: rect.size.width, metrics: metrics)
+    let visibleCount = min(maxLines, max(minLines, rows.count))
+    let firstSelectableRow = max(0, rows.count - visibleCount)
+    let lineAdvance = metrics.lineAdvance * fontScale
+    let cellWidth = metrics.cellAdvance * fontScale
+    let textOrigin = Point(x: rect.minX + padding, y: rect.minY + padding + 1)
     let state = context.textInputState(
       id: id,
       in: rect,
       text: getText(),
       onChange: onChange,
-      onSubmit: { _ in onNewline() })
+      onSubmit: { _ in onNewline() },
+      pointerOffset: { point in
+        let visibleRow = Int(((point.y - textOrigin.y) / lineAdvance).rounded(.down))
+        let rowIndex = max(0, min(rows.count - 1, firstSelectableRow + visibleRow))
+        let row = rows[rowIndex]
+        let column = Int(((point.x - textOrigin.x) / cellWidth).rounded(.toNearestOrAwayFromZero))
+        return row.start + max(0, min(row.text.count, column))
+      })
     if state.editing {
       ScribeRenderContext.activeTextInput = id
     } else if ScribeRenderContext.activeTextInput == id {
@@ -94,27 +107,44 @@ struct GrowingTextField: PrimitiveBlock {
       y: rect.minY + padding + 1,
       width: max(0, rect.size.width - 2 * padding),
       height: max(0, rect.size.height - 2 * padding - 2))
-    let rows = wrappedRows(text: getText(), width: rect.size.width, metrics: metrics)
-    let visibleCount = min(maxLines, max(minLines, rows.count))
     let caretRow = rowIndex(containing: state.caretOffset, rows: rows)
     let firstVisible = max(0, min(max(0, rows.count - visibleCount), caretRow - visibleCount + 1))
     let visibleRows = rows.dropFirst(firstVisible).prefix(visibleCount)
-    let lineAdvance = metrics.lineAdvance * fontScale
-    let cellWidth = metrics.cellAdvance * fontScale
 
     drawList.pushClip(inner)
     if getText().isEmpty && !state.editing {
       drawList.text(placeholder, at: inner.origin, color: placeholderColor, scale: fontScale)
     } else {
       for (visibleIndex, row) in visibleRows.enumerated() {
-        drawList.text(
-          row.text,
-          at: Point(x: inner.minX, y: inner.minY + Float(visibleIndex) * lineAdvance),
-          color: textColor,
-          scale: fontScale)
+        let origin = Point(x: inner.minX, y: inner.minY + Float(visibleIndex) * lineAdvance)
+        if let selection = state.selectionRange {
+          let start = max(row.start, selection.lowerBound)
+          let end = min(row.end, selection.upperBound)
+          if start < end {
+            let localStart = start - row.start
+            let localEnd = end - row.start
+            let selectionRect = Rect(
+              x: origin.x + Float(localStart) * cellWidth,
+              y: origin.y,
+              width: Float(localEnd - localStart) * cellWidth,
+              height: lineAdvance)
+            drawList.fillRect(selectionRect, color: context.theme.focus.selectionBackground)
+            drawList.text(row.text, at: origin, color: textColor, scale: fontScale)
+            let selected = String(Array(row.text)[localStart..<localEnd])
+            drawList.pushClip(selectionRect)
+            drawList.text(
+              selected,
+              at: Point(x: selectionRect.minX, y: origin.y),
+              color: context.theme.focus.selectionForeground,
+              scale: fontScale)
+            drawList.popClip()
+            continue
+          }
+        }
+        drawList.text(row.text, at: origin, color: textColor, scale: fontScale)
       }
     }
-    if let caret = state.caretOffset, Self.caretVisible,
+    if let caret = state.caretOffset, state.selectionRange == nil, Self.caretVisible,
       caretRow >= firstVisible, caretRow < firstVisible + visibleCount
     {
       let row = rows[caretRow]
