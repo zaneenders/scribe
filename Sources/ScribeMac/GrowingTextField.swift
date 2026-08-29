@@ -84,7 +84,7 @@ struct GrowingTextField: PrimitiveBlock {
       text: getText(),
       onChange: onChange,
       onSubmit: { _ in onNewline() },
-      pointerOffset: { point in
+      pointerOffset: { point, _ in
         let visibleRow = Int(((point.y - textOrigin.y) / lineAdvance).rounded(.down))
         let rowIndex = max(0, min(rows.count - 1, firstSelectableRow + visibleRow))
         let row = rows[rowIndex]

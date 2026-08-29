@@ -534,6 +534,17 @@ enum MarkdownLayoutRegistry {
     return nil
   }
 
+  /// Visible text layouts in transcript order. Dictionary iteration order is not
+  /// stable, so selection spanning multiple transcript rows must use geometry.
+  static func orderedEntries() -> [(id: WidgetID, layout: MarkdownLayout)] {
+    layouts.map { (id: $0.key, layout: $0.value) }.sorted {
+      if $0.layout.rect.minY == $1.layout.rect.minY {
+        return $0.layout.rect.minX < $1.layout.rect.minX
+      }
+      return $0.layout.rect.minY < $1.layout.rect.minY
+    }
+  }
+
   static func clear() {
     layouts.removeAll()
   }
@@ -613,9 +624,10 @@ struct WrappedText: Block {
 final class SelectionManager {
   static let shared = SelectionManager()
 
-  /// Stable identity of the layout where the selection originated. The rect can
-  /// change when the transcript scrolls or reflows between frames.
+  /// Stable identities of the layouts containing the two selection endpoints.
+  /// Their rects can change when the transcript scrolls or reflows between frames.
   private var originLayoutID: WidgetID? = nil
+  private var endLayoutID: WidgetID? = nil
   private(set) var selectionStart: (line: Int, column: Int)?
   private(set) var selectionEnd: (line: Int, column: Int)?
   /// Whether a drag is in progress (selection is being extended).
@@ -637,6 +649,7 @@ final class SelectionManager {
     if !isSelecting {
       isSelecting = true
       originLayoutID = nil
+      endLayoutID = nil
       selectionStart = nil
       selectionEnd = nil
     }
@@ -649,43 +662,76 @@ final class SelectionManager {
         let hit = entry.layout.hitTest(point: origin)
       {
         originLayoutID = entry.id
+        endLayoutID = entry.id
         selectionStart = hit
         selectionEnd = hit
       }
     }
 
-    guard let layoutID = originLayoutID,
-      let layout = MarkdownLayoutRegistry.layout(for: layoutID),
+    guard let originID = originLayoutID,
+      let originLayout = MarkdownLayoutRegistry.layout(for: originID),
       selectionStart != nil
     else { return }
 
-    if let endHit = layout.hitTest(point: current) {
+    if let entry = MarkdownLayoutRegistry.entry(at: current),
+      let endHit = entry.layout.hitTest(point: current)
+    {
+      endLayoutID = entry.id
       selectionEnd = endHit
-    } else if current.y > layout.rect.maxY {
-      selectionEnd = (layout.lines.count - 1, layout.lines.last?.columnCount ?? 0)
-    } else if current.y < layout.rect.minY {
+      return
+    }
+
+    // Rows have padding and spacing between their text layouts. While the pointer
+    // is in one of those gaps, extend from the nearest visible row rather than
+    // snapping back to the row where the drag began.
+    let entries = MarkdownLayoutRegistry.orderedEntries()
+    guard !entries.isEmpty else { return }
+    let entry: (id: WidgetID, layout: MarkdownLayout)
+    if current.y < entries[0].layout.rect.minY {
+      entry = entries[0]
+      endLayoutID = entry.id
       selectionEnd = (0, 0)
+      return
+    } else if current.y > entries[entries.count - 1].layout.rect.maxY {
+      entry = entries[entries.count - 1]
+      endLayoutID = entry.id
+      selectionEnd = lastPosition(in: entry.layout)
+      return
+    } else {
+      entry = entries.min {
+        verticalDistance(from: current.y, to: $0.layout.rect)
+          < verticalDistance(from: current.y, to: $1.layout.rect)
+      } ?? (originID, originLayout)
+    }
+
+    endLayoutID = entry.id
+    let layout = entry.layout
+    let line = max(
+      0, min(layout.lines.count - 1, Int((current.y - layout.rect.minY) / layout.lineHeight)))
+    if current.y <= layout.rect.minY {
+      selectionEnd = (0, 0)
+    } else if current.y >= layout.rect.maxY {
+      selectionEnd = lastPosition(in: layout)
     } else if current.x >= layout.rect.maxX {
-      let line = max(0, min(layout.lines.count - 1, Int((current.y - layout.rect.minY) / layout.lineHeight)))
       selectionEnd = (line, layout.lines[line].columnCount)
-    } else if current.x < layout.rect.minX {
-      let line = max(0, min(layout.lines.count - 1, Int((current.y - layout.rect.minY) / layout.lineHeight)))
+    } else {
       selectionEnd = (line, 0)
     }
   }
 
-  /// Returns the normalized selection range if it overlaps the given layout,
-  /// or nil. Normalized means start <= end.
+  /// Returns the portion of the current selection that overlaps this layout.
   func selection(
     for id: WidgetID,
     layout: MarkdownLayout
   ) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
-    guard originLayoutID == id else { return nil }
-    guard let start = selectionStart, let end = selectionEnd else { return nil }
-    if start.line < end.line || (start.line == end.line && start.column <= end.column) {
-      return (start, end)
-    }
-    return (end, start)
+    guard let range = orderedSelection(),
+      let index = range.entries.firstIndex(where: { $0.id == id }),
+      index >= range.startIndex, index <= range.endIndex
+    else { return nil }
+
+    let start = index == range.startIndex ? range.start : (0, 0)
+    let end = index == range.endIndex ? range.end : lastPosition(in: layout)
+    return (start, end)
   }
 
   /// Selects all text in the active markdown layout. Returns whether there was
@@ -699,34 +745,71 @@ final class SelectionManager {
     }
     guard let entry, !entry.layout.lines.isEmpty else { return false }
     originLayoutID = entry.id
+    endLayoutID = entry.id
     selectionStart = (0, 0)
-    let lastLine = entry.layout.lines.count - 1
-    selectionEnd = (lastLine, entry.layout.lines[lastLine].columnCount)
+    selectionEnd = lastPosition(in: entry.layout)
     isSelecting = false
     return true
   }
 
   /// Returns the currently selected text, or nil if nothing is selected.
   func selectedText() -> String? {
-    guard let layoutID = originLayoutID,
-      let layout = MarkdownLayoutRegistry.layout(for: layoutID),
-      let start = selectionStart,
-      let end = selectionEnd
+    guard let range = orderedSelection() else { return nil }
+    var parts: [String] = []
+    for index in range.startIndex...range.endIndex {
+      let entry = range.entries[index]
+      let start = index == range.startIndex ? range.start : (0, 0)
+      let end = index == range.endIndex ? range.end : lastPosition(in: entry.layout)
+      parts.append(entry.layout.textInRange(from: start, to: end))
+    }
+    return parts.joined(separator: "\n")
+  }
+
+  private typealias Position = (line: Int, column: Int)
+
+  private func orderedSelection() -> (
+    entries: [(id: WidgetID, layout: MarkdownLayout)],
+    startIndex: Int, endIndex: Int, start: Position, end: Position
+  )? {
+    guard let originID = originLayoutID, let endID = endLayoutID,
+      let selectionStart, let selectionEnd
+    else { return nil }
+    let entries = MarkdownLayoutRegistry.orderedEntries()
+    guard let originIndex = entries.firstIndex(where: { $0.id == originID }),
+      let endIndex = entries.firstIndex(where: { $0.id == endID })
     else { return nil }
 
-    let s: (line: Int, column: Int)
-    let e: (line: Int, column: Int)
-    if start.line < end.line || (start.line == end.line && start.column <= end.column) {
-      s = start; e = end
-    } else {
-      s = end; e = start
+    if originIndex < endIndex {
+      return (entries, originIndex, endIndex, selectionStart, selectionEnd)
     }
-    return layout.textInRange(from: s, to: e)
+    if originIndex > endIndex {
+      return (entries, endIndex, originIndex, selectionEnd, selectionStart)
+    }
+    if precedes(selectionStart, selectionEnd) {
+      return (entries, originIndex, endIndex, selectionStart, selectionEnd)
+    }
+    return (entries, originIndex, endIndex, selectionEnd, selectionStart)
+  }
+
+  private func precedes(_ lhs: Position, _ rhs: Position) -> Bool {
+    lhs.line < rhs.line || (lhs.line == rhs.line && lhs.column <= rhs.column)
+  }
+
+  private func lastPosition(in layout: MarkdownLayout) -> Position {
+    let lastLine = max(0, layout.lines.count - 1)
+    return (lastLine, layout.lines.last?.columnCount ?? 0)
+  }
+
+  private func verticalDistance(from y: Float, to rect: Rect) -> Float {
+    if y < rect.minY { return rect.minY - y }
+    if y > rect.maxY { return y - rect.maxY }
+    return 0
   }
 
   /// Clears the selection.
   func clear() {
     originLayoutID = nil
+    endLayoutID = nil
     selectionStart = nil
     selectionEnd = nil
     isSelecting = false
