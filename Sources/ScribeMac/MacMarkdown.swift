@@ -238,6 +238,7 @@ func layoutMarkdown(
             if room > 0 {
               let cut = remaining.index(remaining.startIndex, offsetBy: room)
               line.runs.append(VisualRun(text: String(remaining[..<cut]), color: color))
+              line.columnCount += room
               remaining = String(remaining[cut...])
             }
             emit()
