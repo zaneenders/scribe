@@ -90,6 +90,14 @@ struct GrowingTextField: PrimitiveBlock {
         let row = rows[rowIndex]
         let column = Int(((point.x - textOrigin.x) / cellWidth).rounded(.toNearestOrAwayFromZero))
         return row.start + max(0, min(row.text.count, column))
+      },
+      verticalOffset: { offset, direction in
+        let rowIndex = rowIndex(containing: offset, rows: rows)
+        let row = rows[rowIndex]
+        let column = max(0, min(row.text.count, offset - row.start))
+        let targetIndex = max(0, min(rows.count - 1, rowIndex + direction))
+        let target = rows[targetIndex]
+        return target.start + min(column, target.text.count)
       })
     if state.editing {
       ScribeRenderContext.activeTextInput = id

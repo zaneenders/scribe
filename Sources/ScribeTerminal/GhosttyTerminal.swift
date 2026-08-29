@@ -575,6 +575,10 @@ public struct GhosttyTerminalView: PrimitiveBlock {
           model.onInput?("\u{1B}[D")
         case .moveCaretRight:
           model.onInput?("\u{1B}[C")
+        case .moveCaretUp:
+          model.onInput?("\u{1B}[A")
+        case .moveCaretDown:
+          model.onInput?("\u{1B}[B")
         case .moveCaretToStart:
           model.onInput?("\u{1B}[H")
         case .moveCaretToEnd:

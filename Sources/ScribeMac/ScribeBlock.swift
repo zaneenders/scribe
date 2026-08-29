@@ -38,6 +38,10 @@ extension ScribeBlock {
       bind(.delete, to: .editing(.deleteForward))
       bind(.leftArrow, to: .editing(.moveCaretLeft))
       bind(.rightArrow, to: .editing(.moveCaretRight))
+      bind(.upArrow, to: .editing(.moveCaretUp))
+      bind(.downArrow, to: .editing(.moveCaretDown))
+      bind(.upArrow, modifiers: .shift, to: .editing(.selectCaretUp))
+      bind(.downArrow, modifiers: .shift, to: .editing(.selectCaretDown))
       bind(.home, to: .editing(.moveCaretToStart))
       bind(.end, to: .editing(.moveCaretToEnd))
       bind(.enter, to: .editing(.submit))
@@ -56,8 +60,6 @@ extension ScribeBlock {
       // Ctrl-/ and Ctrl-_ share the terminal byte 0x1F; accept either chord.
       bind("_", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
       bind(.tab, to: ScribeTerminalCommand.complete)
-      bind(.upArrow, to: ScribeTerminalCommand.lineUp)
-      bind(.downArrow, to: ScribeTerminalCommand.lineDown)
     }
   }
 }

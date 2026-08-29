@@ -86,8 +86,14 @@ final class DirectoryPaletteKeyMonitor {
       case 53:  // Escape
         return self?.onComposerStop?() == true ? nil : event
       case 126:  // Up
+        guard event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty else {
+          return event
+        }
         return self?.onComposerHistoryPrevious?() == true ? nil : event
       case 125:  // Down
+        guard event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty else {
+          return event
+        }
         return self?.onComposerHistoryNext?() == true ? nil : event
       default:
         return event
