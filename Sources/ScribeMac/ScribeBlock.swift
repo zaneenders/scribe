@@ -23,23 +23,19 @@ enum ScribeCommandPickerCommand {
 extension ScribeBlock {
   /// Recommended editing and navigation bindings for a host Chroma app.
   public static var keyBindings: KeyBindings {
-    KeyBindings {
-      bind("c", modifiers: .command, to: .editing(.copy))
-      bind("x", modifiers: .command, to: .editing(.cut))
-      bind("v", modifiers: .command, to: .editing(.paste))
-      bind("a", modifiers: .command, to: .editing(.selectAll))
-      #if os(Linux)
-      // Omarchy's Super-C/V/X shortcuts synthesize the standard Ctrl chords for
-      // non-terminal Wayland clients. Keep the terminal-style Ctrl-Shift chords
-      // too so both desktop conventions work.
-      bind("c", modifiers: .control, to: .editing(.copy))
-      bind("x", modifiers: .control, to: .editing(.cut))
-      bind("v", modifiers: .control, to: .editing(.paste))
-      bind("a", modifiers: .control, to: .editing(.selectAll))
-      bind("c", modifiers: [.control, .shift], to: .editing(.copy))
-      bind("v", modifiers: [.control, .shift], to: .editing(.paste))
-      bind("a", modifiers: [.control, .shift], to: .editing(.selectAll))
-      #endif
+    #if os(macOS)
+    let shortcutModifier = KeyModifiers.command
+    #elseif os(Linux)
+    let shortcutModifier = KeyModifiers.superKey
+    #else
+    let shortcutModifier = KeyModifiers.control
+    #endif
+
+    return KeyBindings {
+      bind("c", modifiers: shortcutModifier, to: .editing(.copy))
+      bind("x", modifiers: shortcutModifier, to: .editing(.cut))
+      bind("v", modifiers: shortcutModifier, to: .editing(.paste))
+      bind("a", modifiers: shortcutModifier, to: .editing(.selectAll))
       bind(.backspace, to: .editing(.backspace))
       bind(.delete, to: .editing(.deleteForward))
       bind(.leftArrow, to: .editing(.moveCaretLeft))
@@ -60,14 +56,9 @@ extension ScribeBlock {
       // so these remain inert whenever no picker is open.
       bind("f", to: ScribeCommandPickerCommand.previous)
       bind("j", to: ScribeCommandPickerCommand.next)
-      // Terminal tab: routed by focus scope, inert outside it. On Linux, Ctrl-C
-      // must remain the standard application copy chord because Omarchy maps its
-      // universal Super-C shortcut to Ctrl-C for non-terminal windows.
-      #if os(Linux)
-      bind("c", modifiers: [.control, .option], to: ScribeTerminalCommand.interrupt)
-      #else
+      // Terminal tab: routed by focus scope, inert outside it. Omarchy uses
+      // Super-C for copy, leaving Ctrl-C available for interrupt.
       bind("c", modifiers: .control, to: ScribeTerminalCommand.interrupt)
-      #endif
       bind("/", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
       // Ctrl-/ and Ctrl-_ share the terminal byte 0x1F; accept either chord.
       bind("_", modifiers: .control, to: ScribeTerminalCommand.controlSlash)

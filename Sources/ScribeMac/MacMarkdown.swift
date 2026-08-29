@@ -803,21 +803,41 @@ final class SelectionManager {
     return (start, end)
   }
 
-  /// Selects all text in the active markdown layout. Returns whether there was
-  /// custom content to select so Chroma can fall back to built-in selectable text.
+  /// Selects the complete transcript containing the active markdown layout.
+  /// Returns whether there was custom content to select so Chroma can fall back
+  /// to built-in selectable text.
   func selectAll() -> Bool {
-    let entry: (id: WidgetID, layout: MarkdownLayout)?
+    let anchor: (id: WidgetID, layout: MarkdownLayout)?
     if let layoutID = originLayoutID, let layout = MarkdownLayoutRegistry.layout(for: layoutID) {
-      entry = (layoutID, layout)
+      anchor = (layoutID, layout)
     } else {
-      entry = MarkdownLayoutRegistry.entry(at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
+      anchor = MarkdownLayoutRegistry.entry(
+        at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
     }
-    guard let entry, !entry.layout.lines.isEmpty else { return false }
-    originLayoutID = entry.id
-    endLayoutID = entry.id
-    retainedSelectionEntries = [entry]
-    selectionStart = (0, 0)
-    selectionEnd = lastPosition(in: entry.layout)
+    guard let anchor, !anchor.layout.lines.isEmpty else { return false }
+
+    let document = TranscriptSelectionDocumentRegistry.entries
+    if document.contains(where: { $0.id == anchor.id }), !document.isEmpty {
+      let columns = max(
+        1, Int((anchor.layout.rect.size.width / anchor.layout.cellWidth).rounded(.down)))
+      let entries = document.map { entry in
+        let layout = MarkdownLayoutRegistry.layout(for: entry.id)
+          ?? entry.layout(columns: columns, matching: anchor.layout)
+        return (id: entry.id, layout: layout)
+      }
+      guard let first = entries.first, let last = entries.last else { return false }
+      originLayoutID = first.id
+      endLayoutID = last.id
+      retainedSelectionEntries = entries
+      selectionStart = (0, 0)
+      selectionEnd = lastPosition(in: last.layout)
+    } else {
+      originLayoutID = anchor.id
+      endLayoutID = anchor.id
+      retainedSelectionEntries = [anchor]
+      selectionStart = (0, 0)
+      selectionEnd = lastPosition(in: anchor.layout)
+    }
     isSelecting = false
     return true
   }
