@@ -69,7 +69,7 @@ struct ScribeMacRoot: Block {
       }
     ) { context in
       context.setCopyTextProvider {
-        SelectionManager.shared.selectedText()
+        SelectionManager.shared.copyText(interactionMode: context.interactionMode)
       }
       context.setSelectAllHandler {
         SelectionManager.shared.selectAll()

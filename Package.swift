@@ -192,6 +192,14 @@ var targets: [Target] = [
     ]
   ),
   .testTarget(
+    name: "ScribeBlocksTests",
+    dependencies: ["ScribeBlocks"],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .testTarget(
     name: "ScribeComputerUseTests",
     dependencies: ["ScribeComputerUse"],
     swiftSettings: [

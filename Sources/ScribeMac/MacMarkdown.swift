@@ -659,6 +659,14 @@ struct WrappedText: Block {
 
 // MARK: - Selection Manager
 
+func shouldProcessSelectionDrag(
+  isDragging: Bool,
+  pointerReleased: Bool,
+  hasDragOrigin: Bool
+) -> Bool {
+  isDragging || (pointerReleased && hasDragOrigin)
+}
+
 /// Tracks text selection across frames. Reads drag state from Interaction
 /// and maps it to text positions using the MarkdownLayoutRegistry.
 @MainActor
@@ -682,14 +690,20 @@ final class SelectionManager {
 
   /// Call at the start of each frame to update selection from drag state.
   func updateFromDrag(context: RenderContext) {
-    guard context.isPointerDragging,
+    let isReleaseFrame = context.input.pointerReleased && context.pointerDragOrigin != nil
+    guard shouldProcessSelectionDrag(
+      isDragging: context.isPointerDragging,
+      pointerReleased: context.input.pointerReleased,
+      hasDragOrigin: context.pointerDragOrigin != nil),
       let origin = context.pointerDragOrigin
     else {
-      if isSelecting {
+      return
+    }
+    defer {
+      if isReleaseFrame, isSelecting {
         retainCurrentSelection()
         isSelecting = false
       }
-      return
     }
 
     if !isSelecting {
@@ -862,6 +876,12 @@ final class SelectionManager {
     }
     isSelecting = false
     return true
+  }
+
+  /// Returns custom transcript text only when no editable control owns copy.
+  func copyText(interactionMode: InteractionMode) -> String? {
+    guard interactionMode != .editing else { return nil }
+    return selectedText()
   }
 
   /// Returns the currently selected text, or nil if nothing is selected.
