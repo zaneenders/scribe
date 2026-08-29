@@ -32,6 +32,7 @@ struct TranscriptView: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
+    updateSelectionDocument()
     let rows: [LazyVStack.Row]
     if session.transcript.isEmpty {
       rows = [
@@ -72,14 +73,15 @@ struct TranscriptView: Block {
     return rows.firstIndex { $0.id == id }
   }
 
-  @MainActor private func transcriptRows() -> [LazyVStack.Row] {
+  @MainActor private func updateSelectionDocument() {
     TranscriptSelectionDocumentRegistry.setEntries(
+      ownerID: session.sessionId,
       session.transcript.compactMap { item in
         guard !item.text.isEmpty else { return nil }
         let text = item.text
         let theme = theme
         return TranscriptSelectionDocumentRegistry.Entry(
-          id: item.layoutID,
+          id: item.selectionID,
           linesForColumns: { columns in
             layoutMarkdown(
               segmentMarkdown(sanitizeASCII(text)),
@@ -88,6 +90,9 @@ struct TranscriptView: Block {
               baseColor: theme.textPrimary)
           })
       })
+  }
+
+  @MainActor private func transcriptRows() -> [LazyVStack.Row] {
     guard let picker = session.commandPicker else {
       return session.transcript.map { transcriptRow($0, selection: .none) }
     }
@@ -264,11 +269,11 @@ struct TranscriptItemBlock: Block {
       } else if item.kind == .answer || item.kind == .reasoning {
         MarkdownText(
           markdown: item.text, theme: theme, baseColor: bodyColor,
-          scale: theme.textScale, itemID: item.layoutID)
+          scale: theme.textScale, itemID: item.selectionID)
       } else {
         WrappedText(
           text: item.text, theme: theme, color: bodyColor,
-          scale: theme.textScale, itemID: item.layoutID)
+          scale: theme.textScale, itemID: item.selectionID)
       }
     }
     .padding(theme.panelPadding)

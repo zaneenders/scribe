@@ -360,8 +360,13 @@ enum TranscriptSelectionDocumentRegistry {
   }
 
   private(set) static var entries: [Entry] = []
+  private static var ownerID: UUID?
 
-  static func setEntries(_ entries: [Entry]) {
+  static func setEntries(ownerID: UUID, _ entries: [Entry]) {
+    if self.ownerID != ownerID {
+      SelectionManager.shared.clear()
+      self.ownerID = ownerID
+    }
     self.entries = entries
   }
 
@@ -880,10 +885,13 @@ final class SelectionManager {
     let document = TranscriptSelectionDocumentRegistry.entries
     guard let originIndex = document.firstIndex(where: { $0.id == originID }),
       let endIndex = document.firstIndex(where: { $0.id == endID }),
-      let originLayout = retainedSelectionEntries?.first(where: { $0.id == originID })?.layout
-        ?? MarkdownLayoutRegistry.layout(for: originID),
-      let endLayout = retainedSelectionEntries?.first(where: { $0.id == endID })?.layout
-        ?? MarkdownLayoutRegistry.layout(for: endID)
+      // Prefer the current frame's layout so a completed selection follows text
+      // appended to a streaming row. Retained layouts are only a fallback for
+      // endpoints that have scrolled out of LazyVStack's visible window.
+      let originLayout = MarkdownLayoutRegistry.layout(for: originID)
+        ?? retainedSelectionEntries?.first(where: { $0.id == originID })?.layout,
+      let endLayout = MarkdownLayoutRegistry.layout(for: endID)
+        ?? retainedSelectionEntries?.first(where: { $0.id == endID })?.layout
     else { return nil }
 
     let lower = min(originIndex, endIndex)

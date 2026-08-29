@@ -36,6 +36,12 @@ final class SessionController {
     var layoutID: WidgetID {
       WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
     }
+
+    /// Stable identity for text selection. Unlike `layoutID`, this must not
+    /// change while streamed content invalidates the row's measured layout.
+    var selectionID: WidgetID {
+      WidgetID("transcript-selection:\(id.uuidString)")
+    }
   }
 
   private enum StreamEvent: Sendable {
