@@ -314,7 +314,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "4598f51",
+      revision: "8d11c3b",
       traits: chromaTraits
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),

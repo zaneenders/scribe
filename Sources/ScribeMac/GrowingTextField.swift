@@ -74,7 +74,10 @@ struct GrowingTextField: PrimitiveBlock {
     let metrics = context.fontMetrics
     let rows = wrappedRows(text: getText(), width: rect.size.width, metrics: metrics)
     let visibleCount = min(maxLines, max(minLines, rows.count))
-    let firstSelectableRow = max(0, rows.count - visibleCount)
+    let firstVisibleRow: (Int?) -> Int = { caret in
+      let caretRow = rowIndex(containing: caret, rows: rows)
+      return max(0, min(max(0, rows.count - visibleCount), caretRow - visibleCount + 1))
+    }
     let lineAdvance = metrics.lineAdvance * fontScale
     let cellWidth = metrics.cellAdvance * fontScale
     let textOrigin = Point(x: rect.minX + padding, y: rect.minY + padding + 1)
@@ -84,9 +87,9 @@ struct GrowingTextField: PrimitiveBlock {
       text: getText(),
       onChange: onChange,
       onSubmit: { _ in onNewline() },
-      pointerOffset: { point, _ in
+      pointerOffset: { point, viewportCaret in
         let visibleRow = Int(((point.y - textOrigin.y) / lineAdvance).rounded(.down))
-        let rowIndex = max(0, min(rows.count - 1, firstSelectableRow + visibleRow))
+        let rowIndex = max(0, min(rows.count - 1, firstVisibleRow(viewportCaret) + visibleRow))
         let row = rows[rowIndex]
         let column = Int(((point.x - textOrigin.x) / cellWidth).rounded(.toNearestOrAwayFromZero))
         return row.start + max(0, min(row.text.count, column))
@@ -116,7 +119,7 @@ struct GrowingTextField: PrimitiveBlock {
       width: max(0, rect.size.width - 2 * padding),
       height: max(0, rect.size.height - 2 * padding - 2))
     let caretRow = rowIndex(containing: state.caretOffset, rows: rows)
-    let firstVisible = max(0, min(max(0, rows.count - visibleCount), caretRow - visibleCount + 1))
+    let firstVisible = firstVisibleRow(state.caretOffset)
     let visibleRows = rows.dropFirst(firstVisible).prefix(visibleCount)
 
     drawList.pushClip(inner)

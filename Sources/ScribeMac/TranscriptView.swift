@@ -73,6 +73,21 @@ struct TranscriptView: Block {
   }
 
   @MainActor private func transcriptRows() -> [LazyVStack.Row] {
+    TranscriptSelectionDocumentRegistry.setEntries(
+      session.transcript.compactMap { item in
+        guard !item.text.isEmpty else { return nil }
+        let text = item.text
+        let theme = theme
+        return TranscriptSelectionDocumentRegistry.Entry(
+          id: item.layoutID,
+          linesForColumns: { columns in
+            layoutMarkdown(
+              segmentMarkdown(sanitizeASCII(text)),
+              columns: columns,
+              theme: theme,
+              baseColor: theme.textPrimary)
+          })
+      })
     guard let picker = session.commandPicker else {
       return session.transcript.map { transcriptRow($0, selection: .none) }
     }

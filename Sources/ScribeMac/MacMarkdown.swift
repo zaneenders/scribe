@@ -341,6 +341,35 @@ enum TranscriptViewportRegistry {
   static var current: Rect?
 }
 
+/// The complete ordered transcript, independent of LazyVStack's visible window.
+/// Selection uses this as its source of truth so fast autoscroll cannot skip
+/// virtualized rows between the two rendered endpoints.
+@MainActor
+enum TranscriptSelectionDocumentRegistry {
+  struct Entry {
+    let id: WidgetID
+    let linesForColumns: (Int) -> [VisualLine]
+
+    func layout(columns: Int, matching template: MarkdownLayout) -> MarkdownLayout {
+      MarkdownLayout(
+        lines: linesForColumns(max(1, columns)),
+        lineHeight: template.lineHeight,
+        cellWidth: template.cellWidth,
+        scale: template.scale)
+    }
+  }
+
+  private(set) static var entries: [Entry] = []
+
+  static func setEntries(_ entries: [Entry]) {
+    self.entries = entries
+  }
+
+  static func entry(for id: WidgetID) -> Entry? {
+    entries.first { $0.id == id }
+  }
+}
+
 /// The computed layout of a MarkdownText block for one frame, cached for
 /// hit testing and text extraction by the selection system.
 struct MarkdownLayout {
@@ -628,6 +657,10 @@ final class SelectionManager {
   /// Their rects can change when the transcript scrolls or reflows between frames.
   private var originLayoutID: WidgetID? = nil
   private var endLayoutID: WidgetID? = nil
+  /// Layouts accumulated while dragging. LazyVStack only keeps visible rows in
+  /// the per-frame registry, so copying must not depend on both endpoints remaining
+  /// on screen at the same time.
+  private var retainedSelectionEntries: [(id: WidgetID, layout: MarkdownLayout)]? = nil
   private(set) var selectionStart: (line: Int, column: Int)?
   private(set) var selectionEnd: (line: Int, column: Int)?
   /// Whether a drag is in progress (selection is being extended).
@@ -641,6 +674,7 @@ final class SelectionManager {
       let origin = context.pointerDragOrigin
     else {
       if isSelecting {
+        retainCurrentSelection()
         isSelecting = false
       }
       return
@@ -650,11 +684,13 @@ final class SelectionManager {
       isSelecting = true
       originLayoutID = nil
       endLayoutID = nil
+      retainedSelectionEntries = nil
       selectionStart = nil
       selectionEnd = nil
     }
 
     let current = context.pointerDragPosition
+    let visibleEntries = MarkdownLayoutRegistry.orderedEntries()
 
     if originLayoutID == nil {
       // First drag frame — find the layout under the origin.
@@ -665,13 +701,17 @@ final class SelectionManager {
         endLayoutID = entry.id
         selectionStart = hit
         selectionEnd = hit
+        retainedSelectionEntries = visibleEntries
       }
     }
 
-    guard let originID = originLayoutID,
-      let originLayout = MarkdownLayoutRegistry.layout(for: originID),
-      selectionStart != nil
-    else { return }
+    guard originLayoutID != nil, selectionStart != nil else { return }
+
+    // Keep every row encountered during the drag. The origin may have scrolled out
+    // of LazyVStack's per-frame registry, but it must not be required to update the
+    // endpoint or copy the completed selection.
+    mergeSelectionEntries(
+      visibleEntries, appendIfDisjoint: current.y >= origin.y)
 
     if let entry = MarkdownLayoutRegistry.entry(at: current),
       let endHit = entry.layout.hitTest(point: current)
@@ -684,7 +724,7 @@ final class SelectionManager {
     // Rows have padding and spacing between their text layouts. While the pointer
     // is in one of those gaps, extend from the nearest visible row rather than
     // snapping back to the row where the drag began.
-    let entries = MarkdownLayoutRegistry.orderedEntries()
+    let entries = visibleEntries
     guard !entries.isEmpty else { return }
     let entry: (id: WidgetID, layout: MarkdownLayout)
     if current.y < entries[0].layout.rect.minY {
@@ -701,7 +741,7 @@ final class SelectionManager {
       entry = entries.min {
         verticalDistance(from: current.y, to: $0.layout.rect)
           < verticalDistance(from: current.y, to: $1.layout.rect)
-      } ?? (originID, originLayout)
+      } ?? entries[0]
     }
 
     endLayoutID = entry.id
@@ -724,11 +764,35 @@ final class SelectionManager {
     for id: WidgetID,
     layout: MarkdownLayout
   ) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
+    guard let originID = originLayoutID, let endID = endLayoutID,
+      let selectionStart, let selectionEnd
+    else { return nil }
+
+    let document = TranscriptSelectionDocumentRegistry.entries
+    if let index = document.firstIndex(where: { $0.id == id }),
+      let originIndex = document.firstIndex(where: { $0.id == originID }),
+      let endIndex = document.firstIndex(where: { $0.id == endID }),
+      index >= min(originIndex, endIndex), index <= max(originIndex, endIndex)
+    {
+      if originIndex < endIndex {
+        let start = index == originIndex ? selectionStart : (0, 0)
+        let end = index == endIndex ? selectionEnd : lastPosition(in: layout)
+        return (start, end)
+      }
+      if originIndex > endIndex {
+        let start = index == endIndex ? selectionEnd : (0, 0)
+        let end = index == originIndex ? selectionStart : lastPosition(in: layout)
+        return (start, end)
+      }
+      return precedes(selectionStart, selectionEnd)
+        ? (selectionStart, selectionEnd)
+        : (selectionEnd, selectionStart)
+    }
+
     guard let range = orderedSelection(),
       let index = range.entries.firstIndex(where: { $0.id == id }),
       index >= range.startIndex, index <= range.endIndex
     else { return nil }
-
     let start = index == range.startIndex ? range.start : (0, 0)
     let end = index == range.endIndex ? range.end : lastPosition(in: layout)
     return (start, end)
@@ -746,6 +810,7 @@ final class SelectionManager {
     guard let entry, !entry.layout.lines.isEmpty else { return false }
     originLayoutID = entry.id
     endLayoutID = entry.id
+    retainedSelectionEntries = [entry]
     selectionStart = (0, 0)
     selectionEnd = lastPosition(in: entry.layout)
     isSelecting = false
@@ -774,7 +839,24 @@ final class SelectionManager {
     guard let originID = originLayoutID, let endID = endLayoutID,
       let selectionStart, let selectionEnd
     else { return nil }
-    let entries = MarkdownLayoutRegistry.orderedEntries()
+    if let documentRange = documentSelectionEntries(originID: originID, endID: endID) {
+      if documentRange.originPrecedesEnd {
+        return (
+          documentRange.entries, 0, documentRange.entries.count - 1,
+          selectionStart, selectionEnd)
+      }
+      if documentRange.entries.count > 1 {
+        return (
+          documentRange.entries, 0, documentRange.entries.count - 1,
+          selectionEnd, selectionStart)
+      }
+      if precedes(selectionStart, selectionEnd) {
+        return (documentRange.entries, 0, 0, selectionStart, selectionEnd)
+      }
+      return (documentRange.entries, 0, 0, selectionEnd, selectionStart)
+    }
+
+    let entries = retainedSelectionEntries ?? MarkdownLayoutRegistry.orderedEntries()
     guard let originIndex = entries.firstIndex(where: { $0.id == originID }),
       let endIndex = entries.firstIndex(where: { $0.id == endID })
     else { return nil }
@@ -789,6 +871,95 @@ final class SelectionManager {
       return (entries, originIndex, endIndex, selectionStart, selectionEnd)
     }
     return (entries, originIndex, endIndex, selectionEnd, selectionStart)
+  }
+
+  private func documentSelectionEntries(
+    originID: WidgetID,
+    endID: WidgetID
+  ) -> (entries: [(id: WidgetID, layout: MarkdownLayout)], originPrecedesEnd: Bool)? {
+    let document = TranscriptSelectionDocumentRegistry.entries
+    guard let originIndex = document.firstIndex(where: { $0.id == originID }),
+      let endIndex = document.firstIndex(where: { $0.id == endID }),
+      let originLayout = retainedSelectionEntries?.first(where: { $0.id == originID })?.layout
+        ?? MarkdownLayoutRegistry.layout(for: originID),
+      let endLayout = retainedSelectionEntries?.first(where: { $0.id == endID })?.layout
+        ?? MarkdownLayoutRegistry.layout(for: endID)
+    else { return nil }
+
+    let lower = min(originIndex, endIndex)
+    let upper = max(originIndex, endIndex)
+    let template = originLayout
+    let columns = max(1, Int((template.rect.size.width / template.cellWidth).rounded(.down)))
+    let entries = document[lower...upper].map { entry in
+      if entry.id == originID { return (id: entry.id, layout: originLayout) }
+      if entry.id == endID { return (id: entry.id, layout: endLayout) }
+      return (id: entry.id, layout: entry.layout(columns: columns, matching: template))
+    }
+    return (entries, originIndex <= endIndex)
+  }
+
+  private func retainCurrentSelection() {
+    guard let originID = originLayoutID, let endID = endLayoutID else { return }
+    mergeSelectionEntries(MarkdownLayoutRegistry.orderedEntries(), appendIfDisjoint: true)
+    guard let entries = retainedSelectionEntries,
+      let originIndex = entries.firstIndex(where: { $0.id == originID }),
+      let endIndex = entries.firstIndex(where: { $0.id == endID })
+    else { return }
+    retainedSelectionEntries = Array(entries[min(originIndex, endIndex)...max(originIndex, endIndex)])
+  }
+
+  /// Merges the current LazyVStack window into the retained transcript ordering.
+  /// Consecutive windows normally overlap; when a fast scroll skips the overlap,
+  /// the pointer's direction determines which side receives the new rows.
+  private func mergeSelectionEntries(
+    _ visible: [(id: WidgetID, layout: MarkdownLayout)],
+    appendIfDisjoint: Bool
+  ) {
+    guard !visible.isEmpty else { return }
+    guard var retained = retainedSelectionEntries else {
+      retainedSelectionEntries = visible
+      return
+    }
+
+    // Refresh layouts that remain visible so drawing uses current geometry.
+    for entry in visible {
+      if let index = retained.firstIndex(where: { $0.id == entry.id }) {
+        retained[index] = entry
+      }
+    }
+
+    let hasOverlap = visible.contains { entry in
+      retained.contains(where: { $0.id == entry.id })
+    }
+    if !hasOverlap {
+      if appendIfDisjoint {
+        retained.append(contentsOf: visible)
+      } else {
+        retained.insert(contentsOf: visible, at: 0)
+      }
+      retainedSelectionEntries = retained
+      return
+    }
+
+    // Insert unseen rows next to an adjacent visible row that is already retained.
+    // Iterating forward makes a newly inserted predecessor available to the next row.
+    for (visibleIndex, entry) in visible.enumerated() {
+      guard !retained.contains(where: { $0.id == entry.id }) else { continue }
+      if visibleIndex > 0,
+        let previous = retained.firstIndex(where: { $0.id == visible[visibleIndex - 1].id })
+      {
+        retained.insert(entry, at: previous + 1)
+      } else if visibleIndex + 1 < visible.count,
+        let next = retained.firstIndex(where: { $0.id == visible[visibleIndex + 1].id })
+      {
+        retained.insert(entry, at: next)
+      } else if appendIfDisjoint {
+        retained.append(entry)
+      } else {
+        retained.insert(entry, at: 0)
+      }
+    }
+    retainedSelectionEntries = retained
   }
 
   private func precedes(_ lhs: Position, _ rhs: Position) -> Bool {
@@ -810,6 +981,7 @@ final class SelectionManager {
   func clear() {
     originLayoutID = nil
     endLayoutID = nil
+    retainedSelectionEntries = nil
     selectionStart = nil
     selectionEnd = nil
     isSelecting = false
