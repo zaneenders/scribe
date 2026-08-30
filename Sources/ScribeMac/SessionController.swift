@@ -36,6 +36,37 @@ final class SessionController {
     var layoutID: WidgetID {
       WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
     }
+
+    /// Stable identities for text selection. Unlike `layoutID`, these must not
+    /// change while streamed content invalidates the row's measured layout.
+    /// The header and body are separate layouts so a drag can select every
+    /// character drawn in a transcript card, including its marker and title.
+    var headerSelectionID: WidgetID {
+      WidgetID("transcript-selection:\(id.uuidString):header")
+    }
+
+    var selectionID: WidgetID {
+      WidgetID("transcript-selection:\(id.uuidString):body")
+    }
+
+    var selectionHeader: String {
+      let marker =
+        switch kind {
+        case .user: ">"
+        case .answer: "◆"
+        case .reasoning: "◇"
+        case .tool: "⌘"
+        case .notice: "·"
+        case .warning: "!"
+        case .error: "×"
+        }
+      let displayedTitle = running ? "\(sanitizeASCII(title)) · running" : sanitizeASCII(title)
+      return "\(marker) \(displayedTitle)"
+    }
+
+    var selectionBody: String {
+      text.isEmpty ? (running ? "running..." : "(empty)") : text
+    }
   }
 
   private enum StreamEvent: Sendable {

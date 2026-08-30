@@ -32,6 +32,7 @@ struct TranscriptView: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
+    updateSelectionDocument()
     let rows: [LazyVStack.Row]
     if session.transcript.isEmpty {
       rows = [
@@ -70,6 +71,32 @@ struct TranscriptView: Block {
     let id = WidgetID(
       "command-boundary:\(picker.command.rawValue):\(picker.activeBoundary):\(isStart)")
     return rows.firstIndex { $0.id == id }
+  }
+
+  @MainActor private func updateSelectionDocument() {
+    TranscriptSelectionDocumentRegistry.setEntries(
+      ownerID: session.sessionId,
+      session.transcript.flatMap { item in
+        let theme = theme
+        let header = item.selectionHeader
+        let body = item.selectionBody
+        return [
+          TranscriptSelectionDocumentRegistry.Entry(
+            id: item.headerSelectionID,
+            linesForColumns: { columns in
+              layoutMarkdown(
+                segmentMarkdown(header), columns: columns, theme: theme,
+                baseColor: theme.textPrimary)
+            }),
+          TranscriptSelectionDocumentRegistry.Entry(
+            id: item.selectionID,
+            linesForColumns: { columns in
+              layoutMarkdown(
+                segmentMarkdown(body), columns: columns, theme: theme,
+                baseColor: theme.textPrimary)
+            }),
+        ]
+      })
   }
 
   @MainActor private func transcriptRows() -> [LazyVStack.Row] {
@@ -226,6 +253,8 @@ private struct CommandRevealTranscript: PrimitiveBlock {
     let stack = LazyVStack(
       id: id, sticksToBottom: true, controller: controller, rows: rows)
     TranscriptViewportRegistry.current = rect
+    TranscriptViewportRegistry.lastDrawn = rect
+    TranscriptViewportRegistry.scrollController = controller
     defer { TranscriptViewportRegistry.current = nil }
     BlockEngine.draw(stack, into: &drawList, in: rect, context: context)
   }
@@ -239,21 +268,23 @@ struct TranscriptItemBlock: Block {
   @MainActor var body: some Block {
     VStack(spacing: 7) {
       HStack(spacing: 6) {
-        Text(labelMarker).fontScale(theme.smallScale).foregroundColor(labelColor)
-        Text(label).fontScale(theme.smallScale).foregroundColor(labelColor)
+        MarkdownText(
+          markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
+          scale: theme.smallScale, sanitizesASCII: false, itemID: item.headerSelectionID)
         Spacer()
       }
       if item.text.isEmpty {
-        Text(item.running ? "running..." : "(empty)")
-          .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+        MarkdownText(
+          markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
+          scale: theme.smallScale, itemID: item.selectionID)
       } else if item.kind == .answer || item.kind == .reasoning {
         MarkdownText(
           markdown: item.text, theme: theme, baseColor: bodyColor,
-          scale: theme.textScale, itemID: item.layoutID)
+          scale: theme.textScale, itemID: item.selectionID)
       } else {
         WrappedText(
           text: item.text, theme: theme, color: bodyColor,
-          scale: theme.textScale, itemID: item.layoutID)
+          scale: theme.textScale, itemID: item.selectionID)
       }
     }
     .padding(theme.panelPadding)

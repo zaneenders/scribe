@@ -16,7 +16,11 @@ import Musl
 struct CodexOAuthTests {
   @Test("login fails promptly when the callback port is occupied", .timeLimit(.minutes(1)))
   func occupiedCallbackPortFailsPromptly() async throws {
+    #if canImport(Glibc) || canImport(Musl)
+    let socketFD = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
+    #else
     let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+    #endif
     try #require(socketFD >= 0)
     defer { close(socketFD) }
 

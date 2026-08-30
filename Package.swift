@@ -192,6 +192,14 @@ var targets: [Target] = [
     ]
   ),
   .testTarget(
+    name: "ScribeBlocksTests",
+    dependencies: ["ScribeBlocks"],
+    swiftSettings: [
+      .swiftLanguageMode(.v6),
+      .treatAllWarnings(as: .error),
+    ]
+  ),
+  .testTarget(
     name: "ScribeComputerUseTests",
     dependencies: ["ScribeComputerUse"],
     swiftSettings: [
@@ -314,7 +322,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "f605be8",
+      revision: "e1adc94",
       traits: chromaTraits
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),

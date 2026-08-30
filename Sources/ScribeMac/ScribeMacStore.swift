@@ -184,9 +184,6 @@ final class ScribeMacStore {
     DirectoryPaletteKeyMonitor.shared.onCommandPickerCancel = { [weak self] in
       self?.active?.cancelCommandPicker()
     }
-    DirectoryPaletteKeyMonitor.shared.copyText = {
-      SelectionManager.shared.selectedText()
-    }
     #endif
     let launchCWD = FilePath.currentDirectory.string
     // Finder launches at `/`, which is not a useful default for a new session.
