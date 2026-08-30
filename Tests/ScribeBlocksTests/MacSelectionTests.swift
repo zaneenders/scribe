@@ -81,7 +81,8 @@ struct MacSelectionTests {
     let color = Color.white
     let narrow = MarkdownLayout(
       lines: [
-        VisualLine(runs: [VisualRun(text: "abcd", color: color)], columnCount: 4),
+        VisualLine(
+          runs: [VisualRun(text: "abcd", color: color)], columnCount: 4, trailingText: ""),
         VisualLine(runs: [VisualRun(text: "efgh", color: color)], columnCount: 4),
       ], lineHeight: 10, cellWidth: 5, scale: 1)
     let wide = MarkdownLayout(
@@ -91,6 +92,31 @@ struct MacSelectionTests {
     let offset = narrow.glyphOffset(at: (line: 1, column: 2))
     #expect(offset == 6)
     #expect(wide.position(atGlyphOffset: offset) == (line: 0, column: 6))
+    #expect(narrow.position(atGlyphOffset: 4) == (line: 1, column: 0))
+    #expect(
+      narrow.textInRange(
+        from: narrow.position(atGlyphOffset: 4),
+        to: narrow.position(atGlyphOffset: 8)) == "efgh")
+  }
+
+  @Test("reflow preserves spaces consumed at wrap boundaries")
+  func spacesSurviveReflow() {
+    let theme = MacTheme()
+    let blocks = segmentMarkdown("abcdefgh x")
+    let narrow = MarkdownLayout(
+      lines: layoutMarkdown(blocks, columns: 8, theme: theme, baseColor: .white),
+      lineHeight: 10, cellWidth: 5, scale: 1)
+    let wide = MarkdownLayout(
+      lines: layoutMarkdown(blocks, columns: 20, theme: theme, baseColor: .white),
+      lineHeight: 10, cellWidth: 5, scale: 1)
+
+    let xOffset = wide.glyphOffset(at: (line: 0, column: 9))
+    #expect(xOffset == 9)
+    #expect(narrow.position(atGlyphOffset: xOffset) == (line: 1, column: 0))
+    #expect(
+      narrow.textInRange(
+        from: (line: 0, column: 0),
+        to: (line: 1, column: 1)) == "abcdefgh x")
   }
 
   @Test("selection outside the viewport requests autoscroll")

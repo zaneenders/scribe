@@ -200,6 +200,10 @@ struct VisualLine: Equatable {
   var kind: VisualLineKind = .plain
   var runs: [VisualRun] = []
   var columnCount: Int = 0
+  /// Logical text between this visual line and the next. Soft wrapping
+  /// contributes nothing, a consumed wrapping space contributes a space, and
+  /// source/block line breaks contribute a newline.
+  var trailingText: String = "\n"
 }
 
 /// Reflows markdown blocks into visual lines of colored runs for a column
@@ -216,7 +220,8 @@ func layoutMarkdown(
 
   func wrapRuns(_ runs: [MDRun], colorFor: (MDRun) -> Color, kind: VisualLineKind) {
     var line = VisualLine(kind: kind)
-    func emit() {
+    func emit(trailingText: String = "") {
+      line.trailingText = trailingText
       lines.append(line)
       line = VisualLine(kind: kind)
     }
@@ -250,10 +255,10 @@ func layoutMarkdown(
       for ch in run.text {
         if ch == "\n" {
           flushWord()
-          emit()
+          emit(trailingText: "\n")
         } else if ch == " " {
           flushWord()
-          if line.columnCount >= columns { emit() }
+          if line.columnCount >= columns { emit(trailingText: " ") }
           if line.columnCount > 0 {
             line.runs.append(VisualRun(text: " ", color: color))
             line.columnCount += 1
@@ -271,8 +276,11 @@ func layoutMarkdown(
   for (index, block) in blocks.enumerated() {
     let isListItem: Bool
     if case .listItem = block { isListItem = true } else { isListItem = false }
-    if index > 0 && !(isListItem && previousWasListItem) {
-      lines.append(VisualLine())
+    if index > 0 {
+      if !lines.isEmpty { lines[lines.count - 1].trailingText = "\n" }
+      if !(isListItem && previousWasListItem) {
+        lines.append(VisualLine(trailingText: "\n"))
+      }
     }
 
     switch block {
@@ -312,12 +320,14 @@ func layoutMarkdown(
         while !rest.isEmpty {
           let take = min(columns, rest.count)
           let cut = rest.index(rest.startIndex, offsetBy: take)
+          let remainder = String(rest[cut...])
           lines.append(
             VisualLine(
               kind: .code,
               runs: [VisualRun(text: String(rest[..<cut]), color: theme.codeText)],
-              columnCount: take))
-          rest = String(rest[cut...])
+              columnCount: take,
+              trailingText: remainder.isEmpty ? "\n" : ""))
+          rest = remainder
         }
       }
     case .rule:
@@ -427,30 +437,47 @@ struct MarkdownLayout {
     return (lineIndex, line.columnCount)
   }
 
-  /// A layout-independent glyph offset for a visual position. Visual wrapping
-  /// contributes no characters, so the offset remains stable when width changes.
+  /// A layout-independent text offset for a visual position. Separators record
+  /// logical whitespace that is not necessarily drawn at a soft-wrap boundary.
   func glyphOffset(at position: (line: Int, column: Int)) -> Int {
     guard !lines.isEmpty else { return 0 }
     let line = max(0, min(position.line, lines.count - 1))
-    let preceding = lines[..<line].reduce(0) { $0 + $1.columnCount }
+    let preceding = lines[..<line].reduce(0) {
+      $0 + $1.columnCount + $1.trailingText.count
+    }
     return preceding + max(0, min(position.column, lines[line].columnCount))
   }
 
-  /// Converts a stable glyph offset back to this layout's visual coordinates.
+  /// Converts a stable text offset back to this layout's visual coordinates.
+  /// At a soft-wrap boundary, prefer the start of the following visual line so
+  /// selecting from that offset does not acquire a visual-only newline.
   func position(atGlyphOffset offset: Int) -> (line: Int, column: Int) {
     guard !lines.isEmpty else { return (0, 0) }
     var remaining = max(0, min(offset, glyphCount))
     for (index, line) in lines.enumerated() {
-      if remaining <= line.columnCount || index == lines.count - 1 {
+      let isLast = index == lines.count - 1
+      if remaining < line.columnCount || isLast {
         return (index, min(remaining, line.columnCount))
       }
+      if remaining == line.columnCount {
+        if line.trailingText.isEmpty { return (index + 1, 0) }
+        return (index, line.columnCount)
+      }
       remaining -= line.columnCount
+      if remaining < line.trailingText.count {
+        return (index, line.columnCount)
+      }
+      remaining -= line.trailingText.count
     }
     return (lines.count - 1, lines.last?.columnCount ?? 0)
   }
 
   var glyphCount: Int {
-    lines.reduce(0) { $0 + $1.columnCount }
+    guard !lines.isEmpty else { return 0 }
+    return lines.enumerated().reduce(0) { result, entry in
+      result + entry.element.columnCount
+        + (entry.offset < lines.count - 1 ? entry.element.trailingText.count : 0)
+    }
   }
 
   /// Extracts the text in the given range (line, column) → (line, column).
@@ -485,9 +512,9 @@ struct MarkdownLayout {
           col = runEnd
         }
       }
-      // A range crossing a visual line boundary includes its newline, even
-      // when either side lands exactly at a line edge or the line is empty.
-      if li < el { result += "\n" }
+      // Preserve the logical separator rather than manufacturing a newline for
+      // every visual wrap. This keeps copied text stable when the width changes.
+      if li < el { result += line.trailingText }
     }
     return result
   }
