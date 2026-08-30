@@ -246,6 +246,8 @@ private struct CommandRevealTranscript: PrimitiveBlock {
     let stack = LazyVStack(
       id: id, sticksToBottom: true, controller: controller, rows: rows)
     TranscriptViewportRegistry.current = rect
+    TranscriptViewportRegistry.lastDrawn = rect
+    TranscriptViewportRegistry.scrollController = controller
     defer { TranscriptViewportRegistry.current = nil }
     BlockEngine.draw(stack, into: &drawList, in: rect, context: context)
   }

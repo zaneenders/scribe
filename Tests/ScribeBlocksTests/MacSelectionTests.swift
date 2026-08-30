@@ -75,4 +75,29 @@ struct MacSelectionTests {
       TranscriptSelectionDocumentRegistry.setEntries(ownerID: UUID(), [])
     }
   }
+
+  @Test("selection glyph offsets survive visual reflow")
+  func glyphOffsetsSurviveReflow() {
+    let color = Color.white
+    let narrow = MarkdownLayout(
+      lines: [
+        VisualLine(runs: [VisualRun(text: "abcd", color: color)], columnCount: 4),
+        VisualLine(runs: [VisualRun(text: "efgh", color: color)], columnCount: 4),
+      ], lineHeight: 10, cellWidth: 5, scale: 1)
+    let wide = MarkdownLayout(
+      lines: [VisualLine(runs: [VisualRun(text: "abcdefgh", color: color)], columnCount: 8)],
+      lineHeight: 10, cellWidth: 5, scale: 1)
+
+    let offset = narrow.glyphOffset(at: (line: 1, column: 2))
+    #expect(offset == 6)
+    #expect(wide.position(atGlyphOffset: offset) == (line: 0, column: 6))
+  }
+
+  @Test("selection outside the viewport requests autoscroll")
+  func selectionAutoscroll() {
+    let viewport = Rect(x: 0, y: 100, width: 500, height: 300)
+    #expect(selectionAutoscrollTarget(pointer: Point(x: 20, y: 50), viewport: viewport)?.minY == 82)
+    #expect(selectionAutoscrollTarget(pointer: Point(x: 20, y: 450), viewport: viewport)?.minY == 418)
+    #expect(selectionAutoscrollTarget(pointer: Point(x: 20, y: 200), viewport: viewport) == nil)
+  }
 }

@@ -340,6 +340,20 @@ func layoutMarkdown(
 @MainActor
 enum TranscriptViewportRegistry {
   static var current: Rect?
+  /// Retained for selection updates, which run before the next transcript draw.
+  static var lastDrawn: Rect?
+  static var scrollController: ScrollViewController?
+}
+
+func selectionAutoscrollTarget(pointer: Point, viewport: Rect, step: Float = 18) -> Rect? {
+  guard step > 0, step.isFinite else { return nil }
+  if pointer.y < viewport.minY {
+    return Rect(x: pointer.x, y: viewport.minY - step, width: 1, height: 1)
+  }
+  if pointer.y > viewport.maxY {
+    return Rect(x: pointer.x, y: viewport.maxY + step, width: 1, height: 1)
+  }
+  return nil
 }
 
 /// The complete ordered transcript, independent of LazyVStack's visible window.
@@ -411,6 +425,32 @@ struct MarkdownLayout {
       col += run.text.count
     }
     return (lineIndex, line.columnCount)
+  }
+
+  /// A layout-independent glyph offset for a visual position. Visual wrapping
+  /// contributes no characters, so the offset remains stable when width changes.
+  func glyphOffset(at position: (line: Int, column: Int)) -> Int {
+    guard !lines.isEmpty else { return 0 }
+    let line = max(0, min(position.line, lines.count - 1))
+    let preceding = lines[..<line].reduce(0) { $0 + $1.columnCount }
+    return preceding + max(0, min(position.column, lines[line].columnCount))
+  }
+
+  /// Converts a stable glyph offset back to this layout's visual coordinates.
+  func position(atGlyphOffset offset: Int) -> (line: Int, column: Int) {
+    guard !lines.isEmpty else { return (0, 0) }
+    var remaining = max(0, min(offset, glyphCount))
+    for (index, line) in lines.enumerated() {
+      if remaining <= line.columnCount || index == lines.count - 1 {
+        return (index, min(remaining, line.columnCount))
+      }
+      remaining -= line.columnCount
+    }
+    return (lines.count - 1, lines.last?.columnCount ?? 0)
+  }
+
+  var glyphCount: Int {
+    lines.reduce(0) { $0 + $1.columnCount }
   }
 
   /// Extracts the text in the given range (line, column) → (line, column).
@@ -683,6 +723,10 @@ final class SelectionManager {
   private var retainedSelectionEntries: [(id: WidgetID, layout: MarkdownLayout)]? = nil
   private(set) var selectionStart: (line: Int, column: Int)?
   private(set) var selectionEnd: (line: Int, column: Int)?
+  /// Layout-independent endpoint offsets, measured in rendered glyphs within
+  /// each transcript item. These preserve the selected characters across reflow.
+  private var selectionStartGlyphOffset: Int?
+  private var selectionEndGlyphOffset: Int?
   /// Whether a drag is in progress (selection is being extended).
   var isSelecting: Bool = false
 
@@ -713,10 +757,20 @@ final class SelectionManager {
       retainedSelectionEntries = nil
       selectionStart = nil
       selectionEnd = nil
+      selectionStartGlyphOffset = nil
+      selectionEndGlyphOffset = nil
     }
 
     let current = context.pointerDragPosition
     let visibleEntries = MarkdownLayoutRegistry.orderedEntries()
+
+    if context.isPointerDragging, originLayoutID != nil,
+      let viewport = TranscriptViewportRegistry.lastDrawn,
+      let target = selectionAutoscrollTarget(pointer: current, viewport: viewport)
+    {
+      TranscriptViewportRegistry.scrollController?.scrollToVisible(target)
+      context.requestRedraw()
+    }
 
     if originLayoutID == nil {
       // First drag frame — find the layout under the origin.
@@ -727,6 +781,8 @@ final class SelectionManager {
         endLayoutID = entry.id
         selectionStart = hit
         selectionEnd = hit
+        selectionStartGlyphOffset = entry.layout.glyphOffset(at: hit)
+        selectionEndGlyphOffset = selectionStartGlyphOffset
         retainedSelectionEntries = visibleEntries
       }
     }
@@ -744,6 +800,7 @@ final class SelectionManager {
     {
       endLayoutID = entry.id
       selectionEnd = endHit
+      selectionEndGlyphOffset = entry.layout.glyphOffset(at: endHit)
       return
     }
 
@@ -757,11 +814,13 @@ final class SelectionManager {
       entry = entries[0]
       endLayoutID = entry.id
       selectionEnd = (0, 0)
+      selectionEndGlyphOffset = 0
       return
     } else if current.y > entries[entries.count - 1].layout.rect.maxY {
       entry = entries[entries.count - 1]
       endLayoutID = entry.id
       selectionEnd = lastPosition(in: entry.layout)
+      selectionEndGlyphOffset = entry.layout.glyphCount
       return
     } else {
       entry = entries.min {
@@ -783,6 +842,7 @@ final class SelectionManager {
     } else {
       selectionEnd = (line, 0)
     }
+    selectionEndGlyphOffset = selectionEnd.map { layout.glyphOffset(at: $0) }
   }
 
   /// Returns the portion of the current selection that overlaps this layout.
@@ -793,6 +853,12 @@ final class SelectionManager {
     guard let originID = originLayoutID, let endID = endLayoutID,
       let selectionStart, let selectionEnd
     else { return nil }
+    let resolvedStart = id == originID
+      ? layout.position(atGlyphOffset: selectionStartGlyphOffset ?? layout.glyphOffset(at: selectionStart))
+      : selectionStart
+    let resolvedEnd = id == endID
+      ? layout.position(atGlyphOffset: selectionEndGlyphOffset ?? layout.glyphOffset(at: selectionEnd))
+      : selectionEnd
 
     let document = TranscriptSelectionDocumentRegistry.entries
     if let index = document.firstIndex(where: { $0.id == id }),
@@ -801,18 +867,18 @@ final class SelectionManager {
       index >= min(originIndex, endIndex), index <= max(originIndex, endIndex)
     {
       if originIndex < endIndex {
-        let start = index == originIndex ? selectionStart : (0, 0)
-        let end = index == endIndex ? selectionEnd : lastPosition(in: layout)
+        let start = index == originIndex ? resolvedStart : (0, 0)
+        let end = index == endIndex ? resolvedEnd : lastPosition(in: layout)
         return (start, end)
       }
       if originIndex > endIndex {
-        let start = index == endIndex ? selectionEnd : (0, 0)
-        let end = index == originIndex ? selectionStart : lastPosition(in: layout)
+        let start = index == endIndex ? resolvedEnd : (0, 0)
+        let end = index == originIndex ? resolvedStart : lastPosition(in: layout)
         return (start, end)
       }
-      return precedes(selectionStart, selectionEnd)
-        ? (selectionStart, selectionEnd)
-        : (selectionEnd, selectionStart)
+      return precedes(resolvedStart, resolvedEnd)
+        ? (resolvedStart, resolvedEnd)
+        : (resolvedEnd, resolvedStart)
     }
 
     guard let range = orderedSelection(),
@@ -868,12 +934,16 @@ final class SelectionManager {
       retainedSelectionEntries = entries
       selectionStart = (0, 0)
       selectionEnd = lastPosition(in: last.layout)
+      selectionStartGlyphOffset = 0
+      selectionEndGlyphOffset = last.layout.glyphCount
     } else {
       originLayoutID = anchor.id
       endLayoutID = anchor.id
       retainedSelectionEntries = [anchor]
       selectionStart = (0, 0)
       selectionEnd = lastPosition(in: anchor.layout)
+      selectionStartGlyphOffset = 0
+      selectionEndGlyphOffset = anchor.layout.glyphCount
     }
     isSelecting = false
     return true
@@ -910,20 +980,30 @@ final class SelectionManager {
       let selectionStart, let selectionEnd
     else { return nil }
     if let documentRange = documentSelectionEntries(originID: originID, endID: endID) {
+      let firstLayout = documentRange.entries[0].layout
+      let lastLayout = documentRange.entries[documentRange.entries.count - 1].layout
       if documentRange.originPrecedesEnd {
-        return (
-          documentRange.entries, 0, documentRange.entries.count - 1,
-          selectionStart, selectionEnd)
+        let start = firstLayout.position(
+          atGlyphOffset: selectionStartGlyphOffset ?? firstLayout.glyphOffset(at: selectionStart))
+        let end = lastLayout.position(
+          atGlyphOffset: selectionEndGlyphOffset ?? lastLayout.glyphOffset(at: selectionEnd))
+        return (documentRange.entries, 0, documentRange.entries.count - 1, start, end)
       }
       if documentRange.entries.count > 1 {
-        return (
-          documentRange.entries, 0, documentRange.entries.count - 1,
-          selectionEnd, selectionStart)
+        let start = firstLayout.position(
+          atGlyphOffset: selectionEndGlyphOffset ?? firstLayout.glyphOffset(at: selectionEnd))
+        let end = lastLayout.position(
+          atGlyphOffset: selectionStartGlyphOffset ?? lastLayout.glyphOffset(at: selectionStart))
+        return (documentRange.entries, 0, documentRange.entries.count - 1, start, end)
       }
-      if precedes(selectionStart, selectionEnd) {
-        return (documentRange.entries, 0, 0, selectionStart, selectionEnd)
+      let start = firstLayout.position(
+        atGlyphOffset: selectionStartGlyphOffset ?? firstLayout.glyphOffset(at: selectionStart))
+      let end = firstLayout.position(
+        atGlyphOffset: selectionEndGlyphOffset ?? firstLayout.glyphOffset(at: selectionEnd))
+      if precedes(start, end) {
+        return (documentRange.entries, 0, 0, start, end)
       }
-      return (documentRange.entries, 0, 0, selectionEnd, selectionStart)
+      return (documentRange.entries, 0, 0, end, start)
     }
 
     let entries = retainedSelectionEntries ?? MarkdownLayoutRegistry.orderedEntries()
@@ -1057,6 +1137,8 @@ final class SelectionManager {
     retainedSelectionEntries = nil
     selectionStart = nil
     selectionEnd = nil
+    selectionStartGlyphOffset = nil
+    selectionEndGlyphOffset = nil
     isSelecting = false
   }
 }
