@@ -36,6 +36,37 @@ final class SessionController {
     var layoutID: WidgetID {
       WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
     }
+
+    /// Stable identities for text selection. Unlike `layoutID`, these must not
+    /// change while streamed content invalidates the row's measured layout.
+    /// The header and body are separate layouts so a drag can select every
+    /// character drawn in a transcript card, including its marker and title.
+    var headerSelectionID: WidgetID {
+      WidgetID("transcript-selection:\(id.uuidString):header")
+    }
+
+    var selectionID: WidgetID {
+      WidgetID("transcript-selection:\(id.uuidString):body")
+    }
+
+    var selectionHeader: String {
+      let marker =
+        switch kind {
+        case .user: ">"
+        case .answer: "◆"
+        case .reasoning: "◇"
+        case .tool: "⌘"
+        case .notice: "·"
+        case .warning: "!"
+        case .error: "×"
+        }
+      let displayedTitle = running ? "\(sanitizeASCII(title)) · running" : sanitizeASCII(title)
+      return "\(marker) \(displayedTitle)"
+    }
+
+    var selectionBody: String {
+      text.isEmpty ? (running ? "running..." : "(empty)") : text
+    }
   }
 
   private enum StreamEvent: Sendable {
@@ -91,9 +122,13 @@ final class SessionController {
 
   var profileName: String
   var modelName: String
+  private(set) var sessionName: String?
+  private(set) var isPinned: Bool
   private(set) var commandPicker: CommandPickerState?
   private(set) var isRunningCommand = false
   var onIdentityChange: ((UUID, UUID) -> Void)?
+  /// Lets the store retain background controllers only while their model is running.
+  var onRunningChange: ((Bool) -> Void)?
 
   private var currentSessionId: UUID
   private var runTask: Task<Void, Never>?
@@ -111,6 +146,8 @@ final class SessionController {
   /// Messages queued while a turn is running, oldest first.
   var queuedTexts: [String] { boot.messageQueues.steeringPreviewTexts() }
   var sessionIdText: String { sessionId.uuidString.prefix(8).uppercased() }
+  /// Uses the session hash until the user assigns a custom name.
+  var displayName: String { sessionName ?? sessionIdText }
   /// Short label for the session list: the working directory's basename.
   var directoryTitle: String {
     if workingDirectory == "/" { return "/" }
@@ -122,8 +159,12 @@ final class SessionController {
     self.boot = boot
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
+    let metadata = try? ChatSessionStore.loadMetadata(from: boot.sessionDirectory)
+    self.sessionName = metadata?.name
+    self.isPinned = metadata?.isPinned ?? false
     self.currentSessionId = boot.sessionId
-    self.lastMessageAt = ChatSessionStore.lastMessageDate(in: boot.sessionDirectory)
+    self.lastMessageAt = ChatSessionStore.lastMessageDate(
+      in: boot.sessionDirectory, metadata: metadata)
     self.transcript = []
     self.promptHistory = boot.initialMessages.compactMap { message in
       message.role == .user && !message.content.isEmpty ? message.content : nil
@@ -147,6 +188,11 @@ final class SessionController {
     }
   }
 
+  func applyPresentation(name: String?, isPinned: Bool) {
+    sessionName = name
+    self.isPinned = isPinned
+  }
+
   // MARK: - Content tabs
 
   enum ContentTab: String, Sendable {
@@ -166,7 +212,7 @@ final class SessionController {
     selectedTab = tab
     // The composer's editing identity is gone while the terminal is on screen;
     // drop it so the AppKit key monitor stops routing composer shortcuts.
-    MacRenderContext.activeTextInput = nil
+    ScribeRenderContext.activeTextInput = nil
     switch tab {
     case .chat:
       wantsComposerFocus = true
@@ -191,7 +237,7 @@ final class SessionController {
     draft.append("\n")
     historyIndex = nil
     draftBeforeHistory = ""
-    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
   }
 
   /// Recalls submitted prompts only when the composer is empty or already in
@@ -207,7 +253,7 @@ final class SessionController {
       historyIndex = index - 1
     }
     if let historyIndex { draft = promptHistory[historyIndex] }
-    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
     return true
   }
 
@@ -222,7 +268,7 @@ final class SessionController {
       draft = draftBeforeHistory
       draftBeforeHistory = ""
     }
-    MacRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
     return true
   }
 
@@ -267,8 +313,8 @@ final class SessionController {
       // Leave composer editing while the picker owns f/j, Enter, and Escape.
       // Otherwise printable picker keys are inserted into the draft and the
       // editing submit/end events are consumed by the text field.
-      MacRenderContext.activeTextInput = nil
-      MacRenderContext.current?.focus(ScribeMacStore.composerID)
+      ScribeRenderContext.activeTextInput = nil
+      ScribeRenderContext.current?.focus(ScribeMacStore.composerID)
       transcript = Self.replay(snapshot.messages)
     }
   }
@@ -388,6 +434,7 @@ final class SessionController {
     historyIndex = nil
     draftBeforeHistory = ""
     isRunning = true
+    onRunningChange?(true)
 
     let harness = boot.harness
     let (events, continuation) = AsyncStream<StreamEvent>.makeStream()
@@ -570,12 +617,15 @@ final class SessionController {
       if let pending = pendingForceSend {
         pendingForceSend = nil
         submit(pending)
+      } else {
+        onRunningChange?(false)
       }
       if isActive {
         wantsComposerFocus = true
       }
     case .failed(let message):
       isRunning = false
+      onRunningChange?(false)
       transcript.append(TranscriptItem(kind: .error, title: "Error", text: message))
       runTask = nil
     }
@@ -595,8 +645,11 @@ final class SessionController {
       transcript.append(TranscriptItem(kind: .notice, title: "Scribe", text: "Empty response."))
     case .output(.finalized):
       break
-    case .tool(.invocation(let name, let arguments, let output)):
-      upsertTool(name: name, arguments: arguments, output: output, running: false)
+    case .tool(.invocation):
+      // Tool execution boundaries own the live transcript row. The invocation event
+      // carries the same arguments and output after toolExecutionEnd; rendering it
+      // again would append a duplicate completed row.
+      break
     case .tool(.warning(let warning)):
       transcript.append(TranscriptItem(kind: .warning, title: "Warning", text: warning))
     case .lifecycle(.usage(let usage, let rate)):

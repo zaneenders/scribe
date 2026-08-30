@@ -106,6 +106,44 @@ struct ChatSessionPersistenceTests {
     }
   }
 
+  @Test func legacyMetadataDefaultsToUnpinnedAndUnnamed() throws {
+    try withTemporaryDirectory { directory in
+      let id = UUID()
+      let json = """
+        {"schemaVersion":2,"id":"\(id.uuidString)","createdAt":"2023-11-14T22:13:20Z","model":"m","cwd":"/tmp"}
+        """
+      try Data(json.utf8).write(to: directory.appendingPathComponent("metadata.json"))
+
+      let metadata = try ChatSessionStore.loadMetadata(from: FilePath(directory.path))
+      #expect(metadata.name == nil)
+      #expect(metadata.displayName == String(id.uuidString.prefix(8)).uppercased())
+      #expect(metadata.isPinned == false)
+    }
+  }
+
+  @Test func updatesSessionNameAndPinWithoutChangingRecency() async throws {
+    try await withTemporaryDirectory { directory in
+      let path = FilePath(directory.path)
+      let lastMessageAt = Date(timeIntervalSince1970: 1_700_000_000)
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: UUID(), createdAt: .distantPast, model: "m", cwd: "/tmp",
+          baseURL: nil, scribeVersion: nil, lastMessageAt: lastMessageAt),
+        to: path)
+
+      let updated = try await ChatSessionStore.updatePresentation(
+        in: path, name: "  Important work  ", isPinned: true)
+      #expect(updated.name == "Important work")
+      #expect(updated.isPinned)
+      #expect(updated.lastMessageAt == lastMessageAt)
+
+      let cleared = try await ChatSessionStore.updatePresentation(in: path, name: "   ")
+      #expect(cleared.name == nil)
+      #expect(cleared.displayName == String(cleared.id.uuidString.prefix(8)).uppercased())
+      #expect(cleared.isPinned)
+    }
+  }
+
   @Test func listSessionsReadsFromConfiguredDirectory() async throws {
     try await withTemporaryDirectory { tempRoot in
       let id = UUID()
@@ -153,6 +191,31 @@ struct ChatSessionPersistenceTests {
 
       let files = try await ChatSessionStore.listSessionDirectories(sessionsRoot: root)
       #expect(files == [newerDirectory, olderDirectory])
+    }
+  }
+
+  @Test func listSessionsPlacesPinnedSessionsFirst() async throws {
+    try await withTemporaryDirectory { tempRoot in
+      let root = FilePath(tempRoot.path)
+      let pinnedDirectory = try await ChatSessionStore.sessionDirectory(
+        sessionId: UUID(), sessionsRoot: root)
+      let recentDirectory = try await ChatSessionStore.sessionDirectory(
+        sessionId: UUID(), sessionsRoot: root)
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: UUID(), createdAt: .distantPast, model: "m", cwd: "/",
+          baseURL: nil, scribeVersion: nil,
+          lastMessageAt: Date(timeIntervalSince1970: 1), isPinned: true),
+        to: pinnedDirectory)
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: UUID(), createdAt: .distantPast, model: "m", cwd: "/",
+          baseURL: nil, scribeVersion: nil,
+          lastMessageAt: Date(timeIntervalSince1970: 2)),
+        to: recentDirectory)
+
+      let files = try await ChatSessionStore.listSessionDirectories(sessionsRoot: root)
+      #expect(files == [pinnedDirectory, recentDirectory])
     }
   }
 

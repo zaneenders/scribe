@@ -18,22 +18,12 @@ final class DirectoryPaletteKeyMonitor {
   var onCommandPickerToggle: (() -> Void)?
   var onCommandPickerConfirm: (() -> Void)?
   var onCommandPickerCancel: (() -> Void)?
-  var copyText: (() -> String?)?
 
   private init() {}
 
   func install() {
     guard monitor == nil else { return }
     monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      if event.modifierFlags.contains(.command),
-        event.charactersIgnoringModifiers?.lowercased() == "c",
-        let text = self?.copyText?(),
-        !text.isEmpty
-      {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        return nil
-      }
       let store = ScribeMacStore.shared
       if store.showDirectoryPicker {
         if event.keyCode == 48 {
@@ -85,7 +75,7 @@ final class DirectoryPaletteKeyMonitor {
           break
         }
       }
-      guard MacRenderContext.activeTextInput == ScribeMacStore.composerID, store.active != nil else {
+      guard ScribeRenderContext.activeTextInput == ScribeMacStore.composerID, store.active != nil else {
         return event
       }
       switch event.keyCode {
@@ -96,8 +86,14 @@ final class DirectoryPaletteKeyMonitor {
       case 53:  // Escape
         return self?.onComposerStop?() == true ? nil : event
       case 126:  // Up
+        guard event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty else {
+          return event
+        }
         return self?.onComposerHistoryPrevious?() == true ? nil : event
       case 125:  // Down
+        guard event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty else {
+          return event
+        }
         return self?.onComposerHistoryNext?() == true ? nil : event
       default:
         return event
@@ -120,7 +116,6 @@ final class DirectoryPaletteKeyMonitor {
     onCommandPickerToggle = nil
     onCommandPickerConfirm = nil
     onCommandPickerCancel = nil
-    copyText = nil
   }
 }
 #endif

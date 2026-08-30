@@ -35,10 +35,8 @@ swift package --allow-writing-to-package-directory --allow-network-connections a
 swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
 
-# Mac app (double-clickable, installable in /Applications)
-swift package --allow-writing-to-package-directory bundle
-rm -rf /Applications/Scribe.app
-ditto dist/Scribe.app /Applications/Scribe.app
+# Mac app (build, stably sign, and install in /Applications)
+./Scripts/install-macos.sh
 ```
 
 Quit any development instance started with `swift run scribe-mac` before opening
@@ -53,6 +51,22 @@ Using the explicit path prevents Launch Services from selecting the copy under
 copying also prevents stale files from a previous bundle from surviving an
 upgrade. The bundle embeds the CLI at `Scribe.app/Contents/Helpers/scribe` if you
 prefer a single install artifact over a separate `~/.local/bin/scribe`.
+
+The install script signs with the first **Apple Development** identity in your
+login keychain. This gives Scribe a stable designated requirement so macOS keeps
+its Accessibility and Screen Recording approvals across rebuilds. If you have
+multiple matching identities, set one explicitly:
+
+```bash
+SCRIBE_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" \
+  ./Scripts/install-macos.sh
+```
+
+Create an Apple Development certificate in Xcode if the script cannot find one.
+Unlike the bundler's ad-hoc signature, a development-signed app's identity does
+not change whenever its executable changes. Keep launching the installed copy at
+the same path (`/Applications/Scribe.app`) rather than granting access separately
+to `dist` or `swift run` builds.
 
 ### Linux
 
@@ -203,6 +217,12 @@ Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
     ├── messages.jsonl
     └── scribe.log                       # diagnostic log for that session
 ```
+
+Session names and pin state are stored in `metadata.json`. A session's default
+name is its abbreviated hash (the first eight characters of its UUID). In the
+graphical app, use **Rename** on a session row to assign a custom name; clearing
+it restores the hash. Use **Pin** to keep a session above unpinned sessions in
+the same workspace group.
 
 Per-session logs live under `sessions/{uuid}/scribe.log`. Older releases wrote
 `~/.scribe/logs/scribe-{uuid}.log`; those files are not moved automatically.

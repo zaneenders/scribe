@@ -200,6 +200,10 @@ struct VisualLine: Equatable {
   var kind: VisualLineKind = .plain
   var runs: [VisualRun] = []
   var columnCount: Int = 0
+  /// Logical text between this visual line and the next. Soft wrapping
+  /// contributes nothing, a consumed wrapping space contributes a space, and
+  /// source/block line breaks contribute a newline.
+  var trailingText: String = "\n"
 }
 
 /// Reflows markdown blocks into visual lines of colored runs for a column
@@ -216,7 +220,8 @@ func layoutMarkdown(
 
   func wrapRuns(_ runs: [MDRun], colorFor: (MDRun) -> Color, kind: VisualLineKind) {
     var line = VisualLine(kind: kind)
-    func emit() {
+    func emit(trailingText: String = "") {
+      line.trailingText = trailingText
       lines.append(line)
       line = VisualLine(kind: kind)
     }
@@ -238,6 +243,7 @@ func layoutMarkdown(
             if room > 0 {
               let cut = remaining.index(remaining.startIndex, offsetBy: room)
               line.runs.append(VisualRun(text: String(remaining[..<cut]), color: color))
+              line.columnCount += room
               remaining = String(remaining[cut...])
             }
             emit()
@@ -249,10 +255,10 @@ func layoutMarkdown(
       for ch in run.text {
         if ch == "\n" {
           flushWord()
-          emit()
+          emit(trailingText: "\n")
         } else if ch == " " {
           flushWord()
-          if line.columnCount >= columns { emit() }
+          if line.columnCount >= columns { emit(trailingText: " ") }
           if line.columnCount > 0 {
             line.runs.append(VisualRun(text: " ", color: color))
             line.columnCount += 1
@@ -270,8 +276,11 @@ func layoutMarkdown(
   for (index, block) in blocks.enumerated() {
     let isListItem: Bool
     if case .listItem = block { isListItem = true } else { isListItem = false }
-    if index > 0 && !(isListItem && previousWasListItem) {
-      lines.append(VisualLine())
+    if index > 0 {
+      if !lines.isEmpty { lines[lines.count - 1].trailingText = "\n" }
+      if !(isListItem && previousWasListItem) {
+        lines.append(VisualLine(trailingText: "\n"))
+      }
     }
 
     switch block {
@@ -311,12 +320,14 @@ func layoutMarkdown(
         while !rest.isEmpty {
           let take = min(columns, rest.count)
           let cut = rest.index(rest.startIndex, offsetBy: take)
+          let remainder = String(rest[cut...])
           lines.append(
             VisualLine(
               kind: .code,
               runs: [VisualRun(text: String(rest[..<cut]), color: theme.codeText)],
-              columnCount: take))
-          rest = String(rest[cut...])
+              columnCount: take,
+              trailingText: remainder.isEmpty ? "\n" : ""))
+          rest = remainder
         }
       }
     case .rule:
@@ -339,6 +350,57 @@ func layoutMarkdown(
 @MainActor
 enum TranscriptViewportRegistry {
   static var current: Rect?
+  /// Retained for selection updates, which run before the next transcript draw.
+  static var lastDrawn: Rect?
+  static var scrollController: ScrollViewController?
+}
+
+func selectionAutoscrollTarget(pointer: Point, viewport: Rect, step: Float = 18) -> Rect? {
+  guard step > 0, step.isFinite else { return nil }
+  if pointer.y < viewport.minY {
+    return Rect(x: pointer.x, y: viewport.minY - step, width: 1, height: 1)
+  }
+  if pointer.y > viewport.maxY {
+    return Rect(x: pointer.x, y: viewport.maxY + step, width: 1, height: 1)
+  }
+  return nil
+}
+
+/// The complete ordered transcript, independent of LazyVStack's visible window.
+/// Selection uses this as its source of truth so fast autoscroll cannot skip
+/// virtualized rows between the two rendered endpoints.
+@MainActor
+enum TranscriptSelectionDocumentRegistry {
+  struct Entry {
+    let id: WidgetID
+    let linesForColumns: (Int) -> [VisualLine]
+
+    func layout(columns: Int, matching template: MarkdownLayout) -> MarkdownLayout {
+      MarkdownLayout(
+        lines: linesForColumns(max(1, columns)),
+        lineHeight: template.lineHeight,
+        cellWidth: template.cellWidth,
+        scale: template.scale)
+    }
+  }
+
+  private(set) static var entries: [Entry] = []
+  private static var ownerID: UUID?
+
+  static func setEntries(ownerID: UUID, _ entries: [Entry]) {
+    let entryIDs = Set(entries.map(\.id))
+    if self.ownerID != ownerID
+      || !SelectionManager.shared.selectionEndpointsAreContained(in: entryIDs)
+    {
+      SelectionManager.shared.clear()
+    }
+    self.ownerID = ownerID
+    self.entries = entries
+  }
+
+  static func entry(for id: WidgetID) -> Entry? {
+    entries.first { $0.id == id }
+  }
 }
 
 /// The computed layout of a MarkdownText block for one frame, cached for
@@ -354,7 +416,9 @@ struct MarkdownLayout {
   /// Returns the (line index, column) for a point in window coordinates,
   /// or nil if the point is outside this block.
   func hitTest(point: Point) -> (line: Int, column: Int)? {
-    guard rect.contains(point) else { return nil }
+    guard rect.contains(point), lineHeight > 0, lineHeight.isFinite,
+      cellWidth > 0, cellWidth.isFinite
+    else { return nil }
     let lineIndex = Int((point.y - rect.minY) / lineHeight)
     guard lineIndex >= 0, lineIndex < lines.count else { return nil }
     let line = lines[lineIndex]
@@ -364,13 +428,56 @@ struct MarkdownLayout {
     for run in line.runs {
       let runWidth = Float(run.text.count) * cellWidth
       if xOffset < runX + runWidth {
-        col += Int((xOffset - runX) / cellWidth)
-        return (lineIndex, min(col, line.columnCount))
+        col += Int(((xOffset - runX) / cellWidth).rounded(.toNearestOrAwayFromZero))
+        return (lineIndex, max(0, min(col, line.columnCount)))
       }
       runX += runWidth
       col += run.text.count
     }
     return (lineIndex, line.columnCount)
+  }
+
+  /// A layout-independent text offset for a visual position. Separators record
+  /// logical whitespace that is not necessarily drawn at a soft-wrap boundary.
+  func glyphOffset(at position: (line: Int, column: Int)) -> Int {
+    guard !lines.isEmpty else { return 0 }
+    let line = max(0, min(position.line, lines.count - 1))
+    let preceding = lines[..<line].reduce(0) {
+      $0 + $1.columnCount + $1.trailingText.count
+    }
+    return preceding + max(0, min(position.column, lines[line].columnCount))
+  }
+
+  /// Converts a stable text offset back to this layout's visual coordinates.
+  /// At a soft-wrap boundary, prefer the start of the following visual line so
+  /// selecting from that offset does not acquire a visual-only newline.
+  func position(atGlyphOffset offset: Int) -> (line: Int, column: Int) {
+    guard !lines.isEmpty else { return (0, 0) }
+    var remaining = max(0, min(offset, glyphCount))
+    for (index, line) in lines.enumerated() {
+      let isLast = index == lines.count - 1
+      if remaining < line.columnCount || isLast {
+        return (index, min(remaining, line.columnCount))
+      }
+      if remaining == line.columnCount {
+        if line.trailingText.isEmpty { return (index + 1, 0) }
+        return (index, line.columnCount)
+      }
+      remaining -= line.columnCount
+      if remaining < line.trailingText.count {
+        return (index, line.columnCount)
+      }
+      remaining -= line.trailingText.count
+    }
+    return (lines.count - 1, lines.last?.columnCount ?? 0)
+  }
+
+  var glyphCount: Int {
+    guard !lines.isEmpty else { return 0 }
+    return lines.enumerated().reduce(0) { result, entry in
+      result + entry.element.columnCount
+        + (entry.offset < lines.count - 1 ? entry.element.trailingText.count : 0)
+    }
   }
 
   /// Extracts the text in the given range (line, column) → (line, column).
@@ -405,9 +512,9 @@ struct MarkdownLayout {
           col = runEnd
         }
       }
-      // A range crossing a visual line boundary includes its newline, even
-      // when either side lands exactly at a line edge or the line is empty.
-      if li < el { result += "\n" }
+      // Preserve the logical separator rather than manufacturing a newline for
+      // every visual wrap. This keeps copied text stable when the width changes.
+      if li < el { result += line.trailingText }
     }
     return result
   }
@@ -524,20 +631,26 @@ enum MarkdownLayoutRegistry {
     layouts[id]
   }
 
-  /// Returns the layout whose rect contains the given point, or nil.
-  static func layout(at point: Point) -> MarkdownLayout? {
-    for (_, layout) in layouts {
-      if layout.rect.contains(point) { return layout }
+  /// Returns the registered entry whose rect contains the given point, or nil.
+  static func entry(at point: Point) -> (id: WidgetID, layout: MarkdownLayout)? {
+    for (id, layout) in layouts where !layout.lines.isEmpty && layout.rect.contains(point) {
+      return (id, layout)
     }
     return nil
   }
 
-  /// Returns the layout with the given rect, or nil.
-  static func layout(withRect rect: Rect) -> MarkdownLayout? {
-    for (_, layout) in layouts {
-      if layout.rect == rect { return layout }
+  /// Visible text layouts in transcript order. Dictionary iteration order is not
+  /// stable, so selection spanning multiple transcript rows must use geometry.
+  /// Empty layouts have no valid text position and must not become drag endpoints.
+  static func orderedEntries() -> [(id: WidgetID, layout: MarkdownLayout)] {
+    layouts.compactMap { id, layout in
+      layout.lines.isEmpty ? nil : (id: id, layout: layout)
+    }.sorted {
+      if $0.layout.rect.minY == $1.layout.rect.minY {
+        return $0.layout.rect.minX < $1.layout.rect.minX
+      }
+      return $0.layout.rect.minY < $1.layout.rect.minY
     }
-    return nil
   }
 
   static func clear() {
@@ -553,6 +666,9 @@ struct MarkdownText: PrimitiveBlock {
   var baseColor: Color
   var scale: Float = 0.5
   var lineSpacing: Float = 4
+  /// Fixed interface labels may contain the small set of UI glyphs that prose
+  /// sanitization intentionally replaces.
+  var sanitizesASCII = true
   /// Optional stable ID for this block, used to register its layout for
   /// hit testing and text selection.
   var itemID: WidgetID? = nil
@@ -560,7 +676,7 @@ struct MarkdownText: PrimitiveBlock {
   private func lines(forWidth width: Float, metrics: FontMetrics) -> [VisualLine] {
     let columns = Int(width / (metrics.cellAdvance * scale))
     return layoutMarkdown(
-      segmentMarkdown(sanitizeASCII(markdown)),
+      segmentMarkdown(sanitizesASCII ? sanitizeASCII(markdown) : markdown),
       columns: columns,
       theme: theme,
       baseColor: baseColor)
@@ -588,7 +704,7 @@ struct MarkdownText: PrimitiveBlock {
     // potentially large row to the viewport as well, so a single long answer
     // does not emit draw commands for every markdown line.
     let visibleRect = TranscriptViewportRegistry.current
-    let selection = SelectionManager.shared.selection(for: layout)
+    let selection = itemID.flatMap { SelectionManager.shared.selection(for: $0, layout: layout) }
     layout.draw(
       into: &drawList, selection: selection, theme: theme,
       visibleRect: visibleRect)
@@ -613,16 +729,34 @@ struct WrappedText: Block {
 
 // MARK: - Selection Manager
 
+func shouldProcessSelectionDrag(
+  isDragging: Bool,
+  pointerReleased: Bool,
+  hasDragOrigin: Bool
+) -> Bool {
+  isDragging || (pointerReleased && hasDragOrigin)
+}
+
 /// Tracks text selection across frames. Reads drag state from Interaction
 /// and maps it to text positions using the MarkdownLayoutRegistry.
 @MainActor
 final class SelectionManager {
   static let shared = SelectionManager()
 
-  /// The rect of the layout where the selection originated.
-  private var originLayoutRect: Rect? = nil
+  /// Stable identities of the layouts containing the two selection endpoints.
+  /// Their rects can change when the transcript scrolls or reflows between frames.
+  private var originLayoutID: WidgetID? = nil
+  private var endLayoutID: WidgetID? = nil
+  /// Layouts accumulated while dragging. LazyVStack only keeps visible rows in
+  /// the per-frame registry, so copying must not depend on both endpoints remaining
+  /// on screen at the same time.
+  private var retainedSelectionEntries: [(id: WidgetID, layout: MarkdownLayout)]? = nil
   private(set) var selectionStart: (line: Int, column: Int)?
   private(set) var selectionEnd: (line: Int, column: Int)?
+  /// Layout-independent endpoint offsets, measured in rendered glyphs within
+  /// each transcript item. These preserve the selected characters across reflow.
+  private var selectionStartGlyphOffset: Int?
+  private var selectionEndGlyphOffset: Int?
   /// Whether a drag is in progress (selection is being extended).
   var isSelecting: Bool = false
 
@@ -630,81 +764,411 @@ final class SelectionManager {
 
   /// Call at the start of each frame to update selection from drag state.
   func updateFromDrag(context: RenderContext) {
-    let input = context.input
-    guard input.pointerDown && input.pointerPosition != input.pointerPressPosition else {
-      if isSelecting {
+    let isReleaseFrame = context.input.pointerReleased && context.pointerDragOrigin != nil
+    guard shouldProcessSelectionDrag(
+      isDragging: context.isPointerDragging,
+      pointerReleased: context.input.pointerReleased,
+      hasDragOrigin: context.pointerDragOrigin != nil),
+      let origin = context.pointerDragOrigin
+    else {
+      return
+    }
+    defer {
+      if isReleaseFrame, isSelecting {
+        retainCurrentSelection()
         isSelecting = false
       }
-      return
     }
 
     if !isSelecting {
       isSelecting = true
-      originLayoutRect = nil
+      originLayoutID = nil
+      endLayoutID = nil
+      retainedSelectionEntries = nil
       selectionStart = nil
       selectionEnd = nil
+      selectionStartGlyphOffset = nil
+      selectionEndGlyphOffset = nil
     }
 
-    let origin = input.pointerPressPosition
-    let current = input.pointerPosition
+    let current = context.pointerDragPosition
+    let visibleEntries = MarkdownLayoutRegistry.orderedEntries()
 
-    if originLayoutRect == nil {
-      // First drag frame — find the layout under the origin
-      if let layout = MarkdownLayoutRegistry.layout(at: origin),
-        let hit = layout.hitTest(point: origin)
+    if context.isPointerDragging, originLayoutID != nil,
+      let viewport = TranscriptViewportRegistry.lastDrawn,
+      let target = selectionAutoscrollTarget(pointer: current, viewport: viewport)
+    {
+      TranscriptViewportRegistry.scrollController?.scrollToVisible(target)
+      context.requestRedraw()
+    }
+
+    if originLayoutID == nil {
+      // First drag frame — find the layout under the origin.
+      if let entry = MarkdownLayoutRegistry.entry(at: origin),
+        let hit = entry.layout.hitTest(point: origin)
       {
-        originLayoutRect = layout.rect
+        originLayoutID = entry.id
+        endLayoutID = entry.id
         selectionStart = hit
+        selectionEnd = hit
+        selectionStartGlyphOffset = entry.layout.glyphOffset(at: hit)
+        selectionEndGlyphOffset = selectionStartGlyphOffset
+        retainedSelectionEntries = visibleEntries
       }
     }
 
-    guard let layoutRect = originLayoutRect else { return }
-    guard let layout = MarkdownLayoutRegistry.layout(withRect: layoutRect),
-      selectionStart != nil else { return }
+    guard originLayoutID != nil, selectionStart != nil else { return }
 
-    if let endHit = layout.hitTest(point: current) {
+    // Keep every row encountered during the drag. The origin may have scrolled out
+    // of LazyVStack's per-frame registry, but it must not be required to update the
+    // endpoint or copy the completed selection.
+    mergeSelectionEntries(
+      visibleEntries, appendIfDisjoint: current.y >= origin.y)
+
+    if let entry = MarkdownLayoutRegistry.entry(at: current),
+      let endHit = entry.layout.hitTest(point: current)
+    {
+      endLayoutID = entry.id
       selectionEnd = endHit
-    } else if current.y > layout.rect.maxY {
-      selectionEnd = (layout.lines.count - 1, layout.lines.last?.columnCount ?? 0)
-    } else if current.y < layout.rect.minY {
-      selectionEnd = (0, 0)
+      selectionEndGlyphOffset = entry.layout.glyphOffset(at: endHit)
+      return
     }
+
+    // Rows have padding and spacing between their text layouts. While the pointer
+    // is in one of those gaps, extend from the nearest visible row rather than
+    // snapping back to the row where the drag began.
+    let entries = visibleEntries
+    guard !entries.isEmpty else { return }
+    let entry: (id: WidgetID, layout: MarkdownLayout)
+    if current.y < entries[0].layout.rect.minY {
+      entry = entries[0]
+      endLayoutID = entry.id
+      selectionEnd = (0, 0)
+      selectionEndGlyphOffset = 0
+      return
+    } else if current.y > entries[entries.count - 1].layout.rect.maxY {
+      entry = entries[entries.count - 1]
+      endLayoutID = entry.id
+      selectionEnd = lastPosition(in: entry.layout)
+      selectionEndGlyphOffset = entry.layout.glyphCount
+      return
+    } else {
+      entry = entries.min {
+        verticalDistance(from: current.y, to: $0.layout.rect)
+          < verticalDistance(from: current.y, to: $1.layout.rect)
+      } ?? entries[0]
+    }
+
+    endLayoutID = entry.id
+    let layout = entry.layout
+    let line = max(
+      0, min(layout.lines.count - 1, Int((current.y - layout.rect.minY) / layout.lineHeight)))
+    if current.y <= layout.rect.minY {
+      selectionEnd = (0, 0)
+    } else if current.y >= layout.rect.maxY {
+      selectionEnd = lastPosition(in: layout)
+    } else if current.x >= layout.rect.maxX {
+      selectionEnd = (line, layout.lines[line].columnCount)
+    } else {
+      selectionEnd = (line, 0)
+    }
+    selectionEndGlyphOffset = selectionEnd.map { layout.glyphOffset(at: $0) }
   }
 
-  /// Returns the normalized selection range if it overlaps the given layout,
-  /// or nil. Normalized means start <= end.
-  func selection(for layout: MarkdownLayout) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
-    guard let rect = originLayoutRect, rect == layout.rect else { return nil }
-    guard let start = selectionStart, let end = selectionEnd else { return nil }
-    if start.line < end.line || (start.line == end.line && start.column <= end.column) {
-      return (start, end)
+  /// Returns the portion of the current selection that overlaps this layout.
+  func selection(
+    for id: WidgetID,
+    layout: MarkdownLayout
+  ) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
+    guard let originID = originLayoutID, let endID = endLayoutID,
+      let selectionStart, let selectionEnd
+    else { return nil }
+    let resolvedStart = id == originID
+      ? layout.position(atGlyphOffset: selectionStartGlyphOffset ?? layout.glyphOffset(at: selectionStart))
+      : selectionStart
+    let resolvedEnd = id == endID
+      ? layout.position(atGlyphOffset: selectionEndGlyphOffset ?? layout.glyphOffset(at: selectionEnd))
+      : selectionEnd
+
+    let document = TranscriptSelectionDocumentRegistry.entries
+    if let index = document.firstIndex(where: { $0.id == id }),
+      let originIndex = document.firstIndex(where: { $0.id == originID }),
+      let endIndex = document.firstIndex(where: { $0.id == endID }),
+      index >= min(originIndex, endIndex), index <= max(originIndex, endIndex)
+    {
+      if originIndex < endIndex {
+        let start = index == originIndex ? resolvedStart : (0, 0)
+        let end = index == endIndex ? resolvedEnd : lastPosition(in: layout)
+        return (start, end)
+      }
+      if originIndex > endIndex {
+        let start = index == endIndex ? resolvedEnd : (0, 0)
+        let end = index == originIndex ? resolvedStart : lastPosition(in: layout)
+        return (start, end)
+      }
+      return precedes(resolvedStart, resolvedEnd)
+        ? (resolvedStart, resolvedEnd)
+        : (resolvedEnd, resolvedStart)
     }
-    return (end, start)
+
+    guard let range = orderedSelection(),
+      let index = range.entries.firstIndex(where: { $0.id == id }),
+      index >= range.startIndex, index <= range.endIndex
+    else { return nil }
+    let start = index == range.startIndex ? range.start : (0, 0)
+    let end = index == range.endIndex ? range.end : lastPosition(in: layout)
+    return (start, end)
+  }
+
+  /// Whether both endpoints still belong to the current transcript document.
+  /// A missing endpoint means there is no active selection to invalidate.
+  func selectionEndpointsAreContained(in entryIDs: Set<WidgetID>) -> Bool {
+    guard let originLayoutID, let endLayoutID else { return true }
+    return entryIDs.contains(originLayoutID) && entryIDs.contains(endLayoutID)
+  }
+
+  /// Selects the complete transcript containing the active markdown layout.
+  /// Returns whether there was custom content to select so Chroma can fall back
+  /// to built-in selectable text.
+  func selectAll(isTranscriptVisible: Bool) -> Bool {
+    guard isTranscriptVisible else { return false }
+    let document = TranscriptSelectionDocumentRegistry.entries
+    let documentIDs = Set(document.map(\.id))
+    let anchor: (id: WidgetID, layout: MarkdownLayout)?
+    if let layoutID = originLayoutID, let layout = MarkdownLayoutRegistry.layout(for: layoutID) {
+      anchor = (layoutID, layout)
+    } else if let pointed = MarkdownLayoutRegistry.entry(
+      at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
+    {
+      anchor = pointed
+    } else {
+      // Keyboard select-all should not depend on the pointer landing directly on
+      // glyphs; transcript padding, headers, and blank space are valid anchors.
+      anchor = MarkdownLayoutRegistry.orderedEntries().first {
+        documentIDs.contains($0.id)
+      }
+    }
+    guard let anchor, !anchor.layout.lines.isEmpty else { return false }
+
+    if document.contains(where: { $0.id == anchor.id }), !document.isEmpty {
+      let columns = max(
+        1, Int((anchor.layout.rect.size.width / anchor.layout.cellWidth).rounded(.down)))
+      let entries = document.map { entry in
+        let layout = MarkdownLayoutRegistry.layout(for: entry.id)
+          ?? entry.layout(columns: columns, matching: anchor.layout)
+        return (id: entry.id, layout: layout)
+      }
+      guard let first = entries.first, let last = entries.last else { return false }
+      originLayoutID = first.id
+      endLayoutID = last.id
+      retainedSelectionEntries = entries
+      selectionStart = (0, 0)
+      selectionEnd = lastPosition(in: last.layout)
+      selectionStartGlyphOffset = 0
+      selectionEndGlyphOffset = last.layout.glyphCount
+    } else {
+      originLayoutID = anchor.id
+      endLayoutID = anchor.id
+      retainedSelectionEntries = [anchor]
+      selectionStart = (0, 0)
+      selectionEnd = lastPosition(in: anchor.layout)
+      selectionStartGlyphOffset = 0
+      selectionEndGlyphOffset = anchor.layout.glyphCount
+    }
+    isSelecting = false
+    return true
+  }
+
+  /// Returns custom transcript text. Chroma checks an editable selection before
+  /// consulting this fallback, so a focused editor without a selection must not
+  /// prevent copying a selection made in the transcript.
+  func copyText(isTranscriptVisible: Bool) -> String? {
+    guard isTranscriptVisible else { return nil }
+    return selectedText()
   }
 
   /// Returns the currently selected text, or nil if nothing is selected.
   func selectedText() -> String? {
-    guard let rect = originLayoutRect,
-      let start = selectionStart,
-      let end = selectionEnd else { return nil }
-
-    guard let layout = MarkdownLayoutRegistry.layout(withRect: rect) else { return nil }
-
-    let s: (line: Int, column: Int)
-    let e: (line: Int, column: Int)
-    if start.line < end.line || (start.line == end.line && start.column <= end.column) {
-      s = start; e = end
-    } else {
-      s = end; e = start
+    guard let range = orderedSelection() else { return nil }
+    var parts: [String] = []
+    for index in range.startIndex...range.endIndex {
+      let entry = range.entries[index]
+      let start = index == range.startIndex ? range.start : (0, 0)
+      let end = index == range.endIndex ? range.end : lastPosition(in: entry.layout)
+      parts.append(entry.layout.textInRange(from: start, to: end))
     }
-    return layout.textInRange(from: s, to: e)
+    return parts.joined(separator: "\n")
+  }
+
+  private typealias Position = (line: Int, column: Int)
+
+  private func orderedSelection() -> (
+    entries: [(id: WidgetID, layout: MarkdownLayout)],
+    startIndex: Int, endIndex: Int, start: Position, end: Position
+  )? {
+    guard let originID = originLayoutID, let endID = endLayoutID,
+      let selectionStart, let selectionEnd
+    else { return nil }
+    if let documentRange = documentSelectionEntries(originID: originID, endID: endID) {
+      let firstLayout = documentRange.entries[0].layout
+      let lastLayout = documentRange.entries[documentRange.entries.count - 1].layout
+      if documentRange.originPrecedesEnd {
+        let start = firstLayout.position(
+          atGlyphOffset: selectionStartGlyphOffset ?? firstLayout.glyphOffset(at: selectionStart))
+        let end = lastLayout.position(
+          atGlyphOffset: selectionEndGlyphOffset ?? lastLayout.glyphOffset(at: selectionEnd))
+        return (documentRange.entries, 0, documentRange.entries.count - 1, start, end)
+      }
+      if documentRange.entries.count > 1 {
+        let start = firstLayout.position(
+          atGlyphOffset: selectionEndGlyphOffset ?? firstLayout.glyphOffset(at: selectionEnd))
+        let end = lastLayout.position(
+          atGlyphOffset: selectionStartGlyphOffset ?? lastLayout.glyphOffset(at: selectionStart))
+        return (documentRange.entries, 0, documentRange.entries.count - 1, start, end)
+      }
+      let start = firstLayout.position(
+        atGlyphOffset: selectionStartGlyphOffset ?? firstLayout.glyphOffset(at: selectionStart))
+      let end = firstLayout.position(
+        atGlyphOffset: selectionEndGlyphOffset ?? firstLayout.glyphOffset(at: selectionEnd))
+      if precedes(start, end) {
+        return (documentRange.entries, 0, 0, start, end)
+      }
+      return (documentRange.entries, 0, 0, end, start)
+    }
+
+    let entries = retainedSelectionEntries ?? MarkdownLayoutRegistry.orderedEntries()
+    guard let originIndex = entries.firstIndex(where: { $0.id == originID }),
+      let endIndex = entries.firstIndex(where: { $0.id == endID })
+    else { return nil }
+
+    if originIndex < endIndex {
+      return (entries, originIndex, endIndex, selectionStart, selectionEnd)
+    }
+    if originIndex > endIndex {
+      return (entries, endIndex, originIndex, selectionEnd, selectionStart)
+    }
+    if precedes(selectionStart, selectionEnd) {
+      return (entries, originIndex, endIndex, selectionStart, selectionEnd)
+    }
+    return (entries, originIndex, endIndex, selectionEnd, selectionStart)
+  }
+
+  private func documentSelectionEntries(
+    originID: WidgetID,
+    endID: WidgetID
+  ) -> (entries: [(id: WidgetID, layout: MarkdownLayout)], originPrecedesEnd: Bool)? {
+    let document = TranscriptSelectionDocumentRegistry.entries
+    guard let originIndex = document.firstIndex(where: { $0.id == originID }),
+      let endIndex = document.firstIndex(where: { $0.id == endID }),
+      // Prefer the current frame's layout so a completed selection follows text
+      // appended to a streaming row. Retained layouts are only a fallback for
+      // endpoints that have scrolled out of LazyVStack's visible window.
+      let originLayout = MarkdownLayoutRegistry.layout(for: originID)
+        ?? retainedSelectionEntries?.first(where: { $0.id == originID })?.layout,
+      let endLayout = MarkdownLayoutRegistry.layout(for: endID)
+        ?? retainedSelectionEntries?.first(where: { $0.id == endID })?.layout
+    else { return nil }
+
+    let lower = min(originIndex, endIndex)
+    let upper = max(originIndex, endIndex)
+    let template = originLayout
+    let columns = max(1, Int((template.rect.size.width / template.cellWidth).rounded(.down)))
+    let entries = document[lower...upper].map { entry in
+      if entry.id == originID { return (id: entry.id, layout: originLayout) }
+      if entry.id == endID { return (id: entry.id, layout: endLayout) }
+      return (id: entry.id, layout: entry.layout(columns: columns, matching: template))
+    }
+    return (entries, originIndex <= endIndex)
+  }
+
+  private func retainCurrentSelection() {
+    guard let originID = originLayoutID, let endID = endLayoutID else { return }
+    mergeSelectionEntries(MarkdownLayoutRegistry.orderedEntries(), appendIfDisjoint: true)
+    guard let entries = retainedSelectionEntries,
+      let originIndex = entries.firstIndex(where: { $0.id == originID }),
+      let endIndex = entries.firstIndex(where: { $0.id == endID })
+    else { return }
+    retainedSelectionEntries = Array(entries[min(originIndex, endIndex)...max(originIndex, endIndex)])
+  }
+
+  /// Merges the current LazyVStack window into the retained transcript ordering.
+  /// Consecutive windows normally overlap; when a fast scroll skips the overlap,
+  /// the pointer's direction determines which side receives the new rows.
+  private func mergeSelectionEntries(
+    _ visible: [(id: WidgetID, layout: MarkdownLayout)],
+    appendIfDisjoint: Bool
+  ) {
+    guard !visible.isEmpty else { return }
+    guard var retained = retainedSelectionEntries else {
+      retainedSelectionEntries = visible
+      return
+    }
+
+    // Refresh layouts that remain visible so drawing uses current geometry.
+    for entry in visible {
+      if let index = retained.firstIndex(where: { $0.id == entry.id }) {
+        retained[index] = entry
+      }
+    }
+
+    let hasOverlap = visible.contains { entry in
+      retained.contains(where: { $0.id == entry.id })
+    }
+    if !hasOverlap {
+      if appendIfDisjoint {
+        retained.append(contentsOf: visible)
+      } else {
+        retained.insert(contentsOf: visible, at: 0)
+      }
+      retainedSelectionEntries = retained
+      return
+    }
+
+    // Insert unseen rows next to an adjacent visible row that is already retained.
+    // Iterating forward makes a newly inserted predecessor available to the next row.
+    for (visibleIndex, entry) in visible.enumerated() {
+      guard !retained.contains(where: { $0.id == entry.id }) else { continue }
+      if visibleIndex > 0,
+        let previous = retained.firstIndex(where: { $0.id == visible[visibleIndex - 1].id })
+      {
+        retained.insert(entry, at: previous + 1)
+      } else if visibleIndex + 1 < visible.count,
+        let next = retained.firstIndex(where: { $0.id == visible[visibleIndex + 1].id })
+      {
+        retained.insert(entry, at: next)
+      } else if appendIfDisjoint {
+        retained.append(entry)
+      } else {
+        retained.insert(entry, at: 0)
+      }
+    }
+    retainedSelectionEntries = retained
+  }
+
+  private func precedes(_ lhs: Position, _ rhs: Position) -> Bool {
+    lhs.line < rhs.line || (lhs.line == rhs.line && lhs.column <= rhs.column)
+  }
+
+  private func lastPosition(in layout: MarkdownLayout) -> Position {
+    let lastLine = max(0, layout.lines.count - 1)
+    return (lastLine, layout.lines.last?.columnCount ?? 0)
+  }
+
+  private func verticalDistance(from y: Float, to rect: Rect) -> Float {
+    if y < rect.minY { return rect.minY - y }
+    if y > rect.maxY { return y - rect.maxY }
+    return 0
   }
 
   /// Clears the selection.
   func clear() {
-    originLayoutRect = nil
+    originLayoutID = nil
+    endLayoutID = nil
+    retainedSelectionEntries = nil
     selectionStart = nil
     selectionEnd = nil
+    selectionStartGlyphOffset = nil
+    selectionEndGlyphOffset = nil
     isSelecting = false
   }
 }

@@ -6,61 +6,76 @@ struct ScribeMacRoot: Block {
   let theme = MacTheme()
 
   @MainActor var body: some Block {
-    RenderContextBridge(content: VStack(spacing: 0) {
-      header
-      if store.showDirectoryPicker && !store.requiresDirectoryBeforeStart {
-        directoryPicker
-      }
-      if let error = store.lastError {
-        errorBanner(error)
-      }
-      switch store.phase {
-      case .starting:
-        if store.showDirectoryPicker {
-          DirectoryPalette(store: store, theme: theme, required: store.requiresDirectoryBeforeStart)
-        } else {
-          VStack(spacing: 12) {
-            Spacer()
-            Text("Starting Scribe...").fontScale(theme.textScale).foregroundColor(theme.textSecondary)
-            Spacer()
+    RenderContextBridge(
+      content: ZStack {
+        VStack(spacing: 0) {
+          header
+          if store.showDirectoryPicker && !store.requiresDirectoryBeforeStart {
+            directoryPicker
           }
-          .sizing(x: .grow, y: .grow)
-        }
-      case .failed(let message):
-        VStack(spacing: 14) {
-          Text("Could not start Scribe").fontScale(theme.textScale).foregroundColor(theme.errorText)
-          WrappedText(text: message, theme: theme, color: theme.textPrimary)
-          HStack(spacing: 8) {
-            Button("New session", id: WidgetID("retry-new"), fontScale: theme.textScale) {
-              store.newSession()
+          if let error = store.lastError {
+            errorBanner(error)
+          }
+          switch store.phase {
+          case .starting:
+            if store.showDirectoryPicker {
+              DirectoryPalette(store: store, theme: theme, required: store.requiresDirectoryBeforeStart)
+            } else {
+              VStack(spacing: 12) {
+                Spacer()
+                Text("Starting Scribe...").fontScale(theme.textScale).foregroundColor(theme.textSecondary)
+                Spacer()
+              }
+              .sizing(x: .grow, y: .grow)
             }
-            Button("Resume latest", id: WidgetID("retry-resume"), fontScale: theme.textScale) {
-              store.resumeLatest()
+          case .failed(let message):
+            VStack(spacing: 14) {
+              Text("Could not start Scribe").fontScale(theme.textScale).foregroundColor(theme.errorText)
+              WrappedText(text: message, theme: theme, color: theme.textPrimary)
+              HStack(spacing: 8) {
+                Button("New session", id: WidgetID("retry-new"), fontScale: theme.textScale) {
+                  store.newSession()
+                }
+                Button("Resume latest", id: WidgetID("retry-resume"), fontScale: theme.textScale) {
+                  store.resumeLatest()
+                }
+              }
+              Spacer()
             }
+            .padding(theme.margin)
+            .sizing(x: .grow, y: .grow)
+          case .ready:
+            HStack(spacing: 0) {
+              if store.isSessionSidebarVisible {
+                SessionSidebar(store: store, theme: theme)
+              }
+              if store.requiresDirectoryBeforeStart && store.showDirectoryPicker {
+                DirectoryPalette(store: store, theme: theme, required: true)
+              } else if let active = store.active {
+                ReadyLayout(store: store, session: active, theme: theme)
+              } else if let selected = store.selectedSavedSession {
+                sessionLoadingState(selected)
+              } else {
+                emptyState
+              }
+            }
+            .sizing(x: .grow, y: .grow)
           }
-          Spacer()
         }
-        .padding(theme.margin)
-        .sizing(x: .grow, y: .grow)
-      case .ready:
-        HStack(spacing: 0) {
-          if store.isSessionSidebarVisible {
-            SessionSidebar(store: store, theme: theme)
-          }
-          if store.requiresDirectoryBeforeStart && store.showDirectoryPicker {
-            DirectoryPalette(store: store, theme: theme, required: true)
-          } else if let active = store.active {
-            ReadyLayout(store: store, session: active, theme: theme)
-          } else if let selected = store.selectedSavedSession {
-            sessionLoadingState(selected)
-          } else {
-            emptyState
-          }
+        .background(theme.background)
+        if let sessionID = store.renamingSessionID {
+          RenameSessionDialog(store: store, sessionID: sessionID, theme: theme)
         }
-        .sizing(x: .grow, y: .grow)
       }
-    }
-    .background(theme.background)) { context in
+    ) { context in
+      context.setCopyTextProvider {
+        SelectionManager.shared.copyText(
+          isTranscriptVisible: store.active?.selectedTab == .chat)
+      }
+      context.setSelectAllHandler {
+        SelectionManager.shared.selectAll(
+          isTranscriptVisible: store.active?.selectedTab == .chat)
+      }
       // Hit testing uses layouts retained from the preceding frame.
       if context.input.pointerPressed {
         SelectionManager.shared.clear()
