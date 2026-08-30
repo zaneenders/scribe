@@ -322,7 +322,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "d872fd6",
+      revision: "f3100de",
       traits: chromaTraits
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
