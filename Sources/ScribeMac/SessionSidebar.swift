@@ -119,7 +119,7 @@ struct SessionGroupHeader: Block {
   let isCollapsed: Bool
 
   @MainActor var body: some Block {
-    HStack(spacing: 0) {
+    HStack(spacing: 4) {
       Interactive(
         id: WidgetID("group-toggle:\(group.cwd)"),
         action: { store.toggleGroup(group.cwd) }

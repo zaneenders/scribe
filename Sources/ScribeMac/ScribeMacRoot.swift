@@ -68,6 +68,14 @@ struct ScribeMacRoot: Block {
         }
       }
     ) { context in
+      context.setCopyTextProvider {
+        SelectionManager.shared.copyText(
+          isTranscriptVisible: store.active?.selectedTab == .chat)
+      }
+      context.setSelectAllHandler {
+        SelectionManager.shared.selectAll(
+          isTranscriptVisible: store.active?.selectedTab == .chat)
+      }
       // Hit testing uses layouts retained from the preceding frame.
       if context.input.pointerPressed {
         SelectionManager.shared.clear()
