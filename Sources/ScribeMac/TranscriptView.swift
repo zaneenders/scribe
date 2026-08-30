@@ -76,19 +76,26 @@ struct TranscriptView: Block {
   @MainActor private func updateSelectionDocument() {
     TranscriptSelectionDocumentRegistry.setEntries(
       ownerID: session.sessionId,
-      session.transcript.compactMap { item in
-        guard !item.text.isEmpty else { return nil }
-        let text = item.text
+      session.transcript.flatMap { item in
         let theme = theme
-        return TranscriptSelectionDocumentRegistry.Entry(
-          id: item.selectionID,
-          linesForColumns: { columns in
-            layoutMarkdown(
-              segmentMarkdown(sanitizeASCII(text)),
-              columns: columns,
-              theme: theme,
-              baseColor: theme.textPrimary)
-          })
+        let header = item.selectionHeader
+        let body = item.selectionBody
+        return [
+          TranscriptSelectionDocumentRegistry.Entry(
+            id: item.headerSelectionID,
+            linesForColumns: { columns in
+              layoutMarkdown(
+                segmentMarkdown(header), columns: columns, theme: theme,
+                baseColor: theme.textPrimary)
+            }),
+          TranscriptSelectionDocumentRegistry.Entry(
+            id: item.selectionID,
+            linesForColumns: { columns in
+              layoutMarkdown(
+                segmentMarkdown(body), columns: columns, theme: theme,
+                baseColor: theme.textPrimary)
+            }),
+        ]
       })
   }
 
@@ -261,13 +268,15 @@ struct TranscriptItemBlock: Block {
   @MainActor var body: some Block {
     VStack(spacing: 7) {
       HStack(spacing: 6) {
-        Text(labelMarker).fontScale(theme.smallScale).foregroundColor(labelColor)
-        Text(label).fontScale(theme.smallScale).foregroundColor(labelColor)
+        MarkdownText(
+          markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
+          scale: theme.smallScale, sanitizesASCII: false, itemID: item.headerSelectionID)
         Spacer()
       }
       if item.text.isEmpty {
-        Text(item.running ? "running..." : "(empty)")
-          .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+        MarkdownText(
+          markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
+          scale: theme.smallScale, itemID: item.selectionID)
       } else if item.kind == .answer || item.kind == .reasoning {
         MarkdownText(
           markdown: item.text, theme: theme, baseColor: bodyColor,

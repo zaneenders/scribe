@@ -666,6 +666,9 @@ struct MarkdownText: PrimitiveBlock {
   var baseColor: Color
   var scale: Float = 0.5
   var lineSpacing: Float = 4
+  /// Fixed interface labels may contain the small set of UI glyphs that prose
+  /// sanitization intentionally replaces.
+  var sanitizesASCII = true
   /// Optional stable ID for this block, used to register its layout for
   /// hit testing and text selection.
   var itemID: WidgetID? = nil
@@ -673,7 +676,7 @@ struct MarkdownText: PrimitiveBlock {
   private func lines(forWidth width: Float, metrics: FontMetrics) -> [VisualLine] {
     let columns = Int(width / (metrics.cellAdvance * scale))
     return layoutMarkdown(
-      segmentMarkdown(sanitizeASCII(markdown)),
+      segmentMarkdown(sanitizesASCII ? sanitizeASCII(markdown) : markdown),
       columns: columns,
       theme: theme,
       baseColor: baseColor)
