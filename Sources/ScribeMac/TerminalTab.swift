@@ -78,22 +78,36 @@ final class SessionTerminal {
           await Self.client.close(id)
           return
         }
-        let attachment = try await Self.client.attach(to: id, after: nil)
         terminalID = id
-        self.attachment = attachment
         startupError = nil
 
-        for try await event in attachment.events {
-          guard !Task.isCancelled, shellGeneration == generation else { return }
-          switch event {
-          case .output(let output):
-            model.write(output.data)
-          case .exit(let status):
-            model.write("\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
-            terminalID = nil
-            self.attachment = nil
-            startShell(in: model)
+        // Rendering can briefly fall behind bursty programs such as Neovim. The
+        // runtime intentionally disconnects a full bounded attachment rather than
+        // allowing it to grow forever. Resume from the last byte rendered; replay
+        // fills the gap without restarting the shell or losing terminal output.
+        var cursor: UInt64?
+        while !Task.isCancelled, shellGeneration == generation {
+          let attachment = try await Self.client.attach(to: id, after: cursor)
+          self.attachment = attachment
+          do {
+            for try await event in attachment.events {
+              guard !Task.isCancelled, shellGeneration == generation else { return }
+              switch event {
+              case .output(let output):
+                model.write(output.data)
+                cursor = output.endCursor
+              case .exit(let status):
+                model.write("\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
+                terminalID = nil
+                self.attachment = nil
+                startShell(in: model)
+                return
+              }
+            }
             return
+          } catch TerminalRuntimeError.slowConsumer {
+            self.attachment = nil
+            continue
           }
         }
       } catch is CancellationError {
