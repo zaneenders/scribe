@@ -35,11 +35,16 @@ final class SessionTerminal {
   /// input that only makes sense while the pane is live.
   private(set) var isEditing = false
 
+  private static let client = InProcessTerminalClient()
+
   private let model: GhosttyTerminal?
   private let workingDirectory: String
   private var columns: UInt16 = 80
   private var rows: UInt16 = 24
-  private var pty: PTYSession?
+  private var terminalID: TerminalID?
+  private var attachment: TerminalAttachment?
+  private var eventTask: Task<Void, Never>?
+  private var shellGeneration = UUID()
   private(set) var startupError: String?
 
   init(sessionId: UUID, workingDirectory: String) {
@@ -48,11 +53,9 @@ final class SessionTerminal {
     do {
       let model = try GhosttyTerminal()
       self.model = model
-      self.pty = nil
       startShell(in: model)
     } catch {
       self.model = nil
-      self.pty = nil
       self.startupError = String(describing: error)
     }
   }
@@ -61,29 +64,57 @@ final class SessionTerminal {
   /// grid lets scrollback survive an `exit`, while replacing the PTY makes the
   /// terminal immediately usable again.
   private func startShell(in model: GhosttyTerminal) {
-    do {
-      let pty = try PTYSession(
-        workingDirectory: workingDirectory, columns: columns, rows: rows)
-      pty.onOutput = { [weak model] data in model?.write(data) }
-      pty.onExit = { [weak self, weak model, weak pty] status in
-        Task { @MainActor in
-          guard let self, let model, let pty, self.pty === pty else { return }
-          model.write("\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
-          self.pty = nil
-          self.startShell(in: model)
+    let generation = UUID()
+    shellGeneration = generation
+    eventTask?.cancel()
+    eventTask = Task { [weak self, weak model] in
+      guard let self, let model else { return }
+      do {
+        let id = try await Self.client.createTerminal(
+          configuration: TerminalConfiguration(
+            workingDirectory: workingDirectory,
+            size: TerminalSize(columns: columns, rows: rows)))
+        guard !Task.isCancelled, shellGeneration == generation else {
+          await Self.client.close(id)
+          return
         }
+        let attachment = try await Self.client.attach(to: id, after: nil)
+        terminalID = id
+        self.attachment = attachment
+        startupError = nil
+
+        for try await event in attachment.events {
+          guard !Task.isCancelled, shellGeneration == generation else { return }
+          switch event {
+          case .output(let output):
+            model.write(output.data)
+          case .exit(let status):
+            model.write("\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
+            terminalID = nil
+            self.attachment = nil
+            startShell(in: model)
+            return
+          }
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        guard shellGeneration == generation else { return }
+        startupError = String(describing: error)
+        model.write("\r\n\u{1B}[31m[could not start shell: \(error)]\u{1B}[0m\r\n")
       }
-      model.onInput = { [weak pty] input in pty?.write(input) }
-      model.onResize = { [weak self, weak pty] columns, rows in
-        self?.columns = columns
-        self?.rows = rows
-        pty?.resize(columns: columns, rows: rows)
-      }
-      startupError = nil
-      self.pty = pty
-    } catch {
-      startupError = String(describing: error)
-      model.write("\r\n\u{1B}[31m[could not start shell: \(error)]\u{1B}[0m\r\n")
+    }
+
+    model.onInput = { [weak self] input in
+      guard let self, let id = self.terminalID else { return }
+      Task { try? await Self.client.write(input, to: id) }
+    }
+    model.onResize = { [weak self] columns, rows in
+      guard let self else { return }
+      self.columns = columns
+      self.rows = rows
+      guard let id = self.terminalID else { return }
+      Task { try? await Self.client.resize(id, to: TerminalSize(columns: columns, rows: rows)) }
     }
   }
 
@@ -98,17 +129,34 @@ final class SessionTerminal {
     }
   }
 
-  func interrupt() { pty?.interrupt() }
-  func send(_ text: String) { pty?.write(text) }
+  func interrupt() {
+    guard let id = terminalID else { return }
+    Task { try? await Self.client.interrupt(id) }
+  }
+
+  func send(_ text: String) {
+    guard let id = terminalID else { return }
+    Task { try? await Self.client.write(text, to: id) }
+  }
+
   func send(key: GhosttyTerminalKey) {
-    guard let input = model?.encodeKey(key) else { return }
-    pty?.write(input)
+    guard let input = model?.encodeKey(key), let id = terminalID else { return }
+    Task { try? await Self.client.write(input, to: id) }
   }
 
   /// Hangs up the shell; called when the owning session closes.
   func close() {
-    pty?.close()
-    pty = nil
+    shellGeneration = UUID()
+    eventTask?.cancel()
+    eventTask = nil
+    let attachment = self.attachment
+    self.attachment = nil
+    let id = terminalID
+    terminalID = nil
+    Task {
+      await attachment?.detach()
+      if let id { await Self.client.close(id) }
+    }
   }
 
   func makeView(theme: MacTheme) -> GhosttyTerminalView? {
