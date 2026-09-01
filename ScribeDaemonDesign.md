@@ -70,10 +70,13 @@ Only one live agent and one client connection may own a session at a time. The d
 - The daemon keeps a `SessionID -> AgentID` map and an `AgentID -> connection` attachment map.
 - `openAgent` checks and updates both maps as one daemon-isolated operation. If another connection owns the agent, it returns `sessionInUse`; it never creates a second `SessionHarness`.
 - All mutating agent requests are accepted only from that attached connection and are processed serially by the agent runtime.
+- Each attachment has a monotonically increasing ownership epoch. Every accepted mutation is stamped with that epoch and revalidates it immediately before execution. Detach, connection loss, and ownership transfer increment the epoch, so work queued by a former owner fails with `staleAttachment` rather than executing under the new owner.
 - Detach or connection loss releases the attachment. It does not stop an in-flight turn or unload the agent. The first later `openAgent` attaches to that same live agent and receives its current state.
 - Closing the agent explicitly stops its turn and unloads it, but leaves the durable session on disk.
 
 A GUI that wants two views of one session must fan out one attachment inside that GUI; it cannot create two protocol attachments. Attachment ownership is tied to the transport connection, so a crashed or disconnected client cannot leave a timed stale lock. This prevents two machines from submitting, interrupting, changing profiles, or otherwise racing one session. `SessionHarness` remains the sole persistence writer.
+
+The existing `fork` and `tldr` operations may change a `SessionHarness` from its parent session UUID to a newly persisted child UUID. That identity transition is one daemon-isolated transaction: after durable child creation succeeds, the daemon removes the parent `SessionID -> AgentID` entry, installs the child entry, updates the agent snapshot and summary, and emits the root session-created and agent-updated events before accepting another open or delete operation. The response includes the child `SessionID`. If child persistence fails, the harness and maps retain the parent identity and no success events are emitted. The durable parent session remains available and is no longer in use after a successful transition.
 
 ### Terminal object
 
@@ -94,6 +97,16 @@ struct TerminalSnapshot: Codable, Sendable {
 enum TerminalProcessState: Codable, Sendable {
   case running
   case exited(status: Int32)
+}
+
+enum TerminalAccess: String, Codable, Sendable {
+  case controller
+  case observer
+}
+
+struct TerminalAttachmentSnapshot: Codable, Sendable {
+  var terminal: TerminalSnapshot
+  var access: TerminalAccess  // capability of this connection-local handle
 }
 ```
 
@@ -132,7 +145,8 @@ These object IDs are handles for one client connection. They are neither the dur
 
 - Detaching or disconnecting drops the handle only.
 - Closing an agent stops that live agent but keeps its session.
-- Terminating a terminal kills its process.
+- Terminating a terminal process kills its child but retains the terminal object for inspection.
+- Closing a terminal removes the live object and its replay; closing a running terminal first terminates its child.
 - Deleting a session removes durable chat data.
 
 ## API
@@ -176,9 +190,11 @@ createTerminal(workingDirectory, columns, rows, newObjectID: ObjectID)
 attachTerminal(terminalID: TerminalID, newObjectID: ObjectID)
 ```
 
-A root snapshot is a complete, point-in-time protocol state, not a screenshot or a separate persisted copy. It contains bounded summaries, never message bodies or terminal replay bytes, and populates and resynchronizes the session list and live-object list after connect. `AgentSummary` and `TerminalSummary` contain identity and list-display metadata only. Large root snapshots are paginated with an opaque `RootSnapshotCursor`: the first page freezes a logical baseline through event sequence `N`, later pages use its cursor, and each page respects `limit` and the negotiated frame size. Cursors have a short bounded lifetime; expiration returns `snapshotExpired` and the client restarts from the first page. Object snapshots provide the baseline to which later events are applied. `openAgent`, `createTerminal`, and `attachTerminal` bind the supplied protocol object ID and return the initial object snapshot atomically, so a separate initial object `snapshot` call is unnecessary.
+A root snapshot is a complete, point-in-time protocol state, not a screenshot or a separate persisted copy. It contains bounded summaries, never message bodies or terminal replay bytes, and populates and resynchronizes the session list and live-object list after connect. `AgentSummary` and `TerminalSummary` contain identity and list-display metadata only. Large root snapshots are paginated with an opaque `RootSnapshotCursor`: the first page freezes a logical baseline through event sequence `N`, later pages use its cursor, and each page respects `limit` and the negotiated frame size. Cursors have a short bounded lifetime; expiration returns `snapshotExpired` and the client restarts from the first page. Object snapshots provide the baseline to which later events are applied. `openAgent` binds the supplied protocol object ID and returns the initial `AgentSnapshot` atomically. `createTerminal` and `attachTerminal` bind the handle and return its initial `TerminalAttachmentSnapshot` atomically. A separate initial object `snapshot` call is therefore unnecessary.
 
 Root events report session and live-object creation, update, and removal. Each event carries a monotonically increasing root `eventSequence`. Snapshot capture and event subscription are one daemon-isolated operation: events after `N` are buffered in the connection's normal bounded queue while all pages are fetched, and released after the final page. The first later event is `N + 1`. A duplicate sequence is ignored; a higher-than-expected sequence is a gap and requires a fresh root snapshot. Sequence history need not be retained because the snapshot is the recovery mechanism.
+
+Root buffering is bounded, including while paginated snapshot pages are outstanding. If it overflows, the daemon invalidates the root subscription, discards its queued data events, and sends `subscriptionInvalidated(scope: root)` through the reserved control lane. No later root events are sent until the client starts a new snapshot. If the invalidation notice cannot be queued, the daemon closes the connection. A cursor from an invalidated snapshot returns `snapshotInvalidated`; the client discards all of its pages and starts again.
 
 `deleteSession` fails with `sessionInUse` while a live agent exists for the session. Closing that agent through its attached object is required first. Root requests cannot close agents or terminate terminals by daemon-generation-scoped ID; destructive live-object operations require an authorized attachment.
 
@@ -230,13 +246,15 @@ The wire events are stable client-facing messages. The existing internal `AgentE
 
 Agent snapshot capture and event subscription are atomic. If the snapshot is through sequence `N`, subsequent events begin at `N + 1`. On a gap, the client requests a fresh snapshot, reconciles persisted history from `latestMessageCursor`, and replaces any partial rendering from the paginated `currentTurnID` snapshot. Agent event sequences are transient and restart with a new live agent; message cursors are the durable history boundary. `close` is accepted only on the attached agent object, stops its turn, unloads it, and preserves the durable session.
 
+Agent event and snapshot-pagination buffering is bounded. Overflow invalidates that handle's subscription, drops queued data events, and sends `subscriptionInvalidated(scope: agent, latestMessageCursor, currentTurnID)` through the reserved control lane; no later agent events are sent on the invalidated handle. Failure to queue the notice closes the handle. Recovery uses the attached object's `snapshot`, followed by `messages` and, when present, `turnSnapshot`; the running turn is not interrupted. Requests using continuations from an invalidated snapshot return `snapshotInvalidated`.
+
 ### Common attached-object lifecycle
 
 ```text
 detach
 ```
 
-`detach` is sent to an attached agent or terminal object. It removes only that connection's handle, event subscription, and queued outbound data; it does not close the agent, delete the session, or terminate the terminal. Explicit detach is needed when a tab closes but the shared daemon connection remains open. Otherwise those resources are also released automatically when the connection closes. Putting `detach` on the target object avoids a root-level `detachObject(objectID)` bookkeeping API.
+`detach` is sent to an attached agent or terminal object. It removes only that connection's handle, event subscription, and queued outbound data; it does not close the agent, delete the session, terminate the terminal process, or remove the terminal object. Explicit detach is needed when a tab closes but the shared daemon connection remains open. Otherwise those resources are also released automatically when the connection closes. Putting `detach` on the target object avoids a root-level `detachObject(objectID)` bookkeeping API.
 
 ### Terminal object
 
@@ -246,7 +264,8 @@ Terminal requests:
 snapshot
 input(bytes)
 resize(columns, rows)
-terminate
+terminateProcess
+close
 ```
 
 Terminal events:
@@ -255,17 +274,18 @@ Terminal events:
 replay(offset, bytes)
 output(offset, bytes)
 resized(columns, rows)
+accessChanged(access)
 replayInvalidated(availableFromOffset, nextOutputOffset)
 exited(status)
 ```
 
-Terminal replay, input, and output payloads are raw bytes, not JSON or base64. An output or replay event payload starts with an eight-byte, big-endian `UInt64` offset followed by the bytes. The offset is the absolute position of the first byte. The next expected offset is `offset + bytes.count`. Byte payloads are split so every complete frame is at most the negotiated maximum frame size; PTY read boundaries have no protocol meaning.
+The attached-object `snapshot` request returns a `TerminalAttachmentSnapshot`, including the requesting handle's current access. Terminal replay, input, and output payloads are raw bytes, not JSON or base64. An output or replay event payload starts with an eight-byte, big-endian `UInt64` offset followed by the bytes. The offset is the absolute position of the first byte. The next expected offset is `offset + bytes.count`. Byte payloads are split so every complete frame is at most the negotiated maximum frame size; PTY read boundaries have no protocol meaning.
 
 ### Terminal stream behavior
 
 The PTY read path never waits for a GUI or socket write. For every read, the terminal object assigns offsets, appends the bytes to its shared replay buffer, and enqueues output independently for each attached connection. Socket writes preserve output order for each terminal.
 
-Attaching is atomic with respect to output. The daemon first subscribes the handle and captures a `TerminalSnapshot` with retained range `R..<N`. The response contains metadata only. It is followed by chunked raw `replay` frames covering a contiguous suffix `R'..<N`, where `R' >= R` if pressure evicted bytes while the response was in flight, and then by live `output` frames beginning at `N`. If `R' > R`, `replayInvalidated` precedes replay so the client can mark the display incomplete. Output produced after the baseline is queued behind replay for that handle, so no byte can slip between replay and live output. All frames obey the negotiated maximum size.
+Attaching is atomic with respect to output. The daemon first subscribes the handle and captures a `TerminalAttachmentSnapshot` containing terminal metadata, retained range `R..<N`, and that handle's controller or observer access. The response contains metadata only. It is followed by chunked raw `replay` frames covering a contiguous suffix `R'..<N`, where `R' >= R` if pressure evicted bytes while the response was in flight, and then by live `output` frames beginning at `N`. If `R' > R`, `replayInvalidated` precedes replay so the client can mark the display incomplete. Output produced after the baseline is queued behind replay for that handle, so no byte can slip between replay and live output. All frames obey the negotiated maximum size.
 
 A client initializes its next expected byte offset from the first replay frame (or `N` when replay is empty), then tracks it across replay and live output:
 
@@ -277,9 +297,11 @@ Each connection has a bounded outbound data queue plus a reserved, bounded contr
 
 Recovery uses `attachTerminal` with a fresh, unused `ObjectID`. The operation atomically replaces any invalidated handle for that terminal on the same connection and establishes a new snapshot/replay/live-output baseline. The old handle is closed after the new baseline is installed. If the retained range no longer includes the missing bytes, the GUI performs the best-effort reset and replay described above.
 
-In the first version, only one attached client may send input, resize, or terminate a terminal. Other attachments are observers. The first attachment is the controller; control transfers after it detaches or disconnects. This avoids interleaved input and competing window sizes. A later protocol version can add explicit control acquisition if needed. Root snapshots expose no capability that bypasses this check.
+In the first version, only one attached client may send input, resize, `terminateProcess`, or `close` on a terminal. Other attachments are observers. The first attachment is the controller; control transfers after it detaches or disconnects, and every remaining handle receives `accessChanged` when its capability changes. This avoids interleaved input and competing window sizes. A later protocol version can add explicit control acquisition if needed. Root snapshots expose no capability that bypasses this check.
 
-The daemon emits all final readable PTY output before `exited`. An exited terminal remains attachable so its final output and status can be inspected until it is explicitly terminated or cleaned up by the daemon's retention policy.
+Terminal control uses the same ownership-epoch rule as agents. Input and destructive requests accepted under an old controller epoch are rejected with `staleAttachment` if control transfers before they execute. Output delivery is unaffected.
+
+The daemon emits all final readable PTY output before `exited`. `terminateProcess` signals a running child and retains the exited terminal, replay, and status for inspection. `close` removes the terminal object and replay, closing all of its handles; if the child is still running, the daemon terminates it and drains final PTY output before removal. Exited terminals otherwise remain attachable until `close` or the daemon's retention policy removes them.
 
 ## Connections
 
@@ -328,7 +350,7 @@ struct FrameHeader {
 
 The 16-byte header uses big-endian integers.
 
-- `version` is the selected protocol version.
+- `version` is the selected protocol version after the handshake; hello request and response frames use bootstrap version `0`.
 - `code` identifies the request, response, or event.
 - `objectID` identifies the target protocol object.
 - `requestID` correlates a request and response; events use zero.
@@ -336,9 +358,42 @@ The 16-byte header uses big-endian integers.
 
 Control payloads use JSON encoded with `Codable`. Terminal and chunked message-content byte messages use raw payloads. `maximumFrameSize` includes the 16-byte header. Every decoder rejects a header whose payload length would exceed the negotiated limit before allocating payload storage. Collection responses are paginated or contain bounded summaries; large byte content is split into ordered raw frames.
 
+### Chunked message content
+
+A JSON response or event that contains a field too large for one frame replaces that field with a `ChunkedContentReference`:
+
+```swift
+struct ChunkedContentReference: Codable, Sendable {
+  let transferID: UInt64       // unique for the lifetime of this connection
+  let field: String            // stable semantic field name
+  let byteLength: UInt64
+  let encoding: ContentEncoding
+}
+
+enum ContentEncoding: String, Codable, Sendable {
+  case utf8
+  case binary
+}
+```
+
+The descriptor is followed by one or more raw `contentChunk` frames. Their payload begins with this 28-byte big-endian header and continues with chunk bytes:
+
+```text
+transferID  UInt64
+byteOffset  UInt64
+byteLength  UInt64   // total length, repeated in every chunk
+flags       UInt16   // bit 0 is final; all other bits must be zero
+reserved    UInt16   // must be zero
+bytes       ...
+```
+
+Chunks for one transfer are emitted in increasing contiguous `byteOffset` order starting at zero. The final flag is set exactly when `byteOffset + bytes.count == byteLength`; a zero-length value stays in JSON and is never chunked. Different transfers and request IDs may interleave, so receivers reassemble by `transferID`, while the frame's `requestID` associates response chunks with the request that produced their descriptor. Event chunks use request ID zero and rely on the connection-unique transfer ID. A transfer is valid only after its descriptor has been received, its encoding and semantic field come from that descriptor, and duplicate, overlapping, out-of-range, mismatched-length, or unknown-transfer chunks are protocol errors. A response is complete only after its JSON descriptor and all referenced transfers complete. Connection or subscription closure abandons incomplete transfers.
+
+This mechanism applies independently to message text, reasoning, image content, tool arguments and results, and unfinished-turn parts. Stable numeric `code` values distinguish `contentChunk` from terminal `replay`, `output`, and `input`, so their raw layouts are never inferred from context.
+
 ## Handshake
 
-The first request is `hello` on object `0`.
+The first request is `hello` on object `0`. The frame header for both `ClientHello` and its success or error response uses the reserved bootstrap version `0`; no other frame may use version `0`. The server reads only the bounded hello frame, selects the highest version in the intersection of the advertised range and its supported range, and returns `ServerHello` in a version-0 frame. All subsequent frames use `selectedVersion`. An empty version intersection returns `unsupportedVersion` in a version-0 response and then closes the connection.
 
 ```swift
 struct ClientHello: Codable, Sendable {
@@ -354,6 +409,8 @@ struct ServerHello: Codable, Sendable {
   var maximumFrameSize: UInt32
 }
 ```
+
+The client must advertise `minimumVersion > 0`, `minimumVersion <= maximumVersion`, and `maximumFrameSize` at least the protocol's fixed minimum frame size. Version 1 uses a minimum of 4 KiB, which is also the server's maximum accepted bootstrap-frame size. The negotiated frame size is the smaller of the client's value and the server's configured limit and must still meet that selected version's minimum. Invalid ranges or sizes receive `invalidHello` and the connection closes. Before hello completes, the decoder caps the frame at the bootstrap limit; afterward it applies the negotiated limit before allocating payload storage.
 
 Every successful connection starts a new `ObjectID` namespace, but `AgentID` and `TerminalID` remain scoped to the daemon generation. On disconnect, the GUI discards cached agent IDs, terminal IDs, protocol handles, and transient event positions; it obtains fresh values from snapshots after reconnecting. Reacquired live IDs may be numerically unchanged if the daemon and objects survived, but clients must not depend on that. Durable session UUIDs and message cursors may be retained. This avoids giving an in-memory daemon instance a UUID or persisting a generation counter solely to detect improbable numeric reuse.
 
@@ -408,7 +465,7 @@ The work should land in independently testable pieces, with the current GUI rema
 2. **In-process terminal runtime.** Put `PTYSession` behind `TerminalRuntime`; add attachments, ordered output and exit events, input, resize, and process state. Adapt `SessionTerminal` to use an `InProcessTerminalClient` while retaining `GhosttyTerminal` in the GUI. This is the main architecture refactor and still has no networking.
 3. **Runtime lifecycle and pressure.** Add bounded attachment queues, slow-consumer invalidation, controller versus observer behavior, cleanup, and real-PTY integration tests. In-process tests should deliberately pause a consumer and verify that the PTY and other consumers continue.
 4. **Protocol library.** Add frame encoding and incremental decoding directly over `ByteBuffer`, handshake messages, typed IDs, stable error responses, frame-size limits, and embedded-channel or in-memory tests. This piece starts no daemon and opens no sockets.
-5. **Local daemon transport.** Add `scribe-daemon serve`, Unix socket lifecycle and permissions, and map one connection onto the already-tested terminal runtime. Add create, attach, input, resize, and terminate integration tests. Chat support is not required here.
+5. **Local daemon transport.** Add `scribe-daemon serve`, Unix socket lifecycle and permissions, and map one connection onto the already-tested terminal runtime. Add create, attach, input, resize, process termination, and object close integration tests. Chat support is not required here.
 6. **Network terminal client.** Add a client adapter with the same interface as `InProcessTerminalClient`, then switch the GUI composition root from the in-process adapter to the local daemon. The terminal view and `GhosttyTerminal` should not need another ownership refactor.
 7. **Chat runtime and protocol.** Move session discovery and `SessionHarness` ownership behind an in-process facade first, then add chat snapshots, event cursors, and protocol mapping. This needs a separate detailed reconnect design before implementation.
 8. **SSH transport.** Add the byte-only bridge and NIOSSH client after the local protocol is stable. The bridge does not get separate daemon semantics.
