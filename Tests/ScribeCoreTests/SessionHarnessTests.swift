@@ -17,7 +17,7 @@ struct SessionHarnessTests {
   private func makeHarness(
     seed: [ScribeMessage] = [],
     persister: (any SessionPersister)? = nil
-  ) throws -> (SessionHarness, SessionMessageQueues) {
+  ) throws -> (SessionHarness, SessionMessageQueue) {
     let sessionId = UUID()
     var document = SessionDocument(
       sessionId: sessionId,
@@ -27,15 +27,15 @@ struct SessionHarnessTests {
     if !seed.isEmpty {
       document.append(seed)
     }
-    let queues = SessionMessageQueues()
+    let queue = SessionMessageQueue()
     let harness = try SessionHarness(
       configuration: .testValue,
       document: consume document,
       persister: persister ?? InMemorySessionPersister(),
       logger: logger,
-      messageQueues: queues
+      messageQueue: queue
     )
-    return (harness, queues)
+    return (harness, queue)
   }
 
   @Test func snapshotReflectsDocument() async throws {
@@ -88,22 +88,14 @@ struct SessionHarnessTests {
     #expect(outcome == .completed)
   }
 
-  @Test func enqueueSteeringWhileBusyIsVisibleToHarness() async throws {
-    let (_, queues) = try makeHarness()
-    queues.enqueueSteering(text: "steer me")
-    #expect(queues.steeringCount() == 1)
-    #expect(queues.steeringPreviewTexts() == ["steer me"])
+  @Test func enqueueWhileBusyIsVisibleToHarness() async throws {
+    let (_, queue) = try makeHarness()
+    queue.enqueue(text: "steer me")
+    #expect(queue.count() == 1)
+    #expect(queue.previewTexts() == ["steer me"])
   }
 
-  @Test func followUpQueueDrainsOnlyAfterCompletedTurn() async throws {
-    let (_, queues) = try makeHarness()
-    queues.enqueueFollowUp(text: "later")
-    #expect(queues.followUpCount() == 1)
-    queues.clearFollowUp()
-    #expect(queues.followUpCount() == 0)
-  }
-
-  @Test func steeringDrainInvokesOnUserPromptForEachMessage() async throws {
+  @Test func queueDrainInvokesOnUserPromptForEachMessage() async throws {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]
     let transport = CountingTransport(chunks: chunks)
@@ -124,17 +116,17 @@ struct SessionHarnessTests {
     )
     document.append([ScribeMessage(role: .system, content: "sys")])
 
-    let queues = SessionMessageQueues()
+    let queue = SessionMessageQueue()
     let harness = SessionHarness(
       configuration: .testValue,
       document: consume document,
       persister: InMemorySessionPersister(),
       agent: agent,
       logger: logger,
-      messageQueues: queues
+      messageQueue: queue
     )
-    queues.enqueueSteering(text: "steer-a")
-    queues.enqueueSteering(text: "steer-b")
+    queue.enqueue(text: "steer-a")
+    queue.enqueue(text: "steer-b")
 
     let prompts = Mutex<[String]>([])
     _ = try await harness.submit(
@@ -167,21 +159,21 @@ struct SessionHarnessTests {
     )
     document.append([ScribeMessage(role: .system, content: "sys")])
 
-    let queues = SessionMessageQueues()
+    let queue = SessionMessageQueue()
     let harness = SessionHarness(
       configuration: .testValue,
       document: consume document,
       persister: InMemorySessionPersister(),
       agent: agent,
       logger: logger,
-      messageQueues: queues
+      messageQueue: queue
     )
-    queues.enqueueSteering(text: "msg-one")
-    queues.enqueueSteering(text: "msg-two")
-    queues.enqueueSteering(text: "msg-three")
-    queues.enqueueSteering(text: "msg-four")
+    queue.enqueue(text: "msg-one")
+    queue.enqueue(text: "msg-two")
+    queue.enqueue(text: "msg-three")
+    queue.enqueue(text: "msg-four")
 
-    let first = queues.popSteeringForRecall()
+    let first = queue.popForRecall()
     #expect(first == "msg-one")
 
     let prompts = Mutex<[String]>([])
@@ -192,11 +184,11 @@ struct SessionHarnessTests {
     )
 
     #expect(prompts.withLock { $0 } == ["msg-one", "msg-two", "msg-three", "msg-four"])
-    #expect(queues.steeringCount() == 0)
+    #expect(queue.count() == 0)
     #expect(transport.callCount == 4)
   }
 
-  @Test func steeringModeAllDrainsInSingleTurn() async throws {
+  @Test func modeAllDrainsInSingleTurn() async throws {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]
     let transport = CountingTransport(chunks: chunks)
@@ -217,22 +209,22 @@ struct SessionHarnessTests {
     )
     document.append([ScribeMessage(role: .system, content: "sys")])
 
-    let queues = SessionMessageQueues()
+    let queue = SessionMessageQueue()
     let harness = SessionHarness(
       configuration: .testValue,
       document: consume document,
       persister: InMemorySessionPersister(),
       agent: agent,
       logger: logger,
-      messageQueues: queues
+      messageQueue: queue
     )
-    queues.setSteeringMode(.all)
-    queues.enqueueSteering(text: "steer-a")
-    queues.enqueueSteering(text: "steer-b")
+    queue.setMode(.all)
+    queue.enqueue(text: "steer-a")
+    queue.enqueue(text: "steer-b")
 
     _ = try await harness.submit("hello") { _ in }
 
-    #expect(queues.steeringCount() == 0)
+    #expect(queue.count() == 0)
 
     #expect(transport.callCount == 2)
 
@@ -243,7 +235,7 @@ struct SessionHarnessTests {
     #expect(userContents.contains("steer-b"))
   }
 
-  @Test func steeringModeOneAtATimeDrainsSequentially() async throws {
+  @Test func modeOneAtATimeDrainsSequentially() async throws {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]
     let transport = CountingTransport(chunks: chunks)
@@ -264,21 +256,21 @@ struct SessionHarnessTests {
     )
     document.append([ScribeMessage(role: .system, content: "sys")])
 
-    let queues = SessionMessageQueues()
+    let queue = SessionMessageQueue()
     let harness = SessionHarness(
       configuration: .testValue,
       document: consume document,
       persister: InMemorySessionPersister(),
       agent: agent,
       logger: logger,
-      messageQueues: queues
+      messageQueue: queue
     )
-    queues.enqueueSteering(text: "steer-a")
-    queues.enqueueSteering(text: "steer-b")
+    queue.enqueue(text: "steer-a")
+    queue.enqueue(text: "steer-b")
 
     _ = try await harness.submit("hello") { _ in }
 
-    #expect(queues.steeringCount() == 0)
+    #expect(queue.count() == 0)
 
     #expect(transport.callCount == 3)
   }

@@ -6,11 +6,6 @@ public enum QueueMode: Sendable, Equatable {
   case all
 }
 
-public enum MessageQueueKind: Sendable, Equatable {
-  case steering
-  case followUp
-}
-
 public struct PendingMessageQueue: Sendable {
   private var messages: [ScribeMessage] = []
   public private(set) var mode: QueueMode
@@ -20,12 +15,8 @@ public struct PendingMessageQueue: Sendable {
   }
 
   public var isEmpty: Bool { messages.isEmpty }
-
   public var count: Int { messages.count }
-
-  public var previewTexts: [String] {
-    messages.map(\.content)
-  }
+  public var previewTexts: [String] { messages.map(\.content) }
 
   public mutating func setMode(_ mode: QueueMode) {
     self.mode = mode
@@ -68,87 +59,49 @@ public struct PendingMessageQueue: Sendable {
   }
 }
 
-public final class SessionMessageQueues: Sendable {
-  private let lock = Mutex(State())
+/// The single FIFO queue of user messages waiting behind the active turn.
+public final class SessionMessageQueue: Sendable {
+  private let lock: Mutex<PendingMessageQueue>
 
-  private struct State {
-    var steering = PendingMessageQueue()
-    var followUp = PendingMessageQueue()
+  public var mode: QueueMode {
+    lock.withLock { $0.mode }
   }
 
-  public var steeringMode: QueueMode {
-    lock.withLock { $0.steering.mode }
+  public init(mode: QueueMode = .oneAtATime) {
+    self.lock = Mutex(PendingMessageQueue(mode: mode))
   }
 
-  public var followUpMode: QueueMode {
-    lock.withLock { $0.followUp.mode }
-  }
-
-  public init() {}
-
-  public func setSteeringMode(_ mode: QueueMode) {
-    lock.withLock { $0.steering.setMode(mode) }
-  }
-
-  public func setFollowUpMode(_ mode: QueueMode) {
-    lock.withLock { $0.followUp.setMode(mode) }
+  public func setMode(_ mode: QueueMode) {
+    lock.withLock { $0.setMode(mode) }
   }
 
   @discardableResult
-  public func enqueueSteering(text: String) -> Bool {
-    lock.withLock { $0.steering.enqueue(text: text) }
+  public func enqueue(text: String) -> Bool {
+    lock.withLock { $0.enqueue(text: text) }
+  }
+
+  public func count() -> Int {
+    lock.withLock { $0.count }
+  }
+
+  public func previewTexts() -> [String] {
+    lock.withLock { $0.previewTexts }
   }
 
   @discardableResult
-  public func enqueueFollowUp(text: String) -> Bool {
-    lock.withLock { $0.followUp.enqueue(text: text) }
+  public func popFirst() -> ScribeMessage? {
+    lock.withLock { $0.popFirst() }
   }
 
-  public func steeringCount() -> Int {
-    lock.withLock { $0.steering.count }
+  public func popForRecall() -> String? {
+    popFirst()?.content
   }
 
-  public func followUpCount() -> Int {
-    lock.withLock { $0.followUp.count }
+  public func clear() {
+    lock.withLock { $0.clear() }
   }
 
-  public func steeringPreviewTexts() -> [String] {
-    lock.withLock { $0.steering.previewTexts }
-  }
-
-  public func followUpPreviewTexts() -> [String] {
-    lock.withLock { $0.followUp.previewTexts }
-  }
-
-  @discardableResult
-  public func popSteeringFirst() -> ScribeMessage? {
-    lock.withLock { $0.steering.popFirst() }
-  }
-
-  public func popSteeringForRecall() -> String? {
-    popSteeringFirst()?.content
-  }
-
-  public func clearSteering() {
-    lock.withLock { $0.steering.clear() }
-  }
-
-  public func clearFollowUp() {
-    lock.withLock { $0.followUp.clear() }
-  }
-
-  public func clearAll() {
-    lock.withLock {
-      $0.steering.clear()
-      $0.followUp.clear()
-    }
-  }
-
-  func drainSteering() -> [ScribeMessage] {
-    lock.withLock { $0.steering.drain() }
-  }
-
-  func drainFollowUp() -> [ScribeMessage] {
-    lock.withLock { $0.followUp.drain() }
+  func drain() -> [ScribeMessage] {
+    lock.withLock { $0.drain() }
   }
 }
