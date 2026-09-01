@@ -10,14 +10,14 @@ public actor SessionHarness {
   private let logger: Logger
   private var agent: ScribeAgent
   private var tokenTracker: TokenTracker
-  private let messageQueues: SessionMessageQueues
+  private let messageQueue: SessionMessageQueue
 
   public init(
     configuration: ScribeConfig,
     document: consuming SessionDocument,
     persister: any SessionPersister,
     logger: Logger,
-    messageQueues: SessionMessageQueues = SessionMessageQueues()
+    messageQueue: SessionMessageQueue = SessionMessageQueue()
   ) throws {
     self.document = document
     self.persister = persister
@@ -28,7 +28,7 @@ public actor SessionHarness {
       contextWindow: configuration.contextWindow,
       threshold: configuration.contextWindowThreshold
     )
-    self.messageQueues = messageQueues
+    self.messageQueue = messageQueue
   }
 
   init(
@@ -37,7 +37,7 @@ public actor SessionHarness {
     persister: any SessionPersister,
     agent: ScribeAgent,
     logger: Logger,
-    messageQueues: SessionMessageQueues = SessionMessageQueues()
+    messageQueue: SessionMessageQueue = SessionMessageQueue()
   ) {
     self.document = document
     self.persister = persister
@@ -48,7 +48,7 @@ public actor SessionHarness {
       contextWindow: configuration.contextWindow,
       threshold: configuration.contextWindowThreshold
     )
-    self.messageQueues = messageQueues
+    self.messageQueue = messageQueue
   }
 
   public var sessionId: UUID { document.sessionId }
@@ -167,36 +167,20 @@ public actor SessionHarness {
       onEvent: onEvent
     )
 
-    while true {
-      let steering = messageQueues.drainSteering()
-      if !steering.isEmpty {
-        outcome = try await runTurn(
-          promptMessages: steering,
-          options: options,
-          onUserPrompt: onUserPrompt,
-          onEvent: onEvent,
-          queueKind: .steering
-        )
-        continue
-      }
-
-      guard outcome == .completed else {
-        return outcome
-      }
-
-      let followUp = messageQueues.drainFollowUp()
-      if followUp.isEmpty {
-        return outcome
-      }
+    while outcome == .completed {
+      let queued = messageQueue.drain()
+      guard !queued.isEmpty else { return outcome }
 
       outcome = try await runTurn(
-        promptMessages: followUp,
+        promptMessages: queued,
         options: options,
         onUserPrompt: onUserPrompt,
         onEvent: onEvent,
-        queueKind: .followUp
+        isQueued: true
       )
     }
+
+    return outcome
   }
 
   private func runTurn(
@@ -204,7 +188,7 @@ public actor SessionHarness {
     options: AgentRunOptions,
     onUserPrompt: @Sendable (String) -> Void,
     onEvent: @Sendable (AgentEvent) -> Void,
-    queueKind: MessageQueueKind? = nil
+    isQueued: Bool = false
   ) async throws -> TurnOutcome {
     guard !promptMessages.isEmpty else { return .completed }
 
@@ -214,8 +198,8 @@ public actor SessionHarness {
 
     let charCount = promptMessages.reduce(0) { $0 + $1.content.count }
     var metadata: Logger.Metadata = ["chars": "\(charCount)", "messages": "\(promptMessages.count)"]
-    if let queueKind {
-      metadata["queue"] = "\(queueKind)"
+    if isQueued {
+      metadata["queue"] = "true"
     }
     logger.debug("session.harness.submit", metadata: metadata)
 

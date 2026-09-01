@@ -9,50 +9,50 @@ struct SubmitCoordinatorTests {
 
   @Test func enterWithTextWhenIdleSendsToGate() {
     let effect = SubmitCoordinator.handleEnter(
-      text: "hello", modelBusy: false, steeringQueueCount: 0, steeringLineOutstanding: false)
+      text: "hello", modelBusy: false, queueCount: 0, queuedLineOutstanding: false)
     #expect(effect == .sendToGate("hello"))
   }
 
   @Test func enterWithWhitespaceOnlyWhenIdleAndNothingQueuedIsNoOp() {
     let effect = SubmitCoordinator.handleEnter(
-      text: "   ", modelBusy: false, steeringQueueCount: 0, steeringLineOutstanding: false)
+      text: "   ", modelBusy: false, queueCount: 0, queuedLineOutstanding: false)
     #expect(effect == .none)
   }
 
-  @Test func enterWithTextWhenBusyEnqueuesSteering() {
+  @Test func enterWithTextWhenBusyEnqueues() {
     let effect = SubmitCoordinator.handleEnter(
-      text: "do thing", modelBusy: true, steeringQueueCount: 0, steeringLineOutstanding: false)
-    #expect(effect == .enqueueSteering("do thing"))
+      text: "do thing", modelBusy: true, queueCount: 0, queuedLineOutstanding: false)
+    #expect(effect == .enqueue("do thing"))
   }
 
   @Test func enterEmptyWhenBusyWithQueuedOnlyInterrupts() {
     let effect = SubmitCoordinator.handleEnter(
-      text: "", modelBusy: true, steeringQueueCount: 4, steeringLineOutstanding: false)
+      text: "", modelBusy: true, queueCount: 4, queuedLineOutstanding: false)
     #expect(effect == .interruptModel)
   }
 
   @Test func enterEmptyWhenBusyWithQueuedDoesNotPop() {
     let effect = SubmitCoordinator.handleEnter(
-      text: "", modelBusy: true, steeringQueueCount: 1, steeringLineOutstanding: false)
+      text: "", modelBusy: true, queueCount: 1, queuedLineOutstanding: false)
     #expect(effect != .popAndInterruptAndSend)
     #expect(effect != .popAndSendToGate)
   }
 
   @Test func enterEmptyWhenIdleWithQueuedPopsAndSends() {
     let effect = SubmitCoordinator.handleEnter(
-      text: "", modelBusy: false, steeringQueueCount: 1, steeringLineOutstanding: false)
+      text: "", modelBusy: false, queueCount: 1, queuedLineOutstanding: false)
     #expect(effect == .popAndSendToGate)
   }
 
   @Test func enterEmptyWhenOutstandingAndIdleIsNoOp() {
     let effect = SubmitCoordinator.handleEnter(
-      text: "", modelBusy: false, steeringQueueCount: 2, steeringLineOutstanding: true)
+      text: "", modelBusy: false, queueCount: 2, queuedLineOutstanding: true)
     #expect(effect == .none)
   }
 
-  @Test func ctrlCWithQueuedRecallsSteering() {
-    let effect = SubmitCoordinator.handleCtrlC(steeringQueueCount: 2, modelBusy: true)
-    #expect(effect == .recallSteeringToInput)
+  @Test func ctrlCWithQueuedRecallsMessage() {
+    let effect = SubmitCoordinator.handleCtrlC(queueCount: 2, modelBusy: true)
+    #expect(effect == .recallQueuedToInput)
   }
 
 }

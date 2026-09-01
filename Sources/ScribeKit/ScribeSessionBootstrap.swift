@@ -6,7 +6,7 @@ import SystemPackage
 /// A fully initialized session suitable for a graphical or terminal front end.
 public struct BootstrappedSession: Sendable {
   public let harness: SessionHarness
-  public let messageQueues: SessionMessageQueues
+  public let messageQueue: SessionMessageQueue
   public let initialMessages: [ScribeMessage]
   public let sessionId: UUID
   public let sessionDirectory: FilePath
@@ -16,7 +16,7 @@ public struct BootstrappedSession: Sendable {
 
   public init(
     harness: SessionHarness,
-    messageQueues: SessionMessageQueues,
+    messageQueue: SessionMessageQueue,
     initialMessages: [ScribeMessage],
     sessionId: UUID,
     sessionDirectory: FilePath,
@@ -25,7 +25,7 @@ public struct BootstrappedSession: Sendable {
     workingDirectory: String
   ) {
     self.harness = harness
-    self.messageQueues = messageQueues
+    self.messageQueue = messageQueue
     self.initialMessages = initialMessages
     self.sessionId = sessionId
     self.sessionDirectory = sessionDirectory
@@ -129,13 +129,13 @@ public enum ScribeSessionBootstrap {
       document.append(messages)
     }
 
-    let queues = SessionMessageQueues()
+    let queue = SessionMessageQueue()
     let harness = try SessionHarness(
       configuration: configuration,
       document: consume document,
       persister: persister,
       logger: logger,
-      messageQueues: queues
+      messageQueue: queue
     )
     let profile = loaded.profiles.first { $0.name == loaded.activeProfileName }
       ?? ProfileSummary(
@@ -144,7 +144,7 @@ public enum ScribeSessionBootstrap {
         baseURL: configuration.serverURL)
     return BootstrappedSession(
       harness: harness,
-      messageQueues: queues,
+      messageQueue: queue,
       initialMessages: initialMessages,
       sessionId: sessionId,
       sessionDirectory: directory,

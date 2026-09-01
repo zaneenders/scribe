@@ -144,7 +144,7 @@ final class SessionController {
   var sessionId: UUID { currentSessionId }
   var workingDirectory: String { boot.workingDirectory }
   /// Messages queued while a turn is running, oldest first.
-  var queuedTexts: [String] { boot.messageQueues.steeringPreviewTexts() }
+  var queuedTexts: [String] { boot.messageQueue.previewTexts() }
   var sessionIdText: String { sessionId.uuidString.prefix(8).uppercased() }
   /// Uses the session hash until the user assigns a custom name.
   var displayName: String { sessionName ?? sessionIdText }
@@ -459,10 +459,10 @@ final class SessionController {
     }
   }
 
-  /// Queue a message while the model is busy. The harness drains the steering
+  /// Queue a message while the model is busy. The harness drains the message
   /// queue after the current turn, matching the CLI's Enter-while-busy path.
   private func enqueue(_ text: String) {
-    guard boot.messageQueues.enqueueSteering(text: text) else { return }
+    guard boot.messageQueue.enqueue(text: text) else { return }
     rememberPrompt(text)
     draft = ""
     historyIndex = nil
@@ -480,7 +480,7 @@ final class SessionController {
     // Interrupt the current turn while preserving queued messages so the
     // user can still force-send them afterward (matching the CLI behaviour
     // where Ctrl+C / Enter-on-empty during a turn keeps the queue intact).
-    let queuedCount = boot.messageQueues.steeringCount()
+    let queuedCount = boot.messageQueue.count()
     if queuedCount > 0 {
       transcript.append(
         TranscriptItem(
@@ -500,13 +500,13 @@ final class SessionController {
     scroll.scrollToBottom()
   }
 
-  /// Pops the next queued steering message and sends it immediately.
+  /// Pops the next queued message and sends it immediately.
   ///
   /// When the model is busy the current turn is interrupted first; the
   /// popped message is held in `pendingForceSend` and dispatched as soon as
   /// the turn finishes.  When idle the message is sent directly.
   func forceSendNext() {
-    guard let text = boot.messageQueues.popSteeringForRecall() else { return }
+    guard let text = boot.messageQueue.popForRecall() else { return }
     transcript.append(
       TranscriptItem(
         kind: .notice, title: "Queue",
@@ -527,9 +527,9 @@ final class SessionController {
 
   @discardableResult
   private func discardQueuedMessages() -> Int {
-    let queues = boot.messageQueues
-    let count = queues.steeringCount() + queues.followUpCount()
-    queues.clearAll()
+    let queue = boot.messageQueue
+    let count = queue.count()
+    queue.clear()
     return count
   }
 
@@ -538,7 +538,7 @@ final class SessionController {
   /// interrupted turn is persisted cleanly before the controller is released;
   /// app teardown passes true to cancel immediately.
   func shutdown(cancelTask: Bool) {
-    boot.messageQueues.clearAll()
+    boot.messageQueue.clear()
     terminal?.close()
     Task { await boot.harness.interrupt() }
     if cancelTask {
