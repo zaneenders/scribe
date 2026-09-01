@@ -182,18 +182,25 @@ struct SessionRow: Block {
         if session.isRunning {
           ActivitySpinner(color: theme.purple)
         }
-        Text(sanitizeASCII(session.displayName))
-          .fontScale(theme.smallScale)
-          .foregroundColor(
-            session.isRunning
-              ? theme.purple : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary)
-        if session.hasUnreadActivity && !isActive {
-          Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
+        MarqueeText(
+          sanitizeASCII(session.displayName),
+          id: WidgetID("session-name:\(session.sessionId.uuidString)"),
+          color: session.isRunning
+            ? theme.purple
+            : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary,
+          scale: theme.smallScale,
+          isScrolling: phase == .hovered
+        )
+        if phase != .hovered {
+          if session.hasUnreadActivity && !isActive {
+            Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
+          }
+          Text(sanitizeASCII(session.modelName))
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
         }
-        Spacer()
-        Text(sanitizeASCII(session.modelName))
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
+        // Keep actions in place while previewing the name so moving the pointer
+        // toward one cannot make its hit target disappear.
         sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
       }
       .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 6))
@@ -220,13 +227,18 @@ struct SavedSessionRow: Block {
         Text("-")
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
-        Text(sanitizeASCII(saved.metadata.displayName))
-          .fontScale(theme.smallScale)
-          .foregroundColor(phase == .hovered ? theme.textPrimary : theme.textSecondary)
-        Spacer()
-        Text(sanitizeASCII(saved.metadata.model))
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
+        MarqueeText(
+          sanitizeASCII(saved.metadata.displayName),
+          id: WidgetID("saved-session-name:\(saved.id.uuidString)"),
+          color: phase == .hovered ? theme.textPrimary : theme.textSecondary,
+          scale: theme.smallScale,
+          isScrolling: phase == .hovered
+        )
+        if phase != .hovered {
+          Text(sanitizeASCII(saved.metadata.model))
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+        }
         sessionActions(
           store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
       }
@@ -236,6 +248,83 @@ struct SavedSessionRow: Block {
       .background(isSelected ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
       .border(isSelected ? theme.accent : .clear, width: isSelected ? 1 : 0)
     }
+  }
+}
+
+/// A single-line label that scrolls only when hovered and wider than its slot.
+/// The pause at each end keeps short names still and makes long names readable.
+@MainActor
+private final class MarqueeAnimationState {
+  static let shared = MarqueeAnimationState()
+  private var startTimes: [WidgetID: TimeInterval] = [:]
+
+  func elapsed(for id: WidgetID, scrolling: Bool, now: TimeInterval) -> TimeInterval {
+    guard scrolling else {
+      startTimes[id] = nil
+      return 0
+    }
+    let start = startTimes[id] ?? now
+    startTimes[id] = start
+    return now - start
+  }
+}
+
+private struct MarqueeText: PrimitiveBlock {
+  let text: String
+  let id: WidgetID
+  let color: Color
+  let scale: Float
+  let isScrolling: Bool
+
+  private let pointsPerSecond: Float = 28
+  private let endPause: TimeInterval = 0.8
+
+  init(_ text: String, id: WidgetID, color: Color, scale: Float, isScrolling: Bool) {
+    self.text = text
+    self.id = id
+    self.color = color
+    self.scale = scale
+    self.isScrolling = isScrolling
+  }
+
+  @MainActor var expandsHorizontally: Bool { true }
+
+  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+    let measured = context.fontMetrics.measure(text, scale: scale * context.textScale)
+    return Size(width: proposal.width, height: measured.height)
+  }
+
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+    let effectiveScale = scale * context.textScale
+    let textWidth = context.fontMetrics.measure(text, scale: effectiveScale).width
+    let shouldScroll = isScrolling && textWidth > rect.size.width
+    let animationElapsed = MarqueeAnimationState.shared.elapsed(
+      for: id, scrolling: shouldScroll, now: Date().timeIntervalSinceReferenceDate)
+    var offset: Float = 0
+
+    if shouldScroll {
+      let distance = textWidth - rect.size.width
+      let travelDuration = TimeInterval(distance / pointsPerSecond)
+      let cycleDuration = endPause * 2 + travelDuration * 2
+      let elapsed = animationElapsed.truncatingRemainder(dividingBy: cycleDuration)
+
+      switch elapsed {
+      case ..<endPause:
+        offset = 0
+      case ..<(endPause + travelDuration):
+        offset = Float(elapsed - endPause) * pointsPerSecond
+      case ..<(endPause * 2 + travelDuration):
+        offset = distance
+      default:
+        offset = distance - Float(elapsed - endPause * 2 - travelDuration) * pointsPerSecond
+      }
+      context.requestRedraw()
+    }
+
+    drawList.pushClip(rect)
+    drawList.text(
+      text, at: Point(x: rect.minX - offset, y: rect.minY), color: color, scale: effectiveScale)
+    drawList.popClip()
   }
 }
 

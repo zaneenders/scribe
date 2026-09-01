@@ -5,9 +5,8 @@ public enum SubmitEffect: Equatable, Sendable {
 
   case interruptAndSend(String)
   case popAndInterruptAndSend
-  case recallSteeringToInput
-  case enqueueSteering(String)
-  case enqueueFollowUp(String)
+  case recallQueuedToInput
+  case enqueue(String)
 
   case interruptModel
 
@@ -21,49 +20,37 @@ public enum SubmitCoordinator {
   public static func handleEnter(
     text: String,
     modelBusy: Bool,
-    steeringQueueCount: Int,
-    steeringLineOutstanding: Bool
+    queueCount: Int,
+    queuedLineOutstanding: Bool
   ) -> SubmitEffect {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
     if trimmed.isEmpty {
-      guard steeringQueueCount > 0 else {
+      guard queueCount > 0 else {
         return .none
       }
       if modelBusy {
         return .interruptModel
       }
-      if steeringLineOutstanding {
+      if queuedLineOutstanding {
         return .none
       }
       return .popAndSendToGate
     }
 
     if modelBusy {
-      return .enqueueSteering(text)
+      return .enqueue(text)
     }
 
-    return .sendToGate(text)
-  }
-
-  public static func handleFollowUpSubmit(
-    text: String,
-    modelBusy: Bool
-  ) -> SubmitEffect {
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return .none }
-    if modelBusy {
-      return .enqueueFollowUp(text)
-    }
     return .sendToGate(text)
   }
 
   public static func handleCtrlC(
-    steeringQueueCount: Int,
+    queueCount: Int,
     modelBusy: Bool
   ) -> SubmitEffect {
-    if steeringQueueCount > 0 {
-      return .recallSteeringToInput
+    if queueCount > 0 {
+      return .recallQueuedToInput
     }
     if modelBusy {
       return .interruptModel
