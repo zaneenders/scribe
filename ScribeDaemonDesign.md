@@ -6,17 +6,17 @@
 
 - The GUI connects to the local daemon automatically.
 - The GUI can switch to a remote daemon over SSH.
-- Chat history is stored on the daemon host.
+- Session messages and metadata are stored on the daemon host.
 - A running agent continues while the daemon is alive.
 - A terminal process continues while the daemon is alive.
-- Chat history survives daemon restart; agents and terminals do not.
+- Sessions survive daemon restart; agents and terminals do not.
 - The Slate TUI are deprecated. Setup commands move to `scribe-daemon`.
 
 ## Things the daemon owns
 
-### Chat history
+### Session
 
-A chat history is the existing persisted Scribe session. Its UUID is durable.
+A session is the existing persisted Scribe chat. Its UUID is durable because it names data on disk.
 
 ```swift
 typealias SessionID = UUID
@@ -30,18 +30,18 @@ struct Session: Codable, Sendable {
 }
 ```
 
-The existing session files remain the source of truth for messages and metadata. This design does not introduce a second chat-storage format.
+The existing session files remain the source of truth for messages and metadata. This design does not introduce a second chat-storage format. In this document, **session** always means this durable chat; “history” means the messages inside it, not a second kind of object.
 
 ### Agent object
 
-An agent object is the live agent working on a chat history.
+An agent object is the in-memory agent working on a session.
 
 ```swift
 struct AgentSnapshot: Codable, Sendable {
-  let id: UInt32        // daemon-scoped live object ID
+  let id: AgentID       // daemon-scoped live object ID
   let sessionID: SessionID  // same durable ID as Session.id
   var state: AgentState
-  var queuedTexts: [String]
+  var queuedMessages: [String]
 }
 
 enum AgentState: String, Codable, Sendable {
@@ -52,11 +52,19 @@ enum AgentState: String, Codable, Sendable {
 }
 ```
 
-Internally, the existing `SessionHarness` does this work: it owns the session document, persistence, selected model configuration, message queues, and running turn. It stays an internal implementation detail and is not sent over the protocol.
+Internally, the existing `SessionHarness` owns the session document, persistence, model configuration, in-memory message queue, and running turn. It is not sent over the protocol. Queued messages are lost when the agent or daemon exits.
 
 `SessionID` names the existing durable session UUID; it does not introduce a different wire representation. `AgentSnapshot.sessionID` is always the same value as `Session.id` for the session that agent has open. It is distinct from `AgentSnapshot.id`, which identifies only the daemon-scoped live agent object.
 
-Only one live agent writes a session. Opening an already-live session attaches to its existing agent.
+Only one live agent and one client connection may own a session at a time. The daemon enforces this with an exclusive attachment, not merely a UI convention:
+
+- The daemon keeps a `SessionID -> AgentID` map and an `AgentID -> connection` attachment map.
+- `openAgent` checks and updates both maps as one daemon-isolated operation. If another connection owns the agent, it returns `sessionInUse`; it never creates a second `SessionHarness`.
+- All mutating agent requests are accepted only from that attached connection and are processed serially by the agent runtime.
+- Detach or connection loss releases the attachment. It does not stop an in-flight turn or unload the agent. The first later `openAgent` attaches to that same live agent and receives its current state.
+- Closing the agent explicitly stops its turn and unloads it, but leaves the durable session on disk.
+
+A GUI that wants two views of one session must fan out one attachment inside that GUI; it cannot create two protocol attachments. Attachment ownership is tied to the transport connection, so a crashed or disconnected client cannot leave a timed stale lock. This prevents two machines from submitting, interrupting, changing profiles, or otherwise racing one session. `SessionHarness` remains the sole persistence writer.
 
 ### Terminal object
 
@@ -64,11 +72,11 @@ A terminal object is a live PTY and shell process.
 
 ```swift
 struct TerminalSnapshot: Codable, Sendable {
-  let id: UInt32        // daemon-scoped live object ID
+  let id: TerminalID    // daemon-scoped live object ID
   var title: String?
   var workingDirectory: String
-  var columns: UInt16
-  var rows: UInt16
+  var columns: UInt16  // canonical PTY width in character cells
+  var rows: UInt16     // canonical PTY height in character cells
   var processState: TerminalProcessState
   var replayStartOffset: UInt64
   var nextOutputOffset: UInt64
@@ -81,7 +89,11 @@ enum TerminalProcessState: Codable, Sendable {
 }
 ```
 
-The daemon owns the PTY file descriptor and child process. It retains a bounded amount of recent raw PTY output for reattachment. Output positions are absolute byte offsets, not PTY read or protocol-frame numbers. `recentOutput` contains exactly the half-open range `replayStartOffset..<nextOutputOffset`.
+The daemon owns the PTY file descriptor and child process. It retains a bounded amount of recent raw PTY output for reattachment. Terminal state is memory-only: the PTY, child process, dimensions, replay bytes, and terminal IDs disappear when the daemon exits. Nothing in `TerminalSnapshot` is written to the session files.
+
+The dimensions matter because a PTY has a kernel window size. Shells and full-screen programs use it for wrapping and layout, and a resize updates the PTY with `TIOCSWINSZ` and causes `SIGWINCH`. The daemon keeps one canonical size so the process still has a defined window while no GUI is attached and a reconnecting GUI knows the size that produced the retained output. `UInt16` matches the PTY `winsize` fields; requests must reject zero or unsupported values. While attached, only the controlling client may resize it.
+
+This is broadly how tmux works: a long-lived tmux server owns the PTYs, child processes, pane sizes, and scrollback in memory while clients attach and detach. Killing the tmux server (or rebooting the host) kills those live terminals. Tools such as tmux-resurrect can save commands and layouts, but they do not persist the original processes. Scribe's first version does not provide that kind of terminal restoration. Output positions are absolute byte offsets, not PTY read or protocol-frame numbers. `recentOutput` contains exactly the half-open range `replayStartOffset..<nextOutputOffset`.
 
 The GUI continues to own `GhosttyTerminal`, which turns VT bytes into cells and render state. The daemon does not persist terminal emulator state and does not restore terminals after daemon exit.
 
@@ -89,7 +101,18 @@ Reattachment is best effort in the first version. A bounded suffix of VT output 
 
 ## Protocol objects
 
-Each connection addresses objects with small `UInt32` IDs:
+Durable and live identities intentionally use different types:
+
+```swift
+typealias SessionID = UUID    // persisted and stable across daemon restarts
+typealias AgentID = UInt32    // in-memory, scoped to one daemon generation
+typealias TerminalID = UInt32 // in-memory, scoped to one daemon generation
+typealias ObjectID = UInt32   // in-memory, scoped to one connection
+```
+
+The daemon allocates live IDs and does not reuse one while it remains live. A client must discard them whenever its connection or the daemon generation changes.
+
+Each connection addresses attached objects with small `ObjectID` handles:
 
 ```text
 object 0   daemon/root
@@ -97,12 +120,12 @@ object 1   attached agent
 object 2   attached terminal
 ```
 
-These IDs are handles for one client connection. They are not the chat-history UUID, agent UUID, or terminal UUID.
+These object IDs are handles for one client connection. They are neither the durable session UUID nor the daemon-scoped `AgentID` or `TerminalID`. Agents and terminals do not have UUIDs because they are never restored from disk.
 
 - Detaching or disconnecting drops the handle only.
-- Closing an agent stops that live agent but keeps its history.
+- Closing an agent stops that live agent but keeps its session.
 - Terminating a terminal kills its process.
-- Deleting a history removes durable chat data.
+- Deleting a session removes durable chat data.
 
 ## API
 
@@ -110,7 +133,7 @@ These IDs are handles for one client connection. They are not the chat-history U
 
 ```swift
 struct DaemonSnapshot: Codable, Sendable {
-  var histories: [Session]
+  var sessions: [Session]
   var agents: [AgentSnapshot]
   var terminals: [TerminalSnapshot]
 }
@@ -120,17 +143,18 @@ Root requests:
 
 ```text
 snapshot
-createHistory
-openAgent(sessionID: SessionID, newObjectID)
-closeAgent(agentID: UInt32)
-deleteHistory(sessionID: SessionID)
-createTerminal(workingDirectory, columns, rows, newObjectID)
-attachTerminal(terminalID: UInt32, newObjectID)
-terminateTerminal(terminalID: UInt32)
-detachObject(objectID)
+createSession
+openAgent(sessionID: SessionID, newObjectID: ObjectID)
+closeAgent(agentID: AgentID)
+deleteSession(sessionID: SessionID)
+createTerminal(workingDirectory, columns, rows, newObjectID: ObjectID)
+attachTerminal(terminalID: TerminalID, newObjectID: ObjectID)
+terminateTerminal(terminalID: TerminalID)
 ```
 
-`openAgent`, `createTerminal`, and `attachTerminal` bind the supplied protocol object ID and return the initial object snapshot.
+A snapshot is a complete, point-in-time protocol state, not a screenshot or a separate persisted copy. The root snapshot populates and resynchronizes the session list and live-object list after connect. Object snapshots provide the baseline to which later events are applied. This is why `snapshot` exists even though the UI normally stays current through events: a client needs a bounded way to bootstrap or recover after losing event continuity. `openAgent`, `createTerminal`, and `attachTerminal` bind the supplied protocol object ID and return the initial object snapshot atomically, so a separate initial `snapshot` call is unnecessary.
+
+Root events report session and live-object creation, update, and removal after that baseline. A client may request a new root snapshot if it detects a gap.
 
 ### Agent object
 
@@ -141,11 +165,20 @@ snapshot
 submit(text)
 interrupt
 clearQueue
-sendNextQueued
+sendQueued(strategy)
 setProfile(name)
 fork(boundary)
 tldr(startBoundary, endBoundary)
 ```
+
+```swift
+enum QueueDrainStrategy: String, Codable, Sendable {
+  case next
+  case all
+}
+```
+
+`sendQueued(strategy:)` force-sends either the oldest queued message or all queued messages as the next turn (matching the existing `QueueMode.all` drain behavior). If a turn is running, the agent interrupts it first and sends after that turn has finished cleanly. The name is `sendQueued`, rather than `sendNext`, because the `.all` strategy may consume more than the next item. Automatic queue draining uses the same strategy type.
 
 Agent events:
 
@@ -163,6 +196,14 @@ turnFinished
 ```
 
 The wire events are stable client-facing messages. The existing internal `AgentEvent` enum is not serialized directly.
+
+### Common attached-object lifecycle
+
+```text
+detach
+```
+
+`detach` is sent to an attached agent or terminal object. It removes only that connection's handle, event subscription, and queued outbound data; it does not close the agent, delete the session, or terminate the terminal. Explicit detach is needed when a tab closes but the shared daemon connection remains open. Otherwise those resources are also released automatically when the connection closes. Putting `detach` on the target object avoids a root-level `detachObject(objectID)` bookkeeping API.
 
 ### Terminal object
 
@@ -243,7 +284,7 @@ The Unix socket and SSH channel carry the same frame:
 struct FrameHeader {
   var version: UInt16
   var code: UInt16
-  var objectID: UInt32
+  var objectID: ObjectID
   var requestID: UInt32
   var payloadLength: UInt32
 }
@@ -274,12 +315,11 @@ struct ClientHello: Codable, Sendable {
 struct ServerHello: Codable, Sendable {
   var selectedVersion: UInt16
   var daemonVersion: String
-  var daemonInstanceID: UUID
   var maximumFrameSize: UInt32
 }
 ```
 
-The daemon instance ID changes when the daemon restarts. The GUI then discards live agent IDs, terminal IDs, protocol handles, and event positions. Durable chat-history UUIDs remain valid.
+Every successful connection starts a new live-ID namespace. On disconnect, the GUI discards agent IDs, terminal IDs, protocol handles, and event positions; it must obtain fresh values after reconnecting. Only durable session UUIDs may be retained. This avoids giving an in-memory daemon instance a UUID or persisting a generation counter solely to detect improbable numeric reuse.
 
 ## Daemon commands
 
@@ -343,8 +383,6 @@ For the first terminal-runtime implementation, use a configurable bounded replay
 ## Remaining decisions
 
 1. When should an idle agent be unloaded?
-2. Should queued messages survive daemon restart?
-3. How are multiple clients authorized to submit agent messages?
-4. What numeric opcodes map to the API above?
-5. How long should exited terminal objects remain available?
-6. What per-connection and daemon-wide memory limits should ship as defaults?
+2. What numeric opcodes map to the API above?
+3. How long should exited terminal objects remain available?
+4. What per-connection and daemon-wide memory limits should ship as defaults?
