@@ -25,12 +25,18 @@ struct Session: Codable, Sendable {
   let id: SessionID
   var name: String?
   var workingDirectory: String
-  var profileName: String
+  var profileName: String?
   var isPinned: Bool
+  var createdAt: Date
+  var lastMessageAt: Date?
 }
 ```
 
-The existing session files remain the source of truth for messages and metadata. This design does not introduce a second chat-storage format. In this document, **session** always means this durable chat; “history” means the messages inside it, not a second kind of object.
+The existing session files remain the source of truth for messages and metadata. This design does not introduce a second chat-storage format. In this document, **session** always means this durable chat; “history” means the messages inside it, not a second kind of object. `createdAt` and `lastMessageAt` expose the existing persisted conversation-recency fields; presentation-only changes do not modify either value. Root snapshots are sorted by `isPinned` first, then effective recency (`lastMessageAt ?? createdAt`) descending, with `SessionID` as the deterministic tie-breaker. A committed message updates `lastMessageAt` and emits a root session-updated event, so local and remote GUIs can maintain the same ordering without reading daemon-host files.
+
+The persisted metadata schema gains `profileName`. New sessions store the selected profile name in addition to the existing resolved model and endpoint fields. On first discovery of legacy metadata without `profileName`, the daemon resolves it deterministically: it selects the unique configured profile whose resolved model and endpoint match the legacy values; if there is no unique match, it marks the session as requiring profile selection and does not open an agent until the user chooses an existing profile. Choosing a profile atomically persists `profileName` before the agent starts. A missing or renamed persisted profile is handled the same way and is never silently replaced by the current default. Metadata migration preserves the legacy resolved fields, timestamps, name, pin, and parent information. Discovery need not rewrite a legacy file merely to report it; the selected profile is written on the first successful explicit selection or other metadata mutation. The wire `profileName` is therefore nullable while migration is unresolved. Clients display an unresolved profile state and offer profile selection. `openAgent` fails with `profileRequired` until it is resolved. The root `selectSessionProfile` request resolves an unloaded or legacy session. `setProfile` changes an already-open agent's profile. Both operations persist the selected name before changing observable state and emit a root session-updated event; `setProfile` also updates `AgentSnapshot.profileName` and emits `profileChanged(name)` on the agent subscription. If persistence fails, the live profile and both event streams remain unchanged.
+
+Protocol dates use canonical RFC 3339 UTC strings with fractional seconds. Decoders accept RFC 3339 values with or without fractional seconds for compatibility, while encoders always include milliseconds.
 
 ### Agent object
 
@@ -44,8 +50,10 @@ struct MessageCursor: Codable, Hashable, Sendable {
 struct AgentSnapshot: Codable, Sendable {
   let id: AgentID       // daemon-generation-scoped live object ID
   let sessionID: SessionID  // same durable ID as Session.id
+  var profileName: String
   var state: AgentState
-  var queuedMessages: [String]
+  var queueRevision: UInt64
+  var queuedMessageCount: UInt32
   var latestMessageCursor: MessageCursor?
   var currentTurnID: UInt64?
   var eventSequence: UInt64
@@ -59,7 +67,7 @@ enum AgentState: String, Codable, Sendable {
 }
 ```
 
-Internally, the existing `SessionHarness` owns the session document, persistence, model configuration, in-memory message queue, and running turn. It is not sent over the protocol. Queued messages are lost when the agent or daemon exits.
+Internally, the existing `SessionHarness` owns the session document, persistence, model configuration, in-memory message queue, and running turn. It is not sent over the protocol. Queued messages are lost when the agent or daemon exits. Because queue contents are not bounded by a single protocol frame, `AgentSnapshot` contains only a count and revision. Clients fetch queue text through the paginated `queueSnapshot` request below. Queue admission has configurable per-message, per-agent count, and per-agent byte limits; an over-limit submission fails before mutation with `queueCapacityExceeded`.
 
 Persisted messages have opaque, session-local `MessageCursor` values. Cursors are stable for the lifetime of the session and impose document order; clients must not derive them from array indexes or protocol event sequences. A non-`nil` `currentTurnID` identifies an unfinished turn whose accumulated content is fetched with the paginated `turnSnapshot(turnID, afterPart, limit)` request. This lets a reconnecting client reconstruct output produced so far without relying on transient text events or putting an unbounded turn into `AgentSnapshot`. When the turn is committed, normal message-history pagination is authoritative and `currentTurnID` becomes `nil`.
 
@@ -203,6 +211,17 @@ struct MessagePage: Codable, Sendable {
   var hasNewer: Bool
 }
 
+struct QueuedMessage: Codable, Sendable {
+  var number: UInt64
+  var text: String
+}
+
+struct QueueSnapshotPage: Codable, Sendable {
+  var revision: UInt64
+  var messages: [QueuedMessage]
+  var nextNumber: UInt64?
+}
+
 struct NumberedTurnPart: Codable, Sendable {
   var number: UInt64
   var part: AgentTurnPart  // versioned wire union for text, reasoning, tool, or image content
@@ -221,6 +240,7 @@ Root requests:
 snapshot(cursor: RootSnapshotCursor?, limit: UInt32)
 createSession(workingDirectory, profileName, operationID: OperationID)
 updateSession(sessionID: SessionID, patch: SessionPatch, operationID: OperationID)
+selectSessionProfile(sessionID: SessionID, profileName: String, operationID: OperationID)
 openAgent(sessionID: SessionID, newObjectID: ObjectID)
 deleteSession(sessionID: SessionID, operationID: OperationID)
 createTerminal(workingDirectory, columns, rows, newObjectID: ObjectID, operationID: OperationID)
@@ -249,7 +269,7 @@ enum Presence<Value: Codable & Sendable>: Codable, Sendable {
 }
 ```
 
-`Presence` is a protocol-modeling type: its enclosing `SessionPatch` decoder checks `container.contains(_:)`; for `name`, a present JSON `null` becomes `.value(nil)`. Encoders omit `.omitted` keys. `deleteSession` fails with `sessionInUse` while a live agent exists for the session. Closing that agent through its attached object is required first. Root requests cannot close agents or terminate terminals by daemon-generation-scoped ID; destructive live-object operations require an authorized attachment.
+`Presence` is a protocol-modeling type: its enclosing `SessionPatch` decoder checks `container.contains(_:)`; for `name`, a present JSON `null` becomes `.value(nil)`. Encoders omit `.omitted` keys. `selectSessionProfile` validates the named profile, atomically persists it without changing conversation recency, returns the updated `Session`, and emits a root session-updated event. It fails with `sessionInUse` when a live agent owns the session; an attached owner uses agent `setProfile` instead. `deleteSession` fails with `sessionInUse` while a live agent exists for the session. Closing that agent through its attached object is required first. Root requests cannot close agents or terminate terminals by daemon-generation-scoped ID; destructive live-object operations require an authorized attachment.
 
 ### Agent object
 
@@ -258,6 +278,7 @@ Agent requests:
 ```text
 snapshot
 messages(after: MessageCursor?, before: MessageCursor?, limit: UInt32)
+queueSnapshot(revision: UInt64?, afterNumber: UInt64?, limit: UInt32)
 turnSnapshot(turnID: UInt64, afterPart: UInt64?, limit: UInt32)
 submit(text, operationID: OperationID)
 interrupt(operationID: OperationID)
@@ -288,18 +309,19 @@ assistantText
 assistantFinished
 toolStarted
 toolFinished
-queueChanged
+queueChanged(revision, queuedMessageCount)
+profileChanged(name)
 usageChanged
 turnFinished
 ```
 
 The wire events are stable client-facing messages. The existing internal `AgentEvent` enum is not serialized directly. Each agent event carries a monotonically increasing, agent-local `eventSequence`.
 
-`messages` returns a `MessagePage` containing persisted messages in document order and their opaque cursors. Omitting both request cursors returns the newest page; supplying both is invalid. `after` and `before` are exclusive boundaries: the message named by the supplied cursor is not repeated. `hasOlder` and `hasNewer`, not the number of returned items, indicate whether another request in either direction can produce data, and the corresponding cursor is non-`nil` whenever that flag is true. `turnSnapshot` returns a `TurnSnapshotPage` with ordered, numbered parts of the unfinished turn. `afterPart` is exclusive, while a non-`nil` `nextPart` is the part number to supply as `afterPart` for the next page; `nextPart == nil` is the only indication that the page is complete. Continuations are scoped to the captured session or turn and fail with `snapshotInvalidated` if that source is replaced while paging. Responses must fit the negotiated frame size; the daemon may return fewer than `limit` items and a single message, turn part, or tool payload that cannot fit is returned through chunked message-content frames. A newly attached GUI loads history through these APIs rather than reading daemon-host files.
+`messages` returns a `MessagePage` containing persisted messages in document order and their opaque cursors. Omitting both request cursors returns the newest page; supplying both is invalid. `after` and `before` are exclusive boundaries: the message named by the supplied cursor is not repeated. `hasOlder` and `hasNewer`, not the number of returned items, indicate whether another request in either direction can produce data, and the corresponding cursor is non-`nil` whenever that flag is true. `queueSnapshot` freezes one queue revision; omitting `revision` starts at the current revision, while subsequent pages repeat that revision and use `afterNumber` as an exclusive boundary. `nextNumber == nil` alone means the queue snapshot is complete. If the queue mutates before paging completes, the continuation fails with `snapshotInvalidated` and the client restarts from the latest revision. `turnSnapshot` returns a `TurnSnapshotPage` with ordered, numbered parts of the unfinished turn. `afterPart` is exclusive, while a non-`nil` `nextPart` is the part number to supply as `afterPart` for the next page; `nextPart == nil` is the only indication that the page is complete. Continuations are scoped to the captured session, queue, or turn and fail with `snapshotInvalidated` if that source is replaced while paging. Responses must fit the negotiated frame size; the daemon may return fewer than `limit` items and a single message, queued message, turn part, or tool payload that cannot fit is returned through chunked message-content frames. Page envelopes themselves are bounded independently of chunked fields. A newly attached GUI loads history and queue contents through these APIs rather than reading daemon-host files. Supplying `afterNumber` without `revision` is invalid, and page numbers are scoped to their queue revision rather than being durable queue-entry IDs.
 
-Agent snapshot capture and event subscription are atomic. If the snapshot is through sequence `N`, subsequent events begin at `N + 1`. On a gap, the client requests a fresh snapshot, reconciles persisted history from `latestMessageCursor`, and replaces any partial rendering from the paginated `currentTurnID` snapshot. Agent event sequences are transient and restart with a new live agent; message cursors are the durable history boundary. `close` is accepted only on the attached agent object, stops its turn, unloads it, and preserves the durable session.
+Agent snapshot capture and event subscription are atomic. If the snapshot is through sequence `N`, subsequent events begin at `N + 1`. On a gap, the client requests a fresh snapshot, reloads queue contents when its revision changed, reconciles persisted history from `latestMessageCursor`, and replaces any partial rendering from the paginated `currentTurnID` snapshot. Agent event sequences are transient and restart with a new live agent; message cursors are the durable history boundary. `close` is accepted only on the attached agent object, stops its turn, unloads it, and preserves the durable session.
 
-Agent event and snapshot-pagination buffering is bounded. Overflow invalidates that handle's subscription, drops queued data events, and sends `subscriptionInvalidated(scope: agent, latestMessageCursor, currentTurnID)` through the reserved control lane; no later agent events are sent on the invalidated handle. If the notice cannot be queued, the daemon closes the entire connection: silently removing a multiplexed handle would not be observable to an idle client. Recovery uses the attached object's `snapshot`, followed by `messages` and, when present, `turnSnapshot`; the running turn is not interrupted. Requests using continuations from an invalidated snapshot return `snapshotInvalidated`.
+Agent event and snapshot-pagination buffering is bounded. Overflow invalidates that handle's subscription, drops queued data events, and sends `subscriptionInvalidated(scope: agent, latestMessageCursor, queueRevision, currentTurnID)` through the reserved control lane; no later agent events are sent on the invalidated handle. If the notice cannot be queued, the daemon closes the entire connection: silently removing a multiplexed handle would not be observable to an idle client. Recovery uses the attached object's `snapshot`, followed by `messages`, `queueSnapshot`, and, when present, `turnSnapshot`; the running turn is not interrupted. Requests using continuations from an invalidated snapshot return `snapshotInvalidated`.
 
 ### Common attached-object lifecycle
 
@@ -340,7 +362,7 @@ The attached-object `snapshot` request returns a `TerminalAttachmentSnapshot`, i
 
 The PTY read path never waits for a GUI or socket write. For every read, the terminal object assigns offsets, appends the bytes to its shared replay buffer, and enqueues output independently for each attached connection. Socket writes preserve output order for each terminal.
 
-Attaching is atomic with respect to output. The daemon first subscribes the handle and captures a `TerminalAttachmentSnapshot` containing terminal metadata, retained range `R..<N`, and that handle's controller or observer access. The response contains metadata only. It is followed by chunked raw `replay` frames covering a contiguous suffix `R'..<N`, where `R' >= R` if pressure evicted bytes while the response was in flight, and then by live `output` frames beginning at `N`. If `R' > R`, `replayInvalidated` precedes replay so the client can mark the display incomplete. Output produced after the baseline is queued behind replay for that handle, so no byte can slip between replay and live output. All frames obey the negotiated maximum size.
+Attaching is atomic with respect to output. While isolated with the terminal runtime, the daemon captures `N`, chooses a contiguous retained suffix `R'..<N` that fits the attachment's bounded replay allocation, and transfers ownership of references to those immutable replay segments into the attachment queue before publishing the handle. The returned `TerminalAttachmentSnapshot` reports `replayStartOffset = R'`, not an earlier range that might disappear in flight, and includes that handle's controller or observer access. The response contains metadata only and is followed by raw `replay` frames covering exactly `R'..<N`, then live `output` frames beginning at `N`. Global replay eviction cannot remove the attachment-owned segments; their memory is charged to that connection until sent or invalidated. Output produced after capture is queued behind replay, so no byte can slip between replay and live output. If the daemon cannot reserve enough queue capacity even for its configured minimum replay baseline, attachment fails with retryable `attachmentCapacityExceeded` before binding the handle. Later live-output pressure follows the invalidation rules below. All frames obey the negotiated maximum size.
 
 A client initializes its next expected byte offset from the first replay frame (or `N` when replay is empty), then tracks it across replay and live output:
 
@@ -357,6 +379,8 @@ In the first version, only one attached client may send input, resize, `terminat
 Terminal control uses the same ownership-epoch rule as agents. Input and destructive requests accepted under an old controller epoch are rejected with `staleAttachment` if control transfers before they execute. Output delivery is unaffected.
 
 The daemon emits all final readable PTY output before `exited`. `terminateProcess` begins a bounded asynchronous shutdown of the process group and retains the exited terminal, replay, and status for inspection. Shutdown first sends the platform's graceful termination signal, continues draining PTY output for a configured grace period, escalates to `SIGKILL`, and then drains until EOF or a second bounded deadline. Descendants retaining the slave PTY therefore cannot block cleanup forever. `terminateProcess` and `close` responses acknowledge that shutdown was accepted; exit and root-removal events report completion. `close` marks the terminal as closing immediately, rejects later requests, and removes the terminal object, replay, and all handles after bounded shutdown. If a final drain deadline expires, removal proceeds and the protocol does not promise output beyond the last emitted offset. Exited terminals otherwise remain attachable until `close` or the daemon's retention policy removes them.
+
+Every terminal process group and agent tool-process group is launched through a small independently packaged process-reaper helper before user code can run. The helper is the direct parent of the group leader and receives a daemon-liveness pipe whose write end is held only by the daemon and is never inherited by launched children. On orderly removal the daemon asks the helper to perform the same bounded graceful-then-forceful shutdown and waits for acknowledgement. On daemon exit, crash, or `SIGKILL`, EOF on the liveness pipe makes the helper immediately kill the registered process group and reap its child. The helper creates the process group itself and acknowledges it to the daemon only after containment is installed; the daemon does not expose or drive the child before that acknowledgement, preventing a crash window that could create an untracked process. The helper records process identity at spawn and never acts on a recycled PID. Platform-specific implementations may use stronger primitives such as Linux parent-death signals, but closing a PTY master or relying on `SIGHUP` alone is insufficient. Crash tests run descendants that ignore `SIGHUP`, fork, and retain the slave PTY, then verify that no process remains after daemon death. A machine-wide power loss naturally ends the processes; sessions remain recoverable from disk.
 
 ## Connections
 
@@ -417,9 +441,11 @@ The 16-byte header uses big-endian integers.
 
 Control payloads use JSON encoded with `Codable`. Terminal and chunked message-content byte messages use raw payloads. `maximumFrameSize` includes the 16-byte header. Every decoder rejects a header whose payload length would exceed the negotiated limit before allocating payload storage. Collection responses are paginated or contain bounded summaries; large byte content is split into ordered raw frames.
 
+JSON is a specified wire format rather than Swift's synthesized representation. Every wire union uses a custom adjacent-tag encoding with a required `type` string and case-specific fields—for example `TerminalProcessState.exited(status: 0)` is `{"type":"exited","status":0}` and `OperationQueryResult.inProgress` is `{"type":"inProgress","retryAfterMilliseconds":...}`. Unit-like cases still encode as objects containing `type`. Unknown tags are rejected as an unsupported value for that protocol version. `Presence` is never encoded as a standalone enum: its enclosing patch omits `.omitted` and encodes `.value` as the field's ordinary JSON value. Fields eligible for chunking use a schema-defined adjacent union of `{"type":"inline","value":...}` or `{"type":"chunked","reference":...}`; a decoder never guesses from an object's shape. Each protocol version publishes exact JSON schemas and golden fixtures for requests, successes, errors, events, every union case, and chunk references. Implementations use custom `Codable` conformances and do not make synthesized associated-value-enum encoding part of the contract.
+
 ### Chunked message content
 
-A JSON response or event that contains a field too large for one frame replaces that field with a `ChunkedContentReference`:
+A schema-defined chunkable field encodes inline while it fits one frame; otherwise its `chunked` union case contains a `ChunkedContentReference`:
 
 ```swift
 struct ChunkedContentReference: Codable, Sendable {
@@ -472,7 +498,7 @@ Operation retention is bounded, but every admitted operation's in-progress recor
 
 If a connection is lost before a mutation response arrives, the client first reconnects and queries `operationResult`. On `completed`, it consumes the cached result. On `inProgress`, it polls or rejoins with the identical operation and ID. On `unknown`—including after daemon restart—it reconciles durable effects through root and message snapshots and surfaces any still-ambiguous action to the user. It must never automatically issue the mutation under a new ID. In particular, `submit`, queue draining, `fork`, and `tldr` are not blindly retried. A successful fork or tldr result retains the child `SessionID`, so loss of its original response remains correlatable while the daemon generation survives.
 
-Errors use a common envelope containing a stable machine-readable code, a human-readable message, and optional versioned details. Expected state and validation failures—including `sessionInUse`, `staleAttachment`, `snapshotExpired`, `snapshotInvalidated`, `objectIDInUse`, `operationIDConflict`, `operationCapacityExceeded`, `unknownObject`, `wrongObjectType`, invalid arguments, and unsupported operations—fail only that request. Unknown object IDs receive `unknownObject`, including requests sent after the client has observed handle closure. Unsupported numeric opcodes, malformed JSON, invalid raw layouts, impossible response correlation, and other framing violations are protocol errors and close the connection after a bounded error response when one can be sent safely. Exact numeric opcode and error-code assignments remain to be selected, but these semantics are part of version 1.
+Errors use a common envelope containing a stable machine-readable code, a human-readable message, and optional versioned details. Expected state and validation failures—including `sessionInUse`, `profileRequired`, `queueCapacityExceeded`, `attachmentCapacityExceeded`, `staleAttachment`, `snapshotExpired`, `snapshotInvalidated`, `objectIDInUse`, `operationIDConflict`, `operationCapacityExceeded`, `unknownObject`, `wrongObjectType`, invalid arguments, and unsupported operations—fail only that request. Unknown object IDs receive `unknownObject`, including requests sent after the client has observed handle closure. Unsupported numeric opcodes, malformed JSON, invalid raw layouts, impossible response correlation, and other framing violations are protocol errors and close the connection after a bounded error response when one can be sent safely. Exact numeric opcode and error-code assignments remain to be selected, but these semantics are part of version 1.
 
 ## Handshake
 
@@ -549,7 +575,7 @@ The work should land in independently testable pieces, with the current GUI rema
 2. **In-process terminal runtime.** Put `PTYSession` behind `TerminalRuntime`; add attachments, ordered output and exit events, input, resize, and process state. Adapt `SessionTerminal` to use an `InProcessTerminalClient` while retaining `GhosttyTerminal` in the GUI. This is the main architecture refactor and still has no networking.
 3. **Runtime lifecycle and pressure.** Add bounded attachment queues, slow-consumer invalidation, controller versus observer behavior, cleanup, and real-PTY integration tests. In-process tests should deliberately pause a consumer and verify that the PTY and other consumers continue.
 4. **Protocol library.** Add frame encoding and incremental decoding directly over `ByteBuffer`, handshake messages, typed IDs, stable error responses, frame-size limits, and embedded-channel or in-memory tests. This piece starts no daemon and opens no sockets.
-5. **Local daemon transport.** Add `scribe-daemon serve`, per-data-directory singleton locking, secure Unix socket lifecycle and peer authorization, and map one connection onto the already-tested terminal runtime. Add concurrent startup, stale-artifact recovery, create, attach, input, resize, bounded process termination, and object close integration tests. Chat support is not required here.
+5. **Local daemon transport.** Add `scribe-daemon serve`, per-data-directory singleton locking, secure Unix socket lifecycle and peer authorization, and map one connection onto the already-tested terminal runtime. Add the process-reaper helper and concurrent startup, stale-artifact recovery, create, attach, input, resize, bounded process termination, daemon-crash cleanup, and object close integration tests. Chat support is not required here.
 6. **Network terminal client.** Add a client adapter with the same interface as `InProcessTerminalClient`, then switch the GUI composition root from the in-process adapter to the local daemon. The terminal view and `GhosttyTerminal` should not need another ownership refactor.
 7. **Chat runtime and protocol.** Move session discovery and `SessionHarness` ownership behind an in-process facade first, then add chat snapshots, event cursors, and protocol mapping. This needs a separate detailed reconnect design before implementation.
 8. **SSH transport.** Add the byte-only bridge and NIOSSH client after the local protocol is stable. The bridge does not get separate daemon semantics.
