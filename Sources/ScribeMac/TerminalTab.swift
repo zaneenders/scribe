@@ -26,6 +26,12 @@ enum ScribeTerminalCommand {
 /// is on the Chat tab or another session.
 @MainActor
 final class SessionTerminal {
+  private enum InputCommand: Sendable {
+    case write(TerminalID, Data)
+    case resize(TerminalID, TerminalSize)
+    case interrupt(TerminalID)
+  }
+
   /// Focus identity of the terminal pane; unique per session.
   let inputID: WidgetID
   /// Set when the tab is (re)opened; the tab content retries focusing until
@@ -44,10 +50,27 @@ final class SessionTerminal {
   private var terminalID: TerminalID?
   private var attachment: TerminalAttachment?
   private var eventTask: Task<Void, Never>?
+  private let inputContinuation: AsyncStream<InputCommand>.Continuation
+  private let inputTask: Task<Void, Never>
   private var shellGeneration = UUID()
   private(set) var startupError: String?
 
   init(sessionId: UUID, workingDirectory: String) {
+    let inputPair = AsyncStream<InputCommand>.makeStream()
+    inputContinuation = inputPair.continuation
+    let client = Self.client
+    inputTask = Task.detached {
+      for await command in inputPair.stream {
+        switch command {
+        case .write(let id, let data):
+          try? await client.write(data, to: id)
+        case .resize(let id, let size):
+          try? await client.resize(id, to: size)
+        case .interrupt(let id):
+          try? await client.interrupt(id)
+        }
+      }
+    }
     inputID = WidgetID("terminal.input.\(sessionId.uuidString)")
     self.workingDirectory = workingDirectory
     do {
@@ -121,14 +144,15 @@ final class SessionTerminal {
 
     model.onInput = { [weak self] input in
       guard let self, let id = self.terminalID else { return }
-      Task { try? await Self.client.write(input, to: id) }
+      self.inputContinuation.yield(.write(id, Data(input.utf8)))
     }
     model.onResize = { [weak self] columns, rows in
       guard let self else { return }
       self.columns = columns
       self.rows = rows
       guard let id = self.terminalID else { return }
-      Task { try? await Self.client.resize(id, to: TerminalSize(columns: columns, rows: rows)) }
+      self.inputContinuation.yield(
+        .resize(id, TerminalSize(columns: columns, rows: rows)))
     }
   }
 
@@ -145,17 +169,17 @@ final class SessionTerminal {
 
   func interrupt() {
     guard let id = terminalID else { return }
-    Task { try? await Self.client.interrupt(id) }
+    inputContinuation.yield(.interrupt(id))
   }
 
   func send(_ text: String) {
     guard let id = terminalID else { return }
-    Task { try? await Self.client.write(text, to: id) }
+    inputContinuation.yield(.write(id, Data(text.utf8)))
   }
 
   func send(key: GhosttyTerminalKey) {
     guard let input = model?.encodeKey(key), let id = terminalID else { return }
-    Task { try? await Self.client.write(input, to: id) }
+    inputContinuation.yield(.write(id, input))
   }
 
   /// Hangs up the shell; called when the owning session closes.
@@ -163,6 +187,8 @@ final class SessionTerminal {
     shellGeneration = UUID()
     eventTask?.cancel()
     eventTask = nil
+    inputContinuation.finish()
+    inputTask.cancel()
     let attachment = self.attachment
     self.attachment = nil
     let id = terminalID
