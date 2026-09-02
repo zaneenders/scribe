@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Stable identity for a terminal owned by a ``TerminalRuntime``.
 public struct TerminalID: Hashable, Sendable, Codable {
@@ -84,12 +85,12 @@ public protocol TerminalClient: Sendable {
   func detach(_ attachmentID: UUID, from terminalID: TerminalID) async
 }
 
-public extension TerminalClient {
-  func write(_ string: String, to terminalID: TerminalID) async throws {
+extension TerminalClient {
+  public func write(_ string: String, to terminalID: TerminalID) async throws {
     try await write(Data(string.utf8), to: terminalID)
   }
 
-  func interrupt(_ terminalID: TerminalID) async throws {
+  public func interrupt(_ terminalID: TerminalID) async throws {
     try await write(Data([0x03]), to: terminalID)
   }
 }
@@ -119,9 +120,26 @@ public struct TerminalAttachment: Sendable {
   }
 }
 
+/// A zero-scheduling-overhead attachment for an in-process renderer. Events are
+/// called synchronously on the PTY callback thread and `Data` retains its existing
+/// copy-on-write storage.
+public struct LocalTerminalAttachment: Sendable {
+  public let id: UUID
+  public let terminalID: TerminalID
+  private let detachAction: @Sendable () -> Void
+
+  fileprivate init(id: UUID, terminalID: TerminalID, detachAction: @escaping @Sendable () -> Void) {
+    self.id = id
+    self.terminalID = terminalID
+    self.detachAction = detachAction
+  }
+
+  public func detach() { detachAction() }
+}
+
 /// Owns PTYs independently of any UI or wire transport. Output is retained by
 /// byte count and each attachment has its own bounded delivery queue.
-public actor TerminalRuntime {
+public final class TerminalRuntime: Sendable {
   public struct Limits: Equatable, Sendable {
     public var replayBytes: Int
     public var attachmentEvents: Int
@@ -145,6 +163,7 @@ public actor TerminalRuntime {
     var nextCursor: UInt64 = 0
     var exitStatus: Int32?
     var attachments: [UUID: AsyncThrowingStream<TerminalEvent, any Error>.Continuation] = [:]
+    var localAttachments: [UUID: @Sendable (TerminalEvent) -> Void] = [:]
 
     init(pty: PTYSession) {
       self.pty = pty
@@ -152,7 +171,7 @@ public actor TerminalRuntime {
   }
 
   private let limits: Limits
-  private var sessions: [TerminalID: Session] = [:]
+  private let sessions = Mutex<[TerminalID: Session]>([:])
 
   public init(limits: Limits = Limits()) {
     self.limits = limits
@@ -166,13 +185,16 @@ public actor TerminalRuntime {
       rows: configuration.size.rows)
     let id = TerminalID()
     let session = Session(pty: pty)
-    sessions[id] = session
+    sessions.withLock { $0[id] = session }
 
+    // PTY callbacks are already delivered off the main thread. Process them
+    // synchronously so bytes retain read order and avoid allocating a Task for
+    // every output chunk.
     pty.onOutput = { [weak self] data in
-      Task { await self?.receive(data, from: id) }
+      self?.receive(data, from: id)
     }
     pty.onExit = { [weak self] status in
-      Task { await self?.receiveExit(status, from: id) }
+      self?.receiveExit(status, from: id)
     }
     return id
   }
@@ -180,6 +202,16 @@ public actor TerminalRuntime {
   public func attach(
     to terminalID: TerminalID,
     after requestedCursor: UInt64? = nil
+  ) throws -> TerminalAttachment {
+    try sessions.withLock {
+      try attachLocked(to: terminalID, after: requestedCursor, sessions: &$0)
+    }
+  }
+
+  private func attachLocked(
+    to terminalID: TerminalID,
+    after requestedCursor: UInt64? = nil,
+    sessions: inout [TerminalID: Session]
   ) throws -> TerminalAttachment {
     guard let session = sessions[terminalID] else {
       throw TerminalRuntimeError.terminalNotFound(terminalID)
@@ -201,7 +233,10 @@ public actor TerminalRuntime {
       bufferingPolicy: .bufferingOldest(limits.attachmentEvents))
     session.attachments[attachmentID] = pair.continuation
     pair.continuation.onTermination = { [weak self] _ in
-      Task { await self?.detach(attachmentID, from: terminalID) }
+      // Termination can be invoked synchronously by `finish()` while runtime
+      // state is borrowed by the mutex. Defer cleanup to avoid recursive lock
+      // acquisition; this is a once-per-attachment cold path.
+      Task { self?.detach(attachmentID, from: terminalID) }
     }
 
     if cursor < session.nextCursor {
@@ -224,39 +259,117 @@ public actor TerminalRuntime {
       terminalID: terminalID,
       events: pair.stream,
       detachAction: { [weak self] in
-        await self?.detach(attachmentID, from: terminalID)
+        self?.detach(attachmentID, from: terminalID)
       })
   }
 
-  public func write(_ data: Data, to terminalID: TerminalID) throws {
-    guard let session = sessions[terminalID] else {
-      throw TerminalRuntimeError.terminalNotFound(terminalID)
+  public func attachLocally(
+    to terminalID: TerminalID,
+    after requestedCursor: UInt64? = nil,
+    onEvent: @escaping @Sendable (TerminalEvent) -> Void
+  ) throws -> LocalTerminalAttachment {
+    try sessions.withLock { sessions in
+      guard let session = sessions[terminalID] else {
+        throw TerminalRuntimeError.terminalNotFound(terminalID)
+      }
+      let availableFrom = session.replay.first?.cursor ?? session.nextCursor
+      let cursor = requestedCursor ?? availableFrom
+      guard cursor >= availableFrom else {
+        throw TerminalRuntimeError.replayUnavailable(requested: cursor, availableFrom: availableFrom)
+      }
+      guard cursor <= session.nextCursor else {
+        throw TerminalRuntimeError.invalidCursor(requested: cursor, latest: session.nextCursor)
+      }
+
+      let attachmentID = UUID()
+      session.localAttachments[attachmentID] = onEvent
+      if cursor < session.nextCursor {
+        var replay = Data()
+        replay.reserveCapacity(Int(session.nextCursor - cursor))
+        for chunk in session.replay where chunk.endCursor > cursor {
+          let offset = Int(max(cursor, chunk.cursor) - chunk.cursor)
+          replay.append(chunk.data.dropFirst(offset))
+        }
+        if !replay.isEmpty {
+          onEvent(.output(TerminalOutput(cursor: cursor, data: replay)))
+        }
+      }
+      if let status = session.exitStatus {
+        onEvent(.exit(status))
+        session.localAttachments.removeValue(forKey: attachmentID)
+      }
+      return LocalTerminalAttachment(id: attachmentID, terminalID: terminalID) { [weak self] in
+        self?.detachLocal(attachmentID, from: terminalID)
+      }
     }
-    session.pty.write(data)
+  }
+
+  public func write(_ data: Data, to terminalID: TerminalID) throws {
+    let pty = try sessions.withLock { sessions throws -> PTYSession in
+      guard let session = sessions[terminalID] else {
+        throw TerminalRuntimeError.terminalNotFound(terminalID)
+      }
+      return session.pty
+    }
+    // Never hold the runtime lock across a potentially blocking write(2).
+    pty.write(data)
+  }
+
+  public func write(_ string: String, to terminalID: TerminalID) throws {
+    let pty = try sessions.withLock { sessions throws -> PTYSession in
+      guard let session = sessions[terminalID] else {
+        throw TerminalRuntimeError.terminalNotFound(terminalID)
+      }
+      return session.pty
+    }
+    pty.write(string)
   }
 
   public func resize(_ terminalID: TerminalID, to size: TerminalSize) throws {
-    guard let session = sessions[terminalID] else {
-      throw TerminalRuntimeError.terminalNotFound(terminalID)
+    let pty = try sessions.withLock { sessions throws -> PTYSession in
+      guard let session = sessions[terminalID] else {
+        throw TerminalRuntimeError.terminalNotFound(terminalID)
+      }
+      return session.pty
     }
-    session.pty.resize(columns: size.columns, rows: size.rows)
+    pty.resize(columns: size.columns, rows: size.rows)
   }
 
   public func close(_ terminalID: TerminalID) {
-    sessions[terminalID]?.pty.close()
+    let session = sessions.withLock { $0.removeValue(forKey: terminalID) }
+    guard let session else { return }
+    for continuation in session.attachments.values { continuation.finish() }
+    session.attachments.removeAll(keepingCapacity: false)
+    session.localAttachments.removeAll(keepingCapacity: false)
+    session.pty.close()
   }
 
   public func detach(_ attachmentID: UUID, from terminalID: TerminalID) {
-    sessions[terminalID]?.attachments.removeValue(forKey: attachmentID)?.finish()
+    let continuation = sessions.withLock {
+      $0[terminalID]?.attachments.removeValue(forKey: attachmentID)
+    }
+    continuation?.finish()
+  }
+
+  public func detachLocal(_ attachmentID: UUID, from terminalID: TerminalID) {
+    sessions.withLock {
+      _ = $0[terminalID]?.localAttachments.removeValue(forKey: attachmentID)
+    }
   }
 
   private func receive(_ data: Data, from terminalID: TerminalID) {
-    guard !data.isEmpty, let session = sessions[terminalID], session.exitStatus == nil else { return }
-    let output = TerminalOutput(cursor: session.nextCursor, data: data)
-    session.nextCursor = output.endCursor
-    appendToReplay(output, in: session)
-    for attachmentID in Array(session.attachments.keys) {
-      deliver(.output(output), to: attachmentID, in: session)
+    guard !data.isEmpty else { return }
+    sessions.withLock { sessions in
+      guard let session = sessions[terminalID], session.exitStatus == nil else { return }
+      let output = TerminalOutput(cursor: session.nextCursor, data: data)
+      session.nextCursor = output.endCursor
+      appendToReplay(output, in: session)
+      for attachmentID in Array(session.attachments.keys) {
+        deliver(.output(output), to: attachmentID, in: session)
+      }
+      for handler in session.localAttachments.values {
+        handler(.output(output))
+      }
     }
   }
 
@@ -282,11 +395,17 @@ public actor TerminalRuntime {
   }
 
   private func receiveExit(_ status: Int32, from terminalID: TerminalID) {
-    guard let session = sessions[terminalID], session.exitStatus == nil else { return }
-    session.exitStatus = status
-    for attachmentID in Array(session.attachments.keys) {
-      deliver(.exit(status), to: attachmentID, in: session)
-      session.attachments.removeValue(forKey: attachmentID)?.finish()
+    sessions.withLock { sessions in
+      guard let session = sessions[terminalID], session.exitStatus == nil else { return }
+      session.exitStatus = status
+      for attachmentID in Array(session.attachments.keys) {
+        deliver(.exit(status), to: attachmentID, in: session)
+        session.attachments.removeValue(forKey: attachmentID)?.finish()
+      }
+      for handler in session.localAttachments.values {
+        handler(.exit(status))
+      }
+      session.localAttachments.removeAll(keepingCapacity: false)
     }
   }
 
@@ -320,29 +439,65 @@ public final class InProcessTerminalClient: TerminalClient, @unchecked Sendable 
     self.runtime = runtime
   }
 
+  // The GUI uses these synchronous methods on the in-process transport. They
+  // deliberately avoid task creation and actor scheduling on the keystroke path.
+  public func createSynchronously(
+    configuration: TerminalConfiguration = TerminalConfiguration()
+  ) throws -> TerminalID {
+    try runtime.createTerminal(configuration: configuration)
+  }
+
+  public func attachSynchronously(
+    to terminalID: TerminalID,
+    after cursor: UInt64? = nil,
+    onEvent: @escaping @Sendable (TerminalEvent) -> Void
+  ) throws -> LocalTerminalAttachment {
+    try runtime.attachLocally(to: terminalID, after: cursor, onEvent: onEvent)
+  }
+
+  public func writeSynchronously(_ data: Data, to terminalID: TerminalID) throws {
+    try runtime.write(data, to: terminalID)
+  }
+
+  public func writeSynchronously(_ string: String, to terminalID: TerminalID) throws {
+    try runtime.write(string, to: terminalID)
+  }
+
+  public func resizeSynchronously(_ terminalID: TerminalID, to size: TerminalSize) throws {
+    try runtime.resize(terminalID, to: size)
+  }
+
+  public func closeSynchronously(_ terminalID: TerminalID) {
+    runtime.close(terminalID)
+  }
+
+  public func detachSynchronously(_ attachment: TerminalAttachment) {
+    runtime.detach(attachment.id, from: attachment.terminalID)
+  }
+
   public func createTerminal(configuration: TerminalConfiguration) async throws -> TerminalID {
-    try await runtime.createTerminal(configuration: configuration)
+    try runtime.createTerminal(configuration: configuration)
   }
 
   public func attach(to terminalID: TerminalID, after cursor: UInt64? = nil) async throws
     -> TerminalAttachment
   {
-    try await runtime.attach(to: terminalID, after: cursor)
+    try runtime.attach(to: terminalID, after: cursor)
   }
 
   public func write(_ data: Data, to terminalID: TerminalID) async throws {
-    try await runtime.write(data, to: terminalID)
+    try runtime.write(data, to: terminalID)
   }
 
   public func resize(_ terminalID: TerminalID, to size: TerminalSize) async throws {
-    try await runtime.resize(terminalID, to: size)
+    try runtime.resize(terminalID, to: size)
   }
 
   public func close(_ terminalID: TerminalID) async {
-    await runtime.close(terminalID)
+    runtime.close(terminalID)
   }
 
   public func detach(_ attachmentID: UUID, from terminalID: TerminalID) async {
-    await runtime.detach(attachmentID, from: terminalID)
+    runtime.detach(attachmentID, from: terminalID)
   }
 }

@@ -26,11 +26,6 @@ enum ScribeTerminalCommand {
 /// is on the Chat tab or another session.
 @MainActor
 final class SessionTerminal {
-  private enum InputCommand: Sendable {
-    case write(TerminalID, Data)
-    case resize(TerminalID, TerminalSize)
-    case interrupt(TerminalID)
-  }
 
   /// Focus identity of the terminal pane; unique per session.
   let inputID: WidgetID
@@ -48,29 +43,11 @@ final class SessionTerminal {
   private var columns: UInt16 = 80
   private var rows: UInt16 = 24
   private var terminalID: TerminalID?
-  private var attachment: TerminalAttachment?
-  private var eventTask: Task<Void, Never>?
-  private let inputContinuation: AsyncStream<InputCommand>.Continuation
-  private let inputTask: Task<Void, Never>
+  private var attachment: LocalTerminalAttachment?
   private var shellGeneration = UUID()
   private(set) var startupError: String?
 
   init(sessionId: UUID, workingDirectory: String) {
-    let inputPair = AsyncStream<InputCommand>.makeStream()
-    inputContinuation = inputPair.continuation
-    let client = Self.client
-    inputTask = Task.detached {
-      for await command in inputPair.stream {
-        switch command {
-        case .write(let id, let data):
-          try? await client.write(data, to: id)
-        case .resize(let id, let size):
-          try? await client.resize(id, to: size)
-        case .interrupt(let id):
-          try? await client.interrupt(id)
-        }
-      }
-    }
     inputID = WidgetID("terminal.input.\(sessionId.uuidString)")
     self.workingDirectory = workingDirectory
     do {
@@ -89,70 +66,55 @@ final class SessionTerminal {
   private func startShell(in model: GhosttyTerminal) {
     let generation = UUID()
     shellGeneration = generation
-    eventTask?.cancel()
-    eventTask = Task { [weak self, weak model] in
-      guard let self, let model else { return }
-      do {
-        let id = try await Self.client.createTerminal(
-          configuration: TerminalConfiguration(
-            workingDirectory: workingDirectory,
-            size: TerminalSize(columns: columns, rows: rows)))
-        guard !Task.isCancelled, shellGeneration == generation else {
-          await Self.client.close(id)
-          return
-        }
-        terminalID = id
-        startupError = nil
+    attachment?.detach()
+    attachment = nil
 
-        // Rendering can briefly fall behind bursty programs such as Neovim. The
-        // runtime intentionally disconnects a full bounded attachment rather than
-        // allowing it to grow forever. Resume from the last byte rendered; replay
-        // fills the gap without restarting the shell or losing terminal output.
-        var cursor: UInt64?
-        while !Task.isCancelled, shellGeneration == generation {
-          let attachment = try await Self.client.attach(to: id, after: cursor)
-          self.attachment = attachment
-          do {
-            for try await event in attachment.events {
-              guard !Task.isCancelled, shellGeneration == generation else { return }
-              switch event {
-              case .output(let output):
-                model.write(output.data)
-                cursor = output.endCursor
-              case .exit(let status):
-                model.write("\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
-                terminalID = nil
-                self.attachment = nil
-                startShell(in: model)
-                return
-              }
-            }
-            return
-          } catch TerminalRuntimeError.slowConsumer {
-            self.attachment = nil
-            continue
+    do {
+      let id = try Self.client.createSynchronously(
+        configuration: TerminalConfiguration(
+          workingDirectory: workingDirectory,
+          size: TerminalSize(columns: columns, rows: rows)))
+      guard shellGeneration == generation else {
+        Self.client.closeSynchronously(id)
+        return
+      }
+      terminalID = id
+      startupError = nil
+      attachment = try Self.client.attachSynchronously(to: id) { [weak self, weak model] event in
+        guard let self, let model else { return }
+        switch event {
+        case .output(let output):
+          // This is the hot path: PTY read -> Ghostty parser, with no Task,
+          // AsyncStream node, actor hop, or additional byte-buffer allocation.
+          model.write(output.data)
+        case .exit(let status):
+          Task { @MainActor [weak self, weak model] in
+            guard let self, let model, shellGeneration == generation else { return }
+            model.write(
+              "\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
+            terminalID = nil
+            attachment = nil
+            startShell(in: model)
           }
         }
-      } catch is CancellationError {
-        return
-      } catch {
-        guard shellGeneration == generation else { return }
-        startupError = String(describing: error)
-        model.write("\r\n\u{1B}[31m[could not start shell: \(error)]\u{1B}[0m\r\n")
       }
+    } catch {
+      guard shellGeneration == generation else { return }
+      startupError = String(describing: error)
+      model.write("\r\n\u{1B}[31m[could not start shell: \(error)]\u{1B}[0m\r\n")
     }
 
     model.onInput = { [weak self] input in
       guard let self, let id = self.terminalID else { return }
-      self.inputContinuation.yield(.write(id, Data(input.utf8)))
+      try? Self.client.writeSynchronously(input, to: id)
     }
     model.onResize = { [weak self] columns, rows in
       guard let self else { return }
       self.columns = columns
       self.rows = rows
       guard let id = self.terminalID else { return }
-      self.inputContinuation.yield(
-        .resize(id, TerminalSize(columns: columns, rows: rows)))
+      try? Self.client.resizeSynchronously(
+        id, to: TerminalSize(columns: columns, rows: rows))
     }
   }
 
@@ -169,34 +131,26 @@ final class SessionTerminal {
 
   func interrupt() {
     guard let id = terminalID else { return }
-    inputContinuation.yield(.interrupt(id))
+    try? Self.client.writeSynchronously(Data([0x03]), to: id)
   }
 
   func send(_ text: String) {
     guard let id = terminalID else { return }
-    inputContinuation.yield(.write(id, Data(text.utf8)))
+    try? Self.client.writeSynchronously(text, to: id)
   }
 
   func send(key: GhosttyTerminalKey) {
     guard let input = model?.encodeKey(key), let id = terminalID else { return }
-    inputContinuation.yield(.write(id, input))
+    try? Self.client.writeSynchronously(input, to: id)
   }
 
   /// Hangs up the shell; called when the owning session closes.
   func close() {
     shellGeneration = UUID()
-    eventTask?.cancel()
-    eventTask = nil
-    inputContinuation.finish()
-    inputTask.cancel()
-    let attachment = self.attachment
-    self.attachment = nil
-    let id = terminalID
+    attachment?.detach()
+    attachment = nil
+    if let id = terminalID { Self.client.closeSynchronously(id) }
     terminalID = nil
-    Task {
-      await attachment?.detach()
-      if let id { await Self.client.close(id) }
-    }
   }
 
   func makeView(theme: MacTheme) -> GhosttyTerminalView? {
@@ -248,7 +202,8 @@ struct TerminalTabContent: PrimitiveBlock {
       context.focus(terminal.inputID, editing: true)
     }
 
-    let content = view
+    let content =
+      view
       .onCommand(ScribeTerminalCommand.interrupt) {
         terminal.interrupt()
         return .handled
