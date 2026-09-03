@@ -1,3 +1,4 @@
+import DequeModule
 import Foundation
 import Synchronization
 
@@ -163,10 +164,23 @@ public final class TerminalRuntime: Sendable {
     var nextCursor: UInt64 = 0
     var exitStatus: Int32?
     var attachments: [UUID: AsyncThrowingStream<TerminalEvent, any Error>.Continuation] = [:]
-    var localAttachments: [UUID: @Sendable (TerminalEvent) -> Void] = [:]
+    var localAttachments: [UUID: LocalAttachmentState] = [:]
 
     init(pty: PTYSession) {
       self.pty = pty
+    }
+  }
+
+  /// Mutable local-delivery state. Every field is accessed while `sessions` is
+  /// locked; callbacks themselves are drained only after that lock is released.
+  private final class LocalAttachmentState: @unchecked Sendable {
+    let handler: @Sendable (TerminalEvent) -> Void
+    var pending: Deque<TerminalEvent> = []
+    var isDelivering = false
+    var finishesAfterDelivery = false
+
+    init(handler: @escaping @Sendable (TerminalEvent) -> Void) {
+      self.handler = handler
     }
   }
 
@@ -268,7 +282,7 @@ public final class TerminalRuntime: Sendable {
     after requestedCursor: UInt64? = nil,
     onEvent: @escaping @Sendable (TerminalEvent) -> Void
   ) throws -> LocalTerminalAttachment {
-    try sessions.withLock { sessions in
+    let (attachment, shouldDrain) = try sessions.withLock { sessions in
       guard let session = sessions[terminalID] else {
         throw TerminalRuntimeError.terminalNotFound(terminalID)
       }
@@ -282,7 +296,8 @@ public final class TerminalRuntime: Sendable {
       }
 
       let attachmentID = UUID()
-      session.localAttachments[attachmentID] = onEvent
+      let state = LocalAttachmentState(handler: onEvent)
+      session.localAttachments[attachmentID] = state
       if cursor < session.nextCursor {
         var replay = Data()
         replay.reserveCapacity(Int(session.nextCursor - cursor))
@@ -291,17 +306,21 @@ public final class TerminalRuntime: Sendable {
           replay.append(chunk.data.dropFirst(offset))
         }
         if !replay.isEmpty {
-          onEvent(.output(TerminalOutput(cursor: cursor, data: replay)))
+          state.pending.append(.output(TerminalOutput(cursor: cursor, data: replay)))
         }
       }
       if let status = session.exitStatus {
-        onEvent(.exit(status))
-        session.localAttachments.removeValue(forKey: attachmentID)
+        state.pending.append(.exit(status))
+        state.finishesAfterDelivery = true
       }
-      return LocalTerminalAttachment(id: attachmentID, terminalID: terminalID) { [weak self] in
+      let shouldDrain = beginLocalDeliveryIfNeeded(state)
+      let attachment = LocalTerminalAttachment(id: attachmentID, terminalID: terminalID) { [weak self] in
         self?.detachLocal(attachmentID, from: terminalID)
       }
+      return (attachment, shouldDrain)
     }
+    if shouldDrain { drainLocalAttachment(attachment.id, from: terminalID) }
+    return attachment
   }
 
   public func write(_ data: Data, to terminalID: TerminalID) throws {
@@ -359,17 +378,23 @@ public final class TerminalRuntime: Sendable {
 
   private func receive(_ data: Data, from terminalID: TerminalID) {
     guard !data.isEmpty else { return }
-    sessions.withLock { sessions in
-      guard let session = sessions[terminalID], session.exitStatus == nil else { return }
+    let localAttachmentsToDrain: [UUID] = sessions.withLock { sessions in
+      guard let session = sessions[terminalID], session.exitStatus == nil else { return [] }
       let output = TerminalOutput(cursor: session.nextCursor, data: data)
       session.nextCursor = output.endCursor
       appendToReplay(output, in: session)
       for attachmentID in Array(session.attachments.keys) {
         deliver(.output(output), to: attachmentID, in: session)
       }
-      for handler in session.localAttachments.values {
-        handler(.output(output))
+      var result: [UUID] = []
+      for (attachmentID, state) in session.localAttachments {
+        state.pending.append(.output(output))
+        if beginLocalDeliveryIfNeeded(state) { result.append(attachmentID) }
       }
+      return result
+    }
+    for attachmentID in localAttachmentsToDrain {
+      drainLocalAttachment(attachmentID, from: terminalID)
     }
   }
 
@@ -395,17 +420,51 @@ public final class TerminalRuntime: Sendable {
   }
 
   private func receiveExit(_ status: Int32, from terminalID: TerminalID) {
-    sessions.withLock { sessions in
-      guard let session = sessions[terminalID], session.exitStatus == nil else { return }
+    let localAttachmentsToDrain: [UUID] = sessions.withLock { sessions in
+      guard let session = sessions[terminalID], session.exitStatus == nil else { return [] }
       session.exitStatus = status
       for attachmentID in Array(session.attachments.keys) {
         deliver(.exit(status), to: attachmentID, in: session)
         session.attachments.removeValue(forKey: attachmentID)?.finish()
       }
-      for handler in session.localAttachments.values {
-        handler(.exit(status))
+      var result: [UUID] = []
+      for (attachmentID, state) in session.localAttachments {
+        state.pending.append(.exit(status))
+        state.finishesAfterDelivery = true
+        if beginLocalDeliveryIfNeeded(state) { result.append(attachmentID) }
       }
-      session.localAttachments.removeAll(keepingCapacity: false)
+      return result
+    }
+    for attachmentID in localAttachmentsToDrain {
+      drainLocalAttachment(attachmentID, from: terminalID)
+    }
+  }
+
+  private func beginLocalDeliveryIfNeeded(_ state: LocalAttachmentState) -> Bool {
+    guard !state.isDelivering, !state.pending.isEmpty else { return false }
+    state.isDelivering = true
+    return true
+  }
+
+  /// Drains one local attachment without holding `sessions`. The `isDelivering`
+  /// flag preserves event order when PTY callbacks arrive concurrently.
+  private func drainLocalAttachment(_ attachmentID: UUID, from terminalID: TerminalID) {
+    while true {
+      let delivery: (LocalAttachmentState, TerminalEvent)? = sessions.withLock { sessions in
+        guard let session = sessions[terminalID],
+          let state = session.localAttachments[attachmentID]
+        else { return nil }
+        guard !state.pending.isEmpty else {
+          state.isDelivering = false
+          if state.finishesAfterDelivery {
+            session.localAttachments.removeValue(forKey: attachmentID)
+          }
+          return nil
+        }
+        return (state, state.pending.popFirst()!)
+      }
+      guard let (state, event) = delivery else { return }
+      state.handler(event)
     }
   }
 

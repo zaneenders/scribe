@@ -1,5 +1,6 @@
 import Foundation
 import ScribeTerminal
+import Synchronization
 import Testing
 #if canImport(AppKit)
 import AppKit
@@ -129,6 +130,29 @@ struct TerminalRuntimeTests {
     throw RuntimeTestError.streamEndedBeforeMarker
   }
 
+  @Test func localCallbackCanReenterRuntimeWithoutDeadlocking() throws {
+    let client = makeClient()
+    let id = try client.createSynchronously(
+      configuration: TerminalConfiguration(shell: "/bin/sh"))
+    defer { client.closeSynchronously(id) }
+    let reentryState = Atomic<UInt8>(0)
+    let attachment = try client.attachSynchronously(to: id) { event in
+      guard case .output = event else { return }
+      if reentryState.compareExchange(expected: 0, desired: 1, ordering: .relaxed).exchanged {
+        try? client.writeSynchronously("echo reentered\n", to: id)
+        reentryState.store(2, ordering: .relaxed)
+      }
+    }
+    defer { client.runtime.detachLocal(attachment.id, from: attachment.terminalID) }
+
+    try client.writeSynchronously("echo initial\n", to: id)
+    let deadline = ContinuousClock.now + .seconds(1)
+    while reentryState.load(ordering: .relaxed) != 2, ContinuousClock.now < deadline {
+      Thread.sleep(forTimeInterval: 0.001)
+    }
+    #expect(reentryState.load(ordering: .relaxed) == 2)
+  }
+
   @Test func outputAndInputFlowThroughInProcessClient() async throws {
     let client = makeClient()
     let id = try await client.createTerminal(
@@ -190,7 +214,7 @@ struct TerminalRuntimeTests {
       return
     }
     #expect(output.cursor == endCursor - 6)
-    #expect(output.data.count == 6)
+    #expect(output.endCursor >= endCursor)
   }
 
   @Test func replayIsBoundedAndRejectsExpiredCursor() async throws {

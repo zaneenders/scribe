@@ -69,11 +69,13 @@ final class SessionTerminal {
     attachment?.detach()
     attachment = nil
 
+    var createdID: TerminalID?
     do {
       let id = try Self.client.createSynchronously(
         configuration: TerminalConfiguration(
           workingDirectory: workingDirectory,
           size: TerminalSize(columns: columns, rows: rows)))
+      createdID = id
       guard shellGeneration == generation else {
         Self.client.closeSynchronously(id)
         return
@@ -94,11 +96,16 @@ final class SessionTerminal {
               "\r\n\u{1B}[33m[shell exited: \(status); starting a new shell]\u{1B}[0m\r\n")
             terminalID = nil
             attachment = nil
+            Self.client.closeSynchronously(id)
             startShell(in: model)
           }
         }
       }
     } catch {
+      if let createdID {
+        Self.client.closeSynchronously(createdID)
+        if terminalID == createdID { terminalID = nil }
+      }
       guard shellGeneration == generation else { return }
       startupError = String(describing: error)
       model.write("\r\n\u{1B}[31m[could not start shell: \(error)]\u{1B}[0m\r\n")
