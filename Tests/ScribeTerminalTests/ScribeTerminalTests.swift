@@ -218,6 +218,41 @@ struct TerminalRuntimeTests {
     }
   }
 
+  @Test func exitedTerminalReplayFitsEvenWithOneEventLiveBuffer() async throws {
+    let client = makeClient(attachmentEvents: 1)
+    let id = try client.createSynchronously(
+      configuration: TerminalConfiguration(shell: "/bin/sh"))
+    defer { client.closeSynchronously(id) }
+    let exitStatus = Atomic<Int32>(Int32.min)
+    let live = try client.attachSynchronously(to: id) { event in
+      if case .exit(let status) = event { exitStatus.store(status, ordering: .relaxed) }
+    }
+
+    try client.writeSynchronously("printf 'small-buffer-replay\\n'; exit 3\n", to: id)
+    let deadline = ContinuousClock.now + .seconds(1)
+    while exitStatus.load(ordering: .relaxed) == Int32.min, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    live.detach()
+    let expectedStatus = exitStatus.load(ordering: .relaxed)
+    #expect(expectedStatus != Int32.min)
+
+    let replay = try await client.attach(to: id, after: 0)
+    var replayed = Data()
+    var replayExitStatus: Int32?
+    for try await event in replay.events {
+      switch event {
+      case .output(let output):
+        replayed.append(output.data)
+      case .exit(let status):
+        replayExitStatus = status
+      }
+    }
+
+    #expect(String(decoding: replayed, as: UTF8.self).contains("small-buffer-replay"))
+    #expect(replayExitStatus == expectedStatus)
+  }
+
   @Test func attachReplaysFromByteCursor() async throws {
     let client = makeClient()
     let id = try await client.createTerminal(

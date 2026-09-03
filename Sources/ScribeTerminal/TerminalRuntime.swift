@@ -250,8 +250,20 @@ public final class TerminalRuntime: Sendable {
     }
 
     let attachmentID = UUID()
+    // Replay and exit are queued before attach returns, so reserve room for both
+    // when reconnecting to an exited terminal. Otherwise a configured one-event
+    // live buffer would incorrectly classify a caller as slow before it had any
+    // opportunity to consume the stream.
+    let hasReplay = cursor < session.nextCursor
+    let isExited: Bool
+    if case .exited = session.lifecycle {
+      isExited = true
+    } else {
+      isExited = false
+    }
+    let initialEventCount = (hasReplay ? 1 : 0) + (isExited ? 1 : 0)
     let pair = AsyncThrowingStream<TerminalEvent, any Error>.makeStream(
-      bufferingPolicy: .bufferingOldest(limits.attachmentEvents))
+      bufferingPolicy: .bufferingOldest(max(limits.attachmentEvents, initialEventCount)))
     session.attachments[attachmentID] = pair.continuation
     pair.continuation.onTermination = { [weak self] _ in
       // Termination can be invoked synchronously by `finish()` while runtime

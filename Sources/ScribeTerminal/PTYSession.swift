@@ -3,12 +3,14 @@ import Darwin
 private let systemWrite = Darwin.write
 private let systemRead = Darwin.read
 private let systemClose = Darwin.close
+private let systemDup = Darwin.dup
 private let systemKill = Darwin.kill
 #elseif canImport(Glibc)
 import Glibc
 private let systemWrite = Glibc.write
 private let systemRead = Glibc.read
 private let systemClose = Glibc.close
+private let systemDup = Glibc.dup
 private let systemKill = Glibc.kill
 #endif
 
@@ -55,6 +57,7 @@ public final class PTYSession: Sendable {
   }
 
   private let state: Mutex<State>
+  private let descriptorLock = NSLock()
   private let childPID: pid_t
 
   public var onOutput: (@Sendable (Data) -> Void)? {
@@ -128,7 +131,8 @@ public final class PTYSession: Sendable {
 
   public func write(_ data: Data) throws {
     guard !data.isEmpty else { return }
-    let fd = try openFileDescriptor()
+    let fd = try duplicateFileDescriptor()
+    defer { _ = systemClose(fd) }
 
     try data.withUnsafeBytes { bytes in
       guard var pointer = bytes.baseAddress else { return }
@@ -152,28 +156,37 @@ public final class PTYSession: Sendable {
   public func interrupt() throws { try write(Data([0x03])) }
 
   public func resize(columns: UInt16, rows: UInt16) throws {
-    let fd = try openFileDescriptor()
+    let fd = try duplicateFileDescriptor()
+    defer { _ = systemClose(fd) }
     let result = scribe_pty_resize(fd, Int32(columns), Int32(rows))
     if result != 0 { throw PTYSessionError.operationFailed(result) }
   }
 
-  private func openFileDescriptor() throws -> Int32 {
-    try state.withLock { state in
-      guard !state.isClosing, !state.readEnded else { throw PTYSessionError.closed }
-      return state.masterFD
+  // Duplicate while holding the state lock so cancellation cannot close and
+  // recycle the master descriptor between validation and dup(2). The duplicate
+  // keeps the PTY open for the complete operation without serializing writes.
+  private func duplicateFileDescriptor() throws -> Int32 {
+    try descriptorLock.withLock {
+      try state.withLock { state in
+        guard !state.isClosing, !state.readEnded else { throw PTYSessionError.closed }
+        let duplicate = systemDup(state.masterFD)
+        guard duplicate >= 0 else { throw PTYSessionError.operationFailed(errno) }
+        return duplicate
+      }
     }
   }
 
   public func close() {
-    let source = state.withLock { state -> DispatchSourceRead? in
-      guard !state.isClosing else { return nil }
+    let action = state.withLock { state -> (source: DispatchSourceRead?, shouldClose: Bool) in
+      guard !state.isClosing else { return (nil, false) }
       state.isClosing = true
       state.readEnded = true
       let source = state.readSource
       state.readSource = nil
-      return source
+      return (source, true)
     }
-    source?.cancel()
+    guard action.shouldClose else { return }
+    action.source?.cancel()
     if childPID > 0 { _ = systemKill(childPID, SIGHUP) }
     deliverExitIfReady()
   }
@@ -192,8 +205,12 @@ public final class PTYSession: Sendable {
         finishReading(source)
       }
     }
-    source.setCancelHandler {
-      _ = systemClose(fileDescriptor)
+    source.setCancelHandler { [descriptorLock] in
+      // Coordinate close(2) with duplicateFileDescriptor() so the master cannot
+      // be recycled while an operation is acquiring its private descriptor.
+      descriptorLock.withLock {
+        _ = systemClose(fileDescriptor)
+      }
     }
     state.withLock { $0.readSource = source }
     source.resume()
