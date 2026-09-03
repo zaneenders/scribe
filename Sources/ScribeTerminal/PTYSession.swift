@@ -3,14 +3,12 @@ import Darwin
 private let systemWrite = Darwin.write
 private let systemRead = Darwin.read
 private let systemClose = Darwin.close
-private let systemDup = Darwin.dup
 private let systemKill = Darwin.kill
 #elseif canImport(Glibc)
 import Glibc
 private let systemWrite = Glibc.write
 private let systemRead = Glibc.read
 private let systemClose = Glibc.close
-private let systemDup = Glibc.dup
 private let systemKill = Glibc.kill
 #endif
 
@@ -169,25 +167,28 @@ public final class PTYSession: Sendable {
     try descriptorLock.withLock {
       try state.withLock { state in
         guard !state.isClosing, !state.readEnded else { throw PTYSessionError.closed }
-        let duplicate = systemDup(state.masterFD)
-        guard duplicate >= 0 else { throw PTYSessionError.operationFailed(errno) }
+        var duplicate: Int32 = -1
+        let result = scribe_dup_cloexec(state.masterFD, &duplicate)
+        guard result == 0 else { throw PTYSessionError.operationFailed(result) }
         return duplicate
       }
     }
   }
 
   public func close() {
-    let action = state.withLock { state -> (source: DispatchSourceRead?, shouldClose: Bool) in
-      guard !state.isClosing else { return (nil, false) }
+    // Keep the transition and signal atomic with respect to the waiter. Before
+    // waitStatus is recorded, waitid(WNOWAIT) guarantees this PID is either the
+    // live child or its unreaped zombie; after it is recorded we never signal.
+    let source = state.withLock { state -> DispatchSourceRead? in
+      guard !state.isClosing else { return nil }
       state.isClosing = true
       state.readEnded = true
       let source = state.readSource
       state.readSource = nil
-      return (source, true)
+      if state.waitStatus == nil, childPID > 0 { _ = systemKill(childPID, SIGHUP) }
+      return source
     }
-    guard action.shouldClose else { return }
-    action.source?.cancel()
-    if childPID > 0 { _ = systemKill(childPID, SIGHUP) }
+    source?.cancel()
     deliverExitIfReady()
   }
 
@@ -272,9 +273,24 @@ public final class PTYSession: Sendable {
   private func startWaiting() {
     let pid = childPID
     DispatchQueue.global(qos: .utility).async { [weak self] in
+      // Observe exit without reaping first. While the child remains a zombie its
+      // PID cannot be reused, so close() can safely decide whether SIGHUP still
+      // targets this process while recording the transition under state.
+      let waitResult = scribe_wait_until_exited(pid)
+      guard waitResult == 0 else { return }
       var status: Int32 = 0
-      while waitpid(pid, &status, 0) == -1, errno == EINTR {}
-      self?.recordWaitStatus(status)
+      guard let self else {
+        while waitpid(pid, &status, 0) == -1, errno == EINTR {}
+        return
+      }
+      let reaped = self.state.withLock { state -> Bool in
+        while waitpid(pid, &status, 0) == -1 {
+          if errno != EINTR { return false }
+        }
+        state.waitStatus = status
+        return true
+      }
+      if reaped { self.deliverExitIfReady() }
     }
   }
 

@@ -22,6 +22,14 @@ int scribe_pty_spawn(
 
 int scribe_pty_resize(int master_fd, int columns, int rows);
 
+// Atomically duplicates a descriptor with close-on-exec enabled. Returns 0 on
+// success or an errno value on failure.
+int scribe_dup_cloexec(int fd, int *duplicate_fd);
+
+// Waits until child_pid has exited without reaping it. The caller must
+// subsequently call waitpid(2). Returns 0 on success or an errno value.
+int scribe_wait_until_exited(pid_t child_pid);
+
 #ifdef __cplusplus
 }
 #endif
