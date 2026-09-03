@@ -12,7 +12,7 @@ The daemon owns session access, running agents, and PTYs. Sessions persist acros
 
 2. **Add process lifecycle management.** Ensure terminal and agent child processes are terminated and reaped on explicit close, daemon shutdown, and daemon crash. **Why:** Moving process ownership into a long-lived daemon must not leave orphaned shells, tools, or descendants when that daemon exits.
 
-3. **Add the protocol library.** Define versioned framing, typed IDs, request/response/event routing, bounded payloads, errors, and reconnectable snapshots. Test it without sockets. **Why:** A transport-independent protocol gives local and remote connections one contract and lets us settle serialization and recovery behavior with fast deterministic tests.
+3. **Add the protocol library.** Define versioned framing, typed IDs, request/response/event routing, bounded payloads, errors, and reconnectable snapshots. Test it without sockets. As part of defining terminal input flow control, evaluate replacing synchronous per-PTY write locking with a bounded single-writer queue. A queue could provide explicit backpressure and interrupt prioritization for concurrent local and remote clients; the PTY layer must still preserve each accepted logical write as one ordered unit. **Why:** A transport-independent protocol gives local and remote connections one contract and lets us settle serialization and recovery behavior with fast deterministic tests.
 
 4. **Add the local daemon.** Implement `scribe-daemon serve` over a secure Unix socket with one daemon per Scribe data directory. Expose terminal create, attach, control, detach, and close. **Why:** This creates the first real long-lived owner and proves that a terminal continues running across GUI disconnects on one machine.
 

@@ -56,6 +56,9 @@ public final class PTYSession: Sendable {
 
   private let state: Mutex<State>
   private let descriptorLock = NSLock()
+  // A PTY is one byte stream. Keep each logical write contiguous even when
+  // callers (and, eventually, daemon clients) submit input concurrently.
+  private let writeLock = NSLock()
   private let childPID: pid_t
 
   public var onOutput: (@Sendable (Data) -> Void)? {
@@ -129,21 +132,23 @@ public final class PTYSession: Sendable {
 
   public func write(_ data: Data) throws {
     guard !data.isEmpty else { return }
-    let fd = try duplicateFileDescriptor()
-    defer { _ = systemClose(fd) }
+    try writeLock.withLock {
+      let fd = try duplicateFileDescriptor()
+      defer { _ = systemClose(fd) }
 
-    try data.withUnsafeBytes { bytes in
-      guard var pointer = bytes.baseAddress else { return }
-      var remaining = bytes.count
-      while remaining > 0 {
-        let count = systemWrite(fd, pointer, remaining)
-        if count > 0 {
-          pointer = pointer.advanced(by: count)
-          remaining -= count
-        } else if count == -1 && errno == EINTR {
-          continue
-        } else {
-          throw PTYSessionError.operationFailed(errno)
+      try data.withUnsafeBytes { bytes in
+        guard var pointer = bytes.baseAddress else { return }
+        var remaining = bytes.count
+        while remaining > 0 {
+          let count = systemWrite(fd, pointer, remaining)
+          if count > 0 {
+            pointer = pointer.advanced(by: count)
+            remaining -= count
+          } else if count == -1 && errno == EINTR {
+            continue
+          } else {
+            throw PTYSessionError.operationFailed(errno)
+          }
         }
       }
     }
