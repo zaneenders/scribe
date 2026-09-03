@@ -2,6 +2,7 @@ import Foundation
 import ScribeTerminal
 import Synchronization
 import Testing
+
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -89,7 +90,7 @@ struct PTYSessionTests {
 
     // Arithmetic expansion keeps the TTY's own echo of the typed command from
     // satisfying the check; only the shell's output contains the marker.
-    session.write("echo scribe-pty-$((40+2))\n")
+    try session.write("echo scribe-pty-$((40+2))\n")
 
     let deadline = ContinuousClock.now + .seconds(15)
     while ContinuousClock.now < deadline {
@@ -180,19 +181,41 @@ struct TerminalRuntimeTests {
     #expect(text.contains("37 101"))
   }
 
-  @Test func exitIsDeliveredAndFinishesAttachment() async throws {
-    let client = makeClient()
+  @Test func exitIsDeliveredAfterFinalOutputAndFinishesAttachment() async throws {
+    let client = makeClient(attachmentEvents: 4_096)
     let id = try await client.createTerminal(
       configuration: TerminalConfiguration(shell: "/bin/sh"))
     let attachment = try await client.attach(to: id, after: nil)
 
-    try await client.write("exit 7\n", to: id)
+    let payload = String(repeating: "terminal-final-output-", count: 2_000)
+    try await client.write(
+      "i=0; while [ $i -lt 2000 ]; do printf terminal-final-output-; i=$((i+1)); done; exit 7\n",
+      to: id)
+    var received = Data()
     var exitStatus: Int32?
+    var receivedOutputAfterExit = false
     for try await event in attachment.events {
-      if case .exit(let status) = event { exitStatus = status }
+      switch event {
+      case .output(let output):
+        if exitStatus != nil { receivedOutputAfterExit = true }
+        received.append(output.data)
+      case .exit(let status):
+        exitStatus = status
+      }
     }
 
+    #expect(String(decoding: received, as: UTF8.self).contains(payload))
+    #expect(!receivedOutputAfterExit)
     #expect(exitStatus.map { ($0 >> 8) & 0xff } == 7)
+
+    let status = try #require(exitStatus)
+    let expectedError = TerminalRuntimeError.terminalExited(id, status: status)
+    await #expect(throws: expectedError) {
+      try await client.write("ignored", to: id)
+    }
+    await #expect(throws: expectedError) {
+      try await client.resize(id, to: TerminalSize(columns: 90, rows: 30))
+    }
   }
 
   @Test func attachReplaysFromByteCursor() async throws {

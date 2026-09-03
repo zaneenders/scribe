@@ -59,6 +59,7 @@ public enum TerminalEvent: Equatable, Sendable {
 
 public enum TerminalRuntimeError: Error, Equatable, Sendable, CustomStringConvertible {
   case terminalNotFound(TerminalID)
+  case terminalExited(TerminalID, status: Int32)
   case replayUnavailable(requested: UInt64, availableFrom: UInt64)
   case invalidCursor(requested: UInt64, latest: UInt64)
   case slowConsumer
@@ -67,6 +68,8 @@ public enum TerminalRuntimeError: Error, Equatable, Sendable, CustomStringConver
     switch self {
     case .terminalNotFound(let id):
       return "terminal not found: \(id.rawValue)"
+    case .terminalExited(let id, let status):
+      return "terminal exited: \(id.rawValue) (status \(status))"
     case .replayUnavailable(let requested, let availableFrom):
       return "terminal output at cursor \(requested) is no longer available; replay starts at \(availableFrom)"
     case .invalidCursor(let requested, let latest):
@@ -158,16 +161,20 @@ public final class TerminalRuntime: Sendable {
   }
 
   private final class Session: @unchecked Sendable {
-    let pty: PTYSession
+    enum Lifecycle: Sendable {
+      case running(PTYSession)
+      case exited(Int32)
+    }
+
+    var lifecycle: Lifecycle
     var replay: [ReplayChunk] = []
     var replayByteCount = 0
     var nextCursor: UInt64 = 0
-    var exitStatus: Int32?
     var attachments: [UUID: AsyncThrowingStream<TerminalEvent, any Error>.Continuation] = [:]
     var localAttachments: [UUID: LocalAttachmentState] = [:]
 
     init(pty: PTYSession) {
-      self.pty = pty
+      lifecycle = .running(pty)
     }
   }
 
@@ -263,7 +270,7 @@ public final class TerminalRuntime: Sendable {
         deliver(.output(TerminalOutput(cursor: cursor, data: replay)), to: attachmentID, in: session)
       }
     }
-    if let status = session.exitStatus {
+    if case .exited(let status) = session.lifecycle {
       deliver(.exit(status), to: attachmentID, in: session)
       session.attachments.removeValue(forKey: attachmentID)?.finish()
     }
@@ -309,7 +316,7 @@ public final class TerminalRuntime: Sendable {
           state.pending.append(.output(TerminalOutput(cursor: cursor, data: replay)))
         }
       }
-      if let status = session.exitStatus {
+      if case .exited(let status) = session.lifecycle {
         state.pending.append(.exit(status))
         state.finishesAfterDelivery = true
       }
@@ -324,34 +331,33 @@ public final class TerminalRuntime: Sendable {
   }
 
   public func write(_ data: Data, to terminalID: TerminalID) throws {
-    let pty = try sessions.withLock { sessions throws -> PTYSession in
-      guard let session = sessions[terminalID] else {
-        throw TerminalRuntimeError.terminalNotFound(terminalID)
-      }
-      return session.pty
-    }
+    let pty = try runningPTY(for: terminalID)
     // Never hold the runtime lock across a potentially blocking write(2).
-    pty.write(data)
+    try pty.write(data)
   }
 
   public func write(_ string: String, to terminalID: TerminalID) throws {
-    let pty = try sessions.withLock { sessions throws -> PTYSession in
-      guard let session = sessions[terminalID] else {
-        throw TerminalRuntimeError.terminalNotFound(terminalID)
-      }
-      return session.pty
-    }
-    pty.write(string)
+    let pty = try runningPTY(for: terminalID)
+    try pty.write(string)
   }
 
   public func resize(_ terminalID: TerminalID, to size: TerminalSize) throws {
-    let pty = try sessions.withLock { sessions throws -> PTYSession in
+    let pty = try runningPTY(for: terminalID)
+    try pty.resize(columns: size.columns, rows: size.rows)
+  }
+
+  private func runningPTY(for terminalID: TerminalID) throws -> PTYSession {
+    try sessions.withLock { sessions in
       guard let session = sessions[terminalID] else {
         throw TerminalRuntimeError.terminalNotFound(terminalID)
       }
-      return session.pty
+      switch session.lifecycle {
+      case .running(let pty):
+        return pty
+      case .exited(let status):
+        throw TerminalRuntimeError.terminalExited(terminalID, status: status)
+      }
     }
-    pty.resize(columns: size.columns, rows: size.rows)
   }
 
   public func close(_ terminalID: TerminalID) {
@@ -360,7 +366,7 @@ public final class TerminalRuntime: Sendable {
     for continuation in session.attachments.values { continuation.finish() }
     session.attachments.removeAll(keepingCapacity: false)
     session.localAttachments.removeAll(keepingCapacity: false)
-    session.pty.close()
+    if case .running(let pty) = session.lifecycle { pty.close() }
   }
 
   public func detach(_ attachmentID: UUID, from terminalID: TerminalID) {
@@ -379,7 +385,7 @@ public final class TerminalRuntime: Sendable {
   private func receive(_ data: Data, from terminalID: TerminalID) {
     guard !data.isEmpty else { return }
     let localAttachmentsToDrain: [UUID] = sessions.withLock { sessions in
-      guard let session = sessions[terminalID], session.exitStatus == nil else { return [] }
+      guard let session = sessions[terminalID], case .running = session.lifecycle else { return [] }
       let output = TerminalOutput(cursor: session.nextCursor, data: data)
       session.nextCursor = output.endCursor
       appendToReplay(output, in: session)
@@ -421,8 +427,8 @@ public final class TerminalRuntime: Sendable {
 
   private func receiveExit(_ status: Int32, from terminalID: TerminalID) {
     let localAttachmentsToDrain: [UUID] = sessions.withLock { sessions in
-      guard let session = sessions[terminalID], session.exitStatus == nil else { return [] }
-      session.exitStatus = status
+      guard let session = sessions[terminalID], case .running = session.lifecycle else { return [] }
+      session.lifecycle = .exited(status)
       for attachmentID in Array(session.attachments.keys) {
         deliver(.exit(status), to: attachmentID, in: session)
         session.attachments.removeValue(forKey: attachmentID)?.finish()
