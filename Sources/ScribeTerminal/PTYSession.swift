@@ -299,11 +299,6 @@ public final class PTYSession: Sendable {
     }
   }
 
-  private func recordWaitStatus(_ status: Int32) {
-    state.withLock { $0.waitStatus = status }
-    deliverExitIfReady()
-  }
-
   private func deliverExitIfReady() {
     let delivery = state.withLock { state -> ExitDelivery? in
       guard
