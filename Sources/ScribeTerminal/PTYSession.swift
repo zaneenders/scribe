@@ -42,7 +42,7 @@ public final class PTYSession: Sendable {
     var isDeliveringOutput = false
     var pendingExitStatus: Int32?
     var masterFD: Int32
-    var readSource: DispatchSourceRead?
+    var readTask: Task<Void, Never>?
     var isClosing = false
     var readEnded = false
     var waitStatus: Int32?
@@ -184,42 +184,49 @@ public final class PTYSession: Sendable {
     // Keep the transition and signal atomic with respect to the waiter. Before
     // waitStatus is recorded, waitid(WNOWAIT) guarantees this PID is either the
     // live child or its unreaped zombie; after it is recorded we never signal.
-    let source = state.withLock { state -> DispatchSourceRead? in
+    let task = state.withLock { state -> Task<Void, Never>? in
       guard !state.isClosing else { return nil }
       state.isClosing = true
       state.readEnded = true
-      let source = state.readSource
-      state.readSource = nil
+      let task = state.readTask
+      state.readTask = nil
       if state.waitStatus == nil, childPID > 0 { _ = systemKill(childPID, SIGHUP) }
-      return source
+      return task
     }
-    source?.cancel()
+    task?.cancel()
     deliverExitIfReady()
   }
 
   private func startReading(fileDescriptor: Int32) {
-    let source = DispatchSource.makeReadSource(
-      fileDescriptor: fileDescriptor, queue: .global(qos: .userInitiated))
-    source.setEventHandler { [weak self, weak source] in
-      guard let self, let source else { return }
-      let available = max(1, min(Int(source.data), 64 * 1024))
-      var buffer = [UInt8](repeating: 0, count: available)
-      let count = systemRead(fileDescriptor, &buffer, buffer.count)
-      if count > 0 {
-        deliverOutput(Data(buffer.prefix(count)))
-      } else if count == 0 || (errno != EINTR && errno != EAGAIN) {
-        finishReading(source)
+    let task = Task.detached(priority: .high) { [weak self, descriptorLock] in
+      defer {
+        descriptorLock.withLock {
+          _ = systemClose(fileDescriptor)
+        }
       }
-    }
-    source.setCancelHandler { [descriptorLock] in
-      // Coordinate close(2) with duplicateFileDescriptor() so the master cannot
-      // be recycled while an operation is acquiring its private descriptor.
-      descriptorLock.withLock {
-        _ = systemClose(fileDescriptor)
+
+      while !Task.isCancelled {
+        var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
+        let pollResult = poll(&descriptor, 1, 100)
+        if pollResult == 0 { continue }
+        if pollResult == -1 {
+          if errno == EINTR { continue }
+          break
+        }
+
+        guard let self else { return }
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        let count = systemRead(fileDescriptor, &buffer, buffer.count)
+        if count > 0 {
+          deliverOutput(Data(buffer.prefix(count)))
+        } else if count == 0 || (errno != EINTR && errno != EAGAIN) {
+          break
+        }
       }
+
+      self?.finishReading()
     }
-    state.withLock { $0.readSource = source }
-    source.resume()
+    state.withLock { $0.readTask = task }
   }
 
   private func deliverOutput(_ data: Data) {
@@ -264,15 +271,14 @@ public final class PTYSession: Sendable {
     }
   }
 
-  private func finishReading(_ source: DispatchSourceRead) {
-    let shouldCancel = state.withLock { state -> Bool in
+  private func finishReading() {
+    let didFinish = state.withLock { state -> Bool in
       guard !state.readEnded else { return false }
       state.readEnded = true
-      state.readSource = nil
+      state.readTask = nil
       return true
     }
-    if shouldCancel { source.cancel() }
-    deliverExitIfReady()
+    if didFinish { deliverExitIfReady() }
   }
 
   private func startWaiting() {
