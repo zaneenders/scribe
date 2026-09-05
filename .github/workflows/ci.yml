@@ -18,6 +18,33 @@ env:
   GHOSTTY_NETWORK_PERMISSION: --allow-network-connections all:443
 
 jobs:
+  macos:
+    name: macOS
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Show Swift version
+        run: swift --version
+      - name: Cache Zig
+        uses: actions/cache@v6
+        with:
+          path: Vendor/.tools
+          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/bootstrap-zig.sh') }}
+      - name: Build Ghostty terminal library
+        run: |
+          ./Scripts/bootstrap-zig.sh
+          swift package \
+            --allow-writing-to-package-directory \
+            $GHOSTTY_NETWORK_PERMISSION \
+            refresh-ghostty-vt
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+
   arch:
     name: Arch Linux / Omarchy
     # GitHub does not provide an Arch-hosted runner. This VM only runs the
@@ -31,6 +58,8 @@ jobs:
       SWIFTLY_HOME_DIR: /github/home/.local/share/swiftly
       SWIFTLY_BIN_DIR: /github/home/.local/bin
     steps:
+      - name: Install Git
+        run: pacman -Sy --noconfirm git
       - uses: actions/checkout@v7
         with:
           submodules: recursive
