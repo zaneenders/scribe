@@ -155,6 +155,7 @@ var targets: [Target] = [
       "GhosttyVt",
       "PTYShim",
       .product(name: "Chroma", package: "chroma"),
+      .product(name: "DequeModule", package: "swift-collections"),
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),

@@ -255,21 +255,34 @@ docc preview Sources/ScribeCLI/ScribeCLI.docc
 ## Ghostty terminal dependency
 
 Ghostty source is pinned as the `Vendor/GhosttySource` Git submodule. Scribe
-does not commit generated `libghostty-vt.a` archives. After a fresh recursive
-clone, install the pinned project-local Zig toolchain and generate the platform
-archive once:
+does not commit generated `libghostty-vt.a` archives. After a fresh clone,
+initialize the submodule, install the pinned project-local Zig toolchain, and
+generate the platform archive once:
 
 ```sh
+git submodule update --init --recursive
 ./Scripts/bootstrap-zig.sh
-swift package --allow-writing-to-package-directory refresh-ghostty-vt
+swift package \
+  --allow-writing-to-package-directory \
+  --allow-network-connections all:443 \
+  refresh-ghostty-vt
 ```
 
 Normal `swift build` calls only verify the archive exists and never invoke Zig.
 If it is missing, the build prints the bootstrap command. Run the refresh again
 when the Ghostty submodule is updated.
 
-The public headers and third-party notices remain committed under
-`Vendor/GhosttyVt` so API and license changes are reviewable. libghostty-vt is
-MIT licensed; embedded dependency notices cover uucode, Höhrmann's UTF-8
-decoder, and Unicode data. Detailed build, update, Linux, and provenance
-instructions are in `Vendor/GhosttyVt/README.md`.
+SwiftPM must be able to find the tracked `Vendor/GhosttyVt` target scaffold
+before it can load the refresh plugin. If SwiftPM reports `invalid custom path
+'Vendor/GhosttyVt'`, restore that directory before refreshing:
+
+```sh
+git restore -- Vendor/GhosttyVt
+```
+
+The generated upstream headers are ignored along with the static archives. The
+narrow SwiftPM module map and third-party notices remain committed under
+`Vendor/GhosttyVt`, making integration and license changes reviewable.
+libghostty-vt is MIT licensed; embedded dependency notices cover uucode,
+Höhrmann's UTF-8 decoder, and Unicode data. Detailed build, update, Linux, and
+provenance instructions are in `Vendor/GhosttyVt/README.md`.
