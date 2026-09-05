@@ -684,25 +684,39 @@ public final class InProcessTerminalClient: TerminalClient, @unchecked Sendable 
   }
 
   public func createTerminal(configuration: TerminalConfiguration) async throws -> TerminalID {
-    try runtime.createTerminal(configuration: configuration)
+    let runtime = runtime
+    return try await Task.detached {
+      try runtime.createTerminal(configuration: configuration)
+    }.value
   }
 
   public func attach(to terminalID: TerminalID, after cursor: UInt64? = nil) async throws
     -> TerminalAttachment
   {
+    // This operation only mutates in-memory state and must install the attachment
+    // synchronously with respect to output delivery.
     try runtime.attach(to: terminalID, after: cursor)
   }
 
   public func write(_ data: Data, to terminalID: TerminalID) async throws {
-    try runtime.write(data, to: terminalID)
+    let runtime = runtime
+    try await Task.detached {
+      try runtime.write(data, to: terminalID)
+    }.value
   }
 
   public func resize(_ terminalID: TerminalID, to size: TerminalSize) async throws {
-    try runtime.resize(terminalID, to: size)
+    let runtime = runtime
+    try await Task.detached {
+      try runtime.resize(terminalID, to: size)
+    }.value
   }
 
   public func close(_ terminalID: TerminalID) async {
-    runtime.close(terminalID)
+    let runtime = runtime
+    await Task.detached {
+      runtime.close(terminalID)
+    }.value
   }
 
   public func detach(_ attachmentID: UUID, from terminalID: TerminalID) async {

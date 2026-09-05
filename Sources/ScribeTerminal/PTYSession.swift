@@ -117,6 +117,14 @@ public final class PTYSession: Sendable {
       }
     }
     guard result == 0 else { throw PTYSessionError.spawnFailed(result) }
+    let nonblockingResult = scribe_set_nonblocking(master, 1)
+    guard nonblockingResult == 0 else {
+      _ = systemClose(master)
+      _ = systemKill(pid, SIGHUP)
+      var status: Int32 = 0
+      while waitpid(pid, &status, 0) == -1, errno == EINTR {}
+      throw PTYSessionError.operationFailed(nonblockingResult)
+    }
 
     childPID = pid
     state = Mutex(State(masterFD: master))
@@ -135,6 +143,8 @@ public final class PTYSession: Sendable {
     try writeLock.withLock {
       let fd = try duplicateFileDescriptor()
       defer { _ = systemClose(fd) }
+      let blockingResult = scribe_set_nonblocking(fd, 0)
+      guard blockingResult == 0 else { throw PTYSessionError.operationFailed(blockingResult) }
 
       try data.withUnsafeBytes { bytes in
         guard var pointer = bytes.baseAddress else { return }
@@ -181,17 +191,26 @@ public final class PTYSession: Sendable {
   }
 
   public func close() {
-    // Keep the transition and signal atomic with respect to the waiter. Before
-    // waitStatus is recorded, waitid(WNOWAIT) guarantees this PID is either the
-    // live child or its unreaped zombie; after it is recorded we never signal.
-    let task = state.withLock { state -> Task<Void, Never>? in
-      guard !state.isClosing else { return nil }
-      state.isClosing = true
-      state.readEnded = true
-      let task = state.readTask
-      state.readTask = nil
-      if state.waitStatus == nil, childPID > 0 { _ = systemKill(childPID, SIGHUP) }
-      return task
+    // Use the same lock order as duplicateFileDescriptor(). The reader holds
+    // descriptorLock only around a bounded poll and a nonblocking read, so this
+    // closes the master promptly without racing descriptor reuse.
+    let task = descriptorLock.withLock {
+      state.withLock { state -> Task<Void, Never>? in
+        guard !state.isClosing else { return nil }
+        state.isClosing = true
+        state.readEnded = true
+        let task = state.readTask
+        state.readTask = nil
+        let fd = state.masterFD
+        state.masterFD = -1
+
+        // Keep the transition and signal atomic with respect to the waiter.
+        // Before waitStatus is recorded, waitid(WNOWAIT) guarantees this PID is
+        // either the live child or its unreaped zombie; afterwards we do not signal.
+        if state.waitStatus == nil, childPID > 0 { _ = systemKill(childPID, SIGHUP) }
+        if fd >= 0 { _ = systemClose(fd) }
+        return task
+      }
     }
     task?.cancel()
     deliverExitIfReady()
@@ -199,13 +218,10 @@ public final class PTYSession: Sendable {
 
   private func startReading(fileDescriptor: Int32) {
     let task = Task.detached(priority: .high) { [weak self, descriptorLock] in
-      defer {
-        descriptorLock.withLock {
-          _ = systemClose(fileDescriptor)
-        }
-      }
-
       while !Task.isCancelled {
+        // Poll without the descriptor lock so close() never waits for the timeout.
+        // Before reading, revalidate under the lock that close() has not invalidated
+        // the descriptor; this also prevents reading from a recycled descriptor.
         var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
         let pollResult = poll(&descriptor, 1, 100)
         if pollResult == 0 { continue }
@@ -215,13 +231,23 @@ public final class PTYSession: Sendable {
         }
 
         guard let self else { return }
-        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-        let count = systemRead(fileDescriptor, &buffer, buffer.count)
-        if count > 0 {
-          deliverOutput(Data(buffer.prefix(count)))
-        } else if count == 0 || (errno != EINTR && errno != EAGAIN) {
+        let result: (count: Int, data: Data?, error: Int32) = descriptorLock.withLock {
+          let isOpen = state.withLock {
+            !$0.isClosing && $0.masterFD == fileDescriptor
+          }
+          guard isOpen else { return (0, nil, 0) }
+
+          var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+          let count = systemRead(fileDescriptor, &buffer, buffer.count)
+          return (count, count > 0 ? Data(buffer.prefix(count)) : nil, errno)
+        }
+
+        if result.count == 0 { break }
+        if result.count == -1 {
+          if result.error == EINTR || result.error == EAGAIN { continue }
           break
         }
+        if let data = result.data { deliverOutput(data) }
       }
 
       self?.finishReading()

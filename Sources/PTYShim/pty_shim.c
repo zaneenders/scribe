@@ -36,6 +36,20 @@ int scribe_dup_cloexec(int fd, int *duplicate_fd) {
   return 0;
 }
 
+int scribe_set_nonblocking(int fd, int enabled) {
+  int flags;
+  do {
+    flags = fcntl(fd, F_GETFL);
+  } while (flags == -1 && errno == EINTR);
+  if (flags == -1) return errno;
+
+  int result;
+  do {
+    result = fcntl(fd, F_SETFL, enabled ? flags | O_NONBLOCK : flags & ~O_NONBLOCK);
+  } while (result == -1 && errno == EINTR);
+  return result == -1 ? errno : 0;
+}
+
 int scribe_wait_until_exited(pid_t child_pid) {
   siginfo_t info;
   int result;

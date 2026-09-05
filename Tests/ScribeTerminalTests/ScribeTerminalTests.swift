@@ -99,6 +99,20 @@ struct PTYSessionTests {
     }
     Issue.record("Never saw shell output; received: \(buffer.text.suffix(500))")
   }
+
+  @Test func closeReturnsPromptlyDuringActiveChild() throws {
+    let session = try PTYSession(shell: "/bin/sh")
+    try session.write("trap '' HUP; sleep 30\n")
+
+    let started = ContinuousClock.now
+    session.close()
+    let elapsed = started.duration(to: .now)
+
+    #expect(elapsed < .seconds(1), "close took \(elapsed)")
+    #expect(throws: PTYSessionError.self) {
+      try session.write("ignored\n")
+    }
+  }
 }
 
 @Suite("TerminalRuntime")
