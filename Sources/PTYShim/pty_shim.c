@@ -1,5 +1,5 @@
 #if defined(__linux__)
-#define _XOPEN_SOURCE 600
+#define _GNU_SOURCE
 #endif
 
 #include "pty_shim.h"
@@ -24,6 +24,25 @@ int scribe_pty_resize(int master_fd, int columns, int rows) {
   struct winsize size = scribe_winsize(columns, rows);
   if (ioctl(master_fd, TIOCSWINSZ, &size) == -1) return errno;
   return 0;
+}
+
+int scribe_dup_cloexec(int fd, int *duplicate_fd) {
+  int duplicate;
+  do {
+    duplicate = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+  } while (duplicate == -1 && errno == EINTR);
+  if (duplicate == -1) return errno;
+  *duplicate_fd = duplicate;
+  return 0;
+}
+
+int scribe_wait_until_exited(pid_t child_pid) {
+  siginfo_t info;
+  int result;
+  do {
+    result = waitid(P_PID, (id_t)child_pid, &info, WEXITED | WNOWAIT);
+  } while (result == -1 && errno == EINTR);
+  return result == -1 ? errno : 0;
 }
 
 int scribe_pty_spawn(
