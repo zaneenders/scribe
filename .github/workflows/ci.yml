@@ -1,121 +1,54 @@
 name: CI
 
 on:
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: PR number to acknowledge when CI starts
-        required: false
-        type: string
-  pull_request:
-    types: [closed]
-    branches: [main]
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  GHOSTTY_NETWORK_PERMISSION: --allow-network-connections all:443
+
 jobs:
-  ack:
-    name: Acknowledge
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.pr_number != ''
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - uses: actions/github-script@v7
-        with:
-          script: |
-            const prNumber = Number(context.payload.inputs.pr_number);
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body:
-                `CI is running on \`${context.refName}\`. ` +
-                `[View run](${runUrl})`,
-            });
-
-  setup:
-    name: Setup
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.ref, 'refs/tags/') ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
-    runs-on: ubuntu-latest
-    container: swift:latest
+  macos:
+    name: macOS
+    runs-on: macos-26
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - name: Cache Static SDK
-        id: cache-sdk
+        with:
+          submodules: recursive
+      - name: Show Swift version
+        run: swift --version
+      - name: Cache Zig
         uses: actions/cache@v6
         with:
-          path: /root/.swiftpm/swift-sdks
-          key: swift-static-sdk-6.3.2-v2
-      - name: Download Static SDK
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+          path: Vendor/.tools
+          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}
+      - name: Build Ghostty terminal library
         run: |
-          swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
-      - name: Cache Swift packages
-        id: cache-spm
-        uses: actions/cache@v6
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-          key: spm-${{ hashFiles('Package.resolved') }}
-      - name: Resolve dependencies
-        if: steps.cache-spm.outputs.cache-hit != 'true'
-        run: swift package resolve
+          ./Scripts/bootstrap-zig.sh
+          swift package \
+            --allow-writing-to-package-directory \
+            $GHOSTTY_NETWORK_PERMISSION \
+            refresh-ghostty-vt
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
 
-  build:
-    name: Build (${{ matrix.arch }})
-    needs: setup
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.ref, 'refs/tags/') ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
-    runs-on: ubuntu-latest
-    container: swift:latest
+  linux:
+    name: Linux (${{ matrix.arch }})
     strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-    steps:
-      - uses: actions/checkout@v7
-      - name: Restore Static SDK
-        uses: actions/cache@v6
-        with:
-          path: /root/.swiftpm/swift-sdks
-          key: swift-static-sdk-6.3.2-v2
-      - name: Restore Swift packages
-        uses: actions/cache@v6
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-          key: spm-${{ hashFiles('Package.resolved') }}
-      - name: Build ${{ matrix.arch }}
-        run: swift build --swift-sdk ${{ matrix.arch }}-swift-linux-musl -c release
-      - name: Upload ${{ matrix.arch }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: scribe-${{ matrix.arch }}
-          path: |
-            .build/${{ matrix.arch }}-swift-linux-musl/release/scribe
-
-  linux-package:
-    name: Linux package (${{ matrix.arch }})
-    needs: setup
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.ref, 'refs/tags/') ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
-    strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
@@ -123,47 +56,125 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    container: swift:latest
+    container: swift:6.3.2-noble
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
-      - name: Install graphical build dependencies
+      - name: Install native development libraries
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             binutils curl file git libcurl4-openssl-dev libegl1-mesa-dev \
             libgles2-mesa-dev libwayland-dev libxkbcommon-dev pkg-config xz-utils
-      - name: Restore Swift packages
+      - name: Show Swift version
+        run: swift --version
+      - name: Cache Zig
         uses: actions/cache@v6
         with:
-          path: |
-            .build/checkouts
-            .build/repositories
-          key: spm-${{ hashFiles('Package.resolved') }}-${{ matrix.arch }}-native
+          path: Vendor/.tools
+          key: zig-0.16.0-${{ runner.os }}-${{ matrix.arch }}
       - name: Build Ghostty terminal library
         run: |
           ./Scripts/bootstrap-zig.sh
-          swift package --allow-writing-to-package-directory refresh-ghostty-vt
+          swift package \
+            --allow-writing-to-package-directory \
+            $GHOSTTY_NETWORK_PERMISSION \
+            refresh-ghostty-vt
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
       - name: Build release archive
+        if: startsWith(github.ref, 'refs/tags/v')
         run: ./Scripts/package-linux.sh
       - name: Inspect release archive
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tar -tzf dist/scribe-linux-${{ matrix.arch }}-*.tar.gz
           sha256sum --check dist/scribe-linux-${{ matrix.arch }}-*.tar.gz.sha256
       - name: Upload Linux package
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v7
         with:
           name: scribe-linux-package-${{ matrix.arch }}
           path: |
             dist/scribe-linux-${{ matrix.arch }}-*.tar.gz
             dist/scribe-linux-${{ matrix.arch }}-*.tar.gz.sha256
+          if-no-files-found: error
+
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-24.04
+    container: swift:6.3.2-noble
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Trust checkout ownership
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Determine changed range
+        env:
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$EVENT_BASE_SHA" ] && git cat-file -e "$EVENT_BASE_SHA^{commit}" 2>/dev/null; then
+            echo "BASE_SHA=$EVENT_BASE_SHA" >> "$GITHUB_ENV"
+          else
+            echo "BASE_SHA=$(git rev-parse HEAD^)" >> "$GITHUB_ENV"
+          fi
+      - name: Check whitespace
+        run: git diff --check "$BASE_SHA" "$GITHUB_SHA"
+      - name: Check Swift formatting
+        run: |
+          git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$GITHUB_SHA" -- '*.swift' |
+            while IFS= read -r swift_file; do
+              swift format lint --strict "$swift_file"
+            done
+
+  static-cli:
+    name: Static CLI (${{ matrix.arch }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    runs-on: ubuntu-24.04
+    container: swift:6.3.2-noble
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Swift static SDK
+        run: |
+          swift sdk install \
+            https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
+            --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
+      - name: Build static CLI
+        run: |
+          swift build \
+            --swift-sdk ${{ matrix.arch }}-swift-linux-musl \
+            --product scribe \
+            -c release
+          bin_path=$(swift build \
+            --swift-sdk ${{ matrix.arch }}-swift-linux-musl \
+            --product scribe \
+            -c release \
+            --show-bin-path)
+          mkdir -p dist
+          install -m 755 "$bin_path/scribe" "dist/scribe-${{ matrix.arch }}"
+      - name: Upload static CLI
+        uses: actions/upload-artifact@v7
+        with:
+          name: scribe-${{ matrix.arch }}
+          path: dist/scribe-${{ matrix.arch }}
+          if-no-files-found: error
 
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, linux-package]
+    needs: [macos, linux, hygiene, static-cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -171,12 +182,10 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: scribe-*
+          merge-multiple: true
+          path: dist
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
-          files: |
-            scribe-x86_64/*
-            scribe-aarch64/*
-            scribe-linux-package-x86_64/*
-            scribe-linux-package-aarch64/*
+          files: dist/*
           generate_release_notes: true
