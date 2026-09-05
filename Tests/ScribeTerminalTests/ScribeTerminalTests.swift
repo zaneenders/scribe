@@ -105,11 +105,11 @@ struct PTYSessionTests {
 struct TerminalRuntimeTests {
   private func makeClient(
     replayBytes: Int = 1024 * 1024,
-    attachmentEvents: Int = 64
+    attachmentBytes: Int = 1024 * 1024
   ) -> InProcessTerminalClient {
     InProcessTerminalClient(
       runtime: TerminalRuntime(
-        limits: .init(replayBytes: replayBytes, attachmentEvents: attachmentEvents)))
+        limits: .init(replayBytes: replayBytes, attachmentBytes: attachmentBytes)))
   }
 
   private func output(
@@ -182,7 +182,7 @@ struct TerminalRuntimeTests {
   }
 
   @Test func exitIsDeliveredAfterFinalOutputAndFinishesAttachment() async throws {
-    let client = makeClient(attachmentEvents: 4_096)
+    let client = makeClient(attachmentBytes: 1024 * 1024)
     let id = try await client.createTerminal(
       configuration: TerminalConfiguration(shell: "/bin/sh"))
     let attachment = try await client.attach(to: id, after: nil)
@@ -218,8 +218,8 @@ struct TerminalRuntimeTests {
     }
   }
 
-  @Test func exitedTerminalReplayFitsEvenWithOneEventLiveBuffer() async throws {
-    let client = makeClient(attachmentEvents: 1)
+  @Test func exitedTerminalReplayIncludesOutputAndExit() async throws {
+    let client = makeClient(attachmentBytes: 64 * 1024)
     let id = try client.createSynchronously(
       configuration: TerminalConfiguration(shell: "/bin/sh"))
     defer { client.closeSynchronously(id) }
@@ -292,7 +292,7 @@ struct TerminalRuntimeTests {
   }
 
   @Test func slowConsumerIsDisconnectedWithoutBlockingOthers() async throws {
-    let client = makeClient(attachmentEvents: 64)
+    let client = makeClient(attachmentBytes: 8 * 1024)
     let id = try await client.createTerminal(
       configuration: TerminalConfiguration(shell: "/bin/sh"))
     defer { Task { await client.close(id) } }

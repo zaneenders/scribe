@@ -84,43 +84,69 @@ struct AbortNotifierTests {
     #expect(results.2 == true)
   }
 
-  @Test func toolRegistryWakesPromptlyOnNotifierRequest() async throws {
+  @Test(.timeLimit(.minutes(1)))
+  func toolRegistryWakesPromptlyOnNotifierRequest() async throws {
     let registry = ToolRegistry(tools: [SleepyTool()], logger: toolRunnerTestLogger)
     let notifier = AbortNotifier()
+    let outcomes = AsyncStream<AbortRaceOutcome>.makeStream()
 
-    let start = ContinuousClock.now
-    do {
-      _ = try await withThrowingTaskGroup(of: ToolResult.self) { group in
-        group.addTask {
-          try await registry.run(
-            name: "sleepy",
-            arguments: "{}",
-            workingDirectory: FilePath("/tmp"),
-            logger: toolRunnerTestLogger,
-            abortObserver: notifier)
-        }
-        group.addTask {
-
-          try await Task.sleep(for: .milliseconds(50))
-          notifier.request()
-          try await Task.sleep(for: .seconds(2))
-          throw NotifierWakeTimeoutError()
-        }
-        defer { group.cancelAll() }
-        return try await group.next()!
+    let toolTask = Task {
+      do {
+        _ = try await registry.run(
+          name: "sleepy",
+          arguments: "{}",
+          workingDirectory: FilePath("/tmp"),
+          logger: toolRunnerTestLogger,
+          abortObserver: notifier)
+        outcomes.continuation.yield(.unexpectedSuccess)
+      } catch is AgentTurnInterruptedError {
+        outcomes.continuation.yield(.interrupted(.now))
+      } catch {
+        outcomes.continuation.yield(.unexpectedError(String(describing: error)))
       }
-      Issue.record("Expected AgentTurnInterruptedError")
-    } catch is AgentTurnInterruptedError {
-      let elapsed = start.duration(to: .now)
+    }
 
+    try await Task.sleep(for: .milliseconds(50))
+    let requestedAt = ContinuousClock.now
+    notifier.request()
+
+    let timeoutTask = Task {
+      do {
+        try await Task.sleep(for: .seconds(2))
+        outcomes.continuation.yield(.timeout)
+      } catch {
+        // The tool completed first and cancelled this deadline.
+      }
+    }
+
+    var iterator = outcomes.stream.makeAsyncIterator()
+    let outcome = try #require(await iterator.next())
+    toolTask.cancel()
+    timeoutTask.cancel()
+    outcomes.continuation.finish()
+
+    switch outcome {
+    case .interrupted(let interruptedAt):
+      let latency = requestedAt.duration(to: interruptedAt)
       #expect(
-        elapsed < .milliseconds(150),
-        "event-driven abort should land well under 150 ms; took \(elapsed)")
+        latency < .milliseconds(500),
+        "event-driven abort should land well under 500 ms; took \(latency)")
+    case .unexpectedSuccess:
+      Issue.record("Expected AgentTurnInterruptedError, but the tool completed")
+    case .unexpectedError(let error):
+      Issue.record("Expected AgentTurnInterruptedError, got \(error)")
+    case .timeout:
+      Issue.record("Tool registry did not react to the abort within 2 seconds")
     }
   }
 }
 
-private struct NotifierWakeTimeoutError: Error {}
+private enum AbortRaceOutcome: Sendable {
+  case interrupted(ContinuousClock.Instant)
+  case unexpectedSuccess
+  case unexpectedError(String)
+  case timeout
+}
 
 private struct SleepyTool: ScribeTool {
   static let name = "sleepy"

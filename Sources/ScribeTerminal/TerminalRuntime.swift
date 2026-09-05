@@ -62,6 +62,7 @@ public enum TerminalRuntimeError: Error, Equatable, Sendable, CustomStringConver
   case terminalExited(TerminalID, status: Int32)
   case replayUnavailable(requested: UInt64, availableFrom: UInt64)
   case invalidCursor(requested: UInt64, latest: UInt64)
+  case attachmentAlreadyAwaiting
   case slowConsumer
 
   public var description: String {
@@ -74,6 +75,8 @@ public enum TerminalRuntimeError: Error, Equatable, Sendable, CustomStringConver
       return "terminal output at cursor \(requested) is no longer available; replay starts at \(availableFrom)"
     case .invalidCursor(let requested, let latest):
       return "terminal cursor \(requested) is ahead of latest cursor \(latest)"
+    case .attachmentAlreadyAwaiting:
+      return "terminal attachment already has a consumer awaiting an event"
     case .slowConsumer:
       return "terminal attachment could not keep up with output"
     }
@@ -99,18 +102,46 @@ extension TerminalClient {
   }
 }
 
+/// The event sequence for a terminal attachment. The sequence has a single
+/// consumer; copying an iterator and awaiting both copies concurrently is an error.
+public struct TerminalEventStream: AsyncSequence, Sendable {
+  public typealias Element = TerminalEvent
+
+  public struct AsyncIterator: AsyncIteratorProtocol {
+    private let nextEvent: @Sendable () async throws -> TerminalEvent?
+
+    fileprivate init(nextEvent: @escaping @Sendable () async throws -> TerminalEvent?) {
+      self.nextEvent = nextEvent
+    }
+
+    public mutating func next() async throws -> TerminalEvent? {
+      try await nextEvent()
+    }
+  }
+
+  private let nextEvent: @Sendable () async throws -> TerminalEvent?
+
+  fileprivate init(nextEvent: @escaping @Sendable () async throws -> TerminalEvent?) {
+    self.nextEvent = nextEvent
+  }
+
+  public func makeAsyncIterator() -> AsyncIterator {
+    AsyncIterator(nextEvent: nextEvent)
+  }
+}
+
 /// A bounded stream of events from one terminal. Dropping this value does not
 /// detach it immediately; callers should use ``detach()`` when they are done.
 public struct TerminalAttachment: Sendable {
   public let id: UUID
   public let terminalID: TerminalID
-  public let events: AsyncThrowingStream<TerminalEvent, any Error>
+  public let events: TerminalEventStream
   private let detachAction: @Sendable () async -> Void
 
   fileprivate init(
     id: UUID,
     terminalID: TerminalID,
-    events: AsyncThrowingStream<TerminalEvent, any Error>,
+    events: TerminalEventStream,
     detachAction: @escaping @Sendable () async -> Void
   ) {
     self.id = id
@@ -146,11 +177,12 @@ public struct LocalTerminalAttachment: Sendable {
 public final class TerminalRuntime: Sendable {
   public struct Limits: Equatable, Sendable {
     public var replayBytes: Int
-    public var attachmentEvents: Int
+    /// Maximum unread output bytes retained for one asynchronous attachment.
+    public var attachmentBytes: Int
 
-    public init(replayBytes: Int = 1024 * 1024, attachmentEvents: Int = 64) {
+    public init(replayBytes: Int = 1024 * 1024, attachmentBytes: Int = 1024 * 1024) {
       self.replayBytes = max(0, replayBytes)
-      self.attachmentEvents = max(1, attachmentEvents)
+      self.attachmentBytes = max(1, attachmentBytes)
     }
   }
 
@@ -170,12 +202,42 @@ public final class TerminalRuntime: Sendable {
     var replay: [ReplayChunk] = []
     var replayByteCount = 0
     var nextCursor: UInt64 = 0
-    var attachments: [UUID: AsyncThrowingStream<TerminalEvent, any Error>.Continuation] = [:]
+    var attachments: [UUID: AsyncAttachmentState] = [:]
     var localAttachments: [UUID: LocalAttachmentState] = [:]
 
     init(pty: PTYSession) {
       lifecycle = .running(pty)
     }
+  }
+
+  /// Mutable async-delivery state. Queue fields are protected by `sessions`;
+  /// exactly one consumer may suspend in `next()` at a time.
+  private final class AsyncAttachmentState: @unchecked Sendable {
+    var pending: Deque<TerminalEvent> = []
+    var pendingOutputBytes = 0
+    var waiter: CheckedContinuation<TerminalEvent?, any Error>?
+    var terminalError: (any Error)?
+    var isFinished = false
+
+    func appendOutput(_ output: TerminalOutput) {
+      pendingOutputBytes += output.data.count
+      if let last = pending.popLast() {
+        if case .output(let previous) = last, previous.endCursor == output.cursor {
+          var data = previous.data
+          data.append(output.data)
+          pending.append(.output(TerminalOutput(cursor: previous.cursor, data: data)))
+          return
+        }
+        pending.append(last)
+      }
+      pending.append(.output(output))
+    }
+  }
+
+  private enum AsyncAttachmentAction {
+    case event(CheckedContinuation<TerminalEvent?, any Error>, TerminalEvent)
+    case finish(CheckedContinuation<TerminalEvent?, any Error>)
+    case fail(CheckedContinuation<TerminalEvent?, any Error>, any Error)
   }
 
   /// Mutable local-delivery state. Every field is accessed while `sessions` is
@@ -250,47 +312,37 @@ public final class TerminalRuntime: Sendable {
     }
 
     let attachmentID = UUID()
-    // Replay and exit are queued before attach returns, so reserve room for both
-    // when reconnecting to an exited terminal. Otherwise a configured one-event
-    // live buffer would incorrectly classify a caller as slow before it had any
-    // opportunity to consume the stream.
-    let hasReplay = cursor < session.nextCursor
-    let isExited: Bool
-    if case .exited = session.lifecycle {
-      isExited = true
-    } else {
-      isExited = false
-    }
-    let initialEventCount = (hasReplay ? 1 : 0) + (isExited ? 1 : 0)
-    let pair = AsyncThrowingStream<TerminalEvent, any Error>.makeStream(
-      bufferingPolicy: .bufferingOldest(max(limits.attachmentEvents, initialEventCount)))
-    session.attachments[attachmentID] = pair.continuation
-    pair.continuation.onTermination = { [weak self] _ in
-      // Termination can be invoked synchronously by `finish()` while runtime
-      // state is borrowed by the mutex. Defer cleanup to avoid recursive lock
-      // acquisition; this is a once-per-attachment cold path.
-      Task { self?.detach(attachmentID, from: terminalID) }
-    }
+    let state = AsyncAttachmentState()
+    session.attachments[attachmentID] = state
 
     if cursor < session.nextCursor {
       var replay = Data()
+      replay.reserveCapacity(Int(session.nextCursor - cursor))
       for chunk in session.replay where chunk.endCursor > cursor {
         let offset = Int(max(cursor, chunk.cursor) - chunk.cursor)
         replay.append(chunk.data.dropFirst(offset))
       }
       if !replay.isEmpty {
-        deliver(.output(TerminalOutput(cursor: cursor, data: replay)), to: attachmentID, in: session)
+        state.appendOutput(TerminalOutput(cursor: cursor, data: replay))
       }
     }
     if case .exited(let status) = session.lifecycle {
-      deliver(.exit(status), to: attachmentID, in: session)
-      session.attachments.removeValue(forKey: attachmentID)?.finish()
+      state.pending.append(.exit(status))
+      state.isFinished = true
     }
 
     return TerminalAttachment(
       id: attachmentID,
       terminalID: terminalID,
-      events: pair.stream,
+      events: TerminalEventStream { [weak self] in
+        guard let self else { return nil }
+        return try await withTaskCancellationHandler {
+          try Task.checkCancellation()
+          return try await self.nextEvent(attachmentID, from: terminalID)
+        } onCancel: {
+          self.detach(attachmentID, from: terminalID)
+        }
+      },
       detachAction: { [weak self] in
         self?.detach(attachmentID, from: terminalID)
       })
@@ -373,19 +425,78 @@ public final class TerminalRuntime: Sendable {
   }
 
   public func close(_ terminalID: TerminalID) {
-    let session = sessions.withLock { $0.removeValue(forKey: terminalID) }
+    let (session, actions) = sessions.withLock { sessions -> (Session?, [AsyncAttachmentAction]) in
+      guard let session = sessions.removeValue(forKey: terminalID) else { return (nil, []) }
+      let actions = session.attachments.values.compactMap { finishAsyncAttachment($0) }
+      session.attachments.removeAll(keepingCapacity: false)
+      session.localAttachments.removeAll(keepingCapacity: false)
+      return (session, actions)
+    }
+    resume(actions)
     guard let session else { return }
-    for continuation in session.attachments.values { continuation.finish() }
-    session.attachments.removeAll(keepingCapacity: false)
-    session.localAttachments.removeAll(keepingCapacity: false)
     if case .running(let pty) = session.lifecycle { pty.close() }
   }
 
   public func detach(_ attachmentID: UUID, from terminalID: TerminalID) {
-    let continuation = sessions.withLock {
-      $0[terminalID]?.attachments.removeValue(forKey: attachmentID)
+    let action = sessions.withLock { sessions -> AsyncAttachmentAction? in
+      guard let state = sessions[terminalID]?.attachments.removeValue(forKey: attachmentID) else {
+        return nil
+      }
+      return finishAsyncAttachment(state)
     }
-    continuation?.finish()
+    if let action { resume(action) }
+  }
+
+  private func nextEvent(_ attachmentID: UUID, from terminalID: TerminalID) async throws -> TerminalEvent? {
+    try await withCheckedThrowingContinuation { continuation in
+      let action = sessions.withLock { sessions -> AsyncAttachmentAction? in
+        guard let state = sessions[terminalID]?.attachments[attachmentID] else {
+          return .finish(continuation)
+        }
+        if !state.pending.isEmpty {
+          let event = state.pending.popFirst()!
+          if case .output(let output) = event {
+            state.pendingOutputBytes -= output.data.count
+          }
+          return .event(continuation, event)
+        }
+        if let error = state.terminalError {
+          sessions[terminalID]?.attachments.removeValue(forKey: attachmentID)
+          return .fail(continuation, error)
+        }
+        if state.isFinished {
+          sessions[terminalID]?.attachments.removeValue(forKey: attachmentID)
+          return .finish(continuation)
+        }
+        guard state.waiter == nil else {
+          return .fail(continuation, TerminalRuntimeError.attachmentAlreadyAwaiting)
+        }
+        state.waiter = continuation
+        return nil
+      }
+      if let action { resume(action) }
+    }
+  }
+
+  private func finishAsyncAttachment(_ state: AsyncAttachmentState) -> AsyncAttachmentAction? {
+    state.pending.removeAll(keepingCapacity: false)
+    state.pendingOutputBytes = 0
+    state.isFinished = true
+    guard let waiter = state.waiter else { return nil }
+    state.waiter = nil
+    return .finish(waiter)
+  }
+
+  private func resume(_ actions: [AsyncAttachmentAction]) {
+    for action in actions { resume(action) }
+  }
+
+  private func resume(_ action: AsyncAttachmentAction) {
+    switch action {
+    case .event(let continuation, let event): continuation.resume(returning: event)
+    case .finish(let continuation): continuation.resume(returning: nil)
+    case .fail(let continuation, let error): continuation.resume(throwing: error)
+    }
   }
 
   public func detachLocal(_ attachmentID: UUID, from terminalID: TerminalID) {
@@ -396,21 +507,23 @@ public final class TerminalRuntime: Sendable {
 
   private func receive(_ data: Data, from terminalID: TerminalID) {
     guard !data.isEmpty else { return }
-    let localAttachmentsToDrain: [UUID] = sessions.withLock { sessions in
-      guard let session = sessions[terminalID], case .running = session.lifecycle else { return [] }
+    let (actions, localAttachmentsToDrain): ([AsyncAttachmentAction], [UUID]) = sessions.withLock { sessions in
+      guard let session = sessions[terminalID], case .running = session.lifecycle else { return ([], []) }
       let output = TerminalOutput(cursor: session.nextCursor, data: data)
       session.nextCursor = output.endCursor
       appendToReplay(output, in: session)
+      var actions: [AsyncAttachmentAction] = []
       for attachmentID in Array(session.attachments.keys) {
-        deliver(.output(output), to: attachmentID, in: session)
+        if let action = deliverOutput(output, to: attachmentID, in: session) { actions.append(action) }
       }
-      var result: [UUID] = []
+      var localAttachmentsToDrain: [UUID] = []
       for (attachmentID, state) in session.localAttachments {
         state.pending.append(.output(output))
-        if beginLocalDeliveryIfNeeded(state) { result.append(attachmentID) }
+        if beginLocalDeliveryIfNeeded(state) { localAttachmentsToDrain.append(attachmentID) }
       }
-      return result
+      return (actions, localAttachmentsToDrain)
     }
+    resume(actions)
     for attachmentID in localAttachmentsToDrain {
       drainLocalAttachment(attachmentID, from: terminalID)
     }
@@ -438,21 +551,22 @@ public final class TerminalRuntime: Sendable {
   }
 
   private func receiveExit(_ status: Int32, from terminalID: TerminalID) {
-    let localAttachmentsToDrain: [UUID] = sessions.withLock { sessions in
-      guard let session = sessions[terminalID], case .running = session.lifecycle else { return [] }
+    let (actions, localAttachmentsToDrain): ([AsyncAttachmentAction], [UUID]) = sessions.withLock { sessions in
+      guard let session = sessions[terminalID], case .running = session.lifecycle else { return ([], []) }
       session.lifecycle = .exited(status)
+      var actions: [AsyncAttachmentAction] = []
       for attachmentID in Array(session.attachments.keys) {
-        deliver(.exit(status), to: attachmentID, in: session)
-        session.attachments.removeValue(forKey: attachmentID)?.finish()
+        if let action = deliverExit(status, to: attachmentID, in: session) { actions.append(action) }
       }
-      var result: [UUID] = []
+      var localAttachmentsToDrain: [UUID] = []
       for (attachmentID, state) in session.localAttachments {
         state.pending.append(.exit(status))
         state.finishesAfterDelivery = true
-        if beginLocalDeliveryIfNeeded(state) { result.append(attachmentID) }
+        if beginLocalDeliveryIfNeeded(state) { localAttachmentsToDrain.append(attachmentID) }
       }
-      return result
+      return (actions, localAttachmentsToDrain)
     }
+    resume(actions)
     for attachmentID in localAttachmentsToDrain {
       drainLocalAttachment(attachmentID, from: terminalID)
     }
@@ -486,25 +600,42 @@ public final class TerminalRuntime: Sendable {
     }
   }
 
-  private func deliver(
-    _ event: TerminalEvent,
+  private func deliverOutput(
+    _ output: TerminalOutput,
     to attachmentID: UUID,
     in session: Session
-  ) {
-    guard let continuation = session.attachments[attachmentID] else { return }
-    switch continuation.yield(event) {
-    case .enqueued:
-      break
-    case .dropped:
-      session.attachments.removeValue(forKey: attachmentID)?
-        .finish(throwing: TerminalRuntimeError.slowConsumer)
-    case .terminated:
-      session.attachments.removeValue(forKey: attachmentID)
-    @unknown default:
-      session.attachments.removeValue(forKey: attachmentID)?
-        .finish(throwing: TerminalRuntimeError.slowConsumer)
+  ) -> AsyncAttachmentAction? {
+    guard let state = session.attachments[attachmentID], state.terminalError == nil else { return nil }
+    if let waiter = state.waiter, state.pending.isEmpty {
+      state.waiter = nil
+      return .event(waiter, .output(output))
     }
+    state.appendOutput(output)
+    guard state.pendingOutputBytes > limits.attachmentBytes else { return nil }
+    state.pending.removeAll(keepingCapacity: false)
+    state.pendingOutputBytes = 0
+    state.terminalError = TerminalRuntimeError.slowConsumer
+    state.isFinished = true
+    guard let waiter = state.waiter else { return nil }
+    state.waiter = nil
+    return .fail(waiter, TerminalRuntimeError.slowConsumer)
   }
+
+  private func deliverExit(
+    _ status: Int32,
+    to attachmentID: UUID,
+    in session: Session
+  ) -> AsyncAttachmentAction? {
+    guard let state = session.attachments[attachmentID], state.terminalError == nil else { return nil }
+    state.isFinished = true
+    if let waiter = state.waiter, state.pending.isEmpty {
+      state.waiter = nil
+      return .event(waiter, .exit(status))
+    }
+    state.pending.append(.exit(status))
+    return nil
+  }
+
 }
 
 /// The GUI's local adapter. It has the same async boundary a future socket
