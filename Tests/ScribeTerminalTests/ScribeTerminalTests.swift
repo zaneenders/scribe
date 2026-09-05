@@ -64,7 +64,7 @@ struct GhosttyTerminalTests {
   #endif
 }
 
-#if os(macOS)
+#if os(macOS) || os(Linux)
 @Suite("PTYSession")
 struct PTYSessionTests {
   /// Accumulates PTY output from the read thread.
