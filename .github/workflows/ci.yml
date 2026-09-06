@@ -28,12 +28,33 @@ jobs:
           submodules: recursive
       - name: Show Swift version
         run: swift --version
+      - name: Cache Swift package dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+          key: swiftpm-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
+      - name: Read Ghostty revision
+        id: ghostty-source
+        run: echo "revision=$(git -C Vendor/GhosttySource rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache Ghostty terminal library
+        id: cache-ghostty
+        uses: actions/cache@v6
+        with:
+          path: |
+            Vendor/GhosttyVt/Libraries
+            Vendor/GhosttyVt/Headers/ghostty
+            Vendor/GhosttyVt/PROVENANCE.md
+          key: ghostty-vt-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ghostty-source.outputs.revision }}-${{ hashFiles('Plugins/GhosttyVtRefreshPlugin/plugin.swift', 'Scripts/bootstrap-zig.sh') }}
       - name: Cache Zig
+        if: steps.cache-ghostty.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
           path: Vendor/.tools
           key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/bootstrap-zig.sh') }}
       - name: Build Ghostty terminal library
+        if: steps.cache-ghostty.outputs.cache-hit != 'true'
         run: |
           ./Scripts/bootstrap-zig.sh
           swift package \
@@ -130,12 +151,33 @@ jobs:
             while IFS= read -r swift_file; do
               swift format lint --strict "$swift_file"
             done
+      - name: Cache Swift package dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+          key: swiftpm-dependencies-arch-x86_64-${{ hashFiles('Package.resolved') }}
+      - name: Read Ghostty revision
+        id: ghostty-source
+        run: echo "revision=$(git -C Vendor/GhosttySource rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cache Ghostty terminal library
+        id: cache-ghostty
+        uses: actions/cache@v6
+        with:
+          path: |
+            Vendor/GhosttyVt/Libraries
+            Vendor/GhosttyVt/Headers/ghostty
+            Vendor/GhosttyVt/PROVENANCE.md
+          key: ghostty-vt-v1-arch-x86_64-${{ steps.ghostty-source.outputs.revision }}-${{ hashFiles('Plugins/GhosttyVtRefreshPlugin/plugin.swift', 'Scripts/bootstrap-zig.sh') }}
       - name: Cache Zig
+        if: steps.cache-ghostty.outputs.cache-hit != 'true'
         uses: actions/cache@v6
         with:
           path: Vendor/.tools
           key: zig-0.16.0-arch-x86_64-${{ hashFiles('Scripts/bootstrap-zig.sh') }}
       - name: Build Ghostty terminal library
+        if: steps.cache-ghostty.outputs.cache-hit != 'true'
         run: |
           ./Scripts/bootstrap-zig.sh
           swift package \
