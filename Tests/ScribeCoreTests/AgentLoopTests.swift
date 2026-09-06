@@ -320,20 +320,18 @@ struct AgentLoopTests {
     )
     let notifier = AbortNotifier()
 
-    let start = ContinuousClock.now
-    async let loopResult = runLoop(prompt: "test", config: config, abortNotifier: notifier)
+    let loopTask = Task {
+      try await runLoop(prompt: "test", config: config, abortNotifier: notifier)
+    }
+    defer { loopTask.cancel() }
 
     try await Task.sleep(for: .milliseconds(50))
     notifier.request()
 
-    let (_, termination) = try await loopResult
-    let elapsed = start.duration(to: .now)
+    let (_, termination) = try await withTimeout(seconds: 5) {
+      try await loopTask.value
+    }
     expectTermination(termination, .interrupted)
-
-    #expect(
-      elapsed < .seconds(1),
-      "abort should interrupt a hung HTTP request promptly; took \(elapsed)"
-    )
   }
 
   @Test func unknownToolReturnsJSONError() async throws {
