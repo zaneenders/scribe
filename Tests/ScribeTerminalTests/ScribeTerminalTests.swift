@@ -75,333 +75,334 @@ struct GhosttyTerminalTests {
 #if os(macOS) || os(Linux)
 @Suite("PTY integration", .serialized)
 struct PTYIntegrationTests {
-@Suite("PTYSession")
-struct PTYSessionTests {
-  /// Accumulates PTY output from the read thread.
-  private final class OutputBuffer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
+  @Suite("PTYSession")
+  struct PTYSessionTests {
+    /// Accumulates PTY output from the read thread.
+    private final class OutputBuffer: @unchecked Sendable {
+      private let lock = NSLock()
+      private var data = Data()
 
-    func append(_ chunk: Data) {
-      lock.withLock { data.append(chunk) }
-    }
-
-    var text: String {
-      lock.withLock { String(decoding: data, as: UTF8.self) }
-    }
-  }
-
-  @Test func shellEchoesWrittenMarker() async throws {
-    // Never use the user's login shell in an integration test: startup files and
-    // plugins can perform network or filesystem work and make this test unbounded.
-    let session = try PTYSession(shell: "/bin/sh")
-    defer { session.close() }
-
-    let buffer = OutputBuffer()
-    session.onOutput = { data in buffer.append(data) }
-
-    // Arithmetic expansion keeps the TTY's own echo of the typed command from
-    // satisfying the check; only the shell's output contains the marker.
-    try session.write("echo scribe-pty-$((40+2))\n")
-
-    let deadline = ContinuousClock.now + .seconds(15)
-    while ContinuousClock.now < deadline {
-      if buffer.text.contains("scribe-pty-42") { return }
-      try await Task.sleep(for: .milliseconds(100))
-    }
-    Issue.record("Never saw shell output; received: \(buffer.text.suffix(500))")
-  }
-
-  @Test func closeReturnsPromptlyDuringActiveChild() throws {
-    let session = try PTYSession(shell: "/bin/sh")
-    try session.write("trap '' HUP; sleep 30\n")
-
-    let started = ContinuousClock.now
-    session.close()
-    let elapsed = started.duration(to: .now)
-
-    #expect(elapsed < .seconds(1), "close took \(elapsed)")
-    #expect(throws: PTYSessionError.self) {
-      try session.write("ignored\n")
-    }
-  }
-
-  @Test func closeKillsShellDescendants() async throws {
-    let session = try PTYSession(shell: "/bin/sh")
-    let buffer = OutputBuffer()
-    session.onOutput = { buffer.append($0) }
-    try session.write("sleep 30 & echo descendant:$!\n")
-
-    let deadline = ContinuousClock.now + .seconds(3)
-    var descendant: pid_t?
-    while ContinuousClock.now < deadline, descendant == nil {
-      let text = buffer.text
-      if let range = text.range(of: #"descendant:(\d+)"#, options: .regularExpression) {
-        descendant = pid_t(text[range].dropFirst("descendant:".count))
+      func append(_ chunk: Data) {
+        lock.withLock { data.append(chunk) }
       }
-      if descendant == nil { try await Task.sleep(for: .milliseconds(10)) }
-    }
-    let pid = try #require(descendant)
 
-    session.close()
-    let exitDeadline = ContinuousClock.now + .seconds(3)
-    while testKill(pid, 0) == 0, ContinuousClock.now < exitDeadline {
-      try await Task.sleep(for: .milliseconds(10))
-    }
-    #expect(testKill(pid, 0) == -1 && errno == ESRCH)
-  }
-}
-
-@Suite("TerminalRuntime")
-struct TerminalRuntimeTests {
-  private func makeClient(
-    replayBytes: Int = 1024 * 1024,
-    attachmentBytes: Int = 1024 * 1024
-  ) -> InProcessTerminalClient {
-    InProcessTerminalClient(
-      runtime: TerminalRuntime(
-        limits: .init(replayBytes: replayBytes, attachmentBytes: attachmentBytes)))
-  }
-
-  private func output(
-    from attachment: TerminalAttachment,
-    until marker: String
-  ) async throws -> (String, UInt64) {
-    var text = ""
-    var cursor: UInt64 = 0
-    for try await event in attachment.events {
-      switch event {
-      case .output(let output):
-        text += String(decoding: output.data, as: UTF8.self)
-        cursor = output.endCursor
-        if text.contains(marker) { return (text, cursor) }
-      case .exit(let status):
-        throw RuntimeTestError.exitedBeforeMarker(status)
+      var text: String {
+        lock.withLock { String(decoding: data, as: UTF8.self) }
       }
     }
-    throw RuntimeTestError.streamEndedBeforeMarker
+
+    @Test func shellEchoesWrittenMarker() async throws {
+      // Never use the user's login shell in an integration test: startup files and
+      // plugins can perform network or filesystem work and make this test unbounded.
+      let session = try PTYSession(shell: "/bin/sh")
+      defer { session.close() }
+
+      let buffer = OutputBuffer()
+      session.onOutput = { data in buffer.append(data) }
+
+      // Arithmetic expansion keeps the TTY's own echo of the typed command from
+      // satisfying the check; only the shell's output contains the marker.
+      try session.write("echo scribe-pty-$((40+2))\n")
+
+      let deadline = ContinuousClock.now + .seconds(15)
+      while ContinuousClock.now < deadline {
+        if buffer.text.contains("scribe-pty-42") { return }
+        try await Task.sleep(for: .milliseconds(100))
+      }
+      Issue.record("Never saw shell output; received: \(buffer.text.suffix(500))")
+    }
+
+    @Test func closeReturnsPromptlyDuringActiveChild() throws {
+      let session = try PTYSession(shell: "/bin/sh")
+      try session.write("trap '' HUP; sleep 30\n")
+
+      let started = ContinuousClock.now
+      session.close()
+      let elapsed = started.duration(to: .now)
+
+      #expect(elapsed < .seconds(1), "close took \(elapsed)")
+      #expect(throws: PTYSessionError.self) {
+        try session.write("ignored\n")
+      }
+    }
+
+    @Test func closeKillsShellDescendants() async throws {
+      let session = try PTYSession(shell: "/bin/sh")
+      let buffer = OutputBuffer()
+      session.onOutput = { buffer.append($0) }
+      try session.write("sleep 30 & echo descendant:$!\n")
+
+      let deadline = ContinuousClock.now + .seconds(3)
+      var descendant: pid_t?
+      while ContinuousClock.now < deadline, descendant == nil {
+        let text = buffer.text
+        if let range = text.range(of: #"descendant:(\d+)"#, options: .regularExpression) {
+          descendant = pid_t(text[range].dropFirst("descendant:".count))
+        }
+        if descendant == nil { try await Task.sleep(for: .milliseconds(10)) }
+      }
+      let pid = try #require(descendant)
+
+      session.close()
+      let exitDeadline = ContinuousClock.now + .seconds(3)
+      while testKill(pid, 0) == 0, ContinuousClock.now < exitDeadline {
+        try await Task.sleep(for: .milliseconds(10))
+      }
+      #expect(testKill(pid, 0) == -1 && errno == ESRCH)
+    }
   }
 
-  @Test func shutdownClosesEveryOwnedTerminal() throws {
-    let runtime = TerminalRuntime()
-    let first = try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
-    let second = try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
-
-    runtime.shutdown()
-
-    #expect(throws: TerminalRuntimeError.terminalNotFound(first)) {
-      try runtime.write("ignored", to: first)
+  @Suite("TerminalRuntime")
+  struct TerminalRuntimeTests {
+    private func makeClient(
+      replayBytes: Int = 1024 * 1024,
+      attachmentBytes: Int = 1024 * 1024
+    ) -> InProcessTerminalClient {
+      InProcessTerminalClient(
+        runtime: TerminalRuntime(
+          limits: .init(replayBytes: replayBytes, attachmentBytes: attachmentBytes)))
     }
-    #expect(throws: TerminalRuntimeError.terminalNotFound(second)) {
-      try runtime.write("ignored", to: second)
-    }
-    // Idempotence matters because explicit daemon shutdown can be followed by deinit.
-    runtime.shutdown()
-  }
 
-  @Test func concurrentTerminalCreationCompletes() async throws {
-    let runtime = TerminalRuntime()
-    defer { runtime.shutdown() }
-    let ids = try await withThrowingTaskGroup(of: TerminalID.self) { group in
-      for _ in 0..<8 {
-        group.addTask {
-          try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
+    private func output(
+      from attachment: TerminalAttachment,
+      until marker: String
+    ) async throws -> (String, UInt64) {
+      var text = ""
+      var cursor: UInt64 = 0
+      for try await event in attachment.events {
+        switch event {
+        case .output(let output):
+          text += String(decoding: output.data, as: UTF8.self)
+          cursor = output.endCursor
+          if text.contains(marker) { return (text, cursor) }
+        case .exit(let status):
+          throw RuntimeTestError.exitedBeforeMarker(status)
         }
       }
-      return try await group.reduce(into: []) { $0.append($1) }
+      throw RuntimeTestError.streamEndedBeforeMarker
     }
-    #expect(ids.count == 8)
-  }
 
-  @Test func localCallbackCanReenterRuntimeWithoutDeadlocking() throws {
-    let client = makeClient()
-    let id = try client.createSynchronously(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    defer { client.closeSynchronously(id) }
-    let reentryState = Atomic<UInt8>(0)
-    let attachment = try client.attachSynchronously(to: id) { event in
-      guard case .output = event else { return }
-      if reentryState.compareExchange(expected: 0, desired: 1, ordering: .relaxed).exchanged {
-        try? client.writeSynchronously("echo reentered\n", to: id)
-        reentryState.store(2, ordering: .relaxed)
+    @Test func shutdownClosesEveryOwnedTerminal() throws {
+      let runtime = TerminalRuntime()
+      let first = try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
+      let second = try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
+
+      runtime.shutdown()
+
+      #expect(throws: TerminalRuntimeError.terminalNotFound(first)) {
+        try runtime.write("ignored", to: first)
+      }
+      #expect(throws: TerminalRuntimeError.terminalNotFound(second)) {
+        try runtime.write("ignored", to: second)
+      }
+      // Idempotence matters because explicit daemon shutdown can be followed by deinit.
+      runtime.shutdown()
+    }
+
+    @Test func concurrentTerminalCreationCompletes() async throws {
+      let runtime = TerminalRuntime()
+      defer { runtime.shutdown() }
+      let ids = try await withThrowingTaskGroup(of: TerminalID.self) { group in
+        for _ in 0..<8 {
+          group.addTask {
+            try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
+          }
+        }
+        return try await group.reduce(into: []) { $0.append($1) }
+      }
+      #expect(ids.count == 8)
+    }
+
+    @Test func localCallbackCanReenterRuntimeWithoutDeadlocking() throws {
+      let client = makeClient()
+      let id = try client.createSynchronously(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      defer { client.closeSynchronously(id) }
+      let reentryState = Atomic<UInt8>(0)
+      let attachment = try client.attachSynchronously(to: id) { event in
+        guard case .output = event else { return }
+        if reentryState.compareExchange(expected: 0, desired: 1, ordering: .relaxed).exchanged {
+          try? client.writeSynchronously("echo reentered\n", to: id)
+          reentryState.store(2, ordering: .relaxed)
+        }
+      }
+      defer { client.runtime.detachLocal(attachment.id, from: attachment.terminalID) }
+
+      try client.writeSynchronously("echo initial\n", to: id)
+      let deadline = ContinuousClock.now + .seconds(1)
+      while reentryState.load(ordering: .relaxed) != 2, ContinuousClock.now < deadline {
+        Thread.sleep(forTimeInterval: 0.001)
+      }
+      #expect(reentryState.load(ordering: .relaxed) == 2)
+    }
+
+    @Test func outputAndInputFlowThroughInProcessClient() async throws {
+      let client = makeClient()
+      let id = try await client.createTerminal(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      defer { Task { await client.close(id) } }
+      let attachment = try await client.attach(to: id, after: nil)
+
+      try await client.write("echo runtime-$((6*7))\n", to: id)
+      let (text, _) = try await output(from: attachment, until: "runtime-42")
+
+      #expect(text.contains("runtime-42"))
+    }
+
+    @Test func resizeChangesPTYWindowSize() async throws {
+      let client = makeClient()
+      let id = try await client.createTerminal(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      defer { Task { await client.close(id) } }
+      let attachment = try await client.attach(to: id, after: nil)
+
+      try await client.resize(id, to: TerminalSize(columns: 101, rows: 37))
+      try await client.write("stty size; echo resize-$((6*7))\n", to: id)
+      let (text, _) = try await output(from: attachment, until: "resize-42")
+
+      #expect(text.contains("37 101"))
+    }
+
+    @Test func exitIsDeliveredAfterFinalOutputAndFinishesAttachment() async throws {
+      let client = makeClient(attachmentBytes: 1024 * 1024)
+      let id = try await client.createTerminal(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      let attachment = try await client.attach(to: id, after: nil)
+
+      let payload = String(repeating: "terminal-final-output-", count: 2_000)
+      try await client.write(
+        "i=0; while [ $i -lt 2000 ]; do printf terminal-final-output-; i=$((i+1)); done; exit 7\n",
+        to: id)
+      var received = Data()
+      var exitStatus: Int32?
+      var receivedOutputAfterExit = false
+      for try await event in attachment.events {
+        switch event {
+        case .output(let output):
+          if exitStatus != nil { receivedOutputAfterExit = true }
+          received.append(output.data)
+        case .exit(let status):
+          exitStatus = status
+        }
+      }
+
+      #expect(String(decoding: received, as: UTF8.self).contains(payload))
+      #expect(!receivedOutputAfterExit)
+      #expect(exitStatus.map { ($0 >> 8) & 0xff } == 7)
+
+      let status = try #require(exitStatus)
+      let expectedError = TerminalRuntimeError.terminalExited(id, status: status)
+      await #expect(throws: expectedError) {
+        try await client.write("ignored", to: id)
+      }
+      await #expect(throws: expectedError) {
+        try await client.resize(id, to: TerminalSize(columns: 90, rows: 30))
       }
     }
-    defer { client.runtime.detachLocal(attachment.id, from: attachment.terminalID) }
 
-    try client.writeSynchronously("echo initial\n", to: id)
-    let deadline = ContinuousClock.now + .seconds(1)
-    while reentryState.load(ordering: .relaxed) != 2, ContinuousClock.now < deadline {
-      Thread.sleep(forTimeInterval: 0.001)
+    @Test func exitedTerminalReplayIncludesOutputAndExit() async throws {
+      let client = makeClient(attachmentBytes: 64 * 1024)
+      let id = try client.createSynchronously(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      defer { client.closeSynchronously(id) }
+      let exitStatus = Atomic<Int32>(Int32.min)
+      let live = try client.attachSynchronously(to: id) { event in
+        if case .exit(let status) = event { exitStatus.store(status, ordering: .relaxed) }
+      }
+
+      try client.writeSynchronously("printf 'small-buffer-replay\\n'; exit 3\n", to: id)
+      let deadline = ContinuousClock.now + .seconds(1)
+      while exitStatus.load(ordering: .relaxed) == Int32.min, ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(1))
+      }
+      live.detach()
+      let expectedStatus = exitStatus.load(ordering: .relaxed)
+      #expect(expectedStatus != Int32.min)
+
+      let replay = try await client.attach(to: id, after: 0)
+      var replayed = Data()
+      var replayExitStatus: Int32?
+      for try await event in replay.events {
+        switch event {
+        case .output(let output):
+          replayed.append(output.data)
+        case .exit(let status):
+          replayExitStatus = status
+        }
+      }
+
+      #expect(String(decoding: replayed, as: UTF8.self).contains("small-buffer-replay"))
+      #expect(replayExitStatus == expectedStatus)
     }
-    #expect(reentryState.load(ordering: .relaxed) == 2)
-  }
 
-  @Test func outputAndInputFlowThroughInProcessClient() async throws {
-    let client = makeClient()
-    let id = try await client.createTerminal(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    defer { Task { await client.close(id) } }
-    let attachment = try await client.attach(to: id, after: nil)
+    @Test func attachReplaysFromByteCursor() async throws {
+      let client = makeClient()
+      let id = try await client.createTerminal(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      defer { Task { await client.close(id) } }
+      let first = try await client.attach(to: id, after: nil)
 
-    try await client.write("echo runtime-$((6*7))\n", to: id)
-    let (text, _) = try await output(from: attachment, until: "runtime-42")
+      try await client.write("printf 'alpha-beta-replay\\n'\n", to: id)
+      let (_, endCursor) = try await output(from: first, until: "alpha-beta-replay")
+      await first.detach()
 
-    #expect(text.contains("runtime-42"))
-  }
+      let replay = try await client.attach(to: id, after: endCursor - 6)
+      var iterator = replay.events.makeAsyncIterator()
+      let event = try await iterator.next()
+      guard case .output(let output)? = event else {
+        Issue.record("Expected replay output")
+        return
+      }
+      #expect(output.cursor == endCursor - 6)
+      #expect(output.endCursor >= endCursor)
+    }
 
-  @Test func resizeChangesPTYWindowSize() async throws {
-    let client = makeClient()
-    let id = try await client.createTerminal(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    defer { Task { await client.close(id) } }
-    let attachment = try await client.attach(to: id, after: nil)
+    @Test func replayIsBoundedAndRejectsExpiredCursor() async throws {
+      let client = makeClient(replayBytes: 32)
+      let id = try await client.createTerminal(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      defer { Task { await client.close(id) } }
+      let first = try await client.attach(to: id, after: nil)
 
-    try await client.resize(id, to: TerminalSize(columns: 101, rows: 37))
-    try await client.write("stty size; echo resize-$((6*7))\n", to: id)
-    let (text, _) = try await output(from: attachment, until: "resize-42")
+      try await client.write("printf 'abcdefghijklmnopqrstuvwxyz-BOUNDARY\\n'\n", to: id)
+      _ = try await output(from: first, until: "BOUNDARY")
+      await first.detach()
 
-    #expect(text.contains("37 101"))
-  }
-
-  @Test func exitIsDeliveredAfterFinalOutputAndFinishesAttachment() async throws {
-    let client = makeClient(attachmentBytes: 1024 * 1024)
-    let id = try await client.createTerminal(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    let attachment = try await client.attach(to: id, after: nil)
-
-    let payload = String(repeating: "terminal-final-output-", count: 2_000)
-    try await client.write(
-      "i=0; while [ $i -lt 2000 ]; do printf terminal-final-output-; i=$((i+1)); done; exit 7\n",
-      to: id)
-    var received = Data()
-    var exitStatus: Int32?
-    var receivedOutputAfterExit = false
-    for try await event in attachment.events {
-      switch event {
-      case .output(let output):
-        if exitStatus != nil { receivedOutputAfterExit = true }
-        received.append(output.data)
-      case .exit(let status):
-        exitStatus = status
+      await #expect(throws: TerminalRuntimeError.self) {
+        _ = try await client.attach(to: id, after: 0)
       }
     }
 
-    #expect(String(decoding: received, as: UTF8.self).contains(payload))
-    #expect(!receivedOutputAfterExit)
-    #expect(exitStatus.map { ($0 >> 8) & 0xff } == 7)
+    @Test func slowConsumerIsDisconnectedWithoutBlockingOthers() async throws {
+      let client = makeClient(attachmentBytes: 8 * 1024)
+      let id = try await client.createTerminal(
+        configuration: TerminalConfiguration(shell: "/bin/sh"))
+      defer { Task { await client.close(id) } }
+      let slow = try await client.attach(to: id, after: nil)
+      let fast = try await client.attach(to: id, after: nil)
 
-    let status = try #require(exitStatus)
-    let expectedError = TerminalRuntimeError.terminalExited(id, status: status)
-    await #expect(throws: expectedError) {
-      try await client.write("ignored", to: id)
-    }
-    await #expect(throws: expectedError) {
-      try await client.resize(id, to: TerminalSize(columns: 90, rows: 30))
-    }
-  }
-
-  @Test func exitedTerminalReplayIncludesOutputAndExit() async throws {
-    let client = makeClient(attachmentBytes: 64 * 1024)
-    let id = try client.createSynchronously(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    defer { client.closeSynchronously(id) }
-    let exitStatus = Atomic<Int32>(Int32.min)
-    let live = try client.attachSynchronously(to: id) { event in
-      if case .exit(let status) = event { exitStatus.store(status, ordering: .relaxed) }
-    }
-
-    try client.writeSynchronously("printf 'small-buffer-replay\\n'; exit 3\n", to: id)
-    let deadline = ContinuousClock.now + .seconds(1)
-    while exitStatus.load(ordering: .relaxed) == Int32.min, ContinuousClock.now < deadline {
-      try await Task.sleep(for: .milliseconds(1))
-    }
-    live.detach()
-    let expectedStatus = exitStatus.load(ordering: .relaxed)
-    #expect(expectedStatus != Int32.min)
-
-    let replay = try await client.attach(to: id, after: 0)
-    var replayed = Data()
-    var replayExitStatus: Int32?
-    for try await event in replay.events {
-      switch event {
-      case .output(let output):
-        replayed.append(output.data)
-      case .exit(let status):
-        replayExitStatus = status
+      let fastTask = Task { try await output(from: fast, until: "slow-consumer-finished") }
+      for index in 0..<160 {
+        try await client.write(
+          "echo chunk-\(index)-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", to: id)
       }
+      try await client.write("echo slow-consumer-finished\n", to: id)
+      let (fastText, _) = try await fastTask.value
+      #expect(fastText.contains("slow-consumer-finished"))
+
+      var sawSlowConsumer = false
+      do {
+        for try await _ in slow.events {}
+      } catch TerminalRuntimeError.slowConsumer {
+        sawSlowConsumer = true
+      }
+      #expect(sawSlowConsumer)
     }
 
-    #expect(String(decoding: replayed, as: UTF8.self).contains("small-buffer-replay"))
-    #expect(replayExitStatus == expectedStatus)
-  }
-
-  @Test func attachReplaysFromByteCursor() async throws {
-    let client = makeClient()
-    let id = try await client.createTerminal(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    defer { Task { await client.close(id) } }
-    let first = try await client.attach(to: id, after: nil)
-
-    try await client.write("printf 'alpha-beta-replay\\n'\n", to: id)
-    let (_, endCursor) = try await output(from: first, until: "alpha-beta-replay")
-    await first.detach()
-
-    let replay = try await client.attach(to: id, after: endCursor - 6)
-    var iterator = replay.events.makeAsyncIterator()
-    let event = try await iterator.next()
-    guard case .output(let output)? = event else {
-      Issue.record("Expected replay output")
-      return
-    }
-    #expect(output.cursor == endCursor - 6)
-    #expect(output.endCursor >= endCursor)
-  }
-
-  @Test func replayIsBoundedAndRejectsExpiredCursor() async throws {
-    let client = makeClient(replayBytes: 32)
-    let id = try await client.createTerminal(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    defer { Task { await client.close(id) } }
-    let first = try await client.attach(to: id, after: nil)
-
-    try await client.write("printf 'abcdefghijklmnopqrstuvwxyz-BOUNDARY\\n'\n", to: id)
-    _ = try await output(from: first, until: "BOUNDARY")
-    await first.detach()
-
-    await #expect(throws: TerminalRuntimeError.self) {
-      _ = try await client.attach(to: id, after: 0)
+    private enum RuntimeTestError: Error {
+      case exitedBeforeMarker(Int32)
+      case streamEndedBeforeMarker
     }
   }
-
-  @Test func slowConsumerIsDisconnectedWithoutBlockingOthers() async throws {
-    let client = makeClient(attachmentBytes: 8 * 1024)
-    let id = try await client.createTerminal(
-      configuration: TerminalConfiguration(shell: "/bin/sh"))
-    defer { Task { await client.close(id) } }
-    let slow = try await client.attach(to: id, after: nil)
-    let fast = try await client.attach(to: id, after: nil)
-
-    let fastTask = Task { try await output(from: fast, until: "slow-consumer-finished") }
-    for index in 0..<160 {
-      try await client.write("echo chunk-\(index)-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", to: id)
-    }
-    try await client.write("echo slow-consumer-finished\n", to: id)
-    let (fastText, _) = try await fastTask.value
-    #expect(fastText.contains("slow-consumer-finished"))
-
-    var sawSlowConsumer = false
-    do {
-      for try await _ in slow.events {}
-    } catch TerminalRuntimeError.slowConsumer {
-      sawSlowConsumer = true
-    }
-    #expect(sawSlowConsumer)
-  }
-
-  private enum RuntimeTestError: Error {
-    case exitedBeforeMarker(Int32)
-    case streamEndedBeforeMarker
-  }
-}
 }
 #endif

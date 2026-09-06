@@ -1339,7 +1339,8 @@ struct AgentLoopTests {
       ScriptedTransport.Response(
         status: 200,
         chunks: [
-          sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"}}]}"#)
+          sseChunk(
+            #"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"}}]}"#)
         ],
         streamError: URLError(.networkConnectionLost)),
       ScriptedTransport.Response(

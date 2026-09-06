@@ -1,5 +1,6 @@
-@testable import ScribeComputerUse
 import Testing
+
+@testable import ScribeComputerUse
 
 @Suite
 struct ComputerUseAlgorithmsTests {
@@ -14,10 +15,12 @@ struct ComputerUseAlgorithmsTests {
   }
 
   @Test func traversalIsDepthFirstPreorderAndPreservesDepth() {
-    let root = Node("root", [
-      Node("toolbar", [Node("back"), Node("address")]),
-      Node("content", [Node("filter", [Node("price")])]),
-    ])
+    let root = Node(
+      "root",
+      [
+        Node("toolbar", [Node("back"), Node("address")]),
+        Node("content", [Node("filter", [Node("price")])]),
+      ])
 
     let result = depthFirstPreorder(
       root: root, maxDepth: 12, maxCount: 600, maxChildren: 200,

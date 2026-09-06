@@ -26,23 +26,23 @@ struct GhosttyVtPresencePlugin: BuildToolPlugin {
     let outputDirectory = context.pluginWorkDirectoryURL.appendingPathComponent("preflight")
     let quoted = required.map(Self.shellQuote).joined(separator: " ")
     let script = """
-    missing=""
-    for path in \(quoted); do
-      if [ ! -f "$path" ]; then
-        missing="$missing\\n  - $path"
+      missing=""
+      for path in \(quoted); do
+        if [ ! -f "$path" ]; then
+          missing="$missing\\n  - $path"
+        fi
+      done
+      if [ -n "$missing" ]; then
+        printf >&2 'error: Missing generated libghostty-vt artifacts:%b\\n\\n' "$missing"
+        printf >&2 'Initialize the pinned Ghostty source and build the library once:\n'
+        printf >&2 '  git submodule update --init --recursive\n'
+        printf >&2 '  swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt\n\\n'
+        printf >&2 'Run the same refresh command whenever the Ghostty submodule is updated.\n'
+        exit 1
       fi
-    done
-    if [ -n "$missing" ]; then
-      printf >&2 'error: Missing generated libghostty-vt artifacts:%b\\n\\n' "$missing"
-      printf >&2 'Initialize the pinned Ghostty source and build the library once:\n'
-      printf >&2 '  git submodule update --init --recursive\n'
-      printf >&2 '  swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt\n\\n'
-      printf >&2 'Run the same refresh command whenever the Ghostty submodule is updated.\n'
-      exit 1
-    fi
-    mkdir -p "$0"
-    touch "$0/present"
-    """
+      mkdir -p "$0"
+      touch "$0/present"
+      """
 
     return [
       .prebuildCommand(

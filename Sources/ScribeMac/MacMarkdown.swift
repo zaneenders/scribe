@@ -285,9 +285,11 @@ func layoutMarkdown(
 
     switch block {
     case .paragraph(let text):
-      wrapRuns(inlineRuns(text), colorFor: { run in
-        run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
-      }, kind: .plain)
+      wrapRuns(
+        inlineRuns(text),
+        colorFor: { run in
+          run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+        }, kind: .plain)
     case .heading(let level, let text):
       let prefix = String(repeating: "#", count: level) + " "
       wrapRuns(
@@ -297,16 +299,20 @@ func layoutMarkdown(
       let indentation = String(repeating: "  ", count: min(depth, 4))
       var runs = [MDRun(text: indentation + marker + " ")]
       runs.append(contentsOf: inlineRuns(text))
-      wrapRuns(runs, colorFor: { run in
-        if run.text == indentation + marker + " " { return theme.orange }
-        return run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
-      }, kind: .plain)
+      wrapRuns(
+        runs,
+        colorFor: { run in
+          if run.text == indentation + marker + " " { return theme.orange }
+          return run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+        }, kind: .plain)
     case .quote(let text):
       var runs = [MDRun(text: "| ")]
       runs.append(contentsOf: inlineRuns(text))
-      wrapRuns(runs, colorFor: { run in
-        run.text == "| " ? theme.green : run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
-      }, kind: .plain)
+      wrapRuns(
+        runs,
+        colorFor: { run in
+          run.text == "| " ? theme.green : run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+        }, kind: .plain)
     case .code(_, let code):
       let codeLines = code.split(separator: "\n", omittingEmptySubsequences: false)
       if codeLines.isEmpty {
@@ -560,7 +566,8 @@ struct MarkdownLayout {
           color: theme.codeBackground)
       }
       if let sel {
-        let sl = sel.start.line, el = sel.end.line
+        let sl = sel.start.line
+        let el = sel.end.line
         if index >= sl && index <= el {
           let sc = (index == sl) ? sel.start.column : 0
           let ec = (index == el) ? sel.end.column : line.columnCount
@@ -765,10 +772,11 @@ final class SelectionManager {
   /// Call at the start of each frame to update selection from drag state.
   func updateFromDrag(context: RenderContext) {
     let isReleaseFrame = context.input.pointerReleased && context.pointerDragOrigin != nil
-    guard shouldProcessSelectionDrag(
-      isDragging: context.isPointerDragging,
-      pointerReleased: context.input.pointerReleased,
-      hasDragOrigin: context.pointerDragOrigin != nil),
+    guard
+      shouldProcessSelectionDrag(
+        isDragging: context.isPointerDragging,
+        pointerReleased: context.input.pointerReleased,
+        hasDragOrigin: context.pointerDragOrigin != nil),
       let origin = context.pointerDragOrigin
     else {
       return
@@ -853,10 +861,11 @@ final class SelectionManager {
       selectionEndGlyphOffset = entry.layout.glyphCount
       return
     } else {
-      entry = entries.min {
-        verticalDistance(from: current.y, to: $0.layout.rect)
-          < verticalDistance(from: current.y, to: $1.layout.rect)
-      } ?? entries[0]
+      entry =
+        entries.min {
+          verticalDistance(from: current.y, to: $0.layout.rect)
+            < verticalDistance(from: current.y, to: $1.layout.rect)
+        } ?? entries[0]
     }
 
     endLayoutID = entry.id
@@ -883,10 +892,12 @@ final class SelectionManager {
     guard let originID = originLayoutID, let endID = endLayoutID,
       let selectionStart, let selectionEnd
     else { return nil }
-    let resolvedStart = id == originID
+    let resolvedStart =
+      id == originID
       ? layout.position(atGlyphOffset: selectionStartGlyphOffset ?? layout.glyphOffset(at: selectionStart))
       : selectionStart
-    let resolvedEnd = id == endID
+    let resolvedEnd =
+      id == endID
       ? layout.position(atGlyphOffset: selectionEndGlyphOffset ?? layout.glyphOffset(at: selectionEnd))
       : selectionEnd
 
@@ -954,7 +965,8 @@ final class SelectionManager {
       let columns = max(
         1, Int((anchor.layout.rect.size.width / anchor.layout.cellWidth).rounded(.down)))
       let entries = document.map { entry in
-        let layout = MarkdownLayoutRegistry.layout(for: entry.id)
+        let layout =
+          MarkdownLayoutRegistry.layout(for: entry.id)
           ?? entry.layout(columns: columns, matching: anchor.layout)
         return (id: entry.id, layout: layout)
       }

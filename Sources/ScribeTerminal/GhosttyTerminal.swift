@@ -1,6 +1,7 @@
 import Chroma
 import Foundation
 import GhosttyVt
+
 #if canImport(AppKit)
 import AppKit
 #endif

@@ -32,7 +32,8 @@ struct GhosttyVtRefreshPlugin: CommandPlugin {
     if fileManager.fileExists(atPath: work.path) { try fileManager.removeItem(at: work) }
     try fileManager.createDirectory(at: work, withIntermediateDirectories: true)
 
-    let source = options.source.map { URL(fileURLWithPath: $0).standardizedFileURL }
+    let source =
+      options.source.map { URL(fileURLWithPath: $0).standardizedFileURL }
       ?? package.appendingPathComponent("Vendor/GhosttySource", isDirectory: true)
     guard fileManager.fileExists(atPath: source.appendingPathComponent("build.zig").path) else {
       throw RefreshError.invalidSource(
@@ -42,8 +43,8 @@ struct GhosttyVtRefreshPlugin: CommandPlugin {
     let sourceRevision = Self.gitRevision(at: source) ?? "local-source"
     if sourceRevision != revision {
       Diagnostics.warning(
-        "Ghostty checkout is at \(sourceRevision), while the reviewed revision is \(revision). " +
-          "Review C API and license changes before committing the result.")
+        "Ghostty checkout is at \(sourceRevision), while the reviewed revision is \(revision). "
+          + "Review C API and license changes before committing the result.")
     }
     let outputLibrary: URL
     let platform: String
@@ -128,20 +129,21 @@ struct GhosttyVtRefreshPlugin: CommandPlugin {
     } else {
       throw RefreshError.missingTool("shasum or sha256sum")
     }
-    let checksum = try Self.capture(checksumTool.0, checksumTool.1)
+    let checksum =
+      try Self.capture(checksumTool.0, checksumTool.1)
       .split(separator: " ").first.map(String.init) ?? "unknown"
     let provenance = """
-    # Generated libghostty-vt provenance
+      # Generated libghostty-vt provenance
 
-    repository: \(repository)
-    revision: \(sourceRevision)
-    zig: \(installedZig)
-    optimize: ReleaseFast
-    platform: \(platform)
-    library: \(destinationLibrary.path.replacingOccurrences(of: package.path + "/", with: ""))
-    sha256: \(checksum)
+      repository: \(repository)
+      revision: \(sourceRevision)
+      zig: \(installedZig)
+      optimize: ReleaseFast
+      platform: \(platform)
+      library: \(destinationLibrary.path.replacingOccurrences(of: package.path + "/", with: ""))
+      sha256: \(checksum)
 
-    """
+      """
     try provenance.write(
       to: vendor.appendingPathComponent("PROVENANCE.md"), atomically: true, encoding: .utf8)
     Diagnostics.remark("Updated \(destinationLibrary.path)")
@@ -241,8 +243,9 @@ struct GhosttyVtRefreshPlugin: CommandPlugin {
   private static func copyTree(from source: URL, to destination: URL) throws {
     let fileManager = FileManager.default
     try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
-    guard let enumerator = fileManager.enumerator(
-      at: source, includingPropertiesForKeys: [.isDirectoryKey])
+    guard
+      let enumerator = fileManager.enumerator(
+        at: source, includingPropertiesForKeys: [.isDirectoryKey])
     else { throw RefreshError.invalidSource(source.path) }
     while let item = enumerator.nextObject() as? URL {
       let relative = item.path.replacingOccurrences(of: source.path + "/", with: "")
@@ -298,13 +301,17 @@ private struct Version: Comparable, CustomStringConvertible {
   let patch: Int
 
   init(_ major: Int, _ minor: Int, _ patch: Int) {
-    self.major = major; self.minor = minor; self.patch = patch
+    self.major = major
+    self.minor = minor
+    self.patch = patch
   }
 
   init(_ string: String) throws {
     let parts = string.split(separator: ".").prefix(3).compactMap { Int($0) }
     guard parts.count >= 2 else { throw RefreshError.invalidZigVersion(string) }
-    major = parts[0]; minor = parts[1]; patch = parts.count > 2 ? parts[2] : 0
+    major = parts[0]
+    minor = parts[1]
+    patch = parts.count > 2 ? parts[2] : 0
   }
 
   var description: String { "\(major).\(minor).\(patch)" }
