@@ -237,20 +237,11 @@ struct TerminalRuntimeTests {
     let id = try client.createSynchronously(
       configuration: TerminalConfiguration(shell: "/bin/sh"))
     defer { client.closeSynchronously(id) }
-    let exitStatus = Atomic<Int32>(Int32.min)
-    let live = try client.attachSynchronously(to: id) { event in
-      if case .exit(let status) = event { exitStatus.store(status, ordering: .relaxed) }
-    }
-
     try client.writeSynchronously("printf 'small-buffer-replay\\n'; exit 3\n", to: id)
-    let deadline = ContinuousClock.now + .seconds(1)
-    while exitStatus.load(ordering: .relaxed) == Int32.min, ContinuousClock.now < deadline {
-      try await Task.sleep(for: .milliseconds(1))
-    }
-    live.detach()
-    let expectedStatus = exitStatus.load(ordering: .relaxed)
-    #expect(expectedStatus != Int32.min)
 
+    // Attaching immediately also covers the transition from a running session to
+    // an exited one. Do not use a wall-clock deadline here: macOS CI can starve
+    // the PTY's utility-QoS wait queue while the rest of the test suite runs.
     let replay = try await client.attach(to: id, after: 0)
     var replayed = Data()
     var replayExitStatus: Int32?
@@ -264,7 +255,7 @@ struct TerminalRuntimeTests {
     }
 
     #expect(String(decoding: replayed, as: UTF8.self).contains("small-buffer-replay"))
-    #expect(replayExitStatus == expectedStatus)
+    #expect(replayExitStatus.map { ($0 >> 8) & 0xff } == 3)
   }
 
   @Test func attachReplaysFromByteCursor() async throws {
