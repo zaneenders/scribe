@@ -42,6 +42,7 @@ public final class PTYSession: Sendable {
     var isDeliveringOutput = false
     var pendingExitStatus: Int32?
     var masterFD: Int32
+    var controlFD: Int32
     var readTask: Task<Void, Never>?
     var isClosing = false
     var readEnded = false
@@ -56,10 +57,14 @@ public final class PTYSession: Sendable {
 
   private let state: Mutex<State>
   private let descriptorLock = NSLock()
+  private let exitGroup = DispatchGroup()
   // A PTY is one byte stream. Keep each logical write contiguous even when
   // callers (and, eventually, daemon clients) submit input concurrently.
   private let writeLock = NSLock()
-  private let childPID: pid_t
+  // The supervisor is our direct child and is always reaped. The terminal
+  // leader owns an isolated process group containing the shell and descendants.
+  private let supervisorPID: pid_t
+  private let processGroupPID: pid_t
 
   public var onOutput: (@Sendable (Data) -> Void)? {
     get { state.withLock { $0.outputHandler } }
@@ -96,7 +101,9 @@ public final class PTYSession: Sendable {
     environment.removeValue(forKey: "SWIFTLY_PROXY_IN_PROGRESS")
 
     var master: Int32 = -1
-    var pid: pid_t = -1
+    var supervisor: pid_t = -1
+    var processGroup: pid_t = -1
+    var control: Int32 = -1
     let arguments = [shell, "-l"]
     let result = Self.withCStringArray(arguments) { argv in
       Self.withCStringArray(environment.map { "\($0.key)=\($0.value)" }) { envp in
@@ -110,7 +117,9 @@ public final class PTYSession: Sendable {
               Int32(columns),
               Int32(rows),
               &master,
-              &pid
+              &supervisor,
+              &processGroup,
+              &control
             )
           }
         }
@@ -119,20 +128,27 @@ public final class PTYSession: Sendable {
     guard result == 0 else { throw PTYSessionError.spawnFailed(result) }
     let nonblockingResult = scribe_set_nonblocking(master, 1)
     guard nonblockingResult == 0 else {
+      _ = systemClose(control)
       _ = systemClose(master)
-      _ = systemKill(pid, SIGHUP)
       var status: Int32 = 0
-      while waitpid(pid, &status, 0) == -1, errno == EINTR {}
+      while waitpid(supervisor, &status, 0) == -1, errno == EINTR {}
       throw PTYSessionError.operationFailed(nonblockingResult)
     }
 
-    childPID = pid
-    state = Mutex(State(masterFD: master))
+    supervisorPID = supervisor
+    processGroupPID = processGroup
+    state = Mutex(State(masterFD: master, controlFD: control))
     startReading(fileDescriptor: master)
     startWaiting()
   }
 
-  deinit { close() }
+  deinit {
+    close()
+    // A process owner must not disappear before its direct child is reaped.
+    // The supervisor uses SIGKILL on control-pipe EOF, so this wait is bounded
+    // by scheduler latency and keeps zombies out of a long-lived daemon.
+    exitGroup.wait()
+  }
 
   public func write(_ string: String) throws {
     try write(Data(string.utf8))
@@ -203,16 +219,26 @@ public final class PTYSession: Sendable {
         state.readTask = nil
         let fd = state.masterFD
         state.masterFD = -1
+        let controlFD = state.controlFD
+        state.controlFD = -1
 
-        // Keep the transition and signal atomic with respect to the waiter.
-        // Before waitStatus is recorded, waitid(WNOWAIT) guarantees this PID is
-        // either the live child or its unreaped zombie; afterwards we do not signal.
-        if state.waitStatus == nil, childPID > 0 { _ = systemKill(childPID, SIGHUP) }
+        // Closing the control descriptor also triggers cleanup if the daemon
+        // crashes. Signal explicitly here for prompt graceful teardown; the
+        // supervisor escalates to SIGKILL and waits for the session leader.
+        if state.waitStatus == nil, processGroupPID > 2 {
+          _ = systemKill(-processGroupPID, SIGHUP)
+        }
+        if controlFD >= 0 {
+          var closeRequest: UInt8 = 1
+          while systemWrite(controlFD, &closeRequest, 1) == -1, errno == EINTR {}
+          _ = systemClose(controlFD)
+        }
         if fd >= 0 { _ = systemClose(fd) }
         return task
       }
     }
     task?.cancel()
+    exitGroup.wait()
     deliverExitIfReady()
   }
 
@@ -308,26 +334,26 @@ public final class PTYSession: Sendable {
   }
 
   private func startWaiting() {
-    let pid = childPID
-    DispatchQueue.global(qos: .utility).async { [weak self] in
-      // Observe exit without reaping first. While the child remains a zombie its
-      // PID cannot be reused, so close() can safely decide whether SIGHUP still
-      // targets this process while recording the transition under state.
-      let waitResult = scribe_wait_until_exited(pid)
-      guard waitResult == 0 else { return }
+    let pid = supervisorPID
+    exitGroup.enter()
+    DispatchQueue.global(qos: .utility).async { [weak self, exitGroup] in
       var status: Int32 = 0
-      guard let self else {
-        while waitpid(pid, &status, 0) == -1, errno == EINTR {}
-        return
-      }
-      let reaped = self.state.withLock { state -> Bool in
-        while waitpid(pid, &status, 0) == -1 {
-          if errno != EINTR { return false }
-        }
+      var result: pid_t
+      repeat {
+        result = waitpid(pid, &status, 0)
+      } while result == -1 && errno == EINTR
+      // Mark reaping complete before invoking user callbacks. An exit callback
+      // is allowed to reenter close(), which waits on this group.
+      exitGroup.leave()
+      guard result == pid, let self else { return }
+      self.state.withLock { state in
         state.waitStatus = status
-        return true
+        if state.controlFD >= 0 {
+          _ = systemClose(state.controlFD)
+          state.controlFD = -1
+        }
       }
-      if reaped { self.deliverExitIfReady() }
+      self.deliverExitIfReady()
     }
   }
 

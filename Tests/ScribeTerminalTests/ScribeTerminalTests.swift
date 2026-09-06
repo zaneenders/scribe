@@ -3,6 +3,14 @@ import ScribeTerminal
 import Synchronization
 import Testing
 
+#if canImport(Darwin)
+import Darwin
+private let testKill = Darwin.kill
+#elseif canImport(Glibc)
+import Glibc
+private let testKill = Glibc.kill
+#endif
+
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -65,6 +73,8 @@ struct GhosttyTerminalTests {
 }
 
 #if os(macOS) || os(Linux)
+@Suite("PTY integration", .serialized)
+struct PTYIntegrationTests {
 @Suite("PTYSession")
 struct PTYSessionTests {
   /// Accumulates PTY output from the read thread.
@@ -82,7 +92,9 @@ struct PTYSessionTests {
   }
 
   @Test func shellEchoesWrittenMarker() async throws {
-    let session = try PTYSession()
+    // Never use the user's login shell in an integration test: startup files and
+    // plugins can perform network or filesystem work and make this test unbounded.
+    let session = try PTYSession(shell: "/bin/sh")
     defer { session.close() }
 
     let buffer = OutputBuffer()
@@ -112,6 +124,31 @@ struct PTYSessionTests {
     #expect(throws: PTYSessionError.self) {
       try session.write("ignored\n")
     }
+  }
+
+  @Test func closeKillsShellDescendants() async throws {
+    let session = try PTYSession(shell: "/bin/sh")
+    let buffer = OutputBuffer()
+    session.onOutput = { buffer.append($0) }
+    try session.write("sleep 30 & echo descendant:$!\n")
+
+    let deadline = ContinuousClock.now + .seconds(3)
+    var descendant: pid_t?
+    while ContinuousClock.now < deadline, descendant == nil {
+      let text = buffer.text
+      if let range = text.range(of: #"descendant:(\d+)"#, options: .regularExpression) {
+        descendant = pid_t(text[range].dropFirst("descendant:".count))
+      }
+      if descendant == nil { try await Task.sleep(for: .milliseconds(10)) }
+    }
+    let pid = try #require(descendant)
+
+    session.close()
+    let exitDeadline = ContinuousClock.now + .seconds(3)
+    while testKill(pid, 0) == 0, ContinuousClock.now < exitDeadline {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(testKill(pid, 0) == -1 && errno == ESRCH)
   }
 }
 
@@ -143,6 +180,37 @@ struct TerminalRuntimeTests {
       }
     }
     throw RuntimeTestError.streamEndedBeforeMarker
+  }
+
+  @Test func shutdownClosesEveryOwnedTerminal() throws {
+    let runtime = TerminalRuntime()
+    let first = try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
+    let second = try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
+
+    runtime.shutdown()
+
+    #expect(throws: TerminalRuntimeError.terminalNotFound(first)) {
+      try runtime.write("ignored", to: first)
+    }
+    #expect(throws: TerminalRuntimeError.terminalNotFound(second)) {
+      try runtime.write("ignored", to: second)
+    }
+    // Idempotence matters because explicit daemon shutdown can be followed by deinit.
+    runtime.shutdown()
+  }
+
+  @Test func concurrentTerminalCreationCompletes() async throws {
+    let runtime = TerminalRuntime()
+    defer { runtime.shutdown() }
+    let ids = try await withThrowingTaskGroup(of: TerminalID.self) { group in
+      for _ in 0..<8 {
+        group.addTask {
+          try runtime.createTerminal(configuration: TerminalConfiguration(shell: "/bin/sh"))
+        }
+      }
+      return try await group.reduce(into: []) { $0.append($1) }
+    }
+    #expect(ids.count == 8)
   }
 
   @Test func localCallbackCanReenterRuntimeWithoutDeadlocking() throws {
@@ -314,9 +382,8 @@ struct TerminalRuntimeTests {
     let fast = try await client.attach(to: id, after: nil)
 
     let fastTask = Task { try await output(from: fast, until: "slow-consumer-finished") }
-    for index in 0..<500 {
-      try await client.write("echo chunk-\(index)\n", to: id)
-      try await Task.sleep(for: .milliseconds(5))
+    for index in 0..<160 {
+      try await client.write("echo chunk-\(index)-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", to: id)
     }
     try await client.write("echo slow-consumer-finished\n", to: id)
     let (fastText, _) = try await fastTask.value
@@ -335,5 +402,6 @@ struct TerminalRuntimeTests {
     case exitedBeforeMarker(Int32)
     case streamEndedBeforeMarker
   }
+}
 }
 #endif

@@ -260,6 +260,32 @@ public final class TerminalRuntime: Sendable {
     self.limits = limits
   }
 
+  deinit {
+    // Runtime destruction is the daemon-shutdown fallback. PTYSession's crash
+    // supervisor handles ungraceful process death; this path closes cleanly and
+    // waits for each direct child to be reaped as sessions are released.
+    shutdown()
+  }
+
+  /// Closes every terminal owned by this runtime. Safe to call repeatedly.
+  public func shutdown() {
+    let (owned, actions) = sessions.withLock { sessions -> ([Session], [AsyncAttachmentAction]) in
+      let owned = Array(sessions.values)
+      var actions: [AsyncAttachmentAction] = []
+      for session in owned {
+        actions.append(contentsOf: session.attachments.values.compactMap { finishAsyncAttachment($0) })
+        session.attachments.removeAll(keepingCapacity: false)
+        session.localAttachments.removeAll(keepingCapacity: false)
+      }
+      sessions.removeAll(keepingCapacity: false)
+      return (owned, actions)
+    }
+    resume(actions)
+    for session in owned {
+      if case .running(let pty) = session.lifecycle { pty.close() }
+    }
+  }
+
   public func createTerminal(configuration: TerminalConfiguration = TerminalConfiguration()) throws -> TerminalID {
     let pty = try PTYSession(
       shell: configuration.shell,
