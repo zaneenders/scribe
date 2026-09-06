@@ -43,6 +43,7 @@ public final class PTYSession: Sendable {
     var pendingExitStatus: Int32?
     var masterFD: Int32
     var controlFD: Int32
+    var statusFD: Int32
     var readTask: Task<Void, Never>?
     var isClosing = false
     var readEnded = false
@@ -104,6 +105,7 @@ public final class PTYSession: Sendable {
     var supervisor: pid_t = -1
     var processGroup: pid_t = -1
     var control: Int32 = -1
+    var statusFD: Int32 = -1
     let arguments = [shell, "-l"]
     let result = Self.withCStringArray(arguments) { argv in
       Self.withCStringArray(environment.map { "\($0.key)=\($0.value)" }) { envp in
@@ -119,7 +121,8 @@ public final class PTYSession: Sendable {
               &master,
               &supervisor,
               &processGroup,
-              &control
+              &control,
+              &statusFD
             )
           }
         }
@@ -129,6 +132,7 @@ public final class PTYSession: Sendable {
     let nonblockingResult = scribe_set_nonblocking(master, 1)
     guard nonblockingResult == 0 else {
       _ = systemClose(control)
+      _ = systemClose(statusFD)
       _ = systemClose(master)
       var status: Int32 = 0
       while waitpid(supervisor, &status, 0) == -1, errno == EINTR {}
@@ -137,7 +141,7 @@ public final class PTYSession: Sendable {
 
     supervisorPID = supervisor
     processGroupPID = processGroup
-    state = Mutex(State(masterFD: master, controlFD: control))
+    state = Mutex(State(masterFD: master, controlFD: control, statusFD: statusFD))
     startReading(fileDescriptor: master)
     startWaiting()
   }
@@ -228,11 +232,9 @@ public final class PTYSession: Sendable {
         if state.waitStatus == nil, processGroupPID > 2 {
           _ = systemKill(-processGroupPID, SIGHUP)
         }
-        if controlFD >= 0 {
-          var closeRequest: UInt8 = 1
-          while systemWrite(controlFD, &closeRequest, 1) == -1, errno == EINTR {}
-          _ = systemClose(controlFD)
-        }
+        // EOF is the close request. Avoid writing because the supervisor may
+        // already have closed its read end, which would raise process-fatal SIGPIPE.
+        if controlFD >= 0 { _ = systemClose(controlFD) }
         if fd >= 0 { _ = systemClose(fd) }
         return task
       }
@@ -335,19 +337,39 @@ public final class PTYSession: Sendable {
 
   private func startWaiting() {
     let pid = supervisorPID
+    let statusDescriptor = state.withLock { $0.statusFD }
     exitGroup.enter()
     DispatchQueue.global(qos: .utility).async { [weak self, exitGroup] in
-      var status: Int32 = 0
+      // The supervisor cannot encode a signal termination through its own exit
+      // code, so it sends the leader's unmodified waitpid status over this pipe.
+      var leaderStatus: Int32 = 0
+      var received = 0
+      withUnsafeMutableBytes(of: &leaderStatus) { bytes in
+        while received < bytes.count {
+          let count = systemRead(statusDescriptor, bytes.baseAddress!.advanced(by: received), bytes.count - received)
+          if count > 0 {
+            received += count
+          } else if count == -1 && errno == EINTR {
+            continue
+          } else {
+            break
+          }
+        }
+      }
+      _ = systemClose(statusDescriptor)
+
+      var supervisorStatus: Int32 = 0
       var result: pid_t
       repeat {
-        result = waitpid(pid, &status, 0)
+        result = waitpid(pid, &supervisorStatus, 0)
       } while result == -1 && errno == EINTR
       // Mark reaping complete before invoking user callbacks. An exit callback
       // is allowed to reenter close(), which waits on this group.
       exitGroup.leave()
-      guard result == pid, let self else { return }
+      guard result == pid, received == MemoryLayout<Int32>.size, let self else { return }
       self.state.withLock { state in
-        state.waitStatus = status
+        state.waitStatus = leaderStatus
+        state.statusFD = -1
         if state.controlFD >= 0 {
           _ = systemClose(state.controlFD)
           state.controlFD = -1

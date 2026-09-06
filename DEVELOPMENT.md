@@ -16,6 +16,23 @@ by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 [docc]: https://www.swift.org/documentation/docc/
 
+## Formatting
+
+Format all Swift files owned by this repository with:
+
+```bash
+./Scripts/swift-format.sh
+```
+
+Run the same checks without modifying files with:
+
+```bash
+./Scripts/swift-format.sh lint
+```
+
+The script intentionally excludes Swift sources in submodules, including
+`Vendor/GhosttySource`.
+
 ## Testing
 
 You can use the following commands to view current test coverage.

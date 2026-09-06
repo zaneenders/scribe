@@ -16,7 +16,8 @@ extern "C" {
 // supervisor_pid is the caller's direct child and must be waited for.
 // process_group_pid identifies the spawned terminal session and may be passed
 // to kill(2) as a negative PID. Closing control_fd requests unconditional
-// cleanup of that process group.
+// cleanup of that process group. status_fd yields the terminal leader's raw
+// waitpid(2) status before reaching EOF.
 int scribe_pty_spawn(
     const char *path,
     char *const argv[],
@@ -27,7 +28,8 @@ int scribe_pty_spawn(
     int *master_fd,
     pid_t *supervisor_pid,
     pid_t *process_group_pid,
-    int *control_fd);
+    int *control_fd,
+    int *status_fd);
 
 int scribe_pty_resize(int master_fd, int columns, int rows);
 

@@ -126,6 +126,33 @@ struct PTYIntegrationTests {
       }
     }
 
+    @Test func immediateCloseNeverWaitsForLeaderSetup() throws {
+      // Exercise the spawn/setsid/close boundary repeatedly. Spawn does not return
+      // until the leader has established its session and successfully exec'd.
+      for _ in 0..<50 {
+        let session = try PTYSession(shell: "/bin/sh")
+        let started = ContinuousClock.now
+        session.close()
+        #expect(started.duration(to: .now) < .seconds(1))
+      }
+    }
+
+    @Test func signalTerminationPreservesRawWaitStatus() async throws {
+      let session = try PTYSession(shell: "/bin/sh")
+      let status = Atomic<Int32>(Int32.min)
+      session.onOutput = { _ in }
+      session.onExit = { status.store($0, ordering: .relaxed) }
+      try session.write("kill -KILL $$\n")
+
+      let deadline = ContinuousClock.now + .seconds(3)
+      while status.load(ordering: .relaxed) == Int32.min, ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(10))
+      }
+      let rawStatus = status.load(ordering: .relaxed)
+      #expect(rawStatus != Int32.min)
+      #expect(rawStatus & 0x7f == SIGKILL)
+    }
+
     @Test func closeKillsShellDescendants() async throws {
       let session = try PTYSession(shell: "/bin/sh")
       let buffer = OutputBuffer()

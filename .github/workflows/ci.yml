@@ -38,6 +38,9 @@ jobs:
           git diff --check "$base_sha" "$GITHUB_SHA"
           git diff --name-only --diff-filter=ACMR "$base_sha" "$GITHUB_SHA" -- '*.swift' |
             while IFS= read -r swift_file; do
+              case "$swift_file" in
+                Vendor/GhosttySource/*) continue ;;
+              esac
               swift format lint --strict "$swift_file"
             done
 
