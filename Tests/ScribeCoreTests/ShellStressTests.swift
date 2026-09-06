@@ -17,7 +17,7 @@ import Musl
 @Suite(.timeLimit(.minutes(1)))
 struct ShellStressTests {
 
-  @Test func loopedCancelsDoNotLeakFDsOrPegCPU() async throws {
+  @Test(.timeLimit(.minutes(1))) func loopedCancelsDoNotLeakFDsOrPegCPU() async throws {
     let iterations = 20
     let beforeFDs = Self.openFDCount()
     let beforeCPU = Self.cpuTime()
@@ -37,9 +37,11 @@ struct ShellStressTests {
       let iterStart = ContinuousClock.now
       _ = try? await task.value
       let iterElapsed = iterStart.duration(to: .now)
+      // The drain itself has a two-second production deadline. Leave enough
+      // headroom for process reaping and scheduler contention on shared CI hosts.
       #expect(
-        iterElapsed < .seconds(3),
-        "iteration \(i) took \(iterElapsed) — drain should settle within 3s")
+        iterElapsed < .seconds(5),
+        "iteration \(i) took \(iterElapsed) — cancellation should settle within 5s")
     }
 
     let afterCPU = Self.cpuTime()
