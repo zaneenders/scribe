@@ -6,7 +6,7 @@ import Testing
 @testable import ScribeCLI
 @testable import ScribeKit
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct MarkdownToSlateAdapterTests {
 
   private let theme = MarkdownTheme.vibrant

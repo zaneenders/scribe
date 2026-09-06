@@ -5,7 +5,7 @@ import Testing
 
 @testable import ScribeLLM
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct BearerTokenMiddlewareTests {
 
   // MARK: - Token injection

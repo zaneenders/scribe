@@ -5,7 +5,7 @@ import Testing
 
 @testable import ScribeLLMCodex
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct CodexAuthMiddlewareTests {
 
   // MARK: - Token injection

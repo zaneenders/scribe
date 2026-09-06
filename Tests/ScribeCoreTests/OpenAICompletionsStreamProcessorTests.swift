@@ -27,7 +27,7 @@ private func driveProcessor(
 
 // MARK: - Terminal Event Finalization
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct OpenAICompletionsStreamProcessorTests {
 
   @Test("emits finalized on content delta")

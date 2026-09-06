@@ -14,7 +14,7 @@ import Glibc
 import Musl
 #endif
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ShellStressTests {
 
   @Test func loopedCancelsDoNotLeakFDsOrPegCPU() async throws {

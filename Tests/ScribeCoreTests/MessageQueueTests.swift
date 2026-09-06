@@ -2,7 +2,7 @@ import Foundation
 import ScribeCore
 import Testing
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct MessageQueueTests {
 
   @Test func enqueueRejectsBlankText() {

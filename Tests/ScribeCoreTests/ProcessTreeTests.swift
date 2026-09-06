@@ -33,7 +33,7 @@ private final class StubReader: ProcessTreeReader, @unchecked Sendable {
   }
 }
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ProcessTreeWalkerTests {
 
   @Test func leafRootReturnsRootOnly() {
@@ -97,7 +97,7 @@ struct ProcessTreeWalkerTests {
   }
 }
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ProcTreeKillerOrderTests {
   @Test func killOrderIsLeavesFirst() {
     let reader = StubReader(tree: [

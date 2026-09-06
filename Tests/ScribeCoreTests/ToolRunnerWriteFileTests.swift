@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ToolRunnerWriteFileTests {
   @Test func createsFileWithContent() async throws {
     let registry = ToolRegistry(

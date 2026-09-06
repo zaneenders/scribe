@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeKit
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct DirectoryPathCompletionTests {
   @Test func resolveAbsoluteDirectory() throws {
     let tmp = FileManager.default.temporaryDirectory.path

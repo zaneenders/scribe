@@ -5,7 +5,7 @@ import Testing
 @testable import ScribeKit
 
 @MainActor
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ProfilePickerControllerTests {
   private let profiles = [
     ProfileSummary(name: "first", model: "model-1", baseURL: "https://one.example"),

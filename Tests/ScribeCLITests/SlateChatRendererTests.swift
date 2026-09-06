@@ -4,7 +4,7 @@ import Testing
 @testable import ScribeCLI
 @testable import ScribeKit
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct SlateChatRendererBuildSemanticInputRowsTests {
 
   @Test func editModeShowsEDITLabelInUserPrefixColor() {
@@ -220,7 +220,7 @@ struct SlateChatRendererBuildSemanticInputRowsTests {
   }
 }
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct SlateChatRendererQueuedTrayTests {
 
   @Test func emptyMessagesReturnsNoVisualLines() {

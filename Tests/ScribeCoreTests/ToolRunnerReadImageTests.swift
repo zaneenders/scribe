@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ToolRunnerReadImageTests {
 
   @Test func readFileReturnsBase64ForImage() async throws {

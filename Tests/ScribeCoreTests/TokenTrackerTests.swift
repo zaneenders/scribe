@@ -3,7 +3,7 @@ import Logging
 import ScribeCore
 import Testing
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct TokenTrackerTests {
 
   @Test func accumulateSessionTotal() {

@@ -5,6 +5,7 @@ import Testing
 
 @testable import ScribeCore
 
+@Suite(.timeLimit(.minutes(1)))
 struct ToolResultCeilingTests {
   @Test func preservesResultsWithinGlobalCeiling() throws {
     let original = #"{"ok":true,"value":"small"}"#

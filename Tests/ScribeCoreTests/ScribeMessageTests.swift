@@ -3,7 +3,7 @@ import ScribeCore
 import ScribeLLM
 import Testing
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ScribeMessageTests {
 
   @Test func roundTripsUserMessage() throws {

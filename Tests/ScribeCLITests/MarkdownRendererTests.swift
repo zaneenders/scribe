@@ -41,7 +41,7 @@ private func renderedPlainText(_ markdown: String) -> String {
   plainLines(render(markdown)).joined(separator: "\n")
 }
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct MarkdownRendererTests {
 
   @Test func emptyString() {

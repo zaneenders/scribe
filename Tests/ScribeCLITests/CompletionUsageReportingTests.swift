@@ -5,6 +5,7 @@ import Testing
 @testable import ScribeCLI
 @testable import ScribeKit
 
+@Suite(.timeLimit(.minutes(1)))
 struct CompletionUsageReportingTests {
   @Test func groupingIntAddsThousandsSeparators() async throws {
     #expect(ScribeUsageFormatting.groupingInt(116975) == "116,975")

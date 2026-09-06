@@ -6,7 +6,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexUserMessageWithTextOnly() {
   let text = "Hello, how are you?"
   let msg = ScribeLLM.Components.Schemas.ChatMessage(
@@ -32,7 +32,7 @@ func codexUserMessageWithTextOnly() {
   #expect(resultText == text)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexUserMessageWithImageAndTextParts() {
   let imageURL =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -93,7 +93,7 @@ func codexUserMessageWithImageAndTextParts() {
   #expect(codexImage.detail == .auto)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
   // A valid 3x2 RGBA PNG: six pixels total.
   let pngBase64 =
@@ -142,7 +142,7 @@ func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
   }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexUserMessageWithImageOnly() {
   let imageURL =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -187,7 +187,7 @@ func codexUserMessageWithImageOnly() {
   #expect(codexImage.detail == .high)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexMessageConversionSanitizesForeignToolCallIDs() {
   // Regression: after switching models mid-session to the ChatGPT backend, the
   // history can carry tool call IDs from another provider ("tool_..."). The
@@ -227,7 +227,7 @@ func codexMessageConversionSanitizesForeignToolCallIDs() {
   #expect(output.callId == call.callId)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexMessageConversionPreservesSystemAndToolMessages() {
   let systemMsg = ScribeLLM.Components.Schemas.ChatMessage(
     role: .system,

@@ -11,7 +11,7 @@ private func budgetMessage(
   .init(role: role, content: .case1(text))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func requestBudgetAllowsSmallRequests() throws {
   var messages = [budgetMessage(role: .user, text: "hello")]
   var newMessages = messages
@@ -26,7 +26,7 @@ func requestBudgetAllowsSmallRequests() throws {
   #expect(messages.count == 1)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func requestBudgetSerializesOpenAPIToolParameters() throws {
   let tool = ShellTool.toChatTool(logger: Logger(label: "test.request-budget"))
 
@@ -39,7 +39,7 @@ func requestBudgetSerializesOpenAPIToolParameters() throws {
   #expect(estimate.toolDefinitionBytes > metadataBytes)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func requestBudgetRejectsOversizedUserContentBeforeHTTP() throws {
   var messages = [budgetMessage(role: .user, text: String(repeating: "x", count: 20_000))]
   var newMessages = messages
@@ -53,7 +53,7 @@ func requestBudgetRejectsOversizedUserContentBeforeHTTP() throws {
   }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func requestBudgetCompactsLargeToolResults() throws {
   let user = budgetMessage(role: .user, text: "continue")
   let tool = ScribeLLM.Components.Schemas.ChatMessage(
@@ -85,7 +85,7 @@ func requestBudgetCompactsLargeToolResults() throws {
   #expect(persistedCompaction.contains("local preflight estimate"))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func requestBudgetDoesNotChargeBase64AsText() throws {
   let image = ScribeMessage(
     role: .user,
@@ -104,7 +104,7 @@ func requestBudgetDoesNotChargeBase64AsText() throws {
   #expect(!estimate.exceedsLimit)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func requestBudgetDisabledWithoutKnownContextWindow() throws {
   var messages = [budgetMessage(role: .user, text: String(repeating: "x", count: 50_000))]
   var newMessages = messages

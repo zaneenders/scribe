@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeComputerUse
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ObservationFilteringTests {
   private let viewport = CGRect(x: 0, y: 0, width: 1_000, height: 800)
 

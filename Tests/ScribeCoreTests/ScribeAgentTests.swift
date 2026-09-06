@@ -46,7 +46,7 @@ private func consume(_ ts: TurnStream) async throws -> TurnResult {
 
 // MARK: -
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ScribeAgentTests {
 
   // MARK: - Input wiring

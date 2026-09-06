@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeCodexAuth
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct CodexCredentialsTests {
 
   // MARK: - File permissions

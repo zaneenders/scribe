@@ -18,7 +18,7 @@ private struct MockProcessTreeReader: ProcessTreeReader {
   }
 }
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ProcessKillerTests {
 
   // MARK: - collectProcessTree

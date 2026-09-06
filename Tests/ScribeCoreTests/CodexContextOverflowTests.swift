@@ -96,7 +96,7 @@ private func codexOverflowConfig(transport: CodexOverflowTransport) -> CodexAgen
     hooks: .default)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexContextOverflowDropsToolAttachmentAndRetries() async throws {
   let transport = CodexOverflowTransport(responseBodies: [
     codexToolCallResponse,
@@ -147,7 +147,7 @@ func codexContextOverflowDropsToolAttachmentAndRetries() async throws {
   #expect(retryBody.contains("exceeded model context window"))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexContextOverflowRecoveryRunsOnlyOnce() async throws {
   let transport = CodexOverflowTransport(responseBodies: [
     codexToolCallResponse,
@@ -172,7 +172,7 @@ func codexContextOverflowRecoveryRunsOnlyOnce() async throws {
   #expect(description.contains("context_length_exceeded"))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func contextLengthRecognitionIncludesCodexStreamErrors() {
   #expect(
     isContextLengthError(

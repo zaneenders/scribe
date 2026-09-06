@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeBlocks
 
-@Suite("Mac transcript selection")
+@Suite("Mac transcript selection", .timeLimit(.minutes(1)))
 struct MacSelectionTests {
   @Test("only an active drag or its release frame updates selection")
   func selectionDragStateTruthTable() {

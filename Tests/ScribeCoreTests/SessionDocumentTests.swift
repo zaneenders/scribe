@@ -4,7 +4,7 @@ import ScribeCore
 import SystemPackage
 import Testing
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct SessionDocumentTests {
 
   private static func makeDoc(

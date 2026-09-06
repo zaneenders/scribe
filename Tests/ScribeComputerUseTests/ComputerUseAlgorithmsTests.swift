@@ -2,7 +2,7 @@ import Testing
 
 @testable import ScribeComputerUse
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ComputerUseAlgorithmsTests {
   private struct Node: Sendable {
     let name: String

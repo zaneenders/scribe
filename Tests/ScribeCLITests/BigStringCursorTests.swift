@@ -4,7 +4,7 @@ import _RopeModule
 @testable import ScribeCLI
 @testable import ScribeKit
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct BigStringCursorTests {
 
   @Test func emptyBufferHasStartEqualToEnd() {

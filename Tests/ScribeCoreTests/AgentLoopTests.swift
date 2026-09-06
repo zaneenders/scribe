@@ -122,7 +122,7 @@ private func expectTermination(_ actual: TurnOutcome, _ expected: TurnOutcome) {
   }
 }
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct AgentLoopTests {
 
   @Test func completesWithAssistantReply() async throws {

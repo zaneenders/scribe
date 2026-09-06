@@ -6,7 +6,7 @@ import Testing
 @testable import ScribeCLI
 @testable import ScribeKit
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct CodexProfileUpsertTests {
 
   private func writeConfig(_ body: String, in root: URL) throws -> FilePath {

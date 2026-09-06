@@ -2,7 +2,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct SessionForkTests {
 
   private func sys(_ text: String = "sys") -> ScribeMessage {

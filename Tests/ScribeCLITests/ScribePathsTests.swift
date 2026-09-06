@@ -5,7 +5,7 @@ import Testing
 @testable import ScribeCLI
 @testable import ScribeKit
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ScribePathsTests {
   @Test func logFileUsesSessionDirectory() throws {
     try withTemporaryDirectory { root in

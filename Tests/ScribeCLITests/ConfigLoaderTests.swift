@@ -6,7 +6,7 @@ import Testing
 @testable import ScribeCLI
 @testable import ScribeKit
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct ConfigLoaderTests {
   @Test func loadsNamedProfileFromExplicitOverride() async throws {
     try await withTemporaryDirectory { root in

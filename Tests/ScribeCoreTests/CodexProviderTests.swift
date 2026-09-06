@@ -9,7 +9,7 @@ import Testing
 @testable import ScribeCore
 @testable import ScribeLLMCodex
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct CodexProviderTests {
 
   /// Integration test: a `.configured` provider issues an HTTP request through the

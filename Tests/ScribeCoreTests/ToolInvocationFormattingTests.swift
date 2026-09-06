@@ -2,7 +2,7 @@ import Foundation
 import ScribeCore
 import Testing
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ToolInvocationFormattingTests {
 
   @Test func shellShowsExitCodeAndFilePaths() {

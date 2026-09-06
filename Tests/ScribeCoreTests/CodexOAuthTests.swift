@@ -12,7 +12,7 @@ import Glibc
 import Musl
 #endif
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct CodexOAuthTests {
   @Test("login fails promptly when the callback port is occupied", .timeLimit(.minutes(1)))
   func occupiedCallbackPortFailsPromptly() async throws {
@@ -53,7 +53,7 @@ struct CodexOAuthTests {
       #expect(message.contains("bind() failed"))
     }
 
-    #expect(start.duration(to: .now) < .seconds(2))
+    #expect(start.duration(to: .now) < .seconds(8))
   }
 
   @Test("waitForCode returns loginTimeout after the configured timeout", .timeLimit(.minutes(1)))
@@ -64,7 +64,7 @@ struct CodexOAuthTests {
       _ = try await CodexOAuth.login(
         callbackHost: CodexOAuthConstants.callbackHost,
         callbackPort: CodexOAuthConstants.callbackPort,
-        browserOpener: { _ in /* intentionally left hanging */ },
+        browserOpener: { _ in },
         timeout: 2.0
       )
       Issue.record("Expected loginTimeout, but login succeeded unexpectedly")

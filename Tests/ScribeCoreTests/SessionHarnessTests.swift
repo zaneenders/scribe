@@ -9,7 +9,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct SessionHarnessTests {
 
   private let logger = Logger(label: "test.session-harness")

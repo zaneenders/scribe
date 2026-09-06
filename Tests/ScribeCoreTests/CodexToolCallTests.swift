@@ -2,7 +2,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexToolCallIdentifiersRoundTrip() {
   let identifiers = CodexToolCallIdentifiers(callID: "call_abc123", itemID: "fc_def456")
 
@@ -10,7 +10,7 @@ func codexToolCallIdentifiersRoundTrip() {
   #expect(CodexToolCallIdentifiers(encoded: identifiers.encoded) == identifiers)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexToolCallIdentifiersSupportLegacyUnencodedIDs() {
   let identifiers = CodexToolCallIdentifiers(encoded: "call_abc123")
 
@@ -18,7 +18,7 @@ func codexToolCallIdentifiersSupportLegacyUnencodedIDs() {
   #expect(identifiers.itemID == "fc_call_abc123")
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexToolCallIdentifiersSanitizeForeignProviderIDs() {
   // Mid-session model switch left this non-Codex ID in the history; the ChatGPT
   // backend rejected it with: Expected an ID that begins with 'fc'.
@@ -28,7 +28,7 @@ func codexToolCallIdentifiersSanitizeForeignProviderIDs() {
   #expect(identifiers.itemID == "fc_tool_3AXlpi3mBRnQCMzIr7HgDba0")
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexToolCallIdentifiersSanitizeEmptyIDsDeterministically() {
   let first = CodexToolCallIdentifiers(encoded: "")
   let second = CodexToolCallIdentifiers(encoded: "")
@@ -38,7 +38,7 @@ func codexToolCallIdentifiersSanitizeEmptyIDsDeterministically() {
   #expect(first.itemID.hasPrefix("fc_"))
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexAssistantTurnPreservesResponseItemID() {
   var turn = CodexAssistantTurn()
   turn.finalizeToolCall(

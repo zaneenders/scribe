@@ -13,6 +13,7 @@
 #include <libproc.h>
 #elif defined(__linux__)
 #include <dirent.h>
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #endif
 #include <sys/ioctl.h>
@@ -194,6 +195,19 @@ static void scribe_report_status_and_exit(int status_fd, int status) {
   _exit(0);
 }
 
+static void scribe_reap_adopted_children(void) {
+#if defined(__linux__)
+  // PR_SET_CHILD_SUBREAPER reparents orphaned session descendants here. They
+  // have already received SIGKILL, so drain them before reporting completion.
+  for (;;) {
+    pid_t waited = waitpid(-1, NULL, 0);
+    if (waited > 0) continue;
+    if (waited == -1 && errno == EINTR) continue;
+    break;
+  }
+#endif
+}
+
 // Runs in the supervisor process and owns/reaps the terminal leader. EOF on the
 // control pipe is the close request, which avoids any SIGPIPE-producing write in
 // the owner. The leader's unmodified wait status is reported on status_write.
@@ -203,6 +217,7 @@ static void scribe_supervise(pid_t leader, int control_read, int status_write, p
     if (getppid() != owner) {
       scribe_kill_session(leader);
       while (waitpid(leader, &status, 0) == -1 && errno == EINTR) {}
+      scribe_reap_adopted_children();
       scribe_report_status_and_exit(status_write, status);
     }
 
@@ -210,6 +225,7 @@ static void scribe_supervise(pid_t leader, int control_read, int status_write, p
     if (waited == leader) {
       // The shell may leave background jobs in its group after exiting.
       scribe_kill_session(leader);
+      scribe_reap_adopted_children();
       scribe_report_status_and_exit(status_write, status);
     }
     if (waited == -1 && errno != EINTR) {
@@ -233,7 +249,10 @@ static void scribe_supervise(pid_t leader, int control_read, int status_write, p
         do {
           waited = waitpid(leader, &status, 0);
         } while (waited == -1 && errno == EINTR);
-        if (waited == leader) scribe_report_status_and_exit(status_write, status);
+        if (waited == leader) {
+          scribe_reap_adopted_children();
+          scribe_report_status_and_exit(status_write, status);
+        }
         _exit(127);
       }
     } else if (selected == -1 && errno != EINTR) {
@@ -331,6 +350,17 @@ static int scribe_pty_spawn_locked(
     close(ready[0]);
     close(setup[1]);
     close(status[0]);
+
+#if defined(__linux__)
+    // Adopt orphaned grandchildren in this terminal session. Without this,
+    // killing a background job leaves a zombie owned by the container's PID 1,
+    // which may not reap promptly and remains visible to kill(pid, 0).
+    if (prctl(PR_SET_CHILD_SUBREAPER, 1) == -1) {
+      struct scribe_spawn_response response = {.leader = -1, .error = errno};
+      (void)scribe_write_all(ready[1], &response, sizeof(response));
+      _exit(127);
+    }
+#endif
 
     pid_t leader = fork();
     if (leader == -1) {

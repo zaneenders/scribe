@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct ToolRunnerReadFileTests {
   @Test func returnsUtf8ContentWithMetadata() async throws {
     let registry = ToolRegistry(

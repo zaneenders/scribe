@@ -4,7 +4,7 @@ import Testing
 
 @testable import ScribeCore
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct OutputCaptureTests {
 
   // MARK: - create

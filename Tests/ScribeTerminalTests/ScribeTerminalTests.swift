@@ -15,7 +15,7 @@ private let testKill = Glibc.kill
 import AppKit
 #endif
 
-@Suite("GhosttyTerminal")
+@Suite("GhosttyTerminal", .timeLimit(.minutes(1)))
 struct GhosttyTerminalTests {
   @Test func parsesVTAndFormatsActiveScreen() throws {
     let terminal = try GhosttyTerminal(columns: 20, rows: 3)
@@ -73,9 +73,9 @@ struct GhosttyTerminalTests {
 }
 
 #if os(macOS) || os(Linux)
-@Suite("PTY integration", .serialized)
+@Suite("PTY integration", .serialized, .timeLimit(.minutes(1)))
 struct PTYIntegrationTests {
-  @Suite("PTYSession")
+  @Suite("PTYSession", .timeLimit(.minutes(1)))
   struct PTYSessionTests {
     /// Accumulates PTY output from the read thread.
     private final class OutputBuffer: @unchecked Sendable {
@@ -179,7 +179,7 @@ struct PTYIntegrationTests {
     }
   }
 
-  @Suite("TerminalRuntime")
+  @Suite("TerminalRuntime", .timeLimit(.minutes(1)))
   struct TerminalRuntimeTests {
     private func makeClient(
       replayBytes: Int = 1024 * 1024,

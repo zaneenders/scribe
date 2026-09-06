@@ -5,7 +5,7 @@ import Testing
 @testable import ScribeCLI
 @testable import ScribeKit
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct SlateChatRenderTests {
 
   @Test func firstUserMessageAppearsInTranscriptArea() {
@@ -170,7 +170,7 @@ struct SlateChatRenderTests {
   }
 }
 
-@Suite
+@Suite(.timeLimit(.minutes(1)))
 struct InputVisualLinesTests {
 
   @Test func emptyBufferReturnsSingleEmptyLine() {

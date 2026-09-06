@@ -28,7 +28,7 @@ private func driveProcessor(
 
 // MARK: - Terminal Event Finalization Tests
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamEmitsFinalizedOnResponseCompletedWithTextDelta() async throws {
   let sse = makeSSE(
     #"{"type":"response.output_text.delta","delta":"Hello"}"#,
@@ -45,7 +45,7 @@ func codexStreamEmitsFinalizedOnResponseCompletedWithTextDelta() async throws {
   #expect(processor.lastUsage?.outputTokens == 5)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamEmitsFinalizedOnResponseCompletedWithReasoningDelta() async throws {
   let sse = makeSSE(
     #"{"type":"response.reasoning_text.delta","delta":"Let me think..."}"#,
@@ -59,7 +59,7 @@ func codexStreamEmitsFinalizedOnResponseCompletedWithReasoningDelta() async thro
   #expect(turn.reasoningText == "Let me think...")
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamSeparatesAdjacentReasoningSummaryParts() async throws {
   let sse = makeSSE(
     #"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"**Planning font catalog redesign**"}"#,
@@ -80,7 +80,7 @@ func codexStreamSeparatesAdjacentReasoningSummaryParts() async throws {
   #expect(reasoningText == turn.reasoningText)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamEmitsFinalizedOnResponseCompletedWithToolCallDeltas() async throws {
   let sse = makeSSE(
     #"{"type":"response.function_call_arguments.delta","delta":"{\"com","output_index":0}"#,
@@ -97,7 +97,7 @@ func codexStreamEmitsFinalizedOnResponseCompletedWithToolCallDeltas() async thro
   #expect(turn.resolvedToolCalls()[0].name == "shell")
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamEmitsFinalizedOnResponseIncomplete() async throws {
   let sse = makeSSE(
     #"{"type":"response.output_text.delta","delta":"Partial..."}"#,
@@ -110,7 +110,7 @@ func codexStreamEmitsFinalizedOnResponseIncomplete() async throws {
   #expect(emptyEvents(in: events).isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamEmitsEmptyWhenNoContentBeforeResponseCompleted() async throws {
   let sse = makeSSE(
     #"{"type":"response.completed","response":{"id":"resp_empty"}}"#
@@ -124,7 +124,7 @@ func codexStreamEmitsEmptyWhenNoContentBeforeResponseCompleted() async throws {
   #expect(turn.resolvedToolCalls().isEmpty)
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamWithDoneSentinelStillFinalizes() async throws {
   // When only [DONE] terminates the stream (no response.completed event),
   // the post-loop finalization should still kick in.
@@ -140,7 +140,7 @@ func codexStreamWithDoneSentinelStillFinalizes() async throws {
   #expect(turn.text == "Hi")
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamSurfacesTopLevelErrorDetails() async throws {
   let sse = makeSSE(
     #"{"type":"error","code":"input_too_large","message":"Request payload exceeds the limit"}"#
@@ -156,7 +156,7 @@ func codexStreamSurfacesTopLevelErrorDetails() async throws {
   }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamSurfacesNestedResponseErrorDetails() async throws {
   let sse = makeSSE(
     #"{"type":"response.failed","response":{"id":"resp_failed","error":{"code":"invalid_image","type":"invalid_request_error","message":"Image could not be processed"}}}"#
@@ -172,7 +172,7 @@ func codexStreamSurfacesNestedResponseErrorDetails() async throws {
   }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamIncludesRawEventWhenErrorHasNoMessage() async throws {
   let sse = makeSSE(
     #"{"type":"error","code":"unknown","param":"input"}"#
@@ -188,7 +188,7 @@ func codexStreamIncludesRawEventWhenErrorHasNoMessage() async throws {
   }
 }
 
-@Test
+@Test(.timeLimit(.minutes(1)))
 func codexStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent() async throws {
   // If both response.completed and [DONE] appear, the early return
   // from response.completed must prevent a double-finalize from the
