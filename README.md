@@ -8,9 +8,6 @@ Ai Agent written in Swift
 
 - [Swift 6.3](https://www.swift.org/install/) or newer
 - macOS 26+ or Linux (x86_64 or aarch64)
-- For the graphical app/terminal on a fresh checkout: Zig 0.16.0+; macOS also
-  needs `lipo` from Xcode command-line tools. Zig is only used once to generate
-  the ignored libghostty-vt archive, or again when updating Ghostty.
 
 On first run Scribe writes a default `scribe.config.json` targeting Ollama at
 `http://localhost:11434` with the **`gemma4:e2b`** model.  Edit the file or set
@@ -26,11 +23,6 @@ mkdir -p ~/.local/bin
 ### macOS
 
 ```bash
-git submodule update --init --recursive
-
-./Scripts/bootstrap-zig.sh
-swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt
-
 # CLI
 swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
@@ -101,12 +93,6 @@ requires the libcurl runtime package (`libcurl` on Fedora/RHEL or `libcurl4` on
 Debian/Ubuntu), not the development package. Then build Scribe:
 
 ```bash
-git submodule update --init --recursive
-
-# One-time terminal dependency build on a fresh checkout.
-./Scripts/bootstrap-zig.sh
-swift package --allow-writing-to-package-directory --allow-network-connections all:443 refresh-ghostty-vt
-
 # Build a redistributable archive with CLI, app, desktop entry, and icon, then
 # install it to ~/.local. The package script statically links the Swift runtime
 # and rejects a build containing a machine-specific Swift runtime path.
@@ -251,38 +237,3 @@ docc preview Sources/ScribeCore/ScribeCore.docc
 ```bash
 docc preview Sources/ScribeCLI/ScribeCLI.docc
 ```
-
-## Ghostty terminal dependency
-
-Ghostty source is pinned as the `Vendor/GhosttySource` Git submodule. Scribe
-does not commit generated `libghostty-vt.a` archives. After a fresh clone,
-initialize the submodule, install the pinned project-local Zig toolchain, and
-generate the platform archive once:
-
-```sh
-git submodule update --init --recursive
-./Scripts/bootstrap-zig.sh
-swift package \
-  --allow-writing-to-package-directory \
-  --allow-network-connections all:443 \
-  refresh-ghostty-vt
-```
-
-Normal `swift build` calls only verify the archive exists and never invoke Zig.
-If it is missing, the build prints the bootstrap command. Run the refresh again
-when the Ghostty submodule is updated.
-
-SwiftPM must be able to find the tracked `Vendor/GhosttyVt` target scaffold
-before it can load the refresh plugin. If SwiftPM reports `invalid custom path
-'Vendor/GhosttyVt'`, restore that directory before refreshing:
-
-```sh
-git restore -- Vendor/GhosttyVt
-```
-
-The generated upstream headers are ignored along with the static archives. The
-narrow SwiftPM module map and third-party notices remain committed under
-`Vendor/GhosttyVt`, making integration and license changes reviewable.
-libghostty-vt is MIT licensed; embedded dependency notices cover uucode,
-Höhrmann's UTF-8 decoder, and Unicode data. Detailed build, update, Linux, and
-provenance instructions are in `Vendor/GhosttyVt/README.md`.

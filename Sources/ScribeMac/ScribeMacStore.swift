@@ -473,8 +473,6 @@ final class ScribeMacStore {
       let index = sessions.firstIndex(where: { $0.sessionId == id && !$0.isRunning })
     else { return }
     let controller = sessions.remove(at: index)
-    // An idle controller has no model task to interrupt. Closing its optional
-    // terminal is the only live resource that may remain.
     controller.shutdown(cancelTask: true)
   }
 

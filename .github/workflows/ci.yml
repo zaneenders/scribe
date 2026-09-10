@@ -14,9 +14,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  GHOSTTY_NETWORK_PERMISSION: --allow-network-connections all:443
-
 jobs:
   macos:
     name: macOS
@@ -24,8 +21,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: recursive
       - name: Show Swift version
         run: swift --version
       - name: Cache Swift package dependencies
@@ -35,32 +30,6 @@ jobs:
             .build/checkouts
             .build/repositories
           key: swiftpm-dependencies-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
-      - name: Read Ghostty revision
-        id: ghostty-source
-        run: echo "revision=$(git -C Vendor/GhosttySource rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Cache Ghostty terminal library
-        id: cache-ghostty
-        uses: actions/cache@v6
-        with:
-          path: |
-            Vendor/GhosttyVt/Libraries
-            Vendor/GhosttyVt/Headers/ghostty
-            Vendor/GhosttyVt/PROVENANCE.md
-          key: ghostty-vt-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.ghostty-source.outputs.revision }}-${{ hashFiles('Plugins/GhosttyVtRefreshPlugin/plugin.swift', 'Scripts/bootstrap-zig.sh') }}
-      - name: Cache Zig
-        if: steps.cache-ghostty.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
-        with:
-          path: Vendor/.tools
-          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Scripts/bootstrap-zig.sh') }}
-      - name: Build Ghostty terminal library
-        if: steps.cache-ghostty.outputs.cache-hit != 'true'
-        run: |
-          ./Scripts/bootstrap-zig.sh
-          swift package \
-            --allow-writing-to-package-directory \
-            $GHOSTTY_NETWORK_PERMISSION \
-            refresh-ghostty-vt
       - name: Build
         run: swift build
       - name: Test
@@ -79,13 +48,11 @@ jobs:
       SWIFTLY_HOME_DIR: /github/home/.local/share/swiftly
       SWIFTLY_BIN_DIR: /github/home/.local/bin
     steps:
-      # Scribe needs a recursive submodule checkout; Chroma does not. Install
-      # Git first so checkout does not fall back to the REST archive path.
+      # Install Git so checkout does not fall back to the REST archive path.
       - name: Install Git for checkout
         run: pacman -Sy --noconfirm git
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
           fetch-depth: 0
       - name: Install Swift and native development libraries
         run: |
@@ -158,32 +125,6 @@ jobs:
             .build/checkouts
             .build/repositories
           key: swiftpm-dependencies-arch-x86_64-${{ hashFiles('Package.resolved') }}
-      - name: Read Ghostty revision
-        id: ghostty-source
-        run: echo "revision=$(git -C Vendor/GhosttySource rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Cache Ghostty terminal library
-        id: cache-ghostty
-        uses: actions/cache@v6
-        with:
-          path: |
-            Vendor/GhosttyVt/Libraries
-            Vendor/GhosttyVt/Headers/ghostty
-            Vendor/GhosttyVt/PROVENANCE.md
-          key: ghostty-vt-v1-arch-x86_64-${{ steps.ghostty-source.outputs.revision }}-${{ hashFiles('Plugins/GhosttyVtRefreshPlugin/plugin.swift', 'Scripts/bootstrap-zig.sh') }}
-      - name: Cache Zig
-        if: steps.cache-ghostty.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
-        with:
-          path: Vendor/.tools
-          key: zig-0.16.0-arch-x86_64-${{ hashFiles('Scripts/bootstrap-zig.sh') }}
-      - name: Build Ghostty terminal library
-        if: steps.cache-ghostty.outputs.cache-hit != 'true'
-        run: |
-          ./Scripts/bootstrap-zig.sh
-          swift package \
-            --allow-writing-to-package-directory \
-            $GHOSTTY_NETWORK_PERMISSION \
-            refresh-ghostty-vt
       - name: Build
         run: swift build
       - name: Test

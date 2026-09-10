@@ -70,11 +70,11 @@ struct ScribeMacRoot: Block {
     ) { context in
       context.setCopyTextProvider {
         SelectionManager.shared.copyText(
-          isTranscriptVisible: store.active?.selectedTab == .chat)
+          isTranscriptVisible: store.active != nil)
       }
       context.setSelectAllHandler {
         SelectionManager.shared.selectAll(
-          isTranscriptVisible: store.active?.selectedTab == .chat)
+          isTranscriptVisible: store.active != nil)
       }
       // Hit testing uses layouts retained from the preceding frame.
       if context.input.pointerPressed {
@@ -162,16 +162,6 @@ struct ScribeMacRoot: Block {
         id: WidgetID("sidebar-toggle"), fontScale: theme.smallScale,
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
-      if let session = store.active {
-        Text("│")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.border)
-          .padding(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
-        HStack(spacing: 0) {
-          headerTabButton(.chat, session: session)
-          headerTabButton(.terminal, session: session)
-        }
-      }
       Spacer()
     }
     .padding(EdgeInsets(top: 2, leading: theme.margin, bottom: 2, trailing: theme.margin))
@@ -179,27 +169,6 @@ struct ScribeMacRoot: Block {
     .sizing(x: .grow)
     .background(theme.headerBackground)
     .border(theme.border)
-  }
-
-  @MainActor private func headerTabButton(
-    _ tab: SessionController.ContentTab, session: SessionController
-  ) -> some Block {
-    let active = session.selectedTab == tab
-    return Interactive(
-      id: WidgetID("session-tab-\(tab.rawValue).\(session.sessionId.uuidString)"),
-      action: { session.selectTab(tab) }
-    ) { phase in
-      Text(tab == .chat ? "Chat" : "Terminal")
-        .fontScale(theme.smallScale)
-        .foregroundColor(
-          active ? theme.accent : phase == .hovered ? theme.textPrimary : theme.textSecondary
-        )
-        .padding(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
-        .background(
-          active ? theme.panelBackground : phase == .hovered ? theme.sidebarHover : .clear
-        )
-        .border(active ? theme.accent : .clear, width: active ? 1 : 0)
-    }
   }
 
   @MainActor private func errorBanner(_ message: String) -> some Block {
