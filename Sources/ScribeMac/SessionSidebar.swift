@@ -128,12 +128,14 @@ struct SessionGroupHeader: Block {
           Text(isCollapsed ? ">" : "v")
             .fontScale(theme.smallScale)
             .foregroundColor(theme.textSecondary)
-          Text(sanitizeASCII(group.title))
-            .fontScale(theme.smallScale)
-            .foregroundColor(
-              group.open.contains(where: \.isRunning)
-                ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary)
-          Spacer()
+          MarqueeText(
+            sanitizeASCII(group.title),
+            id: WidgetID("group-name:\(group.cwd)"),
+            color: group.open.contains(where: \.isRunning)
+              ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary,
+            scale: theme.smallScale,
+            isScrolling: phase == .hovered
+          )
           Text("\(group.open.count + group.totalSavedCount)")
             .fontScale(theme.smallScale)
             .foregroundColor(theme.textSecondary)
@@ -176,39 +178,40 @@ struct SessionRow: Block {
   @MainActor var body: some Block {
     Interactive(
       id: WidgetID("session-row:\(session.sessionId.uuidString)"),
-      action: { store.switchTo(session.sessionId) }
-    ) { phase in
-      HStack(spacing: 5) {
-        if session.isRunning {
-          ActivitySpinner(color: theme.purple)
-        }
-        MarqueeText(
-          sanitizeASCII(session.displayName),
-          id: WidgetID("session-name:\(session.sessionId.uuidString)"),
-          color: session.isRunning
-            ? theme.purple
-            : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary,
-          scale: theme.smallScale,
-          isScrolling: phase == .hovered
-        )
-        if phase != .hovered {
-          if session.hasUnreadActivity && !isActive {
-            Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
+      action: { store.switchTo(session.sessionId) },
+      content: { phase in
+        HStack(spacing: 5) {
+          if session.isRunning {
+            ActivitySpinner(color: theme.purple)
           }
-          Text(sanitizeASCII(session.modelName))
-            .fontScale(theme.smallScale)
-            .foregroundColor(theme.textSecondary)
+          MarqueeText(
+            sanitizeASCII(session.displayName),
+            id: WidgetID("session-name:\(session.sessionId.uuidString)"),
+            color: session.isRunning
+              ? theme.purple
+              : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary,
+            scale: theme.smallScale,
+            isScrolling: phase == .hovered
+          )
+          if phase != .hovered {
+            if session.hasUnreadActivity && !isActive {
+              Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
+            }
+            Text(sanitizeASCII(session.modelName))
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+          // Keep actions in place while previewing the name so moving the pointer
+          // toward one cannot make its hit target disappear.
+          sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
         }
-        // Keep actions in place while previewing the name so moving the pointer
-        // toward one cannot make its hit target disappear.
-        sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
+        .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 6))
+        .sizing(y: .fixed(30))
+        .sizing(x: .grow)
+        .background(isActive ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
+        .border(isActive ? theme.accent : .clear, width: isActive ? 1 : 0)
       }
-      .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 6))
-      .sizing(y: .fixed(30))
-      .sizing(x: .grow)
-      .background(isActive ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
-      .border(isActive ? theme.accent : .clear, width: isActive ? 1 : 0)
-    }
+    )
   }
 }
 
@@ -221,33 +224,34 @@ struct SavedSessionRow: Block {
     let isSelected = store.selectedSavedSession?.id == saved.id
     return Interactive(
       id: WidgetID("saved-session:\(saved.id.uuidString)"),
-      action: { store.openSavedSession(saved) }
-    ) { phase in
-      HStack(spacing: 5) {
-        Text("-")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
-        MarqueeText(
-          sanitizeASCII(saved.metadata.displayName),
-          id: WidgetID("saved-session-name:\(saved.id.uuidString)"),
-          color: phase == .hovered ? theme.textPrimary : theme.textSecondary,
-          scale: theme.smallScale,
-          isScrolling: phase == .hovered
-        )
-        if phase != .hovered {
-          Text(sanitizeASCII(saved.metadata.model))
+      action: { store.openSavedSession(saved) },
+      content: { phase in
+        HStack(spacing: 5) {
+          Text("-")
             .fontScale(theme.smallScale)
             .foregroundColor(theme.textSecondary)
+          MarqueeText(
+            sanitizeASCII(saved.metadata.displayName),
+            id: WidgetID("saved-session-name:\(saved.id.uuidString)"),
+            color: phase == .hovered ? theme.textPrimary : theme.textSecondary,
+            scale: theme.smallScale,
+            isScrolling: phase == .hovered
+          )
+          if phase != .hovered {
+            Text(sanitizeASCII(saved.metadata.model))
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.textSecondary)
+          }
+          sessionActions(
+            store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
         }
-        sessionActions(
-          store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
+        .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
+        .sizing(y: .fixed(30))
+        .sizing(x: .grow)
+        .background(isSelected ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
+        .border(isSelected ? theme.accent : .clear, width: isSelected ? 1 : 0)
       }
-      .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
-      .sizing(y: .fixed(30))
-      .sizing(x: .grow)
-      .background(isSelected ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
-      .border(isSelected ? theme.accent : .clear, width: isSelected ? 1 : 0)
-    }
+    )
   }
 }
 
@@ -364,24 +368,25 @@ struct ShowMoreSessionsRow: Block {
   @MainActor var body: some Block {
     Interactive(
       id: WidgetID("show-more-sessions:\(group.cwd)"),
-      action: { store.showMoreSavedSessions(for: group.cwd) }
-    ) { phase in
-      HStack(spacing: 5) {
-        Text("+")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
-        Text("Show 5 more")
-          .fontScale(theme.smallScale)
-          .foregroundColor(phase == .hovered ? theme.textPrimary : theme.textSecondary)
-        Spacer()
-        Text("\(group.hiddenSavedCount) older")
-          .fontScale(theme.smallScale)
-          .foregroundColor(theme.textSecondary)
+      action: { store.showMoreSavedSessions(for: group.cwd) },
+      content: { phase in
+        HStack(spacing: 5) {
+          Text("+")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+          Text("Show 5 more")
+            .fontScale(theme.smallScale)
+            .foregroundColor(phase == .hovered ? theme.textPrimary : theme.textSecondary)
+          Spacer()
+          Text("\(group.hiddenSavedCount) older")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textSecondary)
+        }
+        .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
+        .sizing(y: .fixed(30))
+        .sizing(x: .grow)
+        .background(phase == .hovered ? theme.sidebarHover : .clear)
       }
-      .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
-      .sizing(y: .fixed(30))
-      .sizing(x: .grow)
-      .background(phase == .hovered ? theme.sidebarHover : .clear)
-    }
+    )
   }
 }
