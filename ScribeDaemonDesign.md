@@ -16,7 +16,7 @@ The daemon owns session access, running agents, and PTYs. Sessions persist acros
 
 4. **Add the local daemon.** Implement `scribe-daemon serve` over a secure Unix socket with one daemon per Scribe data directory. Expose terminal create, attach, control, detach, and close. **Why:** This creates the first real long-lived owner and proves that a terminal continues running across GUI disconnects on one machine.
 
-5. **Move the GUI terminal client to the daemon.** Replace the in-process terminal adapter with a network adapter without changing terminal rendering. **Why:** This completes the terminal goal for local use and validates that the runtime boundary was sufficient without coupling Ghostty rendering to the daemon.
+5. **Move the GUI terminal client to the daemon.** When an embedded terminal UI is reintroduced, connect it through a network adapter. The PTY runtime remains available independently of the GUI. **Why:** This completes the terminal goal for local use and validates that the runtime boundary was sufficient without coupling terminal rendering to the daemon.
 
 6. **Extract the agent and session runtime.** Put session discovery, persistence, profiles, message history, queues, and `SessionHarness` behind a transport-independent runtime and in-process client. **Why:** This gives chats the same tested ownership boundary as terminals while preserving current behavior before introducing disconnects and concurrency.
 

@@ -133,7 +133,6 @@ var targets: [Target] = [
     dependencies: [
       "ScribeCore",
       "ScribeKit",
-      "ScribeTerminal",
       .product(name: "Chroma", package: "chroma"),
       .product(name: "Logging", package: "swift-log"),
       .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
@@ -152,37 +151,17 @@ var targets: [Target] = [
   .target(
     name: "ScribeTerminal",
     dependencies: [
-      "GhosttyVt",
       "PTYShim",
-      .product(name: "Chroma", package: "chroma"),
       .product(name: "DequeModule", package: "swift-collections"),
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
       .treatAllWarnings(as: .error),
-    ],
-    plugins: [
-      "GhosttyVtPresencePlugin"
     ]
   ),
   .target(
     name: "PTYShim",
     publicHeadersPath: "include"
-  ),
-  .target(
-    name: "GhosttyVt",
-    path: "Vendor/GhosttyVt",
-    publicHeadersPath: "Headers",
-    linkerSettings: [
-      .unsafeFlags(
-        ["-L", "Vendor/GhosttyVt/Libraries/macos", "-lghostty-vt"],
-        .when(platforms: [.macOS])
-      ),
-      .unsafeFlags(
-        ["-L", "Vendor/GhosttyVt/Libraries/linux", "-lghostty-vt"],
-        .when(platforms: [.linux])
-      ),
-    ]
   ),
   .testTarget(
     name: "ScribeTerminalTests",
@@ -235,28 +214,6 @@ var targets: [Target] = [
   .plugin(
     name: "GitVersionPlugin",
     capability: .buildTool()
-  ),
-  .plugin(
-    name: "GhosttyVtPresencePlugin",
-    capability: .buildTool()
-  ),
-  .plugin(
-    name: "GhosttyVtRefreshPlugin",
-    capability: .command(
-      intent: .custom(
-        verb: "refresh-ghostty-vt",
-        description: "Rebuild the checked-in libghostty-vt static library and headers"
-      ),
-      permissions: [
-        .writeToPackageDirectory(
-          reason: "Updates Vendor/GhosttyVt libraries, headers, and provenance"
-        ),
-        .allowNetworkConnections(
-          scope: .all(ports: [443]),
-          reason: "Downloads checksummed dependencies declared by Ghostty's Zig package manifest"
-        ),
-      ]
-    )
   ),
   .plugin(
     name: "ScribeAppBundlerPlugin",

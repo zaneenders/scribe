@@ -16,9 +16,6 @@ struct MacTheme: Sendable {
   var titleScale: Float = 0.7
   var textScale: Float = 0.85
   var smallScale: Float = 0.75
-  // Keep the surrounding app comfortably large, but give full-screen terminal
-  // programs such as Neovim enough rows and columns to be useful.
-  var terminalScale: Float = 0.65
 
   var background = Color(r: 0.055, g: 0.063, b: 0.085, a: 1)
   var panelBackground = Color(r: 0.070, g: 0.080, b: 0.105, a: 1)

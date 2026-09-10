@@ -193,38 +193,6 @@ final class SessionController {
     self.isPinned = isPinned
   }
 
-  // MARK: - Content tabs
-
-  enum ContentTab: String, Sendable {
-    case chat = "Chat"
-    case terminal = "Terminal"
-  }
-
-  /// Which pane of the ready layout is on screen. Switching tabs never
-  /// interrupts a running turn or the terminal's shell.
-  var selectedTab: ContentTab = .chat
-  /// Lazily created on first entry to the Terminal tab; lives until the
-  /// session closes so shell state survives tab and session switches.
-  private(set) var terminal: SessionTerminal?
-
-  func selectTab(_ tab: ContentTab) {
-    guard selectedTab != tab else { return }
-    selectedTab = tab
-    // The composer's editing identity is gone while the terminal is on screen;
-    // drop it so the AppKit key monitor stops routing composer shortcuts.
-    ScribeRenderContext.activeTextInput = nil
-    switch tab {
-    case .chat:
-      wantsComposerFocus = true
-    case .terminal:
-      cancelCommandPicker()
-      if terminal == nil {
-        terminal = SessionTerminal(sessionId: sessionId, workingDirectory: workingDirectory)
-      }
-      terminal?.wantsFocus = true
-    }
-  }
-
   // MARK: - Composer editing
 
   func updateDraft(_ text: String) {
@@ -539,7 +507,6 @@ final class SessionController {
   /// app teardown passes true to cancel immediately.
   func shutdown(cancelTask: Bool) {
     boot.messageQueue.clear()
-    terminal?.close()
     Task { await boot.harness.interrupt() }
     if cancelTask {
       runTask?.cancel()
