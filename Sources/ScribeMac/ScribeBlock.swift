@@ -17,6 +17,7 @@ public struct ScribeBlock: Block {
 
 enum ScribeCommandPickerCommand {
   static let previous: Command = .application("scribe.command-picker.previous")
+  static let toggle: Command = .application("scribe.command-picker.toggle")
   static let next: Command = .application("scribe.command-picker.next")
 }
 
@@ -56,13 +57,7 @@ extension ScribeBlock {
       // so these remain inert whenever no picker is open.
       bind("f", to: ScribeCommandPickerCommand.previous)
       bind("j", to: ScribeCommandPickerCommand.next)
-      // Terminal tab: routed by focus scope, inert outside it. Omarchy uses
-      // Super-C for copy, leaving Ctrl-C available for interrupt.
-      bind("c", modifiers: .control, to: ScribeTerminalCommand.interrupt)
-      bind("/", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
-      // Ctrl-/ and Ctrl-_ share the terminal byte 0x1F; accept either chord.
-      bind("_", modifiers: .control, to: ScribeTerminalCommand.controlSlash)
-      bind(.tab, to: ScribeTerminalCommand.complete)
+      bind(.tab, to: ScribeCommandPickerCommand.toggle)
     }
   }
 }

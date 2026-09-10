@@ -170,11 +170,11 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
   @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
     for command in context.input.commands {
       switch command {
-      case ScribeCommandPickerCommand.previous, ScribeTerminalCommand.lineUp:
+      case ScribeCommandPickerCommand.previous:
         session.moveCommandCursor(by: -1)
-      case ScribeCommandPickerCommand.next, ScribeTerminalCommand.lineDown:
+      case ScribeCommandPickerCommand.next:
         session.moveCommandCursor(by: 1)
-      case ScribeTerminalCommand.complete:
+      case ScribeCommandPickerCommand.toggle:
         session.toggleCommandBoundary()
       default:
         break

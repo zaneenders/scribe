@@ -10,18 +10,8 @@ struct ReadyLayout: Block {
 
   @MainActor var body: some Block {
     VStack(spacing: 0) {
-      switch session.selectedTab {
-      case .chat:
-        TranscriptView(session: session, theme: theme)
-        BottomChrome(store: store, session: session, theme: theme)
-      case .terminal:
-        if let terminal = session.terminal {
-          TerminalTabContent(terminal: terminal, theme: theme)
-            .sizing(x: .grow, y: .grow)
-            .background(theme.panelBackground)
-        }
-        StatusBar(store: store, session: session, theme: theme)
-      }
+      TranscriptView(session: session, theme: theme)
+      BottomChrome(store: store, session: session, theme: theme)
     }
     .sizing(x: .grow, y: .grow)
   }
