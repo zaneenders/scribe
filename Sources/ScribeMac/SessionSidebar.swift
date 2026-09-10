@@ -128,12 +128,14 @@ struct SessionGroupHeader: Block {
           Text(isCollapsed ? ">" : "v")
             .fontScale(theme.smallScale)
             .foregroundColor(theme.textSecondary)
-          Text(sanitizeASCII(group.title))
-            .fontScale(theme.smallScale)
-            .foregroundColor(
-              group.open.contains(where: \.isRunning)
-                ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary)
-          Spacer()
+          MarqueeText(
+            sanitizeASCII(group.title),
+            id: WidgetID("group-name:\(group.cwd)"),
+            color: group.open.contains(where: \.isRunning)
+              ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary,
+            scale: theme.smallScale,
+            isScrolling: phase == .hovered
+          )
           Text("\(group.open.count + group.totalSavedCount)")
             .fontScale(theme.smallScale)
             .foregroundColor(theme.textSecondary)
