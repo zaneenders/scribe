@@ -17,21 +17,24 @@ import Musl
 @Suite
 struct ShellStressTests {
 
-  @Test func loopedCancelsDoNotLeakFDsOrPegCPU() async throws {
+  @Test(.timeLimit(.minutes(2))) func loopedCancelsDoNotLeakFDsOrPegCPU() async throws {
     let iterations = 20
     let beforeFDs = Self.openFDCount()
     let beforeCPU = Self.cpuTime()
 
     for i in 0..<iterations {
+      let readiness = try ShellReadinessMarker()
+      defer { readiness.remove() }
       let task = Task {
 
         try await Shell.run(
           command:
-            "i=0; while [ $i -lt 1000 ]; do echo line$i; i=$((i+1)); sleep 0.001; done",
+            "echo line0; \(readiness.signalCommand); i=1; while [ $i -lt 1000 ]; do echo line$i; i=$((i+1)); sleep 0.001; done",
           cwd: nil,
           workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger)
       }
-      try await Task.sleep(for: .milliseconds(50))
+      defer { task.cancel() }
+      try await readiness.wait()
       task.cancel()
 
       let iterStart = ContinuousClock.now

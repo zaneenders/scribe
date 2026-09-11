@@ -325,7 +325,7 @@ struct AgentLoopTests {
     }
     defer { loopTask.cancel() }
 
-    try await Task.sleep(for: .milliseconds(50))
+    try await transport.readiness.wait()
     notifier.request()
 
     let (_, termination) = try await withTimeout(seconds: 5) {

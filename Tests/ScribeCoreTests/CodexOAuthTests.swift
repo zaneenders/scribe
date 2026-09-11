@@ -26,7 +26,8 @@ struct CodexOAuthTests {
 
     var address = sockaddr_in()
     address.sin_family = sa_family_t(AF_INET)
-    address.sin_port = CodexOAuthConstants.callbackPort.bigEndian
+    // Reserve an OS-assigned port, not the production OAuth port.
+    address.sin_port = 0
     address.sin_addr.s_addr = inet_addr(CodexOAuthConstants.callbackHost)
 
     let bindResult = withUnsafePointer(to: &address) {
@@ -37,11 +38,23 @@ struct CodexOAuthTests {
     try #require(bindResult == 0, "Could not reserve OAuth callback port: errno \(errno)")
     try #require(listen(socketFD, 1) == 0)
 
+    // Keep the reservation open throughout login: releasing it before login
+    // would introduce a race with other processes claiming the same port.
+    var addressLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let nameResult = withUnsafeMutablePointer(to: &address) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        getsockname(socketFD, $0, &addressLength)
+      }
+    }
+    try #require(nameResult == 0, "Could not read reserved port: errno \(errno)")
+    let reservedPort = UInt16(bigEndian: address.sin_port)
+    try #require(reservedPort != 0)
+
     let start = ContinuousClock.now
     do {
       _ = try await CodexOAuth.login(
         callbackHost: CodexOAuthConstants.callbackHost,
-        callbackPort: CodexOAuthConstants.callbackPort,
+        callbackPort: reservedPort,
         browserOpener: { _ in Issue.record("Browser opened before callback server was ready") }
       )
       Issue.record("Expected login to fail when the callback port is occupied")
@@ -58,13 +71,16 @@ struct CodexOAuthTests {
 
   @Test("waitForCode returns loginTimeout after the configured timeout", .timeLimit(.minutes(1)))
   func loginTimeoutWithShortDeadline() async throws {
-    // Use a very short timeout and never send a callback request.
+    // No callback is sent, so an OS-assigned port is sufficient. This avoids
+    // collisions with real OAuth logins or other test processes on port 1455.
     let start = ContinuousClock.now
     do {
       _ = try await CodexOAuth.login(
         callbackHost: CodexOAuthConstants.callbackHost,
-        callbackPort: CodexOAuthConstants.callbackPort,
-        browserOpener: { _ in /* intentionally left hanging */ },
+        callbackPort: 0,
+        browserOpener: { _ in
+          // Intentionally left hanging.
+        },
         timeout: 2.0
       )
       Issue.record("Expected loginTimeout, but login succeeded unexpectedly")

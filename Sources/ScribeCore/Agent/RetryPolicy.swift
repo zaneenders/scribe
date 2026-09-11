@@ -4,12 +4,12 @@ import NIOCore
 import OpenAPIRuntime
 
 #if canImport(FoundationNetworking)
-  import FoundationNetworking
+import FoundationNetworking
 #endif
 #if canImport(Glibc)
-  import Glibc
+import Glibc
 #elseif canImport(Musl)
-  import Musl
+import Musl
 #endif
 
 /// Controls how the agent loop reacts to transient networking failures: a failed

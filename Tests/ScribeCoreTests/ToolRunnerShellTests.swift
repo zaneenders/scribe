@@ -127,15 +127,16 @@ struct ToolRunnerShellTests {
     #expect(fail.error?.contains("path does not exist") == true)
   }
 
-  @Test func interruptKillsLongRunningCommand() async throws {
+  @Test(.timeLimit(.minutes(1))) func interruptKillsLongRunningCommand() async throws {
+    let readiness = try ShellReadinessMarker()
+    defer { readiness.remove() }
     let registry = ToolRegistry(tools: [ShellTool()], logger: toolRunnerTestLogger)
 
     let args = try jsonArguments([
-      "command": "i=0; while [ $i -lt 1000000000 ]; do i=$((i+1)); done"
+      "command": "\(readiness.signalCommand); while :; do sleep 1; done"
     ])
 
     let notifier = AbortNotifier()
-    let start = ContinuousClock.now
 
     do {
       _ = try await withThrowingTaskGroup(of: String.self) { group in
@@ -149,7 +150,7 @@ struct ToolRunnerShellTests {
           ).text
         }
         group.addTask {
-          try await Task.sleep(for: .milliseconds(200))
+          try await readiness.wait()
           notifier.request()
           try await Task.sleep(for: .seconds(5))
           throw InterruptTimeoutError()
@@ -159,17 +160,18 @@ struct ToolRunnerShellTests {
       }
       Issue.record("Expected AgentTurnInterruptedError, but tool returned normally")
     } catch is AgentTurnInterruptedError {
-      let elapsed = start.duration(to: .now)
-      #expect(elapsed < .seconds(5), "interrupt must kill the process within 5 seconds; took \(elapsed)")
+      // The competing deadline starts at the abort request, not startup.
     }
   }
 
   #if os(Linux)
-  @Test func interruptKillsProcessTreeWithSeparateGroups() async throws {
+  @Test(.timeLimit(.minutes(1))) func interruptKillsProcessTreeWithSeparateGroups() async throws {
+    let readiness = try ShellReadinessMarker()
+    defer { readiness.remove() }
     let registry = ToolRegistry(tools: [ShellTool()], logger: toolRunnerTestLogger)
     let args = try jsonArguments([
       "command": """
-      setsid sh -c 'while true; do sleep 0.1; done' &
+      setsid sh -c "\(readiness.signalCommand); while true; do sleep 0.1; done" &
       CHILD=$!
       echo "CHILD=$CHILD"
       wait $CHILD
@@ -177,7 +179,6 @@ struct ToolRunnerShellTests {
     ])
 
     let notifier = AbortNotifier()
-    let start = ContinuousClock.now
 
     do {
       _ = try await withThrowingTaskGroup(of: String.self) { group in
@@ -191,7 +192,7 @@ struct ToolRunnerShellTests {
           ).text
         }
         group.addTask {
-          try await Task.sleep(for: .milliseconds(500))
+          try await readiness.wait()
           notifier.request()
           try await Task.sleep(for: .seconds(5))
           throw InterruptTimeoutError()
@@ -202,15 +203,16 @@ struct ToolRunnerShellTests {
       Issue.record("Expected AgentTurnInterruptedError, but tool returned normally")
       return
     } catch is AgentTurnInterruptedError {
-      let elapsed = start.duration(to: .now)
-      #expect(elapsed < .seconds(5), "interrupt must kill the process tree within 5 seconds; took \(elapsed)")
+      // The competing deadline starts at the abort request, not startup.
     }
   }
   #endif
 
-  @Test func cancellationInvokesKillerWithSubprocessPid() async throws {
+  @Test(.timeLimit(.minutes(1))) func cancellationInvokesKillerWithSubprocessPid() async throws {
+    let readiness = try ShellReadinessMarker()
+    defer { readiness.remove() }
     let spy = SpyProcessKiller()
-    let command = "i=0; while [ $i -lt 1000000000 ]; do i=$((i+1)); done"
+    let command = "\(readiness.signalCommand); while :; do sleep 1; done"
 
     let task = Task {
       try await Shell.run(
@@ -220,7 +222,8 @@ struct ToolRunnerShellTests {
         logger: toolRunnerTestLogger,
         killer: spy)
     }
-    try await Task.sleep(for: .milliseconds(200))
+    defer { task.cancel() }
+    try await readiness.wait()
     task.cancel()
 
     _ = try? await task.value
@@ -244,15 +247,18 @@ struct ToolRunnerShellTests {
     #expect(spy.snapshot().isEmpty, "killer should not be invoked when the task completes normally")
   }
 
-  @Test func partialOutputPreservedOnInterrupt() async throws {
+  @Test(.timeLimit(.minutes(1))) func partialOutputPreservedOnInterrupt() async throws {
+    let readiness = try ShellReadinessMarker()
+    defer { readiness.remove() }
     let command =
-      "i=0; while [ $i -lt 20000 ]; do echo \"line$i\"; i=$((i+1)); sleep 0.001; done"
+      "echo line0; \(readiness.signalCommand); i=1; while [ $i -lt 20000 ]; do echo \"line$i\"; i=$((i+1)); sleep 0.001; done"
 
     let task = Task {
       try await Shell.run(
         command: command, cwd: nil, workingDirectory: FilePath("/tmp"), logger: toolRunnerTestLogger)
     }
-    try await Task.sleep(for: .milliseconds(200))
+    defer { task.cancel() }
+    try await readiness.wait()
     task.cancel()
 
     let result = try await task.value
@@ -268,7 +274,7 @@ struct ToolRunnerShellTests {
 
 private struct InterruptTimeoutError: Error, CustomStringConvertible {
   var description: String {
-    "Interrupt test timed out after 15 seconds — the long-running process was not killed."
+    "Interrupt test timed out after 5 seconds — the long-running process was not killed."
   }
 }
 
