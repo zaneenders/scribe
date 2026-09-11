@@ -2,8 +2,7 @@ import Chroma
 import Foundation
 
 /// A multiline, monospace text input that grows from one to `maxLines` visual
-/// rows. Return is handled by `onNewline`; the macOS key monitor reserves
-/// Command-Return for sending before Chroma receives the key event.
+/// rows. Return inserts a newline; sending uses a backend-neutral command.
 struct GrowingTextField: PrimitiveBlock {
   private struct Row {
     let text: String
@@ -20,6 +19,8 @@ struct GrowingTextField: PrimitiveBlock {
   let getText: () -> String
   let onChange: (String) -> Void
   let onNewline: () -> Void
+  let onEndEditing: () -> CommandResult
+  let onTextEvent: (TextEditEvent, String) -> String?
   let textColor: Color
   let placeholderColor: Color
   let caretColor: Color
@@ -38,7 +39,9 @@ struct GrowingTextField: PrimitiveBlock {
     padding: Float = 8,
     text: @escaping () -> String,
     onChange: @escaping (String) -> Void,
-    onNewline: @escaping () -> Void
+    onNewline: @escaping () -> Void,
+    onEndEditing: @escaping () -> CommandResult = { .ignored },
+    onTextEvent: @escaping (TextEditEvent, String) -> String? = { _, _ in nil }
   ) {
     self.id = id
     self.placeholder = placeholder
@@ -49,6 +52,8 @@ struct GrowingTextField: PrimitiveBlock {
     self.getText = text
     self.onChange = onChange
     self.onNewline = onNewline
+    self.onEndEditing = onEndEditing
+    self.onTextEvent = onTextEvent
     self.textColor = .white
     self.placeholderColor = Color(r: 0.45, g: 0.45, b: 0.55, a: 1)
     self.caretColor = .white
@@ -87,6 +92,8 @@ struct GrowingTextField: PrimitiveBlock {
       text: getText(),
       onChange: onChange,
       onSubmit: { _ in onNewline() },
+      onEndEditing: onEndEditing,
+      onTextEvent: onTextEvent,
       pointerOffset: { point, viewportCaret in
         let visibleRow = Int(((point.y - textOrigin.y) / lineAdvance).rounded(.down))
         let rowIndex = max(0, min(rows.count - 1, firstVisibleRow(viewportCaret) + visibleRow))

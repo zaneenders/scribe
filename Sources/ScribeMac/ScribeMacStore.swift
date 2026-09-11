@@ -150,41 +150,6 @@ final class ScribeMacStore {
     guard !didStart else { return }
     didStart = true
     startProfileRecorder()
-    #if canImport(AppKit)
-    DirectoryPaletteKeyMonitor.shared.install()
-    DirectoryPaletteKeyMonitor.shared.onTab = { [weak self] in
-      self?.tabCompleteDirectory()
-    }
-    DirectoryPaletteKeyMonitor.shared.onEscape = { [weak self] in
-      self?.closeDirectoryPicker()
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerSubmit = { [weak self] in
-      self?.active?.submit()
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerStop = { [weak self] in
-      guard let active = self?.active, active.isRunning else { return false }
-      active.stop()
-      return true
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerHistoryPrevious = { [weak self] in
-      self?.active?.recallPreviousPrompt() ?? false
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerHistoryNext = { [weak self] in
-      self?.active?.recallNextPrompt() ?? false
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerMove = { [weak self] delta in
-      self?.active?.moveCommandCursor(by: delta)
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerToggle = { [weak self] in
-      self?.active?.toggleCommandBoundary()
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerConfirm = { [weak self] in
-      self?.active?.confirmCommandPicker()
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerCancel = { [weak self] in
-      self?.active?.cancelCommandPicker()
-    }
-    #endif
     let launchCWD = FilePath.currentDirectory.string
     // Finder launches at `/`, which is not a useful default for a new session.
     // Use the home directory until the user picks a directory from Directory.
@@ -718,9 +683,6 @@ final class ScribeMacStore {
   func close() {
     profileRecorderTask?.cancel()
     profileRecorderTask = nil
-    #if canImport(AppKit)
-    DirectoryPaletteKeyMonitor.shared.uninstall()
-    #endif
     for session in sessions {
       session.shutdown(cancelTask: true)
     }

@@ -7,16 +7,15 @@ import Testing
 @Suite("PTYSession")
 struct PTYSessionTests {
   /// Accumulates PTY output from the read thread.
-  private final class OutputBuffer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
+  private final class OutputBuffer: Sendable {
+    private let data = Mutex(Data())
 
     func append(_ chunk: Data) {
-      lock.withLock { data.append(chunk) }
+      data.withLock { $0.append(chunk) }
     }
 
     var text: String {
-      lock.withLock { String(decoding: data, as: UTF8.self) }
+      data.withLock { String(decoding: $0, as: UTF8.self) }
     }
   }
 

@@ -301,7 +301,7 @@ private final class CountingTransport: ClientTransport, Sendable {
   }
 }
 
-private final class TrackingPersister: SessionPersister, @unchecked Sendable {
+private final class TrackingPersister: SessionPersister, Sendable {
   private let lock = Mutex(State())
 
   private struct State {

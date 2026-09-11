@@ -81,9 +81,12 @@ struct TranscriptView: Block {
           TranscriptSelectionDocumentRegistry.Entry(
             id: item.selectionID,
             linesForColumns: { columns in
-              layoutMarkdown(
-                segmentMarkdown(body), columns: columns, theme: theme,
-                baseColor: theme.textPrimary)
+              if item.kind == .answer || item.kind == .reasoning || item.text.isEmpty {
+                return layoutMarkdown(
+                  segmentMarkdown(body), columns: columns, theme: theme,
+                  baseColor: theme.textPrimary)
+              }
+              return layoutPlainText(body, columns: columns, color: theme.textPrimary)
             }),
         ]
       })
@@ -127,7 +130,9 @@ struct TranscriptView: Block {
   ) -> LazyVStack.Row {
     LazyVStack.Row(
       id: item.layoutID,
-      content: TranscriptItemBlock(item: item, theme: theme, selection: selection)
+      content: TranscriptItemBlock(
+        item: item, theme: theme, selection: selection,
+        toggleText: { session.toggleTextDisclosure(id: item.id) })
         .padding(
           EdgeInsets(
             top: theme.spacing / 2, leading: theme.margin,
@@ -254,6 +259,7 @@ struct TranscriptItemBlock: Block {
   let item: SessionController.TranscriptItem
   let theme: MacTheme
   var selection: TranscriptSelection = .none
+  var toggleText: () -> Void = {}
 
   @MainActor var body: some Block {
     VStack(spacing: 7) {
@@ -262,6 +268,16 @@ struct TranscriptItemBlock: Block {
           markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
           scale: theme.smallScale, sanitizesASCII: false, itemID: item.headerSelectionID)
         Spacer()
+      }
+      if item.isCollapsible {
+        HStack {
+          Button(
+            item.isTextCollapsed ? "Show full text" : "Hide text",
+            id: WidgetID("text-disclosure:\(item.id.uuidString)"),
+            fontScale: theme.smallScale
+          ) { toggleText() }
+          Spacer()
+        }
       }
       if item.text.isEmpty {
         MarkdownText(
@@ -273,9 +289,10 @@ struct TranscriptItemBlock: Block {
           scale: theme.textScale, itemID: item.selectionID)
       } else {
         WrappedText(
-          text: item.text, theme: theme, color: bodyColor,
+          text: item.displayText, theme: theme, color: bodyColor,
           scale: theme.textScale, itemID: item.selectionID)
       }
+
     }
     .padding(theme.panelPadding)
     .sizing(x: .grow)

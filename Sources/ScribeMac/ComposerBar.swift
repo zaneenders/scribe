@@ -14,7 +14,7 @@ struct BottomChrome: Block {
         QueuedTray(session: session, theme: theme)
       }
       if let picker = session.commandPicker {
-        CommandPickerInput(session: session) {
+        CommandPickerInput(store: store, session: session) {
           VStack(spacing: 0) {
             CommandPickerBar(session: session, picker: picker, theme: theme)
             StatusBar(store: store, session: session, theme: theme)
@@ -39,14 +39,26 @@ struct ComposerBar: Block {
 
   @MainActor var body: some Block {
     VStack(spacing: 6) {
-      ComposerRow(spacing: 8) {
+      TrailingControlsRow(spacing: 8) {
         GrowingTextField(
           session.isRunning ? "Queue a message..." : "Message Scribe",
           id: ScribeMacStore.composerID,
           fontScale: theme.textScale,
           text: { session.draft },
-          onChange: { session.updateDraft($0) },
-          onNewline: { session.insertComposerNewline() }
+          onChange: { if session.draft != $0 { session.updateDraft($0) } },
+          onNewline: { session.insertComposerNewline() },
+          onEndEditing: {
+            guard session.isRunning else { return .ignored }
+            session.stop()
+            return .handled
+          },
+          onTextEvent: { event, text in
+            guard event == .moveCaretUp || event == .moveCaretDown else { return nil }
+            if session.draft != text { session.updateDraft(text) }
+            let recalled = event == .moveCaretUp
+              ? session.recallPreviousPrompt() : session.recallNextPrompt()
+            return recalled ? session.draft : nil
+          }
         )
       } controls: {
         if session.isRunning {
@@ -152,10 +164,12 @@ struct BottomModelPicker: Block {
 }
 
 private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
+  let store: ScribeMacStore
   let session: SessionController
   let content: Content
 
-  init(session: SessionController, @BlockBuilder content: () -> Content) {
+  init(store: ScribeMacStore, session: SessionController, @BlockBuilder content: () -> Content) {
+    self.store = store
     self.session = session
     self.content = content()
   }
@@ -168,26 +182,30 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
   }
 
   @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
-    for command in context.input.commands {
-      switch command {
-      case ScribeCommandPickerCommand.previous:
-        session.moveCommandCursor(by: -1)
-      case ScribeCommandPickerCommand.next:
-        session.moveCommandCursor(by: 1)
-      case ScribeCommandPickerCommand.toggle:
-        session.toggleCommandBoundary()
-      default:
-        break
+    if !store.showDirectoryPicker, store.renamingSessionID == nil {
+      for command in context.input.commands {
+        switch command {
+        case ScribeCommandPickerCommand.previous:
+          session.moveCommandCursor(by: -1)
+        case ScribeCommandPickerCommand.next:
+          session.moveCommandCursor(by: 1)
+        case ScribeCommandPickerCommand.toggle:
+          session.toggleCommandBoundary()
+        case .action(.activate):
+          session.confirmCommandPicker()
+        default:
+          break
+        }
       }
-    }
-    for event in context.input.textEvents {
-      switch event {
-      case .submit:
-        session.confirmCommandPicker()
-      case .endEditing:
-        session.cancelCommandPicker()
-      default:
-        break
+      for event in context.input.textEvents {
+        switch event {
+        case .submit:
+          session.confirmCommandPicker()
+        case .endEditing:
+          session.cancelCommandPicker()
+        default:
+          break
+        }
       }
     }
     BlockEngine.draw(content, into: &drawList, in: rect, context: context)
@@ -245,65 +263,6 @@ struct CommandPickerBar: Block {
   }
 }
 
-/// Measures the fixed composer controls first, then proposes only the remaining
-/// width to the text field. Chroma's `HStack` measures every child with the full
-/// row width, which made the field wrap as though the send area did not exist.
-private struct ComposerRow<Input: Block, Controls: Block>: PrimitiveBlock {
-  let spacing: Float
-  let input: Input
-  let controls: Controls
-
-  init(
-    spacing: Float,
-    @BlockBuilder input: () -> Input,
-    @BlockBuilder controls: () -> Controls
-  ) {
-    self.spacing = spacing
-    self.input = input()
-    self.controls = controls()
-  }
-
-  @MainActor var expandsHorizontally: Bool { true }
-
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
-    let sizes = measuredSizes(for: proposal, context: context)
-    return Size(
-      width: proposal.width,
-      height: max(sizes.input.height, sizes.controls.height))
-  }
-
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
-    let sizes = measuredSizes(for: rect.size, context: context)
-    let inputRect = Rect(
-      x: rect.minX,
-      y: rect.maxY - sizes.input.height,
-      width: sizes.input.width,
-      height: sizes.input.height)
-    let controlsRect = Rect(
-      x: rect.maxX - sizes.controls.width,
-      y: rect.maxY - sizes.controls.height,
-      width: sizes.controls.width,
-      height: sizes.controls.height)
-
-    BlockEngine.draw(input, into: &drawList, in: inputRect, context: context)
-    BlockEngine.draw(controls, into: &drawList, in: controlsRect, context: context)
-  }
-
-  @MainActor private func measuredSizes(
-    for proposal: Size, context: RenderContext
-  ) -> (input: Size, controls: Size) {
-    let controlsSize = BlockEngine.measure(controls, proposal: proposal, context: context)
-    let inputWidth = max(0, proposal.width - controlsSize.width - spacing)
-    let inputSize = BlockEngine.measure(
-      input,
-      proposal: Size(width: inputWidth, height: proposal.height),
-      context: context)
-    return (
-      input: Size(width: inputWidth, height: inputSize.height),
-      controls: controlsSize
-    )
-  }
-}
 
 struct QueuedTray: Block {
   let session: SessionController

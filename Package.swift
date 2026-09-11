@@ -134,6 +134,7 @@ var targets: [Target] = [
       "ScribeCore",
       "ScribeKit",
       .product(name: "Chroma", package: "chroma"),
+      .product(name: "RemoteProtocol", package: "chroma"),
       .product(name: "Logging", package: "swift-log"),
       .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
       .product(name: "SystemPackage", package: "swift-system"),
@@ -173,7 +174,11 @@ var targets: [Target] = [
   ),
   .testTarget(
     name: "ScribeBlocksTests",
-    dependencies: ["ScribeBlocks"],
+    dependencies: [
+      "ScribeBlocks",
+      .product(name: "RemoteServer", package: "chroma"),
+      .product(name: "NIOEmbedded", package: "swift-nio"),
+    ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
       .treatAllWarnings(as: .error),
@@ -236,13 +241,15 @@ var chromaTraits: Set<Package.Dependency.Trait> = []
 #if os(macOS)
 chromaTraits.insert("MetalBackend")
 products.append(.executable(name: "scribe-mac", targets: ["ScribeMac"]))
+targets.append(.testTarget(name: "ScribeMacLaunchTests", dependencies: ["ScribeMac"]))
 targets.append(
   .executableTarget(
     name: "ScribeMac",
     dependencies: [
       "ScribeBlocks",
       .product(name: "Chroma", package: "chroma"),
-      .product(name: "MetalBackend", package: "chroma"),
+      .product(name: "RemoteMetalClient", package: "chroma"),
+      .product(name: "RemoteServer", package: "chroma"),
     ],
     path: "Sources/ScribeMacApp",
     swiftSettings: [
@@ -280,7 +287,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "e1adc94",
+      revision: "656ed72",
       traits: chromaTraits
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),

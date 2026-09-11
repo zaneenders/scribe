@@ -236,3 +236,34 @@ docc preview Sources/ScribeCore/ScribeCore.docc
 ```bash
 docc preview Sources/ScribeCLI/ScribeCLI.docc
 ```
+
+### Local Chroma integration development
+
+`Package.swift` currently uses the sibling `../chroma` checkout. This integration
+requires Chroma's `TrailingControlsRow` and text-event interception API (included
+in `91ee2aa`), plus the explicit `RenderContext.endEditing()` API; an older checkout will not compile. Clone Chroma beside Scribe if
+it is not already present. Before distributing a standalone Scribe checkout,
+replace the local dependency with a published revision containing these APIs.
+
+On macOS, `swift run scribe-mac`
+launches an owned `--backend` subprocess on an ephemeral loopback port and connects
+Chroma's `RemoteMetalClient` to it. The backend owns Scribe's block graph and
+sessions; the client owns the native window and GPU. Closing the app stops its
+backend. This is a local prototype, not an authenticated remote-access service.
+
+Restart the development app after rebuilding; an already installed Scribe.app
+will not pick up changes in either checkout.
+
+Integration regression checks:
+
+```sh
+swift test --filter 'ScribeBlocksTests|ScribeMacLaunchTests'
+(cd ../chroma && swift test --filter 'TrailingControlsRowTests|TextEventInterceptionTests|RemoteServerTests')
+swift Scripts/test-backend-lifecycle.swift .build/debug/scribe-mac
+```
+
+The Swift launcher tests exercise readiness, early exit, malformed responses,
+timeouts, normal EOF shutdown, and forced cleanup using small child processes.
+The Swift smoke test exercises the actual headless backend, including parent
+process death; it does not open a Metal window. Keyboard integration tests feed
+portable key events through RemoteServer, not native AppKit event synthesis.
