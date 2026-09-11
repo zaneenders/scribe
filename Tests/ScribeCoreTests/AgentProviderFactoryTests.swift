@@ -83,58 +83,6 @@ struct AgentProviderFactoryTests {
     #expect(codexProvider.contextWindow == 128_000)
   }
 
-  // MARK: - Kimi provider
-
-  @Test("kimi apiType with kimi code key and URL returns provider")
-  func kimiWithKimiCodeCredentials() throws {
-    let config = configuration(
-      model: "kimi-model",
-      serverURL: KimiK3Support.kimiCodeBaseURL,
-      apiKey: "sk-kimi-test-key",
-      apiType: "kimi",
-      maxTokens: 8192
-    )
-
-    let provider = try AgentProviderFactory.make(configuration: config)
-    #expect(provider is OpenAICompletionsProvider)
-
-    let completionsProvider = try #require(provider as? OpenAICompletionsProvider)
-    #expect(completionsProvider.model == "kimi-model")
-    #expect(completionsProvider.requestProfile == .kimiCode)
-  }
-
-  @Test("kimi apiType with moonshot key and URL returns provider")
-  func kimiWithMoonshotCredentials() throws {
-    let config = configuration(
-      model: "kimi-model",
-      serverURL: KimiK3Support.moonshotBaseURL,
-      apiKey: "sk-platform-key",
-      apiType: "kimi"
-    )
-
-    let provider = try AgentProviderFactory.make(configuration: config)
-    #expect(provider is OpenAICompletionsProvider)
-
-    let completionsProvider = try #require(provider as? OpenAICompletionsProvider)
-    #expect(completionsProvider.model == "kimi-model")
-    #expect(completionsProvider.requestProfile == .moonshotK3)
-  }
-
-  @Test("kimi apiType validates maxCompletionTokens")
-  func kimiValidatesMaxTokens() {
-    let config = configuration(
-      model: "kimi-model",
-      serverURL: KimiK3Support.moonshotBaseURL,
-      apiKey: "sk-platform-key",
-      apiType: "kimi",
-      maxTokens: 2_000_000  // Way over the limit
-    )
-
-    #expect(throws: ScribeError.self) {
-      _ = try AgentProviderFactory.make(configuration: config)
-    }
-  }
-
   // MARK: - Configuration passthrough
 
   @Test("contextWindow is propagated to provider")

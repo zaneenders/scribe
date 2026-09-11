@@ -17,8 +17,6 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let workingDirectory: FilePath
   let reasoningEnabled: Bool?
   let hooks: AgentLoopHooks
-  let requestProfile: ChatCompletionRequestProfile
-  let maxCompletionTokens: Int?
   let contextWindow: Int
   let retryPolicy: RetryPolicy
 
@@ -32,8 +30,6 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
     hooks: AgentLoopHooks,
-    requestProfile: ChatCompletionRequestProfile = .standard,
-    maxCompletionTokens: Int? = nil,
     contextWindow: Int = 0,
     retryPolicy: RetryPolicy = .default
   ) {
@@ -46,8 +42,6 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.workingDirectory = workingDirectory
     self.reasoningEnabled = reasoningEnabled
     self.hooks = hooks
-    self.requestProfile = requestProfile
-    self.maxCompletionTokens = maxCompletionTokens
     self.contextWindow = contextWindow
     self.retryPolicy = retryPolicy
   }
@@ -109,8 +103,6 @@ private func runSingleRound(
     metadata: [
       "messages": "\(requestBody.messages.count)",
       "reasoning_enabled": "\(String(describing: config.reasoningEnabled))",
-      "request_profile": "\(String(describing: config.requestProfile))",
-      "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
     ])
   let response = try await config.client.createChatCompletion(body: .json(requestBody))
 
@@ -136,10 +128,6 @@ private func runSingleRound(
     }
     let hint: String = {
       let d = detail.lowercased()
-      if code == 401, config.requestProfile == .moonshotK3 || config.requestProfile == .kimiCode {
-        return
-          " Check your API key matches api.baseUrl: Kimi Code keys require https://api.kimi.com/coding; Moonshot platform keys require https://api.moonshot.ai."
-      }
       if d.contains("model"), d.contains("not found") {
         return " The configured model was not found."
       }
@@ -207,7 +195,6 @@ private func runSingleRound(
         "prompt_tokens": "\(u.promptTokens.map(String.init(describing:)) ?? "nil")",
         "completion_tokens": "\(u.completionTokens.map(String.init(describing:)) ?? "nil")",
         "finish_reason": "\(turn.finishReason ?? "missing")",
-        "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
         "answer_chars": "\(turn.text.count)",
         "reasoning_chars": "\(turn.reasoningText.count)",
         "tool_calls": "\(toolInvocations.count)",
@@ -229,7 +216,6 @@ private func runSingleRound(
       "reasoning_chars": "\(assistantReasoning?.count ?? 0)",
       "finish_reason": "\(finishReason ?? "missing")",
       "completion_tokens": "\(processor.lastUsage?.completionTokens.map(String.init(describing:)) ?? "nil")",
-      "max_completion_tokens": "\(effectiveMaxCompletionTokens(config).map(String.init(describing:)) ?? "nil")",
     ]
     if isIncomplete {
       logger.warning("agent.assistant.incomplete", metadata: metadata)
@@ -253,68 +239,21 @@ private func runSingleRound(
   return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
 }
 
-private func effectiveMaxCompletionTokens(_ config: AgentLoopConfig) -> Int? {
-  switch config.requestProfile {
-  case .standard:
-    return nil
-  case .moonshotK3, .kimiCode:
-    return KimiK3Support.effectiveMaxCompletionTokens(config.maxCompletionTokens)
-  }
-}
-
 private func makeChatCompletionRequest(
   config: AgentLoopConfig,
   messages: [Components.Schemas.ChatMessage]
 ) throws -> Components.Schemas.CreateChatCompletionRequest {
   let tools = config.chatTools.isEmpty ? nil : config.chatTools
-  switch config.requestProfile {
-  case .standard:
-    return Components.Schemas.CreateChatCompletionRequest(
-      model: config.model,
-      messages: messages,
-      stream: true,
-      temperature: Float(config.temperature),
-      maxTokens: nil,
-      tools: tools,
-      toolChoice: nil,
-      streamOptions: .init(includeUsage: true),
-      reasoning: config.reasoningEnabled == nil
-        ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled),
-      reasoningEffort: nil,
-      maxCompletionTokens: nil,
-      thinking: nil
-    )
-  case .moonshotK3:
-    try KimiK3Support.validateMessages(messages)
-    return Components.Schemas.CreateChatCompletionRequest(
-      model: config.model,
-      messages: messages,
-      stream: true,
-      temperature: nil,
-      maxTokens: nil,
-      tools: tools,
-      toolChoice: nil,
-      streamOptions: .init(includeUsage: true),
-      reasoning: nil,
-      reasoningEffort: .max,
-      maxCompletionTokens: effectiveMaxCompletionTokens(config),
-      thinking: nil
-    )
-  case .kimiCode:
-    try KimiK3Support.validateMessages(messages)
-    return Components.Schemas.CreateChatCompletionRequest(
-      model: config.model,
-      messages: messages,
-      stream: true,
-      temperature: nil,
-      maxTokens: nil,
-      tools: tools,
-      toolChoice: nil,
-      streamOptions: .init(includeUsage: true),
-      reasoning: nil,
-      reasoningEffort: nil,
-      maxCompletionTokens: effectiveMaxCompletionTokens(config),
-      thinking: .init(_type: .enabled, effort: "max", keep: "all")
-    )
-  }
+  return Components.Schemas.CreateChatCompletionRequest(
+    model: config.model,
+    messages: messages,
+    stream: true,
+    temperature: Float(config.temperature),
+    maxTokens: nil,
+    tools: tools,
+    toolChoice: nil,
+    streamOptions: .init(includeUsage: true),
+    reasoning: config.reasoningEnabled == nil
+      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled)
+  )
 }

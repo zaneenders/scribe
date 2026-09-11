@@ -319,30 +319,18 @@ public enum ConfigLoader {
     }
 
     let apiKeyTrimmed = profile.api.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-    var resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
+    let resolvedAPIKey: String? = apiKeyTrimmed.isEmpty ? nil : apiKeyTrimmed
     let apiType = profile.api.type?.trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedAPIType: String? = apiType.flatMap { $0.isEmpty ? nil : $0 }
 
     if let resolvedAPIType {
-      guard resolvedAPIType == "codex" || resolvedAPIType == "kimi" else {
+      guard resolvedAPIType == "codex" else {
         throw ScribeError.configuration(
           key: ScribeConfigBinding.apiType,
           reason:
-            "Unknown `\(ScribeConfigBinding.apiType)` value \"\(resolvedAPIType)\" for profile `\(profileName)`; use \"codex\", \"kimi\", or omit it for OpenAI-compatible providers."
+            "Unknown `\(ScribeConfigBinding.apiType)` value \"\(resolvedAPIType)\" for profile `\(profileName)`; use \"codex\", or omit it for OpenAI-compatible providers."
         )
       }
-    }
-
-    if resolvedAPIType == "kimi" {
-      if resolvedAPIKey == nil,
-        let envKey = ProcessInfo.processInfo.environment["KIMI_API_KEY"]?
-          .trimmingCharacters(in: .whitespacesAndNewlines),
-        !envKey.isEmpty
-      {
-        resolvedAPIKey = envKey
-      }
-      try KimiK3Support.validateMaxCompletionTokens(profile.agent.maxTokens)
-      try KimiK3Support.validateEndpoint(apiKey: resolvedAPIKey, serverURL: baseURL)
     }
 
     let levelRaw = profile.logging.level.trimmingCharacters(in: .whitespacesAndNewlines)
