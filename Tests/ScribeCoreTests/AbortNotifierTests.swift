@@ -36,7 +36,6 @@ struct AbortNotifierTests {
       return true
     }
 
-    try await Task.sleep(for: .milliseconds(20))
     n.request()
     let woke = await waiter.value
     #expect(woke == true)
@@ -75,7 +74,6 @@ struct AbortNotifierTests {
       return true
     }()
 
-    try await Task.sleep(for: .milliseconds(20))
     n.request()
 
     let results = await (woke1, woke2, woke3)
@@ -86,7 +84,8 @@ struct AbortNotifierTests {
 
   @Test(.timeLimit(.minutes(1)))
   func toolRegistryWakesPromptlyOnNotifierRequest() async throws {
-    let registry = ToolRegistry(tools: [SleepyTool()], logger: toolRunnerTestLogger)
+    let readiness = TestReadiness()
+    let registry = ToolRegistry(tools: [SleepyTool(readiness: readiness)], logger: toolRunnerTestLogger)
     let notifier = AbortNotifier()
     let outcomes = AsyncStream<AbortRaceOutcome>.makeStream()
 
@@ -106,7 +105,8 @@ struct AbortNotifierTests {
       }
     }
 
-    try await Task.sleep(for: .milliseconds(50))
+    defer { toolTask.cancel() }
+    try await readiness.wait()
     notifier.request()
 
     let timeoutTask = Task {
@@ -148,6 +148,7 @@ private enum AbortRaceOutcome: Sendable {
 }
 
 private struct SleepyTool: ScribeTool {
+  let readiness: TestReadiness
   static let name = "sleepy"
   static let description = "Sleeps until cancelled."
   static let parameters: [ScribeToolParameter] = []
@@ -157,6 +158,7 @@ private struct SleepyTool: ScribeTool {
 
   func run(arguments: String, workingDirectory: FilePath, logger: Logger) async throws -> Encodable {
     _ = logger
+    readiness.signal()
     try await Task.sleep(for: .seconds(60))
     return Output(ok: true)
   }

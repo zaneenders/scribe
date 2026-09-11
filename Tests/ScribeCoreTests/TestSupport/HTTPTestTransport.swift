@@ -152,12 +152,15 @@ final class ScriptedTransport: ClientTransport, Sendable {
 
 /// A transport that hangs indefinitely (for timeout / cancellation testing).
 final class HangingClientTransport: ClientTransport, Sendable {
+  let readiness = TestReadiness()
+
   func send(
     _ request: HTTPRequest,
     body: HTTPBody?,
     baseURL: URL,
     operationID: String
   ) async throws -> (HTTPResponse, HTTPBody?) {
+    readiness.signal()
     try await Task.sleep(for: .seconds(3600))
     return (HTTPResponse(status: .init(code: 200)), nil)
   }
