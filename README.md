@@ -148,7 +148,7 @@ Scribe uses the first profile by default; override with `--profile <name>`.
       "api": {
         "baseUrl": "http://localhost:11434",
         "apiKey": "",
-        // "type": "codex" | "kimi"   // omit for OpenAI-compatible providers
+        // "type": "codex"   // omit for OpenAI-compatible providers
       },
       "agent": {
         "model": "gemma4:e2b",
@@ -156,7 +156,7 @@ Scribe uses the first profile by default; override with `--profile <name>`.
         "contextWindowThreshold": 0.8,
         "reasoning": false,
         // "reasoningEffort": "medium", // low | medium | high (reasoning models)
-        // "maxTokens": 4096            // required for Kimi (max 4096)
+        // "maxTokens": 4096            // reserved for provider-specific limits
       },
       "logging": {
         "level": "trace"                // trace | debug | info | notice | warning | error
@@ -173,19 +173,18 @@ Scribe uses the first profile by default; override with `--profile <name>`.
 | `name` | *(required)* | Profile identifier; first profile is active by default |
 | `api.baseUrl` | *(required)* | API base URL (e.g. `http://localhost:11434` for Ollama) |
 | `api.apiKey` | `""` | Bearer token; leave empty when no auth is required |
-| `api.type` | *(omitted)* | `"codex"` for ChatGPT/Codex, `"kimi"` for Kimi Code; omit for any OpenAI-compatible provider |
+| `api.type` | *(omitted)* | `"codex"` for ChatGPT/Codex; omit for any OpenAI-compatible provider |
 | `agent.model` | *(required)* | Model name |
 | `agent.contextWindow` | *(required)* | Token context window size |
 | `agent.contextWindowThreshold` | `0.8` | Fraction (0–1) that triggers context compaction |
 | `agent.reasoning` | `false` | Enable reasoning/thinking tokens for models that support it |
 | `agent.reasoningEffort` | *(omitted)* | Reasoning effort: `"low"`, `"medium"`, or `"high"` |
-| `agent.maxTokens` | *(omitted)* | Max completion tokens; required for Kimi (4096 max) |
+| `agent.maxTokens` | *(omitted)* | Reserved for provider-specific token limits |
 | `agent.maxRetries` | `3` | Retries with exponential backoff on transient network failures (HTTP 429/5xx, dropped connections, timeouts); `0` disables |
 | `logging.level` | `"trace"` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
 
 > Scribe supports OpenAI-compatible `completions` APIs, plus `codex` (ChatGPT
-> backend) and `kimi` (Kimi Code) — set `api.type` to opt into non-standard
-> providers.
+> backend) — set `api.type` to `"codex"` to use it.
 
 ## Tools
 

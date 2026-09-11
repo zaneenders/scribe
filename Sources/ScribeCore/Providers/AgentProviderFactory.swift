@@ -12,9 +12,7 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
       client: client,
       model: model,
       reasoningEnabled: reasoningEnabled,
-      contextWindow: contextWindow,
-      requestProfile: .standard,
-      maxCompletionTokens: nil)
+      contextWindow: contextWindow)
   }
 }
 
@@ -40,37 +38,6 @@ enum AgentProviderFactory {
         contextWindow: configuration.contextWindow,
         retryPolicy: retryPolicy)
 
-    case "kimi":
-      let transport = try KimiK3Support.resolveTransport(
-        apiKey: configuration.apiKey,
-        serverURL: configuration.serverURL)
-      try KimiK3Support.validateMaxCompletionTokens(configuration.maxTokens)
-
-      let client: ScribeLLM.Client
-      let profile: ChatCompletionRequestProfile
-      switch transport {
-      case .moonshotOpenAI:
-        client = OpenAICompatibleClient.make(
-          serverURL: serverURL,
-          apiKey: configuration.apiKey)
-        profile = .moonshotK3
-      case .kimiCodeOpenAI:
-        client = OpenAICompatibleClient.makeForKimiCode(
-          serverURL: serverURL,
-          apiKey: configuration.apiKey,
-          headers: KimiCodeIdentity.requestHeaders())
-        profile = .kimiCode
-      }
-      return OpenAICompletionsProvider(
-        client: client,
-        model: configuration.agentModel,
-        reasoningEnabled: configuration.reasoningEnabled,
-        contextWindow: configuration.contextWindow,
-        requestProfile: profile,
-        maxCompletionTokens: configuration.maxTokens,
-        defaultTemperature: configuration.temperature ?? 0,
-        retryPolicy: retryPolicy)
-
     default:
       return OpenAICompletionsProvider(
         client: OpenAICompatibleClient.make(
@@ -79,8 +46,6 @@ enum AgentProviderFactory {
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         contextWindow: configuration.contextWindow,
-        requestProfile: .standard,
-        maxCompletionTokens: nil,
         defaultTemperature: configuration.temperature ?? 0,
         retryPolicy: retryPolicy)
     }

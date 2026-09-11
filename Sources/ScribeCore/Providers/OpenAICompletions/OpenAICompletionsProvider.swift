@@ -7,8 +7,6 @@ struct OpenAICompletionsProvider: AgentProvider {
   let model: String
   let reasoningEnabled: Bool?
   let contextWindow: Int
-  let requestProfile: ChatCompletionRequestProfile
-  let maxCompletionTokens: Int?
   var defaultTemperature: Double = 0
   var retryPolicy: RetryPolicy = .default
 
@@ -33,8 +31,6 @@ struct OpenAICompletionsProvider: AgentProvider {
       workingDirectory: workingDirectory,
       reasoningEnabled: reasoningEnabled,
       hooks: .default,
-      requestProfile: requestProfile,
-      maxCompletionTokens: maxCompletionTokens,
       contextWindow: contextWindow,
       retryPolicy: retryPolicy
     )
