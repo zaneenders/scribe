@@ -126,7 +126,6 @@ func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
       return
     }
     #expect(chatImage.imageUrl.url == "data:image/png;base64,\(pngBase64)")
-    try KimiK3Support.validateMessages([message])
 
     let items = try #require(convertChatMessagesToCodexInput([message]))
     guard case .user(let user) = items[0], case .case2(let codexParts) = user.content else {

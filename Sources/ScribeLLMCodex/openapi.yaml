@@ -313,7 +313,7 @@ components:
         defer_loading:
           type: boolean
           description: >
-            If true, the tool definition is registered lazily (Kimi-style deferred tools).
+            If true, the tool definition is registered lazily.
             Only included in tool_search_output items, not as a top-level tool.
       additionalProperties: true
 
