@@ -237,13 +237,7 @@ docc preview Sources/ScribeCore/ScribeCore.docc
 docc preview Sources/ScribeCLI/ScribeCLI.docc
 ```
 
-### Local Chroma integration development
-
-`Package.swift` currently uses the sibling `../chroma` checkout. This integration
-requires Chroma's `TrailingControlsRow` and text-event interception API (included
-in `91ee2aa`), plus the explicit `RenderContext.endEditing()` API; an older checkout will not compile. Clone Chroma beside Scribe if
-it is not already present. Before distributing a standalone Scribe checkout,
-replace the local dependency with a published revision containing these APIs.
+### macOS app development
 
 On macOS, `swift run scribe-mac`
 launches an owned `--backend` subprocess on an ephemeral loopback port and connects
