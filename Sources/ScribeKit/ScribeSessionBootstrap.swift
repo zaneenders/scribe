@@ -137,7 +137,8 @@ public enum ScribeSessionBootstrap {
       logger: logger,
       messageQueue: queue
     )
-    let profile = loaded.profiles.first { $0.name == loaded.activeProfileName }
+    let profile =
+      loaded.profiles.first { $0.name == loaded.activeProfileName }
       ?? ProfileSummary(
         name: loaded.activeProfileName,
         model: configuration.agentModel,

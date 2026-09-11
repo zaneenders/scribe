@@ -57,9 +57,10 @@ func runAgentLoopCore(
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   abortObserver: some AbortObserver,
-  runRound: @escaping @Sendable (
-    [Components.Schemas.ChatMessage], Int, @escaping @Sendable (AgentEvent) -> Void
-  ) async throws -> RoundResult
+  runRound:
+    @escaping @Sendable (
+      [Components.Schemas.ChatMessage], Int, @escaping @Sendable (AgentEvent) -> Void
+    ) async throws -> RoundResult
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
