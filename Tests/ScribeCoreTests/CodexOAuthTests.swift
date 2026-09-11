@@ -78,7 +78,9 @@ struct CodexOAuthTests {
       _ = try await CodexOAuth.login(
         callbackHost: CodexOAuthConstants.callbackHost,
         callbackPort: 0,
-        browserOpener: { _ in /* intentionally left hanging */ },
+        browserOpener: { _ in
+          // Intentionally left hanging.
+        },
         timeout: 2.0
       )
       Issue.record("Expected loginTimeout, but login succeeded unexpectedly")
