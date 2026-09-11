@@ -159,7 +159,7 @@ func inlineRuns(_ text: String) -> [MDRun] {
       if !plain.isEmpty { runs.append(MDRun(text: String(plain), code: code)) }
       let after = rest[open.upperBound...]
       guard let close = after.range(of: "**") else {
-        runs.append(MDRun(text: String(rest), code: code))
+        runs.append(MDRun(text: String(rest[open.lowerBound...]), code: code))
         return
       }
       runs.append(MDRun(text: String(after[..<close.lowerBound]), code: code, bold: true))
