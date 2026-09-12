@@ -582,6 +582,21 @@ final class ScribeMacStore {
     directoryFocusPending = true
   }
 
+  /// Run after drawing: keep the palette modal for the entire Escape frame.
+  /// TextField may end editing while processing Escape, so restore it when
+  /// first-run directory selection cannot be dismissed.
+  func finishDirectoryPaletteInput(_ context: RenderContext) {
+    guard showDirectoryPicker, renamingSessionID == nil,
+      context.input.textEvents.contains(.endEditing)
+    else { return }
+    if requiresDirectoryBeforeStart {
+      context.focus(Self.directoryPaletteID, editing: true)
+    } else {
+      closeDirectoryPicker()
+    }
+    context.requestRedraw()
+  }
+
   func closeDirectoryPicker() {
     guard !requiresDirectoryBeforeStart else { return }
     showDirectoryPicker = false

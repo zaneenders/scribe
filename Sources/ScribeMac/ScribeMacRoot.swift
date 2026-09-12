@@ -66,40 +66,40 @@ struct ScribeMacRoot: Block {
         if let sessionID = store.renamingSessionID {
           RenameSessionDialog(store: store, sessionID: sessionID, theme: theme)
         }
-      }
-    ) { context in
-      context.setCopyTextProvider {
-        SelectionManager.shared.copyText(
-          isTranscriptVisible: store.active != nil)
-      }
-      context.setSelectAllHandler {
-        SelectionManager.shared.selectAll(
-          isTranscriptVisible: store.active != nil)
-      }
-      // Hit testing uses layouts retained from the preceding frame.
-      if context.input.pointerPressed {
-        SelectionManager.shared.clear()
-      }
-      SelectionManager.shared.updateFromDrag(context: context)
-      MarkdownLayoutRegistry.clear()
-      store.applyPendingFocus()
-      if store.showDirectoryPicker, store.renamingSessionID == nil {
-        if context.input.commands.contains(ScribeCommandPickerCommand.toggle) {
-          store.tabCompleteDirectory()
+      },
+      prepare: { context in
+        context.setCopyTextProvider {
+          SelectionManager.shared.copyText(
+            isTranscriptVisible: store.active != nil)
         }
-        if context.input.textEvents.contains(.endEditing) {
-          store.closeDirectoryPicker()
+        context.setSelectAllHandler {
+          SelectionManager.shared.selectAll(
+            isTranscriptVisible: store.active != nil)
         }
-      }
-      for command in context.input.commands {
-        if !store.showDirectoryPicker, store.renamingSessionID == nil,
-          store.active?.commandPicker == nil,
-          ScribeComposerCommand.shouldSubmit(command, activeTextInput: context.activeTextInput)
-        {
-          store.active?.submit()
+        // Hit testing uses layouts retained from the preceding frame.
+        if context.input.pointerPressed {
+          SelectionManager.shared.clear()
         }
-      }
-    }
+        SelectionManager.shared.updateFromDrag(context: context)
+        MarkdownLayoutRegistry.clear()
+        store.applyPendingFocus()
+        if store.showDirectoryPicker, store.renamingSessionID == nil {
+          if context.input.commands.contains(ScribeCommandPickerCommand.toggle) {
+            store.tabCompleteDirectory()
+          }
+        }
+        for command in context.input.commands {
+          if !store.showDirectoryPicker, store.renamingSessionID == nil,
+            store.active?.commandPicker == nil,
+            ScribeComposerCommand.shouldSubmit(command, activeTextInput: context.activeTextInput)
+          {
+            store.active?.submit()
+          }
+        }
+      },
+      finish: { context in
+        store.finishDirectoryPaletteInput(context)
+      })
   }
 
   @MainActor private func sessionLoadingState(_ saved: ScribeMacStore.SavedSession) -> some Block {
