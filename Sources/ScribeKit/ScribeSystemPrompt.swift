@@ -5,27 +5,44 @@ import ScribeCore
 /// Builds the system prompt every Scribe front-end (CLI, macOS app) shares.
 public enum ScribeSystemPrompt {
 
-  public static func make(tools: [any ScribeTool], cwd: String) -> String {
-    let toolNames = tools.map { type(of: $0).name }.joined(separator: ", ")
+  /// Pure composition; file loading happens only when creating a new session.
+  public static func make(tools: [any ScribeTool], cwd: String, additionalInstructions: String = "") -> String {
     let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
-    return """
-      You are Scribe, a coding agent CLI with shell and file tools.
+    let base = """
+      You are Scribe, a coding agent.
 
-      Prefer doing over asking use tools first for discovery (list dirs, manifests/docs/README, grep), answer from evidence, and don't ask permission to read what you can open. When you truly need the user: lead with what you tried and learned, then the single gap. Never "should I look at X?" instead of opening X.
-
-      Git: use `shell` for normal inspection (`git status`, `git diff`, `git log`, branches). Avoid destructive git operations (force push, hard reset, branch deletion) unless the user explicitly requests them.
-
-      Paths behave like a normal shell: relative paths use the working directory printed below; `..` reaches the parent folder and sibling projects that way if the user mentions such a path, inspect it instead of asking them to relocate or paste files first.
-
-      Tool names must match exactly: \(toolNames).
-      Parallel tool calls are fine when they do not depend on each other's outputs.
+      Inspect available files and tools before asking the user. Act on evidence; when blocked, explain what you tried and ask for the missing information.
+      Preserve unrelated work. Do not perform destructive Git operations unless explicitly requested.
+      Use the provided tools by their exact names. Run independent calls in parallel when useful.
+      Relative paths resolve from the working directory below; `..` can reach sibling projects.
 
       \(toolHints)
 
-      Scribe's configuration, logs, and sessions live under `~/.scribe/` by default.  If asked to modify or rebuild Scribe itself, clone the source into `~/.scribe/scribe/` from https://github.com/zaneenders/scribe.
-
-      Current working directory (relative paths resolve here): \(cwd)
+      Current working directory: \(cwd)
       """
+    guard !additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return base }
+    return base + "\n\n# Additional user-configured instructions\n\n" + additionalInstructions
+  }
+
+  /// Called only for new sessions. The combined prompt is persisted once.
+  public static func load(tools: [any ScribeTool], cwd: String, paths: ScribePaths) throws -> String {
+    let url = URL(fileURLWithPath: paths.systemPromptPath.string)
+    let instructions: String
+    do {
+      instructions = try String(contentsOf: url, encoding: .utf8)
+    } catch CocoaError.fileReadNoSuchFile {
+      return make(tools: tools, cwd: cwd)
+    } catch {
+      throw PromptFileError(path: url.path, reason: String(describing: error))
+    }
+    return make(tools: tools, cwd: cwd, additionalInstructions: instructions)
+  }
+
+  private struct PromptFileError: LocalizedError, CustomStringConvertible {
+    let path: String
+    let reason: String
+    var description: String { "Could not read system prompt appendix at \(path): \(reason)" }
+    var errorDescription: String? { description }
   }
 
   /// The default tool set every front-end offers the agent.

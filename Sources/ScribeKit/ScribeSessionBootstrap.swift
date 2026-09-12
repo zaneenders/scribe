@@ -46,7 +46,6 @@ public enum ScribeSessionBootstrap {
   ) async throws -> BootstrappedSession {
     let loaded = try await ConfigLoader.load(profileOverride: profileOverride)
     let tools = ScribeSystemPrompt.defaultTools()
-    let systemPrompt = ScribeSystemPrompt.make(tools: tools, cwd: workingDirectory)
     let base = loaded.scribeConfig
     let configuration = ScribeConfig(
       agentModel: base.agentModel,
@@ -107,6 +106,10 @@ public enum ScribeSessionBootstrap {
       ])
 
     let isNew = messages.isEmpty
+    let systemPrompt =
+      try isNew
+      ? ScribeSystemPrompt.load(tools: tools, cwd: workingDirectory, paths: loaded.paths)
+      : ""
     let persister = try await FileSessionPersister.open(
       sessionId: sessionId,
       directory: directory,

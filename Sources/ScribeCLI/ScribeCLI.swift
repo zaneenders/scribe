@@ -110,7 +110,6 @@ enum LoginProvider: String, ExpressibleByArgument {
     defer { ShellCaptureDirectory.teardown() }
 
     let tools = ScribeSystemPrompt.defaultTools()
-    let systemPrompt = ScribeSystemPrompt.make(tools: tools, cwd: cwd)
 
     let scribeConfig = ScribeConfig(
       agentModel: loaded.scribeConfig.agentModel,
@@ -157,6 +156,17 @@ enum LoginProvider: String, ExpressibleByArgument {
       resumeMetadata = nil
       resumeMessages = []
     }
+
+    if resumeMetadata != nil, resumeMessages.first?.role != .system {
+      throw ScribeError.sessionCorrupted(
+        reason: "Resumed conversation must begin with a system message.")
+    }
+
+    // Resumes use their persisted prompt without even reading system.md.
+    let systemPrompt =
+      try resumeMetadata == nil
+      ? ScribeSystemPrompt.load(tools: tools, cwd: cwd, paths: loaded.paths)
+      : ""
 
     var logger = loaded.makeSessionLogger(sessionId: sessionId)
     let mode = resumeMetadata == nil ? "new" : "resume"
