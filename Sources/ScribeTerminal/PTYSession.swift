@@ -55,10 +55,10 @@ public final class PTYSession: Sendable {
   }
 
   private let state: Mutex<State>
-  private let descriptorLock = NSLock()
+  private let descriptorLock = Mutex(())
   // A PTY is one byte stream. Keep each logical write contiguous even when
   // callers (and, eventually, daemon clients) submit input concurrently.
-  private let writeLock = NSLock()
+  private let writeLock = Mutex(())
   private let childPID: pid_t
 
   public var onOutput: (@Sendable (Data) -> Void)? {
@@ -140,7 +140,7 @@ public final class PTYSession: Sendable {
 
   public func write(_ data: Data) throws {
     guard !data.isEmpty else { return }
-    try writeLock.withLock {
+    try writeLock.withLock { _ in
       let fd = try duplicateFileDescriptor()
       defer { _ = systemClose(fd) }
       let blockingResult = scribe_set_nonblocking(fd, 0)
@@ -179,7 +179,7 @@ public final class PTYSession: Sendable {
   // recycle the master descriptor between validation and dup(2). The duplicate
   // keeps the PTY open for the complete operation without serializing writes.
   private func duplicateFileDescriptor() throws -> Int32 {
-    try descriptorLock.withLock {
+    try descriptorLock.withLock { _ in
       try state.withLock { state in
         guard !state.isClosing, !state.readEnded else { throw PTYSessionError.closed }
         var duplicate: Int32 = -1
@@ -194,7 +194,7 @@ public final class PTYSession: Sendable {
     // Use the same lock order as duplicateFileDescriptor(). The reader holds
     // descriptorLock only around a bounded poll and a nonblocking read, so this
     // closes the master promptly without racing descriptor reuse.
-    let task = descriptorLock.withLock {
+    let task = descriptorLock.withLock { _ in
       state.withLock { state -> Task<Void, Never>? in
         guard !state.isClosing else { return nil }
         state.isClosing = true
@@ -217,7 +217,7 @@ public final class PTYSession: Sendable {
   }
 
   private func startReading(fileDescriptor: Int32) {
-    let task = Task.detached(priority: .high) { [weak self, descriptorLock] in
+    let task = Task.detached(priority: .high) { [weak self] in
       while !Task.isCancelled {
         // Poll without the descriptor lock so close() never waits for the timeout.
         // Before reading, revalidate under the lock that close() has not invalidated
@@ -231,7 +231,7 @@ public final class PTYSession: Sendable {
         }
 
         guard let self else { return }
-        let result: (count: Int, data: Data?, error: Int32) = descriptorLock.withLock {
+        let result: (count: Int, data: Data?, error: Int32) = descriptorLock.withLock { _ in
           let isOpen = state.withLock {
             !$0.isClosing && $0.masterFD == fileDescriptor
           }

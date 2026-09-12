@@ -676,12 +676,16 @@ struct MarkdownText: PrimitiveBlock {
   /// Fixed interface labels may contain the small set of UI glyphs that prose
   /// sanitization intentionally replaces.
   var sanitizesASCII = true
+  var isPlainText = false
   /// Optional stable ID for this block, used to register its layout for
   /// hit testing and text selection.
   var itemID: WidgetID? = nil
 
   private func lines(forWidth width: Float, metrics: FontMetrics) -> [VisualLine] {
     let columns = Int(width / (metrics.cellAdvance * scale))
+    if isPlainText {
+      return layoutPlainText(markdown, columns: columns, color: baseColor)
+    }
     return layoutMarkdown(
       segmentMarkdown(sanitizesASCII ? sanitizeASCII(markdown) : markdown),
       columns: columns,
@@ -718,8 +722,7 @@ struct MarkdownText: PrimitiveBlock {
   }
 }
 
-/// A one-line convenience wrapper for colored, wrapped plain text (notices,
-/// tool output) — routed through the same layout as markdown.
+/// Literal, hard-wrapped text. Source whitespace and punctuation are preserved.
 struct WrappedText: Block {
   var text: String
   var theme: MacTheme
@@ -730,7 +733,9 @@ struct WrappedText: Block {
   var itemID: WidgetID? = nil
 
   var body: MarkdownText {
-    MarkdownText(markdown: text, theme: theme, baseColor: color, scale: scale, itemID: itemID)
+    MarkdownText(
+      markdown: text, theme: theme, baseColor: color, scale: scale,
+      sanitizesASCII: false, isPlainText: true, itemID: itemID)
   }
 }
 

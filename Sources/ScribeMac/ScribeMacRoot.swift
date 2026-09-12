@@ -66,24 +66,40 @@ struct ScribeMacRoot: Block {
         if let sessionID = store.renamingSessionID {
           RenameSessionDialog(store: store, sessionID: sessionID, theme: theme)
         }
-      }
-    ) { context in
-      context.setCopyTextProvider {
-        SelectionManager.shared.copyText(
-          isTranscriptVisible: store.active != nil)
-      }
-      context.setSelectAllHandler {
-        SelectionManager.shared.selectAll(
-          isTranscriptVisible: store.active != nil)
-      }
-      // Hit testing uses layouts retained from the preceding frame.
-      if context.input.pointerPressed {
-        SelectionManager.shared.clear()
-      }
-      SelectionManager.shared.updateFromDrag(context: context)
-      MarkdownLayoutRegistry.clear()
-      store.applyPendingFocus()
-    }
+      },
+      prepare: { context in
+        context.setCopyTextProvider {
+          SelectionManager.shared.copyText(
+            isTranscriptVisible: store.active != nil)
+        }
+        context.setSelectAllHandler {
+          SelectionManager.shared.selectAll(
+            isTranscriptVisible: store.active != nil)
+        }
+        // Hit testing uses layouts retained from the preceding frame.
+        if context.input.pointerPressed {
+          SelectionManager.shared.clear()
+        }
+        SelectionManager.shared.updateFromDrag(context: context)
+        MarkdownLayoutRegistry.clear()
+        store.applyPendingFocus()
+        if store.showDirectoryPicker, store.renamingSessionID == nil {
+          if context.input.commands.contains(ScribeCommandPickerCommand.toggle) {
+            store.tabCompleteDirectory()
+          }
+        }
+        for command in context.input.commands {
+          if !store.showDirectoryPicker, store.renamingSessionID == nil,
+            store.active?.commandPicker == nil,
+            ScribeComposerCommand.shouldSubmit(command, activeTextInput: context.activeTextInput)
+          {
+            store.active?.submit()
+          }
+        }
+      },
+      finish: { context in
+        store.finishDirectoryPaletteInput(context)
+      })
   }
 
   @MainActor private func sessionLoadingState(_ saved: ScribeMacStore.SavedSession) -> some Block {
@@ -155,7 +171,6 @@ struct ScribeMacRoot: Block {
     HStack(spacing: 8) {
       Text("SCRIBE")
         .fontScale(theme.titleScale)
-        .fontFace(.display)
         .foregroundColor(theme.accent)
       Button(
         store.isSessionSidebarVisible ? "Sessions ◀" : "Sessions ▶",
@@ -163,6 +178,13 @@ struct ScribeMacRoot: Block {
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
+      if ScribeSceneCapture.shared.isEnabled {
+        Button(
+          ScribeSceneCapture.shared.status, id: WidgetID("scene-snapshot"),
+          fontScale: theme.smallScale,
+          padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+        ) { ScribeSceneCapture.shared.request() }
+      }
     }
     .padding(EdgeInsets(top: 2, leading: theme.margin, bottom: 2, trailing: theme.margin))
     .sizing(y: .fixed(theme.headerHeight))
