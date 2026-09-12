@@ -55,6 +55,33 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     try FileManager.default.copyItem(at: infoPlist, to: contentsURL.appendingPathComponent("Info.plist"))
     try FileManager.default.copyItem(at: appIcon, to: resourcesURL.appendingPathComponent("AppIcon.icns"))
 
+    // Resource bundles are emitted beside the products, not included in the executable artifacts.
+    // Discover them from the actual build output rather than assuming a particular SwiftPM backend.
+    var installedBundles: Set<String> = []
+    for directory in Set([macBinary.deletingLastPathComponent(), cliBinary.deletingLastPathComponent()]) {
+      let entries = try FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: [.isDirectoryKey]
+      )
+      for bundle in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+      where bundle.pathExtension == "bundle" {
+        guard try bundle.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { continue }
+        let name = bundle.lastPathComponent
+        guard installedBundles.insert(name).inserted else { continue }
+        Diagnostics.remark("Installing resource bundle \(name)…")
+        try FileManager.default.copyItem(at: bundle, to: resourcesURL.appendingPathComponent(name))
+        // Xcode's accessor searches Contents/Resources; native SwiftPM's accessor searches
+        // Bundle.main.bundleURL. Relative aliases support both, including the embedded CLI.
+        try FileManager.default.createSymbolicLink(
+          atPath: outputURL.appendingPathComponent(name).path,
+          withDestinationPath: "Contents/Resources/\(name)"
+        )
+        try FileManager.default.createSymbolicLink(
+          atPath: helpersURL.appendingPathComponent(name).path,
+          withDestinationPath: "../Resources/\(name)"
+        )
+      }
+    }
+
     if ProcessInfo.processInfo.environment["SCRIBE_SKIP_ADHOC_SIGNING"] != "1" {
       Diagnostics.remark("Signing embedded CLI…")
       try Self.run(
