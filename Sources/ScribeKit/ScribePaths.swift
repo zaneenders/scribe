@@ -7,6 +7,8 @@ public struct ScribePaths: Sendable {
 
   public let profileManifestPath: FilePath
 
+  public var systemPromptPath: FilePath { dataHome.appendingPathComponent("system.md") }
+
   public let sessionsDirectory: FilePath
 
   public var sessionsDirectoryPath: String { sessionsDirectory.string }

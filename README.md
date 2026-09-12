@@ -135,6 +135,23 @@ Set `SCRIBE_HOME` to override the `~/.scribe` data directory for config, logs, a
 
 > `cwd` current working directory
 
+### Personal instructions
+
+Create `~/.scribe/system.md` (or `$SCRIBE_HOME/system.md`) to append personal
+instructions to the built-in prompt:
+
+```md
+- Keep explanations concise.
+- Never use @unchecked Sendable.
+- Run relevant tests after code changes.
+```
+
+The file is read as UTF-8 only when creating a **new session**. Missing or blank
+files have no effect; unreadable or invalid UTF-8 files report an error.
+The combined prompt is saved once. Active, resumed, and forked conversations
+keep their existing prompt unchanged, preserving history and cached prefixes.
+Edits take effect with the next new session; there is no hot reload.
+
 ### Configuration schema
 
 The config file contains a `profiles` array — at least one profile is required.
