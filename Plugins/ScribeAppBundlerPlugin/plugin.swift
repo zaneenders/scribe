@@ -69,12 +69,7 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
         guard installedBundles.insert(name).inserted else { continue }
         Diagnostics.remark("Installing resource bundle \(name)…")
         try FileManager.default.copyItem(at: bundle, to: resourcesURL.appendingPathComponent(name))
-        // Xcode's accessor searches Contents/Resources; native SwiftPM's accessor searches
-        // Bundle.main.bundleURL. Relative aliases support both, including the embedded CLI.
-        try FileManager.default.createSymbolicLink(
-          atPath: outputURL.appendingPathComponent(name).path,
-          withDestinationPath: "Contents/Resources/\(name)"
-        )
+        // The embedded command-line tool searches beside its executable.
         try FileManager.default.createSymbolicLink(
           atPath: helpersURL.appendingPathComponent(name).path,
           withDestinationPath: "../Resources/\(name)"
