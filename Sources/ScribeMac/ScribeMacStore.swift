@@ -1,6 +1,7 @@
 import Chroma
 import Foundation
 import Logging
+import Observation
 import ProfileRecorderServer
 import ScribeCore
 import ScribeKit
@@ -13,6 +14,7 @@ import SystemPackage
 /// controller keeps consuming events in the background and flags unread
 /// activity for the sidebar.
 @MainActor
+@Observable
 final class ScribeMacStore {
   struct SavedSession: Identifiable, Sendable {
     let id: UUID

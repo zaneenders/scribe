@@ -21,7 +21,7 @@ struct TextDisclosureTests {
         let label = expanded ? "Hide text" : "Show full text"
         var buttons = 0
         for command in list.commands {
-          if case .text(let position, let text, _, let scale, _) = command, text == label {
+          if case .text(let position, let text, _, let scale) = command, text == label {
             buttons += 1
             #expect(position.x >= 0)
             #expect(position.x + Float(text.count) * context.fontMetrics.cellAdvance * scale <= width)

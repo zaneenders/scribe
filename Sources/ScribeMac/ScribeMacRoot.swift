@@ -171,7 +171,6 @@ struct ScribeMacRoot: Block {
     HStack(spacing: 8) {
       Text("SCRIBE")
         .fontScale(theme.titleScale)
-        .fontFace(.display)
         .foregroundColor(theme.accent)
       Button(
         store.isSessionSidebarVisible ? "Sessions ◀" : "Sessions ▶",

@@ -1,4 +1,4 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.4
 import PackageDescription
 
 var products: [Product] = [
@@ -176,6 +176,7 @@ var targets: [Target] = [
     name: "ScribeBlocksTests",
     dependencies: [
       "ScribeBlocks",
+      .product(name: "HeadlessBackend", package: "chroma"),
       .product(name: "RemoteServer", package: "chroma"),
       .product(name: "NIOEmbedded", package: "swift-nio"),
     ],
@@ -281,13 +282,12 @@ targets.append(
 let package = Package(
   name: "scribe",
   platforms: [
-    .macOS(.v26)
+    .macOS(.v27)
   ],
   products: products,
   dependencies: [
     .package(
-      url: "https://github.com/zaneenders/chroma",
-      revision: "a34c951",
+      path: "../chroma",
       traits: chromaTraits
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),

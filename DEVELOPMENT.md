@@ -3,6 +3,8 @@
 ## Requirements
 
 Until a 1.0.0 release the project targets the latest Swift version only.
+Swift tools 6.4 or newer are required; use the Chroma-matched snapshot pinned
+in `.swift-version`. See [README.md](README.md#requirements) for Swiftly setup.
 
 Currently only working on MacOs and Linux support so Windows is not currently
 supported but contributions and maintainers for that effort are welcome.
@@ -15,6 +17,23 @@ content is absorbed into permanent documentation (inline doc comments surfaced
 by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 [docc]: https://www.swift.org/documentation/docc/
+
+## Local Chroma observation experiment
+
+This branch uses the sibling `../chroma` checkout (currently the `observation`
+branch) instead of a pinned remote dependency. Keep that checkout alongside
+Scribe; edits there are picked up on the next build.
+
+`ScribeMacStore` and `SessionController` use Swift Observation so model changes
+read during a Chroma frame request a redraw, including asynchronous updates.
+This is whole-frame invalidation, not per-block caching; animations still rely
+on backend refresh scheduling.
+
+```bash
+swift build --product scribe-mac
+swift test --filter ScribeBlocksTests
+swift run scribe-mac
+```
 
 ## Testing
 

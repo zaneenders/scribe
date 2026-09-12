@@ -1,6 +1,7 @@
 import Chroma
 import Foundation
 import Logging
+import Observation
 import ScribeCore
 import ScribeKit
 
@@ -12,6 +13,7 @@ import ScribeKit
 /// or starts a new one. Activity arriving while off-screen raises
 /// `hasUnreadActivity` for the sidebar.
 @MainActor
+@Observable
 final class SessionController {
 
   enum ItemKind: Sendable {

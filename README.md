@@ -6,8 +6,24 @@ Ai Agent written in Swift
 
 ### Requirements
 
-- [Swift 6.3](https://www.swift.org/install/) or newer
+- [Swift tools 6.4](https://www.swift.org/install/) or newer
 - macOS 26+ or Linux (x86_64 or aarch64)
+
+Until a release toolchain is available, `.swift-version` pins
+`main-snapshot-2026-09-10`, matching Chroma (the compiler identifies itself as
+Swift 6.5-dev). Install and use it with [Swiftly](https://www.swift.org/install/):
+
+```bash
+swiftly install
+swiftly run swift --version
+swiftly run swift build
+swiftly run swift test
+```
+
+With Swiftly's proxies on your `PATH`, the plain `swift` commands and build
+scripts below select the pin automatically. The tools requirement is 6.4;
+testing with this snapshot does not establish compatibility with a released
+6.4 compiler.
 
 On first run Scribe writes a default `scribe.config.json` targeting Ollama at
 `http://localhost:11434` with the **`gemma4:e2b`** model.  Edit the file or set
@@ -67,7 +83,7 @@ Wayland/EGL/OpenGL ES backend.
 
 #### Build from source
 
-Install Swift 6.3 and the native development packages first. Scribe's HTTP
+Install the Swift toolchain described above and the native development packages first. Scribe's HTTP
 stack uses Swift's `FoundationNetworking` on Linux for `URLError` handling;
 that module adds the `libcurl` linker dependency. The OpenAI-compatible and
 Codex clients themselves send requests with AsyncHTTPClient.
@@ -104,13 +120,15 @@ Debian/Ubuntu), not the development package. Then build Scribe:
 swift run -c release scribe-wayland
 ```
 
-For CLI-only static builds, install the Swift static SDK once and build for your
-architecture:
+For CLI-only static builds, first install a Swift static Linux SDK matching
+`swift --version`, using the download URL and checksum published for that
+specific toolchain at [Swift.org](https://www.swift.org/install/). The old 6.3
+SDK is not compatible with the pinned snapshot. If no matching SDK is available,
+use the native Linux build above instead.
+
+After installing the matching SDK, build for your architecture:
 
 ```bash
-swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
-  --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
-
 ARCH=$(uname -m)   # x86_64 or aarch64
 swift build -c release --swift-sdk "${ARCH}-swift-linux-musl"
 install -m 755 .build/release/scribe ~/.local/bin/scribe
