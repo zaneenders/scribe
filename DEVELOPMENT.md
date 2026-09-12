@@ -135,3 +135,8 @@ release-mode profiling works out of the box.
 - ``ToolExecutor/execute(_:workingDirectory:logger:abort:)`` takes `logger:` per call.
 - Removed: global `ScribeCore.scribeSessionLogger` — callers must not rely on a package-level log sink.
 
+## Rendering diagnostics (macOS)
+
+```bash
+swift build -c release --product scribe-mac && PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' .build/release/scribe-mac
+```
