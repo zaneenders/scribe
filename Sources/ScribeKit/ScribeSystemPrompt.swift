@@ -38,10 +38,11 @@ public enum ScribeSystemPrompt {
     return make(tools: tools, cwd: cwd, additionalInstructions: instructions)
   }
 
-  private struct PromptFileError: Error, CustomStringConvertible {
+  private struct PromptFileError: LocalizedError, CustomStringConvertible {
     let path: String
     let reason: String
     var description: String { "Could not read system prompt appendix at \(path): \(reason)" }
+    var errorDescription: String? { description }
   }
 
   /// The default tool set every front-end offers the agent.

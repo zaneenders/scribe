@@ -157,6 +157,11 @@ enum LoginProvider: String, ExpressibleByArgument {
       resumeMessages = []
     }
 
+    if resumeMetadata != nil, resumeMessages.first?.role != .system {
+      throw ScribeError.sessionCorrupted(
+        reason: "Resumed conversation must begin with a system message.")
+    }
+
     // Resumes use their persisted prompt without even reading system.md.
     let systemPrompt =
       try resumeMetadata == nil

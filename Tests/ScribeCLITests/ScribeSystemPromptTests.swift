@@ -40,6 +40,7 @@ struct ScribeSystemPromptTests {
           Issue.record("Expected prompt file error")
         } catch {
           #expect(String(describing: error).contains(url.path))
+          #expect(error.localizedDescription == String(describing: error))
         }
         try FileManager.default.removeItem(at: url)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
