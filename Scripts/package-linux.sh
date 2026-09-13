@@ -76,13 +76,16 @@ if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
   fi
 fi
 
-bin_path=$(swift build -c "$configuration" --show-bin-path)
+# The pinned snapshot's swiftbuild engine fails to link the OpenAPI generator
+# with the static Foundation runtime. Use native for packaging, including the
+# path query so it points at the same build engine's output directory.
+bin_path=$(swift build --build-system native -c "$configuration" --show-bin-path)
 if [ -z "$cli_binary" ]; then
-  swift build -c "$configuration" --product scribe --static-swift-stdlib
+  swift build --build-system native -c "$configuration" --product scribe --static-swift-stdlib
   cli_binary="$bin_path/scribe"
 fi
 if [ -z "$wayland_binary" ]; then
-  swift build -c "$configuration" --product scribe-wayland --static-swift-stdlib
+  swift build --build-system native -c "$configuration" --product scribe-wayland --static-swift-stdlib
   wayland_binary="$bin_path/scribe-wayland"
 fi
 
