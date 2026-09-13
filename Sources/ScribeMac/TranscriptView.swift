@@ -266,7 +266,7 @@ struct TranscriptItemBlock: Block {
       HStack(spacing: 6) {
         MarkdownText(
           markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
-          scale: theme.smallScale, sanitizesASCII: false, itemID: item.headerSelectionID)
+          scale: theme.smallScale, itemID: item.headerSelectionID)
         Spacer()
       }
       if item.isCollapsible {
@@ -301,7 +301,7 @@ struct TranscriptItemBlock: Block {
   }
 
   private var label: String {
-    item.running ? "\(sanitizeASCII(item.title)) · running" : sanitizeASCII(item.title)
+    item.running ? "\(item.title) · running" : item.title
   }
 
   private var labelMarker: String {

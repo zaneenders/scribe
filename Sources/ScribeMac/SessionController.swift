@@ -63,7 +63,7 @@ final class SessionController {
         case .warning: "!"
         case .error: "×"
         }
-      let displayedTitle = running ? "\(sanitizeASCII(title)) · running" : sanitizeASCII(title)
+      let displayedTitle = running ? "\(title) · running" : title
       return "\(marker) \(displayedTitle)"
     }
 

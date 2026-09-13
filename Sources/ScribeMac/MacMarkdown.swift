@@ -3,9 +3,8 @@ import Foundation
 
 // MARK: - ASCII sanitization
 
-/// Scribe's editable and generated prose is restricted to printable ASCII so
-/// caret math and text interchange remain predictable. Chroma may also contain
-/// a small set of UI glyphs, but those are used only by fixed interface labels.
+/// Keep printable ASCII and Chroma's single-cell box-drawing characters so
+/// tree diagrams survive sanitization without changing monospace caret math.
 /// Transliterate usual LLM punctuation and map unsupported prose to `?`.
 func sanitizeASCII(_ text: String) -> String {
   var out = String()
@@ -25,7 +24,7 @@ func sanitizeASCII(_ text: String) -> String {
     case "\u{2022}", "\u{00B7}", "\u{25CF}": out += "*"
     case "\u{00A0}": out += " "
     default:
-      if scalar.value >= 0x20 && scalar.value <= 0x7E {
+      if (0x20...0x7E).contains(scalar.value) || (0x2500...0x257F).contains(scalar.value) {
         out.unicodeScalars.append(scalar)
       } else if scalar.properties.generalCategory != .nonspacingMark {
         out += "?"
@@ -673,21 +672,18 @@ struct MarkdownText: PrimitiveBlock {
   var baseColor: Color
   var scale: Float = 0.5
   var lineSpacing: Float = 4
-  /// Fixed interface labels may contain the small set of UI glyphs that prose
-  /// sanitization intentionally replaces.
-  var sanitizesASCII = true
   var isPlainText = false
   /// Optional stable ID for this block, used to register its layout for
   /// hit testing and text selection.
   var itemID: WidgetID? = nil
 
-  private func lines(forWidth width: Float, metrics: FontMetrics) -> [VisualLine] {
+  func lines(forWidth width: Float, metrics: FontMetrics) -> [VisualLine] {
     let columns = Int(width / (metrics.cellAdvance * scale))
     if isPlainText {
       return layoutPlainText(markdown, columns: columns, color: baseColor)
     }
     return layoutMarkdown(
-      segmentMarkdown(sanitizesASCII ? sanitizeASCII(markdown) : markdown),
+      segmentMarkdown(markdown),
       columns: columns,
       theme: theme,
       baseColor: baseColor)
@@ -735,7 +731,7 @@ struct WrappedText: Block {
   var body: MarkdownText {
     MarkdownText(
       markdown: text, theme: theme, baseColor: color, scale: scale,
-      sanitizesASCII: false, isPlainText: true, itemID: itemID)
+      isPlainText: true, itemID: itemID)
   }
 }
 
