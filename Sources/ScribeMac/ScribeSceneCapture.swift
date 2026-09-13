@@ -1,14 +1,23 @@
 import Chroma
 import Foundation
+import Observation
 
 /// Opt-in, local display-list capture. Captures may contain conversation text and images.
 @MainActor
+@Observable
 public final class ScribeSceneCapture {
   public static let shared = ScribeSceneCapture()
   private(set) var isEnabled = false
   private(set) var status = "Capture scene"
   private var pending = false
   private var saving = false
+  private let directory: URL
+
+  init(directory: URL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent(".scribe/captures", isDirectory: true))
+  {
+    self.directory = directory
+  }
 
   public func enable() -> FrameObserver {
     isEnabled = true
@@ -26,11 +35,10 @@ public final class ScribeSceneCapture {
     pending = false
     saving = true
     status = "Saving scene..."
+    let directory = directory
     Task {
       let result = await Task.detached(priority: .utility) { () -> Result<URL, Error> in
         Result {
-          let directory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".scribe/captures", isDirectory: true)
           try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
