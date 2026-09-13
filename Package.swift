@@ -79,9 +79,9 @@ var targets: [Target] = [
       .treatAllWarnings(as: .error),
     ],
     linkerSettings: [
-      .linkedFramework("AppKit"),
-      .linkedFramework("ApplicationServices"),
-      .linkedFramework("ScreenCaptureKit"),
+      .linkedFramework("AppKit", .when(platforms: [.macOS])),
+      .linkedFramework("ApplicationServices", .when(platforms: [.macOS])),
+      .linkedFramework("ScreenCaptureKit", .when(platforms: [.macOS])),
     ]
   ),
   .target(
