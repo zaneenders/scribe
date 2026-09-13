@@ -1,5 +1,5 @@
 {
-  "originHash" : "b7049cc8312cb6d0c79adc7de64e8f2baef7f24dcc5714f5baaff017d16d4e37",
+  "originHash" : "ac806745d134d33aa0df8b00e6053019e608113e8421ff3e37089384c3dad046",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -15,7 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/zaneenders/chroma",
       "state" : {
-        "revision" : "d93f36c7abe7f8080681c753cebac4f4b2bab926"
+        "branch" : "925e67d",
+        "revision" : "925e67dbfc2664daa4f32859db01bdc5630e5d87"
       }
     },
     {
