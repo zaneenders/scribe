@@ -36,6 +36,15 @@ Put the binary on your `PATH` (for example `~/.local/bin`):
 mkdir -p ~/.local/bin
 ```
 
+Use `./Scripts/install.sh` on either macOS or Linux after installing the
+platform prerequisites below. It detects the host OS and uses the existing
+platform-specific build and install flow. Run `./Scripts/install.sh --help`
+for environment-variable overrides. No privileges are elevated automatically.
+Build output and diagnostics are inherited by the terminal, with stage messages
+for building, packaging, signing (macOS), and installation. On macOS, the initial
+build runs directly for live output; the bundler then reuses the artifacts and
+prints any additional captured build log.
+
 ### macOS
 
 ```bash
@@ -44,7 +53,7 @@ swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
 
 # Mac app (build, stably sign, and install in /Applications)
-./Scripts/install-macos.sh
+./Scripts/install.sh
 ```
 
 Quit any development instance started with `swift run scribe-mac` before opening
@@ -67,8 +76,12 @@ multiple matching identities, set one explicitly:
 
 ```bash
 SCRIBE_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" \
-  ./Scripts/install-macos.sh
+  ./Scripts/install.sh
 ```
+
+Set `SCRIBE_INSTALL_PATH="$HOME/Applications/Scribe.app"` to install somewhere
+other than `/Applications/Scribe.app`. The existing `Scripts/install-macos.sh`
+entry point remains available.
 
 Create an Apple Development certificate in Xcode if the script cannot find one.
 Unlike the bundler's ad-hoc signature, a development-signed app's identity does
@@ -112,13 +125,23 @@ Debian/Ubuntu), not the development package. Then build Scribe:
 # Build a redistributable archive with CLI, app, desktop entry, and icon, then
 # install it to ~/.local. The package script statically links the Swift runtime
 # and rejects a build containing a machine-specific Swift runtime path.
-./Scripts/package-linux.sh --install
+./Scripts/install.sh
 
-# To create the archive under dist/ without installing it, omit --install.
+# To create the archive under dist/ without installing it:
+./Scripts/package-linux.sh
 
 # Or build and run only the app locally (Swift remains required in this case).
 swift run -c release scribe-wayland
 ```
+
+Packaging metadata and icons live in `Packaging/`; shell automation lives in
+`Scripts/`. The scripts in `Scripts/Linux/` are copied to the archive root as
+`install.sh` and `uninstall.sh` for managing prebuilt packages; use
+`Scripts/install.sh` to build and install from a source checkout.
+
+Set `PREFIX` to override the default `~/.local` install location. The unified
+installer also forwards the packaging script's environment overrides, including
+`CONFIGURATION`, `OUTPUT_DIRECTORY`, and prebuilt binary paths.
 
 For CLI-only static builds, first install a Swift static Linux SDK matching
 `swift --version`, using the download URL and checksum published for that

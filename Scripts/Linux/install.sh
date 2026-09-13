@@ -44,10 +44,12 @@ awk -v executable="$bindirectory/scribe-wayland" '
 chmod 644 "$desktopdirectory/com.zaneenders.scribe.desktop"
 
 if command -v update-desktop-database >/dev/null 2>&1; then
-  update-desktop-database "$desktopdirectory" >/dev/null 2>&1 || true
+  update-desktop-database "$desktopdirectory" ||
+    printf 'warning: could not update desktop database\n' >&2
 fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-  gtk-update-icon-cache -q -t "$sharedirectory/icons/hicolor" >/dev/null 2>&1 || true
+  gtk-update-icon-cache -t "$sharedirectory/icons/hicolor" ||
+    printf 'warning: could not update icon cache\n' >&2
 fi
 
 printf 'Installed Scribe to %s\n' "$prefix"

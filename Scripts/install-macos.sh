@@ -7,8 +7,9 @@ destination="${SCRIBE_INSTALL_PATH:-/Applications/Scribe.app}"
 identity="${SCRIBE_CODESIGN_IDENTITY:-}"
 
 if [ -z "$identity" ]; then
+  printf '[install] Looking for a stable signing identity...\n'
   identity=$(
-    /usr/bin/security find-identity -v -p codesigning 2>&1 \
+    /usr/bin/security find-identity -v -p codesigning \
       | /usr/bin/sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' \
       | /usr/bin/head -n 1
   )
@@ -27,6 +28,11 @@ EOF
 fi
 
 cd "$repo_root"
+# Build outside the plugin API so SwiftPM streams progress and diagnostics to
+# the terminal. The bundler's build then reuses these up-to-date artifacts.
+printf '[install] Building macOS products (release)...\n'
+swift build -c release
+printf '[install] Assembling Scribe.app...\n'
 SCRIBE_SKIP_ADHOC_SIGNING=1 \
   swift package --allow-writing-to-package-directory bundle
 
@@ -37,6 +43,7 @@ printf 'Signing Scribe with "%s"...\n' "$identity"
 /usr/bin/codesign --force --sign "$identity" "$app"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
 
+printf '[install] Installing app to %s...\n' "$destination"
 /bin/rm -rf "$destination"
 /usr/bin/ditto "$app" "$destination"
 

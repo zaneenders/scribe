@@ -20,6 +20,11 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     guard build.succeeded else {
       throw BundlerError.buildFailed(log: build.logText)
     }
+    // The plugin API captures build output; retain warnings and progress even
+    // when the build succeeds. install-macos.sh streams the initial build live.
+    if !build.logText.isEmpty {
+      print(build.logText)
+    }
 
     guard let macBinary = Self.executable(named: "scribe-mac", in: build.builtArtifacts) else {
       throw BundlerError.missingArtifact("scribe-mac")

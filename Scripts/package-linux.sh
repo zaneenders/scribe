@@ -51,6 +51,7 @@ wayland_binary=${SCRIBE_WAYLAND_BINARY:-}
 # absent. Having a versioned runtime library (for example libcurl.so.4) is not
 # enough: the linker and SwiftPM also need the unversioned library and pkg-config
 # metadata supplied by the distribution's development package.
+printf '[install] Checking Linux build prerequisites...\n'
 if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
   if ! command -v pkg-config >/dev/null 2>&1; then
     echo "error: pkg-config is required to build the Linux package" >&2
@@ -78,10 +79,12 @@ fi
 
 bin_path=$(swift build -c "$configuration" --show-bin-path)
 if [ -z "$cli_binary" ]; then
+  printf '[install] Building CLI (%s)...\n' "$configuration"
   swift build -c "$configuration" --product scribe --static-swift-stdlib
   cli_binary="$bin_path/scribe"
 fi
 if [ -z "$wayland_binary" ]; then
+  printf '[install] Building Wayland app (%s)...\n' "$configuration"
   swift build -c "$configuration" --product scribe-wayland --static-swift-stdlib
   wayland_binary="$bin_path/scribe-wayland"
 fi
@@ -118,7 +121,7 @@ done
 # A distributable build must not depend on Swift shared libraries or retain a
 # path into the build machine's toolchain.
 if command -v readelf >/dev/null 2>&1; then
-  dynamic=$(readelf -d "$wayland_binary" 2>/dev/null || true)
+  dynamic=$(readelf -d "$wayland_binary")
   if printf '%s\n' "$dynamic" | grep -q 'Shared library: \[libswift'; then
     echo "error: scribe-wayland still depends on the Swift shared runtime" >&2
     echo "Build with --static-swift-stdlib and install all native development packages." >&2
@@ -130,6 +133,7 @@ if command -v readelf >/dev/null 2>&1; then
   fi
 fi
 
+printf '[install] Staging Linux package...\n'
 rm -rf "$staging" "$archive" "$archive.sha256"
 mkdir -p \
   "$staging/bin" \
@@ -137,8 +141,8 @@ mkdir -p \
   "$staging/share/icons/hicolor/512x512/apps"
 install -m 755 "$cli_binary" "$staging/bin/scribe"
 install -m 755 "$wayland_binary" "$staging/bin/scribe-wayland"
-install -m 755 Packaging/Linux/install.sh "$staging/install.sh"
-install -m 755 Packaging/Linux/uninstall.sh "$staging/uninstall.sh"
+install -m 755 Scripts/Linux/install.sh "$staging/install.sh"
+install -m 755 Scripts/Linux/uninstall.sh "$staging/uninstall.sh"
 install -m 644 Packaging/Linux/com.zaneenders.scribe.desktop \
   "$staging/share/applications/com.zaneenders.scribe.desktop"
 install -m 644 Packaging/Linux/com.zaneenders.scribe.png \
@@ -147,17 +151,19 @@ install -m 644 LICENSE "$staging/LICENSE"
 
 # Exercise installation into an isolated prefix and ensure desktop substitution
 # and executable permissions are correct before publishing the archive.
+printf '[install] Testing package installation and removal...\n'
 test_prefix="$output_directory/.install-test-$architecture"
 rm -rf "$test_prefix"
-PREFIX="$test_prefix" "$staging/install.sh" >/dev/null
+PREFIX="$test_prefix" "$staging/install.sh"
 test -x "$test_prefix/bin/scribe"
 test -x "$test_prefix/bin/scribe-wayland"
 grep -F "Exec=\"$test_prefix/bin/scribe-wayland\"" \
   "$test_prefix/share/applications/com.zaneenders.scribe.desktop" >/dev/null
-PREFIX="$test_prefix" "$staging/uninstall.sh" >/dev/null
+PREFIX="$test_prefix" "$staging/uninstall.sh"
 test ! -e "$test_prefix/bin/scribe"
 rm -rf "$test_prefix"
 
+printf '[install] Creating archive and checksum...\n'
 tar -C "$output_directory" -czf "$archive" "$package_name"
 if command -v sha256sum >/dev/null 2>&1; then
   (cd "$output_directory" && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
@@ -169,5 +175,5 @@ printf 'Created %s\n' "$archive"
 printf 'Created %s\n' "$archive.sha256"
 
 if [ "$install_after_packaging" = true ]; then
-  "$staging/install.sh"
+  printf '[install] Installing Linux package...\n'  "$staging/install.sh"
 fi
