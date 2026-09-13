@@ -1,9 +1,6 @@
 import Chroma
-import NIOCore
-import NIOEmbedded
-import RemoteProtocol
+import HeadlessBackend
 import Testing
-@testable import RemoteServer
 @testable import ScribeBlocks
 
 @MainActor
@@ -35,26 +32,28 @@ private struct ShortcutSurface: PrimitiveBlock {
 }
 
 @MainActor
-struct RemoteShortcutTests {
+struct ShortcutTests {
   @Test func portableKeysReachComposerAndPickerCommands() throws {
     let state = ShortcutState()
-    let server = RemoteServer(content: ShortcutSurface(state: state))
-    server.keyBindings = ScribeBlock.keyBindings
-    let channel = EmbeddedChannel()
-    try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 9328)).wait()
-    defer {
-      server.disconnected(channel)
-      _ = try? channel.finish()
-      try? server.shutdown()
-    }
-    server.receive(.viewport(Size(width: 400, height: 100)), from: channel)
+    let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
+    renderer.content = ShortcutSurface(state: state)
+    renderer.render()
     let context = try #require(state.context)
     context.focus(ScribeMacStore.composerID, editing: true)
-    var sequence: UInt64 = 0
     func key(_ key: Key, modifiers: KeyModifiers = [], text: String? = nil) {
-      sequence += 1
-      server.receive(.key(sequence: sequence,
-        event: RemoteKeyEvent(chord: KeyChord(key, modifiers: modifiers), text: text)), from: channel)
+      let chord = KeyChord(key, modifiers: modifiers)
+      let bindings = ScribeBlock.keyBindings
+      var input = InputState()
+      if bindings.prefersTextInsertion(chord: chord, text: text, isTextEditing: context.activeTextInput != nil) {
+        if let text { input.textEvents.append(.insert(text)) }
+      } else if let resolution = bindings.command(for: chord), let command = resolution {
+        if case .editing(let event) = command {
+          input.textEvents.append(event)
+        } else {
+          input.commands.append(command)
+        }
+      }
+      renderer.render(input: input)
     }
     #if os(macOS)
     let modifier = KeyModifiers.command

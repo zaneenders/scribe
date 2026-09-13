@@ -134,7 +134,6 @@ var targets: [Target] = [
       "ScribeCore",
       "ScribeKit",
       .product(name: "Chroma", package: "chroma"),
-      .product(name: "RemoteProtocol", package: "chroma"),
       .product(name: "Logging", package: "swift-log"),
       .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
       .product(name: "SystemPackage", package: "swift-system"),
@@ -177,8 +176,6 @@ var targets: [Target] = [
     dependencies: [
       "ScribeBlocks",
       .product(name: "HeadlessBackend", package: "chroma"),
-      .product(name: "RemoteServer", package: "chroma"),
-      .product(name: "NIOEmbedded", package: "swift-nio"),
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
@@ -246,8 +243,7 @@ targets.append(
     dependencies: [
       "ScribeBlocks",
       .product(name: "Chroma", package: "chroma"),
-      .product(name: "RemoteMetalClient", package: "chroma"),
-      .product(name: "RemoteServer", package: "chroma"),
+      .product(name: "MetalBackend", package: "chroma"),
     ],
     path: "Sources/ScribeMacApp",
     swiftSettings: [
@@ -284,7 +280,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "925e67d"
+      revision: "c0582c166f10ee150085706a41be4dcd4e9eb247"
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),

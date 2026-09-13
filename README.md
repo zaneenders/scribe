@@ -257,25 +257,19 @@ docc preview Sources/ScribeCLI/ScribeCLI.docc
 
 ### macOS app development
 
-On macOS, `swift run scribe-mac`
-launches an owned `--backend` subprocess on an ephemeral loopback port and connects
-Chroma's `RemoteMetalClient` to it. The backend owns Scribe's block graph and
-sessions; the client owns the native window and GPU. Closing the app stops its
-backend. This is a local prototype, not an authenticated remote-access service.
+On macOS, `swift run scribe-mac` runs Scribe's block graph, sessions, and native
+Metal window in one process using Chroma's `MetalApp`. No backend subprocess or
+loopback connection is needed.
 
 Restart the development app after rebuilding; an already installed Scribe.app
-will not pick up changes in either checkout.
+will not pick up changes.
 
 Integration regression checks:
 
 ```sh
 swift test --filter 'ScribeBlocksTests|ScribeMacLaunchTests'
-(cd ../chroma && swift test --filter 'TrailingControlsRowTests|TextEventInterceptionTests|RemoteServerTests')
-swift Scripts/test-backend-lifecycle.swift .build/debug/scribe-mac
 ```
 
-The Swift launcher tests exercise readiness, early exit, malformed responses,
-timeouts, normal EOF shutdown, and forced cleanup using small child processes.
-The Swift smoke test exercises the actual headless backend, including parent
-process death; it does not open a Metal window. Keyboard integration tests feed
-portable key events through RemoteServer, not native AppKit event synthesis.
+Keyboard integration tests exercise key binding resolution and feed input through
+Chroma's headless renderer; they do not synthesize native AppKit events.
+Scene captures use Chroma's version 2 JSON format, not the former remote-wire format.

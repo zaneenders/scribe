@@ -3,8 +3,6 @@ import Darwin
 import Foundation
 
 /// Captures swift-log's console output and Chroma's print-based statistics.
-/// Only the parent redirects: the backend inherits stderr and retains its
-/// private stdout readiness pipe until it has duplicated that pipe.
 enum AppConsoleLog {
   static func fileURL(home: URL, date: Date = Date()) -> URL {
     let formatter = DateFormatter()

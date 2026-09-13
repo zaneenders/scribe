@@ -1,6 +1,5 @@
 import Chroma
 import Foundation
-import RemoteProtocol
 
 /// Opt-in, local display-list capture. Captures may contain conversation text and images.
 @MainActor
@@ -36,9 +35,6 @@ public final class ScribeSceneCapture {
             at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
           let data = try SceneCapture.encode(frame)
-          guard data.count <= 64 * 1024 * 1024 else {
-            throw RemoteProtocolError.messageTooLarge(data.count)
-          }
           let url = directory.appendingPathComponent("scene-\(UUID().uuidString).chromacapture")
           guard FileManager.default.createFile(
             atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])

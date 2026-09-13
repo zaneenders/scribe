@@ -95,7 +95,7 @@ This launches the existing release binary without starting another compilation. 
 
 ### Select the backend, not just the frontend
 
-Find the new `scribe-mac --backend` process and its matching socket. Do not reuse the old PID or arbitrarily select the first socket when multiple instances are running.
+Find the new `scribe-mac` process and its matching socket. Do not reuse the old PID or arbitrarily select the first socket when multiple instances are running.
 
 ```bash
 ps -axo pid,ppid,command | grep '[s]cribe-mac'

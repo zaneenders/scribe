@@ -1,10 +1,7 @@
 import Chroma
-import NIOCore
-import NIOEmbedded
-import RemoteProtocol
+import HeadlessBackend
 import Testing
 
-@testable import RemoteServer
 @testable import ScribeBlocks
 
 @MainActor
@@ -70,31 +67,18 @@ struct DirectoryPaletteEscapeTests {
     store.showDirectoryPicker = true
     store.requiresDirectoryBeforeStart = required
     let state = PaletteEscapeState()
-    let server = RemoteServer(content: PaletteEscapeSurface(store: store, state: state))
-    server.keyBindings = ScribeBlock.keyBindings
-    let channel = EmbeddedChannel()
-    try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 9328)).wait()
-    defer {
-      server.disconnected(channel)
-      _ = try? channel.finish()
-      try? server.shutdown()
-    }
-    server.receive(.viewport(Size(width: 640, height: 400)), from: channel)
+    let renderer = HeadlessRenderer(size: Size(width: 640, height: 400))
+    renderer.content = PaletteEscapeSurface(store: store, state: state)
+    renderer.render()
     let context = try #require(state.context)
     context.focus(ScribeMacStore.directoryPaletteID, editing: true)
-    server.receive(
-      .key(
-        sequence: 1,
-        event: RemoteKeyEvent(chord: KeyChord(.escape))), from: channel)
+    renderer.render(input: InputState(textEvents: [.endEditing]))
     #expect(store.showDirectoryPicker == required)
     #expect(!state.underlyingPickerCancelled)
     if required {
       #expect(context.activeTextInput == ScribeMacStore.directoryPaletteID)
       let before = store.directoryDraft
-      server.receive(
-        .key(
-          sequence: 2,
-          event: RemoteKeyEvent(chord: KeyChord(.character("x")), text: "x")), from: channel)
+      renderer.render(input: InputState(textEvents: [.insert("x")]))
       #expect(store.directoryDraft == before + "x")
     }
   }
