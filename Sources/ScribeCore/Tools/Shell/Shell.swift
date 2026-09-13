@@ -56,6 +56,7 @@ enum Shell {
 
     let capture = try OutputCapture.create(
       id: id, in: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true))
+    defer { capture.closeHandles() }
 
     logger.trace(
       "shell-tempfiles-ready",

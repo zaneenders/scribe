@@ -1,6 +1,7 @@
 import Chroma
 import Foundation
 import Logging
+import Observation
 import ScribeCore
 import ScribeKit
 
@@ -12,6 +13,7 @@ import ScribeKit
 /// or starts a new one. Activity arriving while off-screen raises
 /// `hasUnreadActivity` for the sidebar.
 @MainActor
+@Observable
 final class SessionController {
 
   enum ItemKind: Sendable {
@@ -31,6 +33,7 @@ final class SessionController {
     var text: String
     var running = false
     var layoutRevision = 0
+    var isTextExpanded = false
     var sourceMessageIndex: Int?
 
     var layoutID: WidgetID {
@@ -60,12 +63,47 @@ final class SessionController {
         case .warning: "!"
         case .error: "×"
         }
-      let displayedTitle = running ? "\(sanitizeASCII(title)) · running" : sanitizeASCII(title)
+      let displayedTitle = running ? "\(title) · running" : title
       return "\(marker) \(displayedTitle)"
     }
 
+    var isCollapsible: Bool {
+      guard kind == .user else { return false }
+      // Stop early: deciding disclosure should not scan a massive message.
+      var characters = 0
+      var lines = 1
+      for character in text {
+        characters += 1
+        if character == "\n" || character == "\r" || character == "\r\n" { lines += 1 }
+        if characters > 1_000 || lines > 10 { return true }
+      }
+      return false
+    }
+
+    var isTextCollapsed: Bool { isCollapsible && !isTextExpanded }
+
+    var displayText: String {
+      guard isTextCollapsed else { return text }
+      var preview = ""
+      var lines = 1
+      for character in text.prefix(240) {
+        if character == "\n" || character == "\r" || character == "\r\n" {
+          if lines == 3 { break }
+          lines += 1
+        }
+        preview.append(character)
+      }
+      return preview + "\n[remaining text hidden]"
+    }
+
     var selectionBody: String {
-      text.isEmpty ? (running ? "running..." : "(empty)") : text
+      text.isEmpty ? (running ? "running..." : "(empty)") : displayText
+    }
+
+    mutating func toggleTextDisclosure() {
+      guard isCollapsible else { return }
+      isTextExpanded.toggle()
+      layoutRevision += 1
     }
   }
 
@@ -100,12 +138,12 @@ final class SessionController {
 
   var transcript: [TranscriptItem]
   private(set) var isLoadingTranscript = false
-  /// Composer text, already sanitized to ASCII by the TextField's `onChange`.
-  /// This is the single sanitization boundary: `submit` reads the draft (via
-  /// the no-argument call path) rather than the field's raw buffer, so
-  /// non-ASCII text can't reach the harness. `proposed` arguments are only
-  /// passed text that already crossed that boundary (e.g. queued messages).
-  var draft = ""
+  /// Original composer text; display transformations must not alter model input.
+  var draft = "" {
+    didSet { draftRevision &+= 1 }
+  }
+  @ObservationIgnored private(set) var draftRevision: UInt64 = 0
+  @ObservationIgnored let composerLayoutCache = ComposerTextLayoutCache()
   var isRunning = false
   /// Conversation recency used by the sidebar. Selecting or opening a session
   /// does not change this value.
@@ -176,16 +214,19 @@ final class SessionController {
       isLoadingTranscript = true
       // Transcript conversion can be substantial for old tool-heavy sessions.
       // Keep installation cheap and publish the rows after yielding a frame.
-      Task.detached { [weak self] in
-        let replayed = Self.replay(initialMessages)
-        await MainActor.run {
-          guard let self else { return }
-          self.transcript = replayed
-          self.isLoadingTranscript = false
-          self.scroll.scrollToBottom()
-        }
+      Task { [weak self] in
+        let replayed = await Self.buildTranscript(initialMessages)
+        guard let self else { return }
+        self.transcript = replayed
+        self.isLoadingTranscript = false
+        self.scroll.scrollToBottom()
       }
     }
+  }
+
+  @concurrent
+  private static func buildTranscript(_ messages: [ScribeMessage]) async -> [TranscriptItem] {
+    replay(messages)
   }
 
   func applyPresentation(name: String?, isPinned: Bool) {
@@ -193,10 +234,16 @@ final class SessionController {
     self.isPinned = isPinned
   }
 
+  func toggleTextDisclosure(id: UUID) {
+    guard let index = transcript.firstIndex(where: { $0.id == id }) else { return }
+    SelectionManager.shared.clear()
+    transcript[index].toggleTextDisclosure()
+  }
+
   // MARK: - Composer editing
 
   func updateDraft(_ text: String) {
-    draft = sanitizeASCII(text)
+    draft = text
     historyIndex = nil
     draftBeforeHistory = ""
   }
@@ -282,7 +329,7 @@ final class SessionController {
       // Otherwise printable picker keys are inserted into the draft and the
       // editing submit/end events are consumed by the text field.
       ScribeRenderContext.activeTextInput = nil
-      ScribeRenderContext.current?.focus(ScribeMacStore.composerID)
+      ScribeRenderContext.current?.endEditing()
       transcript = Self.replay(snapshot.messages)
     }
   }
@@ -384,8 +431,8 @@ final class SessionController {
 
   func submit(_ proposed: String? = nil) {
     guard commandPicker == nil, !isRunningCommand else { return }
-    let text = (proposed ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
+    let text = proposed ?? draft
+    guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     if isRunning {
       enqueue(text)
       return
@@ -413,6 +460,10 @@ final class SessionController {
           self?.handle(event)
         }
       }
+      defer {
+        continuation.finish()
+        _ = await consumer.result
+      }
       do {
         let outcome = try await harness.submit(
           text,
@@ -422,8 +473,6 @@ final class SessionController {
       } catch {
         continuation.yield(.failed(error.localizedDescription))
       }
-      continuation.finish()
-      _ = await consumer.result
     }
   }
 

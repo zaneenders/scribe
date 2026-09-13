@@ -1,5 +1,5 @@
 {
-  "originHash" : "3af03dcdc43495fda77d6e6eb54a9edbcd8d460b3e4c78487d7f34f4c8c9fc60",
+  "originHash" : "d309537146849e071f71691fc195e250f5f61cfecea049c154a36e7729e50590",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/zaneenders/chroma",
       "state" : {
-        "branch" : "e1adc94",
-        "revision" : "e1adc94bff713afc39d809580b7734f004ab3580"
+        "branch" : "55d970d",
+        "revision" : "55d970dd51b0936a9f2925b5568304b316ffb289"
       }
     },
     {
@@ -177,8 +177,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
-        "revision" : "57c0a08a331aaea9f5d7a932ad94ef43be942a95",
-        "version" : "2.100.0"
+        "revision" : "a931f2c1de8dd49381ce3bf2e279d033f68d8865",
+        "version" : "2.102.0"
       }
     },
     {

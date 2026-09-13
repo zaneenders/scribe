@@ -127,12 +127,13 @@ func withTemporaryDirectory<T>(
   return try await body(dir)
 }
 
-final class AbortState: @unchecked Sendable {
-  var value = false
-  func set(_ newValue: Bool) { value = newValue }
+final class AbortState: Sendable {
+  private let storage = Mutex(false)
+  var value: Bool { storage.withLock { $0 } }
+  func set(_ newValue: Bool) { storage.withLock { $0 = newValue } }
 }
 
-final class CountingAbortObserver: AbortObserver, @unchecked Sendable {
+final class CountingAbortObserver: AbortObserver, Sendable {
   let counter = Atomic<Int>(0)
   private let triggerAt: Int
 
@@ -141,9 +142,8 @@ final class CountingAbortObserver: AbortObserver, @unchecked Sendable {
   }
 
   func isAborted() -> Bool {
-    let c = counter.load(ordering: .sequentiallyConsistent)
-    counter.store(c + 1, ordering: .sequentiallyConsistent)
-    return c >= triggerAt
+    let result = counter.wrappingAdd(1, ordering: .sequentiallyConsistent)
+    return result.oldValue >= triggerAt
   }
 
   func signals() -> AsyncStream<Void> {

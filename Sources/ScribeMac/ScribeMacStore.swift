@@ -1,6 +1,7 @@
 import Chroma
 import Foundation
 import Logging
+import Observation
 import ProfileRecorderServer
 import ScribeCore
 import ScribeKit
@@ -13,6 +14,7 @@ import SystemPackage
 /// controller keeps consuming events in the background and flags unread
 /// activity for the sidebar.
 @MainActor
+@Observable
 final class ScribeMacStore {
   struct SavedSession: Identifiable, Sendable {
     let id: UUID
@@ -150,41 +152,6 @@ final class ScribeMacStore {
     guard !didStart else { return }
     didStart = true
     startProfileRecorder()
-    #if canImport(AppKit)
-    DirectoryPaletteKeyMonitor.shared.install()
-    DirectoryPaletteKeyMonitor.shared.onTab = { [weak self] in
-      self?.tabCompleteDirectory()
-    }
-    DirectoryPaletteKeyMonitor.shared.onEscape = { [weak self] in
-      self?.closeDirectoryPicker()
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerSubmit = { [weak self] in
-      self?.active?.submit()
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerStop = { [weak self] in
-      guard let active = self?.active, active.isRunning else { return false }
-      active.stop()
-      return true
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerHistoryPrevious = { [weak self] in
-      self?.active?.recallPreviousPrompt() ?? false
-    }
-    DirectoryPaletteKeyMonitor.shared.onComposerHistoryNext = { [weak self] in
-      self?.active?.recallNextPrompt() ?? false
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerMove = { [weak self] delta in
-      self?.active?.moveCommandCursor(by: delta)
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerToggle = { [weak self] in
-      self?.active?.toggleCommandBoundary()
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerConfirm = { [weak self] in
-      self?.active?.confirmCommandPicker()
-    }
-    DirectoryPaletteKeyMonitor.shared.onCommandPickerCancel = { [weak self] in
-      self?.active?.cancelCommandPicker()
-    }
-    #endif
     let launchCWD = FilePath.currentDirectory.string
     // Finder launches at `/`, which is not a useful default for a new session.
     // Use the home directory until the user picks a directory from Directory.
@@ -359,23 +326,38 @@ final class ScribeMacStore {
         let sessionsRoot = ScribePaths.resolve().sessionsDirectory
         // Directory enumeration, stat, and metadata decoding are synchronous.
         // Keep all of them off the main actor so launch can draw immediately.
-        savedSessions = try await Task.detached {
-          let directories = try await ChatSessionStore.listSessionDirectories(
-            sessionsRoot: sessionsRoot)
-          return directories.compactMap { directory in
-            guard let metadata = try? ChatSessionStore.loadMetadata(from: directory) else { return nil }
-            return SavedSession(
-              id: metadata.id,
-              directory: directory,
-              metadata: metadata,
-              lastMessageAt: ChatSessionStore.lastMessageDate(
-                in: directory, metadata: metadata))
-          }
-        }.value
+        savedSessions = try await Self.loadSavedSessions(sessionsRoot: sessionsRoot)
       } catch {
         reportError("Could not load saved sessions: \(error.localizedDescription)")
       }
     }
+  }
+
+  // Explicit executor hops keep synchronous stat/decoding work off MainActor
+  // without creating detached tasks or dropping task-local context.
+  @concurrent
+  private static func loadSavedSessions(sessionsRoot: FilePath) async throws -> [SavedSession] {
+    let directories = try await ChatSessionStore.listSessionDirectories(sessionsRoot: sessionsRoot)
+    return try directories.compactMap { directory in
+      try Task.checkCancellation()
+      guard let metadata = try? ChatSessionStore.loadMetadata(from: directory) else { return nil }
+      return SavedSession(
+        id: metadata.id,
+        directory: directory,
+        metadata: metadata,
+        lastMessageAt: ChatSessionStore.lastMessageDate(in: directory, metadata: metadata))
+    }
+  }
+
+  @concurrent
+  private static func loadSavedSession(
+    _ saved: SavedSession, version: String
+  ) async throws -> BootstrappedSession {
+    try Task.checkCancellation()
+    return try await ScribeSessionBootstrap.open(
+      resumeDirectory: saved.directory,
+      workingDirectory: saved.metadata.cwd,
+      version: version)
   }
 
   func openSavedSession(_ saved: SavedSession) {
@@ -400,15 +382,7 @@ final class ScribeMacStore {
       }
       do {
         try ensureShellCapture()
-        // Bootstrap performs synchronous file decoding internally. Run it on a
-        // detached executor so multi-megabyte transcripts do not block drawing.
-        let version = GitVersion.hash
-        let opened = try await Task.detached {
-          try await ScribeSessionBootstrap.open(
-            resumeDirectory: saved.directory,
-            workingDirectory: saved.metadata.cwd,
-            version: version)
-        }.value
+        let opened = try await Self.loadSavedSession(saved, version: GitVersion.hash)
         let shouldActivate = selectedSavedSession?.id == saved.id
         install(opened, refreshHistory: false, activate: shouldActivate)
       } catch {
@@ -617,6 +591,21 @@ final class ScribeMacStore {
     directoryFocusPending = true
   }
 
+  /// Run after drawing: keep the palette modal for the entire Escape frame.
+  /// TextField may end editing while processing Escape, so restore it when
+  /// first-run directory selection cannot be dismissed.
+  func finishDirectoryPaletteInput(_ context: RenderContext) {
+    guard showDirectoryPicker, renamingSessionID == nil,
+      context.input.textEvents.contains(.endEditing)
+    else { return }
+    if requiresDirectoryBeforeStart {
+      context.focus(Self.directoryPaletteID, editing: true)
+    } else {
+      closeDirectoryPicker()
+    }
+    context.requestRedraw()
+  }
+
   func closeDirectoryPicker() {
     guard !requiresDirectoryBeforeStart else { return }
     showDirectoryPicker = false
@@ -718,9 +707,6 @@ final class ScribeMacStore {
   func close() {
     profileRecorderTask?.cancel()
     profileRecorderTask = nil
-    #if canImport(AppKit)
-    DirectoryPaletteKeyMonitor.shared.uninstall()
-    #endif
     for session in sessions {
       session.shutdown(cancelTask: true)
     }

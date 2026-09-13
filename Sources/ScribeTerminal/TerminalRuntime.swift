@@ -192,7 +192,9 @@ public final class TerminalRuntime: Sendable {
     var endCursor: UInt64 { cursor + UInt64(data.count) }
   }
 
-  private final class Session: @unchecked Sendable {
+  // These mutable reference types are intentionally non-Sendable and confined
+  // to `sessions`. Only Sendable PTYs, callbacks, and events leave its lock.
+  private final class Session {
     enum Lifecycle: Sendable {
       case running(PTYSession)
       case exited(Int32)
@@ -212,7 +214,7 @@ public final class TerminalRuntime: Sendable {
 
   /// Mutable async-delivery state. Queue fields are protected by `sessions`;
   /// exactly one consumer may suspend in `next()` at a time.
-  private final class AsyncAttachmentState: @unchecked Sendable {
+  private final class AsyncAttachmentState {
     var pending: Deque<TerminalEvent> = []
     var pendingOutputBytes = 0
     var waiter: CheckedContinuation<TerminalEvent?, any Error>?
@@ -242,7 +244,7 @@ public final class TerminalRuntime: Sendable {
 
   /// Mutable local-delivery state. Every field is accessed while `sessions` is
   /// locked; callbacks themselves are drained only after that lock is released.
-  private final class LocalAttachmentState: @unchecked Sendable {
+  private final class LocalAttachmentState {
     let handler: @Sendable (TerminalEvent) -> Void
     var pending: Deque<TerminalEvent> = []
     var isDelivering = false
@@ -267,8 +269,7 @@ public final class TerminalRuntime: Sendable {
       columns: configuration.size.columns,
       rows: configuration.size.rows)
     let id = TerminalID()
-    let session = Session(pty: pty)
-    sessions.withLock { $0[id] = session }
+    sessions.withLock { $0[id] = Session(pty: pty) }
 
     // PTY callbacks are already delivered off the main thread. Process them
     // synchronously so bytes retain read order and avoid allocating a Task for
@@ -425,16 +426,21 @@ public final class TerminalRuntime: Sendable {
   }
 
   public func close(_ terminalID: TerminalID) {
-    let (session, actions) = sessions.withLock { sessions -> (Session?, [AsyncAttachmentAction]) in
+    let (pty, actions) = sessions.withLock { sessions -> (PTYSession?, [AsyncAttachmentAction]) in
       guard let session = sessions.removeValue(forKey: terminalID) else { return (nil, []) }
       let actions = session.attachments.values.compactMap { finishAsyncAttachment($0) }
       session.attachments.removeAll(keepingCapacity: false)
       session.localAttachments.removeAll(keepingCapacity: false)
-      return (session, actions)
+      let pty: PTYSession?
+      if case .running(let running) = session.lifecycle {
+        pty = running
+      } else {
+        pty = nil
+      }
+      return (pty, actions)
     }
     resume(actions)
-    guard let session else { return }
-    if case .running(let pty) = session.lifecycle { pty.close() }
+    pty?.close()
   }
 
   public func detach(_ attachmentID: UUID, from terminalID: TerminalID) {
@@ -582,7 +588,7 @@ public final class TerminalRuntime: Sendable {
   /// flag preserves event order when PTY callbacks arrive concurrently.
   private func drainLocalAttachment(_ attachmentID: UUID, from terminalID: TerminalID) {
     while true {
-      let delivery: (LocalAttachmentState, TerminalEvent)? = sessions.withLock { sessions in
+      let delivery: (@Sendable (TerminalEvent) -> Void, TerminalEvent)? = sessions.withLock { sessions in
         guard let session = sessions[terminalID],
           let state = session.localAttachments[attachmentID]
         else { return nil }
@@ -593,10 +599,10 @@ public final class TerminalRuntime: Sendable {
           }
           return nil
         }
-        return (state, state.pending.popFirst()!)
+        return (state.handler, state.pending.popFirst()!)
       }
-      guard let (state, event) = delivery else { return }
-      state.handler(event)
+      guard let (handler, event) = delivery else { return }
+      handler(event)
     }
   }
 
@@ -640,7 +646,7 @@ public final class TerminalRuntime: Sendable {
 
 /// The GUI's local adapter. It has the same async boundary a future socket
 /// client will have, while forwarding requests directly to the runtime actor.
-public final class InProcessTerminalClient: TerminalClient, @unchecked Sendable {
+public final class InProcessTerminalClient: TerminalClient, Sendable {
   public let runtime: TerminalRuntime
 
   public init(runtime: TerminalRuntime = TerminalRuntime()) {

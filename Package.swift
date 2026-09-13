@@ -1,4 +1,4 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.4
 import PackageDescription
 
 var products: [Product] = [
@@ -79,9 +79,9 @@ var targets: [Target] = [
       .treatAllWarnings(as: .error),
     ],
     linkerSettings: [
-      .linkedFramework("AppKit"),
-      .linkedFramework("ApplicationServices"),
-      .linkedFramework("ScreenCaptureKit"),
+      .linkedFramework("AppKit", .when(platforms: [.macOS])),
+      .linkedFramework("ApplicationServices", .when(platforms: [.macOS])),
+      .linkedFramework("ScreenCaptureKit", .when(platforms: [.macOS])),
     ]
   ),
   .target(
@@ -173,7 +173,10 @@ var targets: [Target] = [
   ),
   .testTarget(
     name: "ScribeBlocksTests",
-    dependencies: ["ScribeBlocks"],
+    dependencies: [
+      "ScribeBlocks",
+      .product(name: "HeadlessBackend", package: "chroma"),
+    ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
       .treatAllWarnings(as: .error),
@@ -231,11 +234,9 @@ var targets: [Target] = [
   ),
 ]
 
-var chromaTraits: Set<Package.Dependency.Trait> = []
-
 #if os(macOS)
-chromaTraits.insert("MetalBackend")
 products.append(.executable(name: "scribe-mac", targets: ["ScribeMac"]))
+targets.append(.testTarget(name: "ScribeMacLaunchTests", dependencies: ["ScribeMac"]))
 targets.append(
   .executableTarget(
     name: "ScribeMac",
@@ -252,7 +253,6 @@ targets.append(
   )
 )
 #elseif os(Linux)
-chromaTraits.insert("WaylandBackend")
 products.append(.executable(name: "scribe-wayland", targets: ["ScribeWayland"]))
 targets.append(
   .executableTarget(
@@ -274,14 +274,13 @@ targets.append(
 let package = Package(
   name: "scribe",
   platforms: [
-    .macOS(.v26)
+    .macOS(.v27)
   ],
   products: products,
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "e1adc94",
-      traits: chromaTraits
+      revision: "55d970d"
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),

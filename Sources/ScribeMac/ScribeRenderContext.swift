@@ -11,6 +11,7 @@ enum ScribeRenderContext {
 struct RenderContextBridge<Content: Block>: PrimitiveBlock {
   let content: Content
   let prepare: @MainActor (RenderContext) -> Void
+  var finish: @MainActor (RenderContext) -> Void = { _ in }
 
   @MainActor var expandsHorizontally: Bool {
     BlockEngine.expandsHorizontally(content)
@@ -29,5 +30,6 @@ struct RenderContextBridge<Content: Block>: PrimitiveBlock {
     ScribeRenderContext.current = context
     prepare(context)
     BlockEngine.draw(content, into: &drawList, in: rect, context: context)
+    finish(context)
   }
 }

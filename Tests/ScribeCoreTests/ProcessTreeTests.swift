@@ -12,7 +12,7 @@ import Glibc
 import Musl
 #endif
 
-private final class StubReader: ProcessTreeReader, @unchecked Sendable {
+private final class StubReader: ProcessTreeReader, Sendable {
   private struct State {
     var visited: [pid_t] = []
   }

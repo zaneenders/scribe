@@ -17,7 +17,7 @@ struct ActivitySpinner: PrimitiveBlock {
   @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
     let center = Point(x: rect.minX + diameter / 2, y: rect.minY + rect.size.height / 2)
     let orbitRadius = (diameter - dotDiameter) / 2
-    let head = Int(Date().timeIntervalSinceReferenceDate * 11) % dotCount
+    let head = Int(context.animationFrame().timestamp * 11) % dotCount
 
     for index in 0..<dotCount {
       let angle = Float(index) * 2 * .pi / Float(dotCount) - .pi / 2

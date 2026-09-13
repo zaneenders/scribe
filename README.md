@@ -6,8 +6,24 @@ Ai Agent written in Swift
 
 ### Requirements
 
-- [Swift 6.3](https://www.swift.org/install/) or newer
+- [Swift tools 6.4](https://www.swift.org/install/) or newer
 - macOS 26+ or Linux (x86_64 or aarch64)
+
+Until a release toolchain is available, `.swift-version` pins
+`main-snapshot-2026-09-10`, matching Chroma (the compiler identifies itself as
+Swift 6.5-dev). Install and use it with [Swiftly](https://www.swift.org/install/):
+
+```bash
+swiftly install
+swiftly run swift --version
+swiftly run swift build
+swiftly run swift test
+```
+
+With Swiftly's proxies on your `PATH`, the plain `swift` commands and build
+scripts below select the pin automatically. The tools requirement is 6.4;
+testing with this snapshot does not establish compatibility with a released
+6.4 compiler.
 
 On first run Scribe writes a default `scribe.config.json` targeting Ollama at
 `http://localhost:11434` with the **`gemma4:e2b`** model.  Edit the file or set
@@ -20,6 +36,15 @@ Put the binary on your `PATH` (for example `~/.local/bin`):
 mkdir -p ~/.local/bin
 ```
 
+Use `./Scripts/install.sh` on either macOS or Linux after installing the
+platform prerequisites below. It detects the host OS and uses the existing
+platform-specific build and install flow. Run `./Scripts/install.sh --help`
+for environment-variable overrides. No privileges are elevated automatically.
+Build output and diagnostics are inherited by the terminal, with stage messages
+for building, packaging, signing (macOS), and installation. On macOS, the initial
+build runs directly for live output; the bundler then reuses the artifacts and
+prints any additional captured build log.
+
 ### macOS
 
 ```bash
@@ -28,7 +53,7 @@ swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
 
 # Mac app (build, stably sign, and install in /Applications)
-./Scripts/install-macos.sh
+./Scripts/install.sh
 ```
 
 Quit any development instance started with `swift run scribe-mac` before opening
@@ -51,8 +76,12 @@ multiple matching identities, set one explicitly:
 
 ```bash
 SCRIBE_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" \
-  ./Scripts/install-macos.sh
+  ./Scripts/install.sh
 ```
+
+Set `SCRIBE_INSTALL_PATH="$HOME/Applications/Scribe.app"` to install somewhere
+other than `/Applications/Scribe.app`. The existing `Scripts/install-macos.sh`
+entry point remains available.
 
 Create an Apple Development certificate in Xcode if the script cannot find one.
 Unlike the bundler's ad-hoc signature, a development-signed app's identity does
@@ -67,7 +96,7 @@ Wayland/EGL/OpenGL ES backend.
 
 #### Build from source
 
-Install Swift 6.3 and the native development packages first. Scribe's HTTP
+Install the Swift toolchain described above and the native development packages first. Scribe's HTTP
 stack uses Swift's `FoundationNetworking` on Linux for `URLError` handling;
 that module adds the `libcurl` linker dependency. The OpenAI-compatible and
 Codex clients themselves send requests with AsyncHTTPClient.
@@ -96,21 +125,33 @@ Debian/Ubuntu), not the development package. Then build Scribe:
 # Build a redistributable archive with CLI, app, desktop entry, and icon, then
 # install it to ~/.local. The package script statically links the Swift runtime
 # and rejects a build containing a machine-specific Swift runtime path.
-./Scripts/package-linux.sh --install
+./Scripts/install.sh
 
-# To create the archive under dist/ without installing it, omit --install.
+# To create the archive under dist/ without installing it:
+./Scripts/package-linux.sh
 
 # Or build and run only the app locally (Swift remains required in this case).
 swift run -c release scribe-wayland
 ```
 
-For CLI-only static builds, install the Swift static SDK once and build for your
-architecture:
+Packaging metadata and icons live in `Packaging/`; shell automation lives in
+`Scripts/`. The scripts in `Scripts/Linux/` are copied to the archive root as
+`install.sh` and `uninstall.sh` for managing prebuilt packages; use
+`Scripts/install.sh` to build and install from a source checkout.
+
+Set `PREFIX` to override the default `~/.local` install location. The unified
+installer also forwards the packaging script's environment overrides, including
+`CONFIGURATION`, `OUTPUT_DIRECTORY`, and prebuilt binary paths.
+
+For CLI-only static builds, first install a Swift static Linux SDK matching
+`swift --version`, using the download URL and checksum published for that
+specific toolchain at [Swift.org](https://www.swift.org/install/). The old 6.3
+SDK is not compatible with the pinned snapshot. If no matching SDK is available,
+use the native Linux build above instead.
+
+After installing the matching SDK, build for your architecture:
 
 ```bash
-swift sdk install https://download.swift.org/swift-6.3.2-release/static-sdk/swift-6.3.2-RELEASE/swift-6.3.2-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz \
-  --checksum 3fd798bef6f4408f1ea5a6f94ce4d4052830c4326ab85ebc04f983f01b3da407
-
 ARCH=$(uname -m)   # x86_64 or aarch64
 swift build -c release --swift-sdk "${ARCH}-swift-linux-musl"
 install -m 755 .build/release/scribe ~/.local/bin/scribe
@@ -253,3 +294,22 @@ docc preview Sources/ScribeCore/ScribeCore.docc
 ```bash
 docc preview Sources/ScribeCLI/ScribeCLI.docc
 ```
+
+### macOS app development
+
+On macOS, `swift run scribe-mac` runs Scribe's block graph, sessions, and native
+Metal window in one process using Chroma's `MetalApp`. No backend subprocess or
+loopback connection is needed.
+
+Restart the development app after rebuilding; an already installed Scribe.app
+will not pick up changes.
+
+Integration regression checks:
+
+```sh
+swift test --filter 'ScribeBlocksTests|ScribeMacLaunchTests'
+```
+
+Keyboard integration tests exercise key binding resolution and feed input through
+Chroma's headless renderer; they do not synthesize native AppKit events.
+Scene captures use Chroma's version 2 JSON format, not the former remote-wire format.
