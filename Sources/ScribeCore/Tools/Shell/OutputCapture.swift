@@ -126,38 +126,50 @@ struct OutputCapture: Sendable {
       case deadline
       case errored
     }
-    return await Task.detached(priority: .userInitiated) {
-      [drainTask] () async -> DrainBytes? in
-      await withTaskGroup(of: RaceOutcome.self) { group in
-        group.addTask {
-          do {
-            return .completed(try await drainTask.value)
-          } catch {
-            return .errored
-          }
-        }
-        group.addTask {
-          try? await Task.sleep(for: .milliseconds(deadlineMs))
-          return .deadline
-        }
-        let first = await group.next()!
-        group.cancelAll()
-        switch first {
-        case .completed(let bytes):
-          return bytes
-        case .deadline:
-          drainTask.cancel()
-          logger.trace(
-            "shell-drain-deadline-fired",
-            metadata: [
-              "shell_id": "\(shellID)", "deadline_ms": "\(deadlineMs)",
-            ])
-          return nil
-        case .errored:
-          return nil
+    // A task group would join the losing waiter, so a drain that ignores
+    // cancellation could prevent the deadline from ever returning. These
+    // unstructured waiters publish one result instead. The completion waiter
+    // remains until the underlying drain settles; cancellation cannot forcibly
+    // terminate it. The caller remains responsible for closing capture handles.
+    return await withTaskCancellationShield {
+      let (outcomes, continuation) = AsyncStream<RaceOutcome>.makeStream(
+        bufferingPolicy: .bufferingOldest(1))
+      let completion = Task {
+        do {
+          continuation.yield(.completed(try await drainTask.value))
+        } catch {
+          continuation.yield(.errored)
         }
       }
-    }.value
+      let timeout = Task {
+        do {
+          try await Task.sleep(for: .milliseconds(deadlineMs))
+          continuation.yield(.deadline)
+        } catch {
+          // Cancellation means another outcome won, not that time expired.
+        }
+      }
+      defer {
+        continuation.finish()
+        completion.cancel()
+        timeout.cancel()
+      }
+      var iterator = outcomes.makeAsyncIterator()
+      switch await iterator.next() {
+      case .completed(let bytes):
+        return bytes
+      case .deadline:
+        drainTask.cancel()
+        logger.trace(
+          "shell-drain-deadline-fired",
+          metadata: [
+            "shell_id": "\(shellID)", "deadline_ms": "\(deadlineMs)",
+          ])
+        return nil
+      case .errored, nil:
+        return nil
+      }
+    }
   }
 
   static func writeStream(

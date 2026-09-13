@@ -139,7 +139,11 @@ final class SessionController {
   var transcript: [TranscriptItem]
   private(set) var isLoadingTranscript = false
   /// Original composer text; display transformations must not alter model input.
-  var draft = ""
+  var draft = "" {
+    didSet { draftRevision &+= 1 }
+  }
+  @ObservationIgnored private(set) var draftRevision: UInt64 = 0
+  @ObservationIgnored let composerLayoutCache = ComposerTextLayoutCache()
   var isRunning = false
   /// Conversation recency used by the sidebar. Selecting or opening a session
   /// does not change this value.
@@ -210,16 +214,19 @@ final class SessionController {
       isLoadingTranscript = true
       // Transcript conversion can be substantial for old tool-heavy sessions.
       // Keep installation cheap and publish the rows after yielding a frame.
-      Task.detached { [weak self] in
-        let replayed = Self.replay(initialMessages)
-        await MainActor.run {
-          guard let self else { return }
-          self.transcript = replayed
-          self.isLoadingTranscript = false
-          self.scroll.scrollToBottom()
-        }
+      Task { [weak self] in
+        let replayed = await Self.buildTranscript(initialMessages)
+        guard let self else { return }
+        self.transcript = replayed
+        self.isLoadingTranscript = false
+        self.scroll.scrollToBottom()
       }
     }
+  }
+
+  @concurrent
+  private static func buildTranscript(_ messages: [ScribeMessage]) async -> [TranscriptItem] {
+    replay(messages)
   }
 
   func applyPresentation(name: String?, isPinned: Bool) {
@@ -453,6 +460,10 @@ final class SessionController {
           self?.handle(event)
         }
       }
+      defer {
+        continuation.finish()
+        _ = await consumer.result
+      }
       do {
         let outcome = try await harness.submit(
           text,
@@ -462,8 +473,6 @@ final class SessionController {
       } catch {
         continuation.yield(.failed(error.localizedDescription))
       }
-      continuation.finish()
-      _ = await consumer.result
     }
   }
 

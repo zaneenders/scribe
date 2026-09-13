@@ -36,5 +36,22 @@ struct ObservationTests {
     await drainChanges()
     #expect(redraws == 2)
     #expect(renderer.render() == initial)
+
+    // A token burst should schedule one frame that sees the final value.
+    for index in 0..<100 {
+      store.lastError = "Token \(index)"
+    }
+    await drainChanges()
+    #expect(redraws == 3)
+    #expect(renderer.render() != initial)
+
+    // Closing before a queued invalidation runs must discard that callback.
+    store.lastError = "Pending at close"
+    renderer.close()
+    await drainChanges()
+    #expect(redraws == 3)
+    store.lastError = "After close"
+    await drainChanges()
+    #expect(redraws == 3)
   }
 }

@@ -18,11 +18,10 @@ by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 [docc]: https://www.swift.org/documentation/docc/
 
-## Local Chroma observation experiment
+## Chroma observation integration
 
-This branch uses the sibling `../chroma` checkout (currently the `observation`
-branch) instead of a pinned remote dependency. Keep that checkout alongside
-Scribe; edits there are picked up on the next build.
+Chroma is fetched from GitHub at the exact revision pinned in `Package.swift`.
+A sibling `../chroma` checkout is not required to build Scribe.
 
 `ScribeMacStore` and `SessionController` use Swift Observation so model changes
 read during a Chroma frame request a redraw, including asynchronous updates.

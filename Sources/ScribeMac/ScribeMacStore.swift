@@ -326,23 +326,38 @@ final class ScribeMacStore {
         let sessionsRoot = ScribePaths.resolve().sessionsDirectory
         // Directory enumeration, stat, and metadata decoding are synchronous.
         // Keep all of them off the main actor so launch can draw immediately.
-        savedSessions = try await Task.detached {
-          let directories = try await ChatSessionStore.listSessionDirectories(
-            sessionsRoot: sessionsRoot)
-          return directories.compactMap { directory in
-            guard let metadata = try? ChatSessionStore.loadMetadata(from: directory) else { return nil }
-            return SavedSession(
-              id: metadata.id,
-              directory: directory,
-              metadata: metadata,
-              lastMessageAt: ChatSessionStore.lastMessageDate(
-                in: directory, metadata: metadata))
-          }
-        }.value
+        savedSessions = try await Self.loadSavedSessions(sessionsRoot: sessionsRoot)
       } catch {
         reportError("Could not load saved sessions: \(error.localizedDescription)")
       }
     }
+  }
+
+  // Explicit executor hops keep synchronous stat/decoding work off MainActor
+  // without creating detached tasks or dropping task-local context.
+  @concurrent
+  private static func loadSavedSessions(sessionsRoot: FilePath) async throws -> [SavedSession] {
+    let directories = try await ChatSessionStore.listSessionDirectories(sessionsRoot: sessionsRoot)
+    return try directories.compactMap { directory in
+      try Task.checkCancellation()
+      guard let metadata = try? ChatSessionStore.loadMetadata(from: directory) else { return nil }
+      return SavedSession(
+        id: metadata.id,
+        directory: directory,
+        metadata: metadata,
+        lastMessageAt: ChatSessionStore.lastMessageDate(in: directory, metadata: metadata))
+    }
+  }
+
+  @concurrent
+  private static func loadSavedSession(
+    _ saved: SavedSession, version: String
+  ) async throws -> BootstrappedSession {
+    try Task.checkCancellation()
+    return try await ScribeSessionBootstrap.open(
+      resumeDirectory: saved.directory,
+      workingDirectory: saved.metadata.cwd,
+      version: version)
   }
 
   func openSavedSession(_ saved: SavedSession) {
@@ -367,15 +382,7 @@ final class ScribeMacStore {
       }
       do {
         try ensureShellCapture()
-        // Bootstrap performs synchronous file decoding internally. Run it on a
-        // detached executor so multi-megabyte transcripts do not block drawing.
-        let version = GitVersion.hash
-        let opened = try await Task.detached {
-          try await ScribeSessionBootstrap.open(
-            resumeDirectory: saved.directory,
-            workingDirectory: saved.metadata.cwd,
-            version: version)
-        }.value
+        let opened = try await Self.loadSavedSession(saved, version: GitVersion.hash)
         let shouldActivate = selectedSavedSession?.id == saved.id
         install(opened, refreshHistory: false, activate: shouldActivate)
       } catch {

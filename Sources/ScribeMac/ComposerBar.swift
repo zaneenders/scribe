@@ -45,6 +45,8 @@ struct ComposerBar: Block {
           id: ScribeMacStore.composerID,
           fontScale: theme.textScale,
           text: { session.draft },
+          layoutCache: session.composerLayoutCache,
+          revision: { session.draftRevision },
           onChange: { if session.draft != $0 { session.updateDraft($0) } },
           onNewline: { session.insertComposerNewline() },
           onEndEditing: {

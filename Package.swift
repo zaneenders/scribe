@@ -237,10 +237,7 @@ var targets: [Target] = [
   ),
 ]
 
-var chromaTraits: Set<Package.Dependency.Trait> = []
-
 #if os(macOS)
-chromaTraits.insert("MetalBackend")
 products.append(.executable(name: "scribe-mac", targets: ["ScribeMac"]))
 targets.append(.testTarget(name: "ScribeMacLaunchTests", dependencies: ["ScribeMac"]))
 targets.append(
@@ -260,7 +257,6 @@ targets.append(
   )
 )
 #elseif os(Linux)
-chromaTraits.insert("WaylandBackend")
 products.append(.executable(name: "scribe-wayland", targets: ["ScribeWayland"]))
 targets.append(
   .executableTarget(
@@ -287,8 +283,8 @@ let package = Package(
   products: products,
   dependencies: [
     .package(
-      path: "../chroma",
-      traits: chromaTraits
+      url: "https://github.com/zaneenders/chroma",
+      revision: "d93f36c7abe7f8080681c753cebac4f4b2bab926"
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
