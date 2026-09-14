@@ -35,6 +35,7 @@ private struct ConfigManifest: Codable {
     var baseUrl: String
     var apiKey: String
     var type: String?
+    var opencodeHeader: Bool?
   }
   struct AgentSection: Codable {
     var model: String
@@ -354,6 +355,7 @@ public enum ConfigLoader {
       reasoningEnabled: profile.agent.reasoning,
       reasoningEffort: profile.agent.reasoningEffort,
       maxTokens: profile.agent.maxTokens,
+      sendsOpenCodeHeader: profile.api.opencodeHeader ?? false,
       temperature: profile.agent.temperature,
       maxRetries: profile.agent.maxRetries
     )

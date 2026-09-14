@@ -232,6 +232,7 @@ Scribe uses the first profile by default; override with `--profile <name>`.
 | `api.baseUrl` | *(required)* | API base URL (e.g. `http://localhost:11434` for Ollama) |
 | `api.apiKey` | `""` | Bearer token; leave empty when no auth is required |
 | `api.type` | *(omitted)* | `"codex"` for ChatGPT/Codex; omit for any OpenAI-compatible provider |
+| `api.opencodeHeader` | `false` | Send `x-opencode-session` with the session's stable ID on every request (required by OpenCode Go) |
 | `agent.model` | *(required)* | Model name |
 | `agent.contextWindow` | *(required)* | Token context window size |
 | `agent.contextWindowThreshold` | `0.8` | Fraction (0–1) that triggers context compaction |

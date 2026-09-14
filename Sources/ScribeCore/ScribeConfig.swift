@@ -12,6 +12,9 @@ public struct ScribeConfig: Sendable {
   public var reasoningEnabled: Bool?
   public var reasoningEffort: String?
   public var maxTokens: Int?
+  /// When true, requests carry an `x-opencode-session` header with the
+  /// session's stable ID (required by OpenCode Go; other providers ignore it).
+  public var sendsOpenCodeHeader: Bool
   /// Optional per-profile sampling temperature. When `nil`, providers use
   /// their default (currently 0 for OpenAI-compatible requests).
   public var temperature: Double?
@@ -30,6 +33,7 @@ public struct ScribeConfig: Sendable {
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
     maxTokens: Int? = nil,
+    sendsOpenCodeHeader: Bool = false,
     temperature: Double? = nil,
     maxRetries: Int? = nil
   ) {
@@ -44,6 +48,7 @@ public struct ScribeConfig: Sendable {
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEffort = reasoningEffort
     self.maxTokens = maxTokens
+    self.sendsOpenCodeHeader = sendsOpenCodeHeader
     self.temperature = temperature
     self.maxRetries = maxRetries
   }

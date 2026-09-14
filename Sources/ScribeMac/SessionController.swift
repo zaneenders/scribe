@@ -394,6 +394,7 @@ final class SessionController {
           let summary = try await SessionSummarizer.summarize(
             slice: Array(snapshot.messages[start..<end]),
             configuration: configuration,
+            sessionId: currentSessionId,
             logger: Logger(label: "scribe.mac.tldr"))
           change = try await harness.applyEdit(
             .forkSplice(

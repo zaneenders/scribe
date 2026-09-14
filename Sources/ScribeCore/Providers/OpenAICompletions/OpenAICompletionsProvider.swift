@@ -1,12 +1,15 @@
+import Foundation
 import Logging
 import ScribeLLM
 import SystemPackage
 
 struct OpenAICompletionsProvider: AgentProvider {
+  private let fallbackSessionId = UUID()
   let client: ScribeLLM.Client
   let model: String
   let reasoningEnabled: Bool?
   let contextWindow: Int
+  var sendsOpenCodeHeader: Bool = false
   var defaultTemperature: Double = 0
   var retryPolicy: RetryPolicy = .default
 
@@ -32,7 +35,9 @@ struct OpenAICompletionsProvider: AgentProvider {
       reasoningEnabled: reasoningEnabled,
       hooks: .default,
       contextWindow: contextWindow,
-      retryPolicy: retryPolicy
+      retryPolicy: retryPolicy,
+      sessionId: options.sessionId ?? fallbackSessionId,
+      sendsOpenCodeHeader: sendsOpenCodeHeader
     )
 
     let task = Task<TurnResult, Error> {
