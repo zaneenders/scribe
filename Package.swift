@@ -7,7 +7,6 @@ var products: [Product] = [
   .library(name: "ScribeKit", targets: ["ScribeKit"]),
   .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
   .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
-  .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
 ]
 
 var targets: [Target] = [
@@ -146,29 +145,6 @@ var targets: [Target] = [
     ],
     plugins: [
       "GitVersionPlugin"
-    ]
-  ),
-  .target(
-    name: "ScribeTerminal",
-    dependencies: [
-      "PTYShim",
-      .product(name: "DequeModule", package: "swift-collections"),
-    ],
-    swiftSettings: [
-      .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
-    ]
-  ),
-  .target(
-    name: "PTYShim",
-    publicHeadersPath: "include"
-  ),
-  .testTarget(
-    name: "ScribeTerminalTests",
-    dependencies: ["ScribeTerminal"],
-    swiftSettings: [
-      .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
     ]
   ),
   .testTarget(
