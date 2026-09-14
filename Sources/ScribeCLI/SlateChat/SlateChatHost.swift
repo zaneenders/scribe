@@ -921,6 +921,7 @@ extension SlateChatHost {
       newConfig.reasoningEnabled = loaded.scribeConfig.reasoningEnabled
       newConfig.reasoningEffort = loaded.scribeConfig.reasoningEffort
       newConfig.maxTokens = loaded.scribeConfig.maxTokens
+      newConfig.sendsOpenCodeHeader = loaded.scribeConfig.sendsOpenCodeHeader
       newConfig.temperature = loaded.scribeConfig.temperature
       newConfig.maxRetries = loaded.scribeConfig.maxRetries
       try await harness.reconfigure(configuration: newConfig)

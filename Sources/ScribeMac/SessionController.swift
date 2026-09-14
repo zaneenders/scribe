@@ -585,6 +585,7 @@ final class SessionController {
         reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
         reasoningEffort: loaded.scribeConfig.reasoningEffort,
         maxTokens: loaded.scribeConfig.maxTokens,
+        sendsOpenCodeHeader: loaded.scribeConfig.sendsOpenCodeHeader,
         temperature: loaded.scribeConfig.temperature,
         maxRetries: loaded.scribeConfig.maxRetries
       )
