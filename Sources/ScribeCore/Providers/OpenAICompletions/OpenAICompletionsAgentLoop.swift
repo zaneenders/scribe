@@ -7,6 +7,8 @@ import SystemPackage
 struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let model: String
   let client: Client
+  let sessionId: UUID
+  let sendsOpenCodeHeader: Bool
 
   let toolExecutor: any ToolExecutor
 
@@ -30,8 +32,12 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     reasoningEnabled: Bool?,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0,
-    retryPolicy: RetryPolicy = .default
+    retryPolicy: RetryPolicy = .default,
+    sessionId: UUID = UUID(),
+    sendsOpenCodeHeader: Bool = false
   ) {
+    self.sessionId = sessionId
+    self.sendsOpenCodeHeader = sendsOpenCodeHeader
     self.model = model
     self.client = client
     self.toolExecutor = toolExecutor
@@ -98,7 +104,10 @@ private func runSingleRound(
       "messages": "\(requestBody.messages.count)",
       "reasoning_enabled": "\(String(describing: config.reasoningEnabled))",
     ])
-  let response = try await config.client.createChatCompletion(body: .json(requestBody))
+  let response = try await config.client.createChatCompletion(
+    headers: .init(
+      xOpencodeSession: config.sendsOpenCodeHeader ? config.sessionId.uuidString : nil),
+    body: .json(requestBody))
 
   let httpBody: HTTPBody
   switch response {

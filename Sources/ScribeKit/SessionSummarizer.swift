@@ -63,6 +63,7 @@ public enum SessionSummarizer {
   public static func summarize(
     slice: [ScribeMessage],
     configuration: ScribeConfig,
+    sessionId: UUID,
     logger: Logger
   ) async throws -> String {
     let summarizerConfig = ScribeConfig(
@@ -74,7 +75,8 @@ public enum SessionSummarizer {
       apiType: configuration.apiType,
       tools: [],
       workingDirectory: configuration.workingDirectory,
-      reasoningEnabled: configuration.reasoningEnabled
+      reasoningEnabled: configuration.reasoningEnabled,
+      sendsOpenCodeHeader: configuration.sendsOpenCodeHeader
     )
     let agent = try ScribeAgent(
       configuration: summarizerConfig,
@@ -93,7 +95,8 @@ public enum SessionSummarizer {
     let history: [ScribeMessage] = [
       ScribeMessage(role: .system, content: summarizerSystemPrompt)
     ]
-    let turn = agent.run(userPrompt, history: history)
+    let turn = agent.run(
+      userPrompt, history: history, options: AgentRunOptions(sessionId: sessionId))
     for await _ in turn.events {}
     let result = try await turn.result.value
 

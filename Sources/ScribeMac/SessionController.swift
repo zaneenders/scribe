@@ -354,6 +354,7 @@ final class SessionController {
           let summary = try await SessionSummarizer.summarize(
             slice: Array(snapshot.messages[start..<end]),
             configuration: configuration,
+            sessionId: currentSessionId,
             logger: Logger(label: "scribe.mac.tldr"))
           change = try await harness.applyEdit(
             .forkSplice(
@@ -521,6 +522,7 @@ final class SessionController {
         reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
         reasoningEffort: loaded.scribeConfig.reasoningEffort,
         maxTokens: loaded.scribeConfig.maxTokens,
+        sendsOpenCodeHeader: loaded.scribeConfig.sendsOpenCodeHeader,
         temperature: loaded.scribeConfig.temperature,
         maxRetries: loaded.scribeConfig.maxRetries
       )

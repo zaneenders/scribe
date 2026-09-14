@@ -202,6 +202,8 @@ public actor SessionHarness {
     logger.debug("session.harness.submit", metadata: metadata)
 
     let history = document.agentHistory()
+    var options = options
+    options.sessionId = document.sessionId
     let turnStream = agent.run(promptMessages, history: history, options: options)
 
     for await event in turnStream.events {

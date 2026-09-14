@@ -74,6 +74,9 @@ Optional agent settings: `contextWindowThreshold` (default `0.8`), `reasoning`
 (`false`), `reasoningEffort` (`low`/`medium`/`high`), and `maxRetries` (`3`).
 Set `logging.level` to control verbosity (default `trace`).
 
+Set `api.opencodeHeader` to `true` for OpenCode Go to send `x-opencode-session`
+with the stable session ID on every request (default `false`).
+
 Personal instructions go in `~/.scribe/system.md` and apply to new sessions only.
 Sessions, metadata, and logs live in `~/.scribe/sessions/{uuid}/`.
 Built-in tools: `shell`, `read_file`, `write_file`, and `edit_file`.

@@ -7,7 +7,7 @@ public enum OpenAICompatibleClient {
     Client(
       serverURL: serverURL,
       transport: AsyncHTTPClientTransport(),
-      middlewares: [BearerTokenMiddleware(token: apiKey)]
+      middlewares: [BearerTokenMiddleware(token: apiKey), UserAgentMiddleware()]
     )
   }
 }

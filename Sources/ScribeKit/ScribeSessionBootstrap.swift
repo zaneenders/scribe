@@ -57,6 +57,7 @@ public enum ScribeSessionBootstrap {
       reasoningEnabled: base.reasoningEnabled,
       reasoningEffort: base.reasoningEffort,
       maxTokens: base.maxTokens,
+      sendsOpenCodeHeader: base.sendsOpenCodeHeader,
       temperature: base.temperature,
       maxRetries: base.maxRetries
     )
