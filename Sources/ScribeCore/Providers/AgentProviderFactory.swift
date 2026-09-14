@@ -6,13 +6,15 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
     client: ScribeLLM.Client,
     model: String,
     reasoningEnabled: Bool?,
-    contextWindow: Int = 0
+    contextWindow: Int = 0,
+    sendsOpenCodeHeader: Bool = false
   ) -> Self {
     OpenAICompletionsProvider(
       client: client,
       model: model,
       reasoningEnabled: reasoningEnabled,
-      contextWindow: contextWindow)
+      contextWindow: contextWindow,
+      sendsOpenCodeHeader: sendsOpenCodeHeader)
   }
 }
 
@@ -46,6 +48,7 @@ enum AgentProviderFactory {
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         contextWindow: configuration.contextWindow,
+        sendsOpenCodeHeader: configuration.sendsOpenCodeHeader,
         defaultTemperature: configuration.temperature ?? 0,
         retryPolicy: retryPolicy)
     }

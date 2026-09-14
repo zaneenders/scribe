@@ -855,7 +855,8 @@ extension SlateChatHost {
             ])
         case .tldr:
           let summary = try await SessionSummarizer.summarize(
-            slice: request.slice, configuration: configuration, logger: logger)
+            slice: request.slice, configuration: configuration, sessionId: self.sessionId,
+            logger: logger)
           let replacement = [ScribeMessage(role: .assistant, content: summary)]
           if let change = try await harness.applyEdit(
             .forkSplice(
@@ -920,6 +921,7 @@ extension SlateChatHost {
       newConfig.reasoningEnabled = loaded.scribeConfig.reasoningEnabled
       newConfig.reasoningEffort = loaded.scribeConfig.reasoningEffort
       newConfig.maxTokens = loaded.scribeConfig.maxTokens
+      newConfig.sendsOpenCodeHeader = loaded.scribeConfig.sendsOpenCodeHeader
       newConfig.temperature = loaded.scribeConfig.temperature
       newConfig.maxRetries = loaded.scribeConfig.maxRetries
       try await harness.reconfigure(configuration: newConfig)

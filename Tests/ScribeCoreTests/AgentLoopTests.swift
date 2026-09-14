@@ -140,6 +140,55 @@ struct AgentLoopTests {
     #expect(stringContent(messages[1]) == "reply")
   }
 
+  @Test func sendsOpenCodeHeaderWhenEnabled() async throws {
+    let sessionId = UUID()
+    let transport = ScriptedTransport(chunks: [
+      sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default,
+      sessionId: sessionId,
+      sendsOpenCodeHeader: true
+    )
+    _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    let header = transport.capturedRequests.first?
+      .headers[HTTPField.Name("x-opencode-session")!]
+    #expect(header == sessionId.uuidString)
+  }
+
+  @Test func omitsOpenCodeHeaderByDefault() async throws {
+    let transport = ScriptedTransport(chunks: [
+      sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      hooks: .default
+    )
+    _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    let header = transport.capturedRequests.first?
+      .headers[HTTPField.Name("x-opencode-session")!]
+    #expect(header == nil)
+  }
+
   @Test func reportsLengthLimitedResponseAsIncomplete() async throws {
     let chunks = [
       sseChunk(
