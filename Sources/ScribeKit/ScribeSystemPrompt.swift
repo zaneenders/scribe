@@ -20,10 +20,6 @@ public enum ScribeSystemPrompt {
       Scribe's configuration, logs, and sessions live under `~/.scribe/` by default.
       This is runtime data storage, not a required source-code workspace.
 
-      Prefer the current working directory when it is a Scribe checkout, unless the user specifies another location.
-      If no suitable checkout exists, you may clone the zaneenders/scribe repository
-      from GitHub into `~/.scribe/scribe`, using the user's preferred Git transport.
-
       Your current working directory is (relative paths resolve here): \(cwd)
       """
     guard !additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return base }
