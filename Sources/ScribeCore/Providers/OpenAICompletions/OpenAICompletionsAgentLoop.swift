@@ -9,7 +9,6 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let model: String
   let client: Client
   let sessionId: UUID
-  /// Send `x-opencode-session` on every request (OpenCode Go requirement).
   let sendsOpenCodeHeader: Bool
 
   let toolExecutor: any ToolExecutor

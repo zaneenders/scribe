@@ -2,8 +2,6 @@ import Foundation
 import HTTPTypes
 import OpenAPIRuntime
 
-/// Identifies Scribe on the wire; providers (e.g. OpenCode Go) flag requests
-/// that carry no user agent as coming from an "Unknown client".
 struct UserAgentMiddleware: ClientMiddleware {
   let value: String
 

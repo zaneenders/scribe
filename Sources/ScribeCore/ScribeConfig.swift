@@ -12,8 +12,6 @@ public struct ScribeConfig: Sendable {
   public var reasoningEnabled: Bool?
   public var reasoningEffort: String?
   public var maxTokens: Int?
-  /// When true, requests carry an `x-opencode-session` header with the
-  /// session's stable ID (required by OpenCode Go; other providers ignore it).
   public var sendsOpenCodeHeader: Bool
   /// Optional per-profile sampling temperature. When `nil`, providers use
   /// their default (currently 0 for OpenAI-compatible requests).
