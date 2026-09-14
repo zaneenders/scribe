@@ -143,6 +143,13 @@ Set `PREFIX` to override the default `~/.local` install location. The unified
 installer also forwards the packaging script's environment overrides, including
 `CONFIGURATION`, `OUTPUT_DIRECTORY`, and prebuilt binary paths.
 
+Linux packaging defaults to SwiftPM's `native` build engine. The Swift 6.5-dev
+2026-09-10 snapshot's default `swiftbuild` engine fails to link the OpenAPI
+build tool with the static Swift runtime (unresolved Foundation/ICU symbols).
+Both executable builds and output-path discovery use the same engine. Set
+`SWIFT_BUILD_SYSTEM=swiftbuild` to retest with a toolchain that fixes this issue.
+Supplying both prebuilt binaries skips Swift entirely.
+
 For CLI-only static builds, first install a Swift static Linux SDK matching
 `swift --version`, using the download URL and checksum published for that
 specific toolchain at [Swift.org](https://www.swift.org/install/). The old 6.3

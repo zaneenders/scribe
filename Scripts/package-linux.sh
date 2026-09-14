@@ -77,15 +77,23 @@ if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
   fi
 fi
 
-bin_path=$(swift build -c "$configuration" --show-bin-path)
+# Swift 6.5's swiftbuild engine omits transitive Foundation/ICU libraries
+# from static links of build tools (including swift-openapi-generator). Use
+# SwiftPM's native engine until that upstream issue is fixed. Keep bin-path
+# discovery on the same engine: the two engines use different output layouts.
+build_system=${SWIFT_BUILD_SYSTEM:-native}
+bin_path=
+if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
+  bin_path=$(swift build --build-system "$build_system" -c "$configuration" --show-bin-path)
+fi
 if [ -z "$cli_binary" ]; then
   printf '[install] Building CLI (%s)...\n' "$configuration"
-  swift build -c "$configuration" --product scribe --static-swift-stdlib
+  swift build --build-system "$build_system" -c "$configuration" --product scribe --static-swift-stdlib
   cli_binary="$bin_path/scribe"
 fi
 if [ -z "$wayland_binary" ]; then
   printf '[install] Building Wayland app (%s)...\n' "$configuration"
-  swift build -c "$configuration" --product scribe-wayland --static-swift-stdlib
+  swift build --build-system "$build_system" -c "$configuration" --product scribe-wayland --static-swift-stdlib
   wayland_binary="$bin_path/scribe-wayland"
 fi
 
@@ -175,5 +183,6 @@ printf 'Created %s\n' "$archive"
 printf 'Created %s\n' "$archive.sha256"
 
 if [ "$install_after_packaging" = true ]; then
-  printf '[install] Installing Linux package...\n'  "$staging/install.sh"
+  printf '[install] Installing Linux package...\n'
+  "$staging/install.sh"
 fi
