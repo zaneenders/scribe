@@ -1,7 +1,5 @@
 import Chroma
 
-/// Makes Chroma's explicit render context available to app-level actions that
-/// run outside a primitive's `draw` call, regardless of the active backend.
 @MainActor
 enum ScribeRenderContext {
   static var current: RenderContext?

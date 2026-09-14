@@ -77,14 +77,12 @@ func codexUserMessageWithImageAndTextParts() {
   }
   #expect(parts.count == 2)
 
-  // First part should be text
   guard case .inputText(let codexText) = parts[0] else {
     Issue.record("Expected first part to be inputText")
     return
   }
   #expect(codexText.text == textContent)
 
-  // Second part should be image
   guard case .inputImage(let codexImage) = parts[1] else {
     Issue.record("Expected second part to be inputImage")
     return
@@ -95,7 +93,6 @@ func codexUserMessageWithImageAndTextParts() {
 
 @Test
 func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
-  // A valid 3x2 RGBA PNG: six pixels total.
   let pngBase64 =
     "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAFUlEQVR4nGP4z8DwH4QZGBgYGBgAAEKFCf6R29pAAAAAAElFTkSuQmCC"
   let png = try #require(Data(base64Encoded: pngBase64))
@@ -188,9 +185,6 @@ func codexUserMessageWithImageOnly() {
 
 @Test
 func codexMessageConversionSanitizesForeignToolCallIDs() {
-  // Regression: after switching models mid-session to the ChatGPT backend, the
-  // history can carry tool call IDs from another provider ("tool_..."). The
-  // backend 400s unless the function_call item ID begins with "fc".
   let foreignID = "tool_3AXlpi3mBRnQCMzIr7HgDba0"
   let assistantMsg = ScribeLLM.Components.Schemas.ChatMessage(
     role: .assistant,
@@ -265,16 +259,14 @@ func codexMessageConversionPreservesSystemAndToolMessages() {
     return
   }
 
-  #expect(items.count == 5)  // system + user + assistant + functionCall + functionCallOutput
+  #expect(items.count == 5)
 
-  // 0: System
   guard case .system(let sys) = items[0] else {
     Issue.record("Expected .system at index 0")
     return
   }
   #expect(sys.content == "You are a helpful assistant.")
 
-  // 1: User
   guard case .user(let usr) = items[1] else {
     Issue.record("Expected .user at index 1")
     return
@@ -285,7 +277,6 @@ func codexMessageConversionPreservesSystemAndToolMessages() {
   }
   #expect(userText == "Run ls")
 
-  // 2: Assistant
   guard case .assistant(let asst) = items[2] else {
     Issue.record("Expected .assistant at index 2")
     return
@@ -296,7 +287,6 @@ func codexMessageConversionPreservesSystemAndToolMessages() {
   }
   #expect(asstText == "Let me run that command.")
 
-  // 3: Function call
   guard case .functionCall(let fc) = items[3] else {
     Issue.record("Expected .functionCall at index 3")
     return
@@ -304,7 +294,6 @@ func codexMessageConversionPreservesSystemAndToolMessages() {
   #expect(fc.name == "shell")
   #expect(fc.arguments == #"{"command":"ls"}"#)
 
-  // 4: Function call output
   guard case .functionCallOutput(let fco) = items[4] else {
     Issue.record("Expected .functionCallOutput at index 4")
     return

@@ -42,15 +42,9 @@ package_name="scribe-linux-$architecture-$version"
 staging="$output_directory/$package_name"
 archive="$output_directory/$package_name.tar.gz"
 
-# CI can supply its static-musl CLI artifact. Local packages otherwise build a
-# native CLI with a static Swift runtime, just like the graphical executable.
 cli_binary=${SCRIBE_CLI_BINARY:-}
 wayland_binary=${SCRIBE_WAYLAND_BINARY:-}
 
-# Fail before the lengthy Swift build when a native development package is
-# absent. Having a versioned runtime library (for example libcurl.so.4) is not
-# enough: the linker and SwiftPM also need the unversioned library and pkg-config
-# metadata supplied by the distribution's development package.
 printf '[install] Checking Linux build prerequisites...\n'
 if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
   if ! command -v pkg-config >/dev/null 2>&1; then
@@ -77,10 +71,6 @@ if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
   fi
 fi
 
-# Swift 6.5's swiftbuild engine omits transitive Foundation/ICU libraries
-# from static links of build tools (including swift-openapi-generator). Use
-# SwiftPM's native engine until that upstream issue is fixed. Keep bin-path
-# discovery on the same engine: the two engines use different output layouts.
 build_system=${SWIFT_BUILD_SYSTEM:-native}
 bin_path=
 if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
@@ -126,8 +116,6 @@ for binary in "$cli_binary" "$wayland_binary"; do
   fi
 done
 
-# A distributable build must not depend on Swift shared libraries or retain a
-# path into the build machine's toolchain.
 if command -v readelf >/dev/null 2>&1; then
   dynamic=$(readelf -d "$wayland_binary")
   if printf '%s\n' "$dynamic" | grep -q 'Shared library: \[libswift'; then
@@ -157,8 +145,6 @@ install -m 644 Packaging/Linux/com.zaneenders.scribe.png \
   "$staging/share/icons/hicolor/512x512/apps/com.zaneenders.scribe.png"
 install -m 644 LICENSE "$staging/LICENSE"
 
-# Exercise installation into an isolated prefix and ensure desktop substitution
-# and executable permissions are correct before publishing the archive.
 printf '[install] Testing package installation and removal...\n'
 test_prefix="$output_directory/.install-test-$architecture"
 rm -rf "$test_prefix"

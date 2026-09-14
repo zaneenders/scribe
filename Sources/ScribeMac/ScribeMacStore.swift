@@ -7,12 +7,6 @@ import ScribeCore
 import ScribeKit
 import SystemPackage
 
-/// Owns every open chat session and which one is on screen.
-///
-/// Sessions are independent ``SessionController``s: switching sessions or
-/// starting a new one never interrupts a turn already streaming — the
-/// controller keeps consuming events in the background and flags unread
-/// activity for the sidebar.
 @MainActor
 @Observable
 final class ScribeMacStore {
@@ -53,7 +47,6 @@ final class ScribeMacStore {
   struct SessionGroup: Identifiable {
     let cwd: String
     let open: [SessionController]
-    /// Open and currently exposed saved sessions, newest message first.
     let entries: [SessionEntry]
     let totalSavedCount: Int
 
@@ -84,57 +77,34 @@ final class ScribeMacStore {
   static let directoryPaletteID = WidgetID("directory-palette")
   static let renameSessionFieldID = WidgetID("rename-session-field")
 
-  /// Startup phase. Only the initial bootstrap blanks the UI; later session
-  /// opens run in the background and report through `pendingSessionCount`
-  /// and `lastError`.
   var phase: Phase = .starting
 
-  /// Live sessions, oldest first. Turns keep running while not active.
   private(set) var sessions: [SessionController] = []
   private(set) var activeSessionID: UUID?
-  /// The session currently on screen, if any. Kept in sync with
-  /// `activeSessionID` by `switchTo` / `closeSession` / `close` so view
-  /// bodies don't rescan `sessions` every frame.
   private(set) var active: SessionController?
-  /// Session opens currently bootstrapping (new / resume / directory change).
   private(set) var pendingSessionCount = 0
-  /// Session metadata discovered on disk but not currently open.
   private(set) var savedSessions: [SavedSession] = []
   private(set) var isLoadingSavedSessions = false
-  /// The saved session selected while its transcript and agent harness load.
-  /// Keeping this separate from `active` lets the UI acknowledge selection on
-  /// the very next frame instead of leaving the previous conversation visible.
   private(set) var selectedSavedSession: SavedSession?
   private var openingSavedSessionIDs: Set<UUID> = []
   private var visibleSavedSessionCounts: [String: Int] = [:]
-  /// Session groups start collapsed and are added here only after the user opens them.
   private var expandedGroupCWDs: Set<String> = []
   private let savedSessionPageSize = 5
   let sidebarScroll = ScrollViewController()
-  /// Whether the session browser is visible alongside the active conversation.
   private(set) var isSessionSidebarVisible = true
-  /// Non-fatal failure shown as a dismissible banner over the session UI.
   var lastError: String?
 
-  /// Profiles listed by the model picker; refreshed on every config load.
   var profileCatalog: [ProfileSummary] = []
 
-  /// Whether the model picker overlay is visible.
   var showModelPicker = false
 
-  /// Session currently being renamed in the app-owned modal overlay.
   private(set) var renamingSessionID: UUID?
   var renameSessionDraft = ""
 
-  /// Whether the directory palette is visible.
   var showDirectoryPicker = false
-  /// Path typed into the palette's `$ cd` field.
   var directoryDraft = ""
-  /// Validation or completion feedback for the palette.
   var directoryError = ""
-  /// Directory names from the most recent Tab completion.
   var directoryMatches: [String] = []
-  /// True until the user chooses the initial working directory.
   var requiresDirectoryBeforeStart = false
 
   private var didStart = false
@@ -143,7 +113,6 @@ final class ScribeMacStore {
   private var composerFocusPending = false
   private var directoryFocusPending = false
   private var renameFocusPending = false
-  /// Cwd anchor for palette resolution before the first session exists.
   private var directoryBaseCWD = FilePath.currentDirectory.string
 
   private init() {}
@@ -153,19 +122,13 @@ final class ScribeMacStore {
     didStart = true
     startProfileRecorder()
     let launchCWD = FilePath.currentDirectory.string
-    // Finder launches at `/`, which is not a useful default for a new session.
-    // Use the home directory until the user picks a directory from Directory.
     directoryBaseCWD = launchCWD == "/" ? NSHomeDirectory() : launchCWD
 
-    // The session sidebar is now the launch screen: users can open history,
-    // start in the launch directory, or choose another directory from there.
     requiresDirectoryBeforeStart = false
     showDirectoryPicker = false
     phase = .ready
     refreshSavedSessions()
   }
-
-  // MARK: - Session lifecycle
 
   func toggleSessionSidebar() {
     isSessionSidebarVisible.toggle()
@@ -175,13 +138,8 @@ final class ScribeMacStore {
     isSessionSidebarVisible = false
   }
 
-  /// Opens a brand-new session in the background. Any turn already streaming
-  /// in another session keeps running untouched.
   func newSession() {
     guard !isStarting else { return }
-    // The launch screen should not silently create a session in Finder's or the
-    // process's working directory. Make the project choice explicit; once a
-    // session is open, New keeps the convenient same-project behavior.
     guard let active else {
       requiresDirectoryBeforeStart = true
       openDirectoryPicker()
@@ -190,15 +148,12 @@ final class ScribeMacStore {
     newSession(in: active.workingDirectory)
   }
 
-  /// Opens a brand-new chat in a specific session-sidebar directory.
   func newSession(in workingDirectory: String) {
     guard !isStarting else { return }
     openSessionInBackground(workingDirectory: workingDirectory)
   }
 
   var sessionGroups: [SessionGroup] {
-    // Build the grouping tables once. Filtering the entire saved-session list
-    // once per directory made every sidebar frame quadratic as history grew.
     let openIDs = Set(sessions.map(\.sessionId))
     var savedByCWD: [String: [SavedSession]] = [:]
     for saved in savedSessions where !openIDs.contains(saved.id) {
@@ -234,9 +189,6 @@ final class ScribeMacStore {
       return lhs.cwd.localizedCaseInsensitiveCompare(rhs.cwd) == .orderedAscending
     }
   }
-
-  // Open sessions are ordered solely by conversation recency above; UI state
-  // such as running, unread, or selected must not reorder them.
 
   func showMoreSavedSessions(for cwd: String) {
     visibleSavedSessionCounts[cwd, default: savedSessionPageSize] += savedSessionPageSize
@@ -302,7 +254,6 @@ final class ScribeMacStore {
   }
 
   func isGroupCollapsed(_ cwd: String) -> Bool {
-    // Running sessions stay visible even if their directory was collapsed.
     if sessions.contains(where: { $0.workingDirectory == cwd && $0.isRunning }) {
       return false
     }
@@ -324,8 +275,6 @@ final class ScribeMacStore {
       defer { isLoadingSavedSessions = false }
       do {
         let sessionsRoot = ScribePaths.resolve().sessionsDirectory
-        // Directory enumeration, stat, and metadata decoding are synchronous.
-        // Keep all of them off the main actor so launch can draw immediately.
         savedSessions = try await Self.loadSavedSessions(sessionsRoot: sessionsRoot)
       } catch {
         reportError("Could not load saved sessions: \(error.localizedDescription)")
@@ -333,8 +282,6 @@ final class ScribeMacStore {
     }
   }
 
-  // Explicit executor hops keep synchronous stat/decoding work off MainActor
-  // without creating detached tasks or dropping task-local context.
   @concurrent
   private static func loadSavedSessions(sessionsRoot: FilePath) async throws -> [SavedSession] {
     let directories = try await ChatSessionStore.listSessionDirectories(sessionsRoot: sessionsRoot)
@@ -365,7 +312,6 @@ final class ScribeMacStore {
       switchTo(existing.sessionId)
       return
     }
-    // Update selection synchronously so the click never appears to be ignored.
     let previousID = activeSessionID
     selectedSavedSession = saved
     activeSessionID = nil
@@ -392,9 +338,6 @@ final class ScribeMacStore {
     }
   }
 
-  /// Resumes the most recently saved session, or switches to it when it is
-  /// already open here — two live controllers on one session file would
-  /// interleave writes to its transcript.
   func resumeLatest() {
     guard !isStarting else { return }
     let cwd = active?.workingDirectory ?? directoryBaseCWD
@@ -423,8 +366,6 @@ final class ScribeMacStore {
     }
   }
 
-  /// Brings a session on screen. A previous controller is retained only while
-  /// its model is running; idle sessions return to their lightweight saved row.
   func switchTo(_ id: UUID) {
     guard let target = sessions.first(where: { $0.sessionId == id }) else { return }
     let previousID = activeSessionID
@@ -450,8 +391,6 @@ final class ScribeMacStore {
     controller.shutdown(cancelTask: true)
   }
 
-  /// Removes a session. An in-flight turn is interrupted but its streaming
-  /// task is left to wind down so the interrupted turn persists cleanly.
   func closeSession(_ id: UUID) {
     guard let index = sessions.firstIndex(where: { $0.sessionId == id }) else { return }
     let controller = sessions.remove(at: index)
@@ -492,8 +431,6 @@ final class ScribeMacStore {
     lastError = nil
     phase = .ready
     if activate { switchTo(controller.sessionId) }
-    // Opening an existing item does not change the set of sessions on disk.
-    // Avoid rereading metadata for every saved session after each selection.
     if refreshHistory { refreshSavedSessions() }
   }
 
@@ -529,8 +466,6 @@ final class ScribeMacStore {
 
   private func reportError(_ message: String) {
     lastError = message
-    // With no sessions to fall back on, still leave the empty state usable
-    // rather than the fatal startup screen.
     if sessions.isEmpty, isStarting {
       phase = .ready
     }
@@ -545,7 +480,6 @@ final class ScribeMacStore {
     lastError = nil
   }
 
-  /// Focus must be requested after a frame has registered the target leaf.
   func applyPendingFocus() {
     if renameFocusPending {
       ScribeRenderContext.current?.focus(Self.renameSessionFieldID, editing: true)
@@ -572,8 +506,6 @@ final class ScribeMacStore {
     }
   }
 
-  // MARK: - Directory palette
-
   func toggleDirectoryPicker() {
     if showDirectoryPicker && !requiresDirectoryBeforeStart {
       closeDirectoryPicker()
@@ -591,9 +523,6 @@ final class ScribeMacStore {
     directoryFocusPending = true
   }
 
-  /// Run after drawing: keep the palette modal for the entire Escape frame.
-  /// TextField may end editing while processing Escape, so restore it when
-  /// first-run directory selection cannot be dismissed.
   func finishDirectoryPaletteInput(_ context: RenderContext) {
     guard showDirectoryPicker, renamingSessionID == nil,
       context.input.textEvents.contains(.endEditing)
@@ -652,16 +581,12 @@ final class ScribeMacStore {
     directoryError = ""
     directoryMatches = []
     directoryFocusPending = false
-    // Starts a new session in the chosen directory; the current session, if
-    // any, keeps running in the background.
     openSessionInBackground(workingDirectory: path, reopenPaletteOnError: true)
   }
 
   private var directoryResolutionBase: String {
     active?.workingDirectory ?? directoryBaseCWD
   }
-
-  // MARK: - Model picker
 
   func toggleModelPicker() {
     guard active?.isRunning != true else { return }
@@ -678,8 +603,6 @@ final class ScribeMacStore {
       }
     }
   }
-
-  // MARK: - App teardown
 
   private func startProfileRecorder() {
     profileRecorderTask = Task.detached {

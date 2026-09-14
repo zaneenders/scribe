@@ -4,7 +4,6 @@ import OpenAPIRuntime
 import ScribeLLM
 import SystemPackage
 
-/// Configuration for the OpenAI-compatible agent loop.
 struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let model: String
   let client: Client
@@ -47,9 +46,6 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   }
 }
 
-/// Runs the agent loop against an OpenAI-compatible chat-completions API. The
-/// orchestration lives in `runAgentLoopCore`; this entry point only supplies the
-/// provider-specific HTTP round.
 func runAgentLoop(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
@@ -77,8 +73,6 @@ func runAgentLoop(
     )
   }
 }
-
-// MARK: - Single Round
 
 private func runSingleRound(
   contextMessages: [Components.Schemas.ChatMessage],
@@ -180,8 +174,6 @@ private func runSingleRound(
   emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
   if let u = processor.lastUsage {
-    // Usage completion tokens can include hidden reasoning, so measure from the
-    // start of the response stream rather than the first visible content delta.
     let genSec = (clock.now - processor.streamWallStart) / .seconds(1)
     let tps: Double? = {
       guard let c = u.completionTokens, c > 0 else { return nil }

@@ -5,17 +5,10 @@ import ScribeLLM
 import Synchronization
 import SystemPackage
 
-// MARK: - Shared Types
-
-/// Conversation state threaded through the agent loop: prior history plus everything
-/// committed during this turn.
 struct AgentContext: Sendable {
   var messages: [Components.Schemas.ChatMessage]
 }
 
-/// The provider-neutral configuration the shared agent loop relies on. Provider configs
-/// (`AgentLoopConfig`, `CodexAgentLoopConfig`) already carry these fields, so conformance
-/// is a one-line extension and the loop stays agnostic of HTTP specifics.
 protocol AgentLoopConfigFields: Sendable {
   var toolExecutor: any ToolExecutor { get }
   var chatTools: [Components.Schemas.ChatTool] { get }
@@ -26,8 +19,6 @@ protocol AgentLoopConfigFields: Sendable {
   var retryPolicy: RetryPolicy { get }
 }
 
-/// The result of a single provider round trip: the assistant message to commit and how
-/// the round ended.
 struct RoundResult: Sendable {
   let assistantMessage: Components.Schemas.ChatMessage
   let kind: RoundOutcome
@@ -39,16 +30,6 @@ enum RoundOutcome: Sendable, Equatable {
   case toolCalls([ToolInvocation])
 }
 
-// MARK: - Agent Loop Core
-
-/// Runs the provider-neutral agent orchestration: prompt injection, per-round request
-/// budget enforcement, abort checks, context-overflow recovery, transient-failure
-/// retries with backoff, tool dispatch with hooks, and attachment injection. Providers
-/// supply only `runRound`, which performs a single HTTP round trip and stream decode,
-/// reporting progress through the supplied per-attempt `emit` sink.
-///
-/// `logTag` is appended to every log event name (e.g. ".codex") so provider logs remain
-/// distinguishable while the orchestration stays identical.
 func runAgentLoopCore(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
@@ -167,9 +148,6 @@ func runAgentLoopCore(
     } catch let scribeError as ScribeError
       where attemptedRecovery && isContextLengthError(scribeError) && scribeError.isInBandStreamError
     {
-      // The provider still reports context overflow after one compaction retry. End the
-      // turn gracefully for in-band stream errors; HTTP-level failures keep propagating
-      // so callers can inspect the status code.
       let description = scribeError.errorDescription ?? String(describing: scribeError)
       logger.error(
         "agent.loop.error\(logTag)",
@@ -182,8 +160,6 @@ func runAgentLoopCore(
       outcome = .error(description)
       return (newMessages, outcome)
     } catch let scribeError as ScribeError {
-      // Non-recoverable ScribeErrors (apiHTTPError, etc.) — propagate
-      // so callers can inspect the specific error type.
       outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
       throw scribeError
     } catch {
@@ -237,10 +213,6 @@ func runAgentLoopCore(
           "tools": "\(invocations.map(\.name).joined(separator: ","))",
         ])
 
-      // OpenAI-compatible APIs require every tool response for an assistant's parallel
-      // tool_calls to appear contiguously before any other role. Tool-produced attachments
-      // are synthetic user messages, so defer them until the complete tool-result block has
-      // been assembled.
       var pendingAttachments: [(attachment: ToolAttachment, toolName: String)] = []
 
       for inv in invocations {
@@ -356,15 +328,6 @@ private func commit(
   newMessages.append(contentsOf: buffer)
 }
 
-// MARK: - Round Retry
-
-/// Runs a single provider round, retrying transient networking failures with backoff
-/// according to `policy` and surfacing each retry as `.lifecycle(.retrying)`.
-///
-/// A failed attempt is only retried when it produced no visible stream output: once
-/// assistant content reaches the transcript, replaying the round would duplicate it.
-/// An abort during the backoff sleep rethrows `AgentTurnInterruptedError` so the
-/// caller's interrupted handling applies unchanged.
 private func runRoundWithRetry(
   policy: RetryPolicy,
   logger: Logger,
@@ -376,8 +339,6 @@ private func runRoundWithRetry(
 ) async throws -> RoundResult {
   var retryAttempt = 0
   while true {
-    // Tracks whether this attempt made assistant output visible. Boundary events are
-    // invisible in the transcript, so re-emitting them on a retry is harmless.
     let streamConsumed = Mutex(false)
     let attemptEmit: @Sendable (AgentEvent) -> Void = { event in
       if event.makesStreamOutputVisible {
@@ -410,15 +371,11 @@ private func runRoundWithRetry(
       } catch is AgentTurnInterruptedError {
         throw AgentTurnInterruptedError()
       } catch {
-        // The backoff sleep itself was cancelled; proceed with the retry.
       }
     }
   }
 }
 
-/// One-line, length-capped error description for the transcript's retry notice.
-/// OpenAPIRuntime's `ClientError` wrapper is unwrapped so a dropped connection reads
-/// as the underlying cause rather than the generic "Client encountered an error".
 private func retryReasonSummary(_ error: any Error) -> String {
   var current = error
   while let clientError = current as? ClientError {
@@ -436,7 +393,6 @@ private func retryReasonSummary(_ error: any Error) -> String {
 }
 
 extension AgentEvent {
-  /// True when the event makes assistant stream output visible to the user.
   fileprivate var makesStreamOutputVisible: Bool {
     switch self {
     case .output, .lifecycle(.usage):
@@ -447,10 +403,6 @@ extension AgentEvent {
   }
 }
 
-// MARK: - Attachments
-
-/// Builds the synthetic user message that carries a tool-produced attachment into the
-/// conversation. Shared by every provider so multimodal injection stays identical.
 func toolAttachmentMessage(
   _ attachment: ToolAttachment
 ) -> Components.Schemas.ChatMessage {
@@ -463,8 +415,6 @@ func toolAttachmentMessage(
     ]
   ).toChatMessage()
 }
-
-// MARK: - Provider Input Recovery
 
 func isImageInputUnsupportedError(_ error: ScribeError) -> Bool {
   let detail: String
@@ -569,24 +519,18 @@ func rollbackContextOverflow(
   var toolIndexesToReplace = Set<Int>()
   var attachmentIndexesToRemove = Set<Int>()
 
-  // Tool-generated attachments are inserted immediately after their tool result. Preserve
-  // ordinary multimodal user prompts, but discard attachment messages created by tools.
   for index in messages.indices where isImageMessage(messages[index]) {
     guard index > messages.startIndex, messages[index - 1].role == .tool else { continue }
     attachmentIndexesToRemove.insert(index)
     toolIndexesToReplace.insert(index - 1)
   }
 
-  // Old sessions can contain tool output written before the global result ceiling existed.
-  // Compact every conspicuously large result so a single retry has the best chance to fit.
   for index in messages.indices where messages[index].role == .tool {
     if messageTextSize(messages[index]) > 32 * 1024 {
       toolIndexesToReplace.insert(index)
     }
   }
 
-  // Providers do not report which input item crossed the limit. If no obvious attachment or
-  // oversized output exists, compact the largest tool result rather than retrying unchanged.
   if toolIndexesToReplace.isEmpty,
     let largest = messages.indices.filter({
       messages[$0].role == .tool && !isContextOverflowReplacement(messages[$0])
@@ -612,8 +556,6 @@ func rollbackContextOverflow(
     messages.remove(at: index)
   }
 
-  // newMessages is the suffix accumulated during this turn. Mirror changes that landed in it
-  // so persistence and the retry context remain identical.
   for contextIndex in toolIndexesToReplace where contextIndex >= newMessageStart {
     let newIndex = contextIndex - newMessageStart
     guard newMessages.indices.contains(newIndex) else { continue }
@@ -666,8 +608,6 @@ private func contextOverflowReplacement(
 }
 
 extension ScribeError {
-  /// True for failures reported inside the provider's event stream. HTTP-level failures
-  /// remain `.apiHTTPError` so callers can inspect the status code.
   fileprivate var isInBandStreamError: Bool {
     switch self {
     case .generic, .providerStreamError:

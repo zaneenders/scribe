@@ -6,8 +6,6 @@ import Testing
 @Suite
 struct AgentProviderFactoryTests {
 
-  // MARK: - Factory helper
-
   private func configuration(
     model: String = "test-model",
     serverURL: String = "https://api.example.com",
@@ -34,8 +32,6 @@ struct AgentProviderFactoryTests {
     )
   }
 
-  // MARK: - Invalid server URL
-
   @Test("throws on empty serverURL")
   func throwsOnEmptyServerURL() {
     let config = configuration(serverURL: "")
@@ -44,8 +40,6 @@ struct AgentProviderFactoryTests {
       _ = try AgentProviderFactory.make(configuration: config)
     }
   }
-
-  // MARK: - Provider-selection matrix (default / unknown / explicit OpenAI)
 
   @Test(
     "provider selection returns OpenAICompletionsProvider",
@@ -59,8 +53,6 @@ struct AgentProviderFactoryTests {
     let provider = try AgentProviderFactory.make(configuration: config)
     #expect(provider is OpenAICompletionsProvider)
   }
-
-  // MARK: - Codex provider
 
   @Test("codex apiType returns CodexProvider with credentials source")
   func codexApiTypeReturnsCodexProvider() throws {
@@ -82,8 +74,6 @@ struct AgentProviderFactoryTests {
     #expect(codexProvider.reasoningEffort == "high")
     #expect(codexProvider.contextWindow == 128_000)
   }
-
-  // MARK: - Configuration passthrough
 
   @Test("contextWindow is propagated to provider")
   func contextWindowPropagated() throws {

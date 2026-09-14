@@ -1,7 +1,5 @@
 import Chroma
 
-/// The macOS app's palette and metrics, mirroring the CLI's dark theme
-/// where Chroma's immediate-mode blocks allow.
 struct MacTheme: Sendable {
   var margin: Float = 16
   var spacing: Float = 10
@@ -11,8 +9,6 @@ struct MacTheme: Sendable {
   var itemHeight: Float = 48
   var sidebarWidth: Float = 320
 
-  // Large, high-contrast defaults are deliberate: the app should remain easy
-  // to scan without leaning toward the display. Body text lands around 17 pt.
   var titleScale: Float = 0.7
   var textScale: Float = 0.85
   var smallScale: Float = 0.75
@@ -37,8 +33,6 @@ struct MacTheme: Sendable {
   var orange = Color(r: 1, g: 0.55, b: 0.15, a: 1)
   var purple = Color(r: 0.7, g: 0.3, b: 0.9, a: 1)
 
-  // Body copy is intentionally softer than pure white. The display face and
-  // colored status accents can stay crisp without making long answers glare.
   var textPrimary = Color(r: 0.90, g: 0.91, b: 0.94, a: 1)
   var textSecondary = Color(r: 0.63, g: 0.66, b: 0.73, a: 1)
   var userBubbleBackground = Color(r: 0.105, g: 0.15, b: 0.22, a: 1)

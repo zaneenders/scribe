@@ -6,7 +6,6 @@ import Testing
 #if os(macOS) || os(Linux)
 @Suite("PTYSession")
 struct PTYSessionTests {
-  /// Accumulates PTY output from the read thread.
   private final class OutputBuffer: Sendable {
     private let data = Mutex(Data())
 
@@ -26,8 +25,6 @@ struct PTYSessionTests {
     let buffer = OutputBuffer()
     session.onOutput = { data in buffer.append(data) }
 
-    // Arithmetic expansion keeps the TTY's own echo of the typed command from
-    // satisfying the check; only the shell's output contains the marker.
     try session.write("echo scribe-pty-$((40+2))\n")
 
     let deadline = ContinuousClock.now + .seconds(15)
@@ -177,9 +174,6 @@ struct TerminalRuntimeTests {
     defer { client.closeSynchronously(id) }
     try client.writeSynchronously("printf 'small-buffer-replay\\n'; exit 3\n", to: id)
 
-    // Attaching immediately also covers the transition from a running session to
-    // an exited one. Do not use a wall-clock deadline here: macOS CI can starve
-    // the PTY's utility-QoS wait queue while the rest of the test suite runs.
     let replay = try await client.attach(to: id, after: 0)
     var replayed = Data()
     var replayExitStatus: Int32?

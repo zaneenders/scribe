@@ -2,7 +2,6 @@
 import Darwin
 import Foundation
 
-/// Captures swift-log's console output and Chroma's print-based statistics.
 enum AppConsoleLog {
   static func fileURL(home: URL, date: Date = Date()) -> URL {
     let formatter = DateFormatter()
@@ -18,9 +17,10 @@ enum AppConsoleLog {
   static func start() throws -> URL {
     let configured = ProcessInfo.processInfo.environment["SCRIBE_HOME"]?
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    let home = URL(fileURLWithPath: NSString(
-      string: configured.flatMap { $0.isEmpty ? nil : $0 } ?? "~/.scribe"
-    ).expandingTildeInPath, isDirectory: true)
+    let home = URL(
+      fileURLWithPath: NSString(
+        string: configured.flatMap { $0.isEmpty ? nil : $0 } ?? "~/.scribe"
+      ).expandingTildeInPath, isDirectory: true)
     let file = fileURL(home: home)
     try redirect(to: file)
     event("app.start log=\(file.path)")
@@ -44,7 +44,6 @@ enum AppConsoleLog {
     guard dup2(fd, STDERR_FILENO) >= 0, dup2(fd, STDOUT_FILENO) >= 0 else {
       throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
-    // Avoid fully buffered print output when launched from Finder.
     setvbuf(stdout, nil, _IONBF, 0)
   }
 }

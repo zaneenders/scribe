@@ -5,8 +5,6 @@ import ScribeLLM
 import ScribeLLMCodex
 import SystemPackage
 
-// MARK: - Shared Helpers
-
 struct CodexToolCallIdentifiers: Equatable {
   private static let separator: Character = "|"
 
@@ -24,11 +22,6 @@ struct CodexToolCallIdentifiers: Equatable {
       callID = String(parts[0])
       itemID = String(parts[1])
     } else {
-      // Foreign or legacy ID, e.g. left in the history by a non-Codex provider
-      // before a mid-session model switch. The ChatGPT backend requires item IDs
-      // beginning with "fc" and call IDs beginning with "call_"; derive both
-      // deterministically so the function_call and its function_call_output,
-      // which share this encoded ID, stay paired.
       let cleaned = Self.sanitize(encoded)
       callID = cleaned.hasPrefix("call_") ? cleaned : "call_" + cleaned
       itemID = cleaned.hasPrefix("fc_") ? cleaned : "fc_" + cleaned
@@ -44,7 +37,6 @@ struct CodexToolCallIdentifiers: Equatable {
       char == "_" || char == "-" || (char.isASCII && (char.isLetter || char.isNumber))
     }
     if !cleaned.isEmpty { return cleaned }
-    // Deterministic fallback (FNV-1a) so a call and its output still pair up.
     var hash: UInt64 = 0xcbf2_9ce4_8422_2325
     for byte in id.utf8 {
       hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
@@ -53,9 +45,6 @@ struct CodexToolCallIdentifiers: Equatable {
   }
 }
 
-// MARK: - Codex Agent Loop
-
-/// Configuration for the Codex agent loop.
 struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let model: String
   let client: ScribeLLMCodex.Client
@@ -99,9 +88,6 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   }
 }
 
-/// Runs the agent loop against the Codex (ChatGPT subscription) API. The orchestration
-/// lives in `runAgentLoopCore`; this entry point only supplies the provider-specific
-/// HTTP round.
 func runCodexAgentLoop(
   promptMessages: [ScribeLLM.Components.Schemas.ChatMessage],
   context: AgentContext,
@@ -130,8 +116,6 @@ func runCodexAgentLoop(
   }
 }
 
-// MARK: - Single Round
-
 private func runSingleCodexRound(
   contextMessages: [ScribeLLM.Components.Schemas.ChatMessage],
   config: CodexAgentLoopConfig,
@@ -144,7 +128,6 @@ private func runSingleCodexRound(
 
   emit(.boundary(.messageStart(role: .assistant, round: round)))
 
-  // Build Codex request from chat messages
   let input = convertChatMessagesToCodexInput(contextMessages)
   let codexTools = convertToCodexTools(config.chatTools)
 
@@ -166,9 +149,6 @@ private func runSingleCodexRound(
           config.reasoningEffort
           .flatMap { ScribeLLMCodex.Components.Schemas.CodexReasoning.EffortPayload(rawValue: $0) }
           ?? .medium
-        // Codex reasoning is hidden unless a summary is explicitly requested.
-        // Request the provider-selected summary so reasoning models such as
-        // gpt-5.6-sol emit response.reasoning_summary_text.delta events.
         r.summary = .auto
         return r
       }()
@@ -255,8 +235,6 @@ private func runSingleCodexRound(
   emit(.boundary(.messageEnd(role: .assistant, round: round)))
 
   if let u = processor.lastUsage {
-    // Usage output tokens include hidden reasoning, so measure from the start of the
-    // response stream rather than the first visible text/tool delta.
     let genSec = (clock.now - processor.streamWallStart) / .seconds(1)
     let tps: Double? = {
       guard let c = u.outputTokens, c > 0 else { return nil }
@@ -308,8 +286,6 @@ private func runSingleCodexRound(
   return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
 }
 
-// MARK: - Message Conversion
-
 private struct CodexRequestMetrics {
   var textChars = 0
   var imageCount = 0
@@ -345,7 +321,6 @@ private func codexRequestMetrics(
   return metrics
 }
 
-/// Convert standard ChatMessage array to Codex input items.
 func convertChatMessagesToCodexInput(
   _ messages: [ScribeLLM.Components.Schemas.ChatMessage]
 ) -> [ScribeLLMCodex.Components.Schemas.CodexInputItem]? {

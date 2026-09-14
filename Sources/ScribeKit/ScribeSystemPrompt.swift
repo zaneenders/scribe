@@ -2,10 +2,8 @@ import Foundation
 import ScribeComputerUse
 import ScribeCore
 
-/// Builds the system prompt every Scribe front-end (CLI, macOS app) shares.
 public enum ScribeSystemPrompt {
 
-  /// Pure composition; file loading happens only when creating a new session.
   public static func make(tools: [any ScribeTool], cwd: String, additionalInstructions: String = "") -> String {
     let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
     let base = """
@@ -32,7 +30,6 @@ public enum ScribeSystemPrompt {
     return base + "\n\n# Additional user-configured instructions\n\n" + additionalInstructions
   }
 
-  /// Called only for new sessions. The combined prompt is persisted once.
   public static func load(tools: [any ScribeTool], cwd: String, paths: ScribePaths) throws -> String {
     let url = URL(fileURLWithPath: paths.systemPromptPath.string)
     let instructions: String
@@ -53,7 +50,6 @@ public enum ScribeSystemPrompt {
     var errorDescription: String? { description }
   }
 
-  /// The default tool set every front-end offers the agent.
   public static func defaultTools() -> [any ScribeTool] {
     [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()] + ComputerUseTools.make()
   }

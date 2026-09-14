@@ -2,7 +2,6 @@ import Foundation
 import ScribeCore
 import SystemPackage
 
-/// Resolves and completes filesystem directory paths for the macOS directory palette.
 public enum DirectoryPathCompletion {
   public struct TabResult: Equatable, Sendable {
     public let text: String
@@ -24,7 +23,6 @@ public enum DirectoryPathCompletion {
     }
   }
 
-  /// Resolves `input` to an absolute existing directory path.
   public static func resolve(input: String, relativeTo baseCWD: String) -> ResolveResult {
     let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
@@ -48,7 +46,6 @@ public enum DirectoryPathCompletion {
     }
   }
 
-  /// Tab-completes directory names in `input`, returning the updated text and visible matches.
   public static func tabComplete(input: String, relativeTo baseCWD: String) -> TabResult {
     let (parentPath, prefix, prefixStartIndex) = completionContext(input: input, baseCWD: baseCWD)
     guard let parentPath else {
@@ -87,8 +84,6 @@ public enum DirectoryPathCompletion {
       replacement: prefix + extendedPrefix)
     return TabResult(text: completed, matches: matches)
   }
-
-  // MARK: - Private
 
   private struct PathResolutionError: Error, CustomStringConvertible {
     let description: String
@@ -129,9 +124,6 @@ public enum DirectoryPathCompletion {
       return (FilePath(home), "", input.startIndex)
     }
 
-    // Bare root: list the root directory itself. Without this guard the
-    // hasSuffix("/") branch below would drop the slash and resolve the empty
-    // remainder against baseCWD, listing the wrong directory.
     if input == "/" {
       return (FilePath("/"), "", input.endIndex)
     }

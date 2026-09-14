@@ -1,6 +1,5 @@
 import Chroma
 
-/// The bottom-most bar: run state, working directory, session id, and usage.
 struct StatusBar: Block {
   let store: ScribeMacStore
   let session: SessionController

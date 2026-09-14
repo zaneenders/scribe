@@ -1,7 +1,6 @@
 import Chroma
 import Foundation
 
-/// App-owned, backend-independent modal overlay for assigning a custom session name.
 struct RenameSessionDialog: Block {
   let store: ScribeMacStore
   let sessionID: UUID
@@ -10,8 +9,6 @@ struct RenameSessionDialog: Block {
   @MainActor var body: some Block {
     RenameSessionInput(store: store) {
       ZStack {
-        // The full-window scrim owns the background hit target so clicks do not
-        // leak through to session rows while the dialog is open.
         Interactive(
           id: WidgetID("rename-session-scrim"),
           action: { store.cancelSessionRename() }
@@ -73,7 +70,6 @@ struct RenameSessionDialog: Block {
   }
 }
 
-/// Handles Chroma's backend-neutral editing commands while the rename modal is open.
 private struct RenameSessionInput<Content: Block>: PrimitiveBlock {
   let store: ScribeMacStore
   let content: Content

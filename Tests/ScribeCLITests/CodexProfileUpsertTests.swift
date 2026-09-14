@@ -95,7 +95,6 @@ struct CodexProfileUpsertTests {
       let api = try #require(profile["api"] as? [String: Any])
       #expect(api["type"] as? String == "codex")
       #expect(api["baseUrl"] as? String == ConfigLoader.codexProfileBaseURL)
-      // Existing apiKey, model, and logging are preserved.
       #expect(api["apiKey"] as? String == "keep-me")
       let agent = try #require(profile["agent"] as? [String: Any])
       #expect(agent["model"] as? String == "custom-model")

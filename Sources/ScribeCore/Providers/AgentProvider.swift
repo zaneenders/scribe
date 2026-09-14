@@ -2,7 +2,6 @@ import Logging
 import ScribeLLM
 import SystemPackage
 
-/// Provider boundary between the agent facade and model-specific transports.
 protocol AgentProvider: Sendable {
   func run(
     promptMessages: [Components.Schemas.ChatMessage],

@@ -26,7 +26,6 @@ struct ObservationTests {
     defer { renderer.close() }
     let initial = renderer.render()
 
-    // No input event or polling frame: model mutations alone must schedule work.
     store.lastError = "After"
     await drainChanges()
     #expect(redraws == 1)
@@ -37,7 +36,6 @@ struct ObservationTests {
     #expect(redraws == 2)
     #expect(renderer.render() == initial)
 
-    // A token burst should schedule one frame that sees the final value.
     for index in 0..<100 {
       store.lastError = "Token \(index)"
     }
@@ -45,7 +43,6 @@ struct ObservationTests {
     #expect(redraws == 3)
     #expect(renderer.render() != initial)
 
-    // Closing before a queued invalidation runs must discard that callback.
     store.lastError = "Pending at close"
     renderer.close()
     await drainChanges()

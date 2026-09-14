@@ -3,9 +3,6 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLMCodex
 
-/// Parses the Codex SSE stream into AgentEvent values.
-/// Mirrors the structure of `StreamProcessor` but handles the
-/// Codex Responses API event types instead of Chat Completions chunks.
 struct CodexStreamProcessor<AO: AbortObserver> {
   private let onEvent: (AgentEvent) -> Void
   private let logger: Logger
@@ -19,10 +16,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   private(set) var isIncomplete = false
   private(set) var incompleteReason: String?
   private var receivedTerminalEvent = false
-  /// Identity of the last reasoning-summary part whose text was emitted.
-  /// Codex sends each summary heading as a separate part, but the text deltas do
-  /// not contain whitespace between parts. Preserve that structural boundary so
-  /// adjacent Markdown headings do not become `**first****second**`.
   private var lastReasoningSummaryPart: String?
   let streamWallStart: ContinuousClock.Instant
 
@@ -77,7 +70,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
             "agent.stream.first-chunk-codex", metadata: ["ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"])
         }
 
-        // Handle terminal events
         switch eventType {
         case "response.completed":
           receivedTerminalEvent = true
@@ -121,7 +113,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           receivedTerminalEvent = true
           throw codexStreamError(from: json, fallback: "Codex stream error")
 
-        // Content events
         case "response.output_text.delta":
           if let delta = json["delta"] as? String {
             markStreamStarted()
@@ -182,10 +173,8 @@ struct CodexStreamProcessor<AO: AbortObserver> {
                   name: name,
                   arguments: args)
               case "message":
-                // text is already captured via deltas
                 break
               case "reasoning":
-                // reasoning is already captured via deltas
                 break
               default:
                 break
@@ -199,7 +188,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           }
 
         default:
-          // Unknown events are silently skipped
           break
         }
       }
@@ -220,8 +208,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
       onEvent(.output(.empty))
     }
   }
-
-  // MARK: - Helpers
 
   private func codexStreamError(
     from event: [String: Any],
@@ -301,7 +287,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
 
   private mutating func emitAnswerDelta(_ text: String) {
     if case .some(.answer) = streamSection {
-      // already in answer section
     } else {
       onEvent(.output(.sectionStarted(.answer, previous: streamSection)))
       streamSection = .answer
@@ -311,7 +296,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
 
   private mutating func emitReasoningDelta(_ text: String) {
     if case .some(.reasoning) = streamSection {
-      // already in reasoning section
     } else {
       onEvent(.output(.sectionStarted(.reasoning, previous: streamSection)))
       streamSection = .reasoning
@@ -336,8 +320,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   }
 
   private mutating func emitToolCallDelta(outputIndex: Int, delta: String) {
-    // Tool call deltas are collected, not emitted as text.
-    // The tool_call event is emitted by the agent loop when tool calls are resolved.
   }
 
   private func parseCodexUsage(_ raw: [String: Any]) -> ScribeLLMCodex.Components.Schemas.CodexUsage {
@@ -360,9 +342,6 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   }
 }
 
-// MARK: - Codex Assistant Turn
-
-/// Accumulates streaming content from the Codex Responses API.
 struct CodexAssistantTurn {
   var text = ""
   var reasoningText = ""
@@ -405,7 +384,6 @@ struct CodexAssistantTurn {
     acc.callID = callID
     acc.itemID = itemID
     acc.name = name
-    // Use the final arguments if we didn't get deltas, or if the final is complete
     if acc.arguments.isEmpty || arguments.count > acc.arguments.count {
       acc.arguments = arguments
     }

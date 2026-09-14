@@ -11,14 +11,9 @@ public struct ChatSessionMetadata: Codable, Sendable {
   public var cwd: String
   public var baseURL: String?
   public var scribeVersion: String?
-  /// Written only when conversation messages are appended. Unlike a directory
-  /// modification date, opening or otherwise touching a session cannot change it.
   public var lastMessageAt: Date?
-  /// A user-supplied label shown instead of the abbreviated session UUID.
   public var name: String?
-  /// Pinned sessions stay at the top of their working-directory group.
   public var isPinned: Bool
-  /// The custom name when present, otherwise the session's abbreviated ID.
   public var displayName: String {
     name ?? String(id.uuidString.prefix(8)).uppercased()
   }
@@ -273,9 +268,6 @@ public enum ChatSessionStore {
     guard (try? await fs.info(forFileAt: sessionsRoot)) != nil else {
       return []
     }
-    // Capture the last-message date during discovery so the comparator does no
-    // filesystem work. Directory mtimes are intentionally ignored: opening or
-    // touching a session must not move it in conversation history.
     var sessions: [(directory: FilePath, isPinned: Bool, lastMessageAt: Date)] = []
     let names = try listDirectoryContents(sessionsRoot)
     for name in names where !name.hasPrefix(".") {
@@ -322,7 +314,6 @@ public enum ChatSessionStore {
     return try dec.decode(ChatSessionMetadata.self, from: metaData)
   }
 
-  /// Updates user-controlled presentation metadata without changing conversation recency.
   @discardableResult
   public static func updatePresentation(
     in directory: FilePath,
@@ -339,9 +330,6 @@ public enum ChatSessionStore {
     return metadata
   }
 
-  /// Returns the time conversation messages were last appended. Older sessions
-  /// predate `lastMessageAt`, so use the messages file's modification time as a
-  /// migration fallback; neither value changes merely because a session opens.
   public static func lastMessageDate(
     in directory: FilePath,
     metadata: ChatSessionMetadata? = nil
@@ -365,7 +353,6 @@ public enum ChatSessionStore {
       if let persisted = try? dec.decode(PersistedMessage.self, from: lineData) {
         return try persisted.hydrated(in: directory)
       }
-      // Legacy sessions stored ScribeMessage directly, including inline data URIs.
       guard let message = try? dec.decode(ScribeMessage.self, from: lineData) else {
         throw ScribeError.sessionCorrupted(reason: "Unrecognized message format in session file")
       }
@@ -405,7 +392,6 @@ public enum ChatSessionStore {
   }
 
   private static func recordLastMessageDate(in directory: FilePath, date: Date) throws {
-    // `appendMessages` is also a low-level utility used before metadata exists.
     guard FileStat.stat(metadataFile(in: directory)).exists else { return }
     var metadata = try loadMetadata(from: directory)
     metadata.lastMessageAt = date

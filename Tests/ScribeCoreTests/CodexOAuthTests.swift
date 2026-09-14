@@ -26,7 +26,6 @@ struct CodexOAuthTests {
 
     var address = sockaddr_in()
     address.sin_family = sa_family_t(AF_INET)
-    // Reserve an OS-assigned port, not the production OAuth port.
     address.sin_port = 0
     address.sin_addr.s_addr = inet_addr(CodexOAuthConstants.callbackHost)
 
@@ -38,8 +37,6 @@ struct CodexOAuthTests {
     try #require(bindResult == 0, "Could not reserve OAuth callback port: errno \(errno)")
     try #require(listen(socketFD, 1) == 0)
 
-    // Keep the reservation open throughout login: releasing it before login
-    // would introduce a race with other processes claiming the same port.
     var addressLength = socklen_t(MemoryLayout<sockaddr_in>.size)
     let nameResult = withUnsafeMutablePointer(to: &address) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -71,15 +68,12 @@ struct CodexOAuthTests {
 
   @Test("waitForCode returns loginTimeout after the configured timeout", .timeLimit(.minutes(1)))
   func loginTimeoutWithShortDeadline() async throws {
-    // No callback is sent, so an OS-assigned port is sufficient. This avoids
-    // collisions with real OAuth logins or other test processes on port 1455.
     let start = ContinuousClock.now
     do {
       _ = try await CodexOAuth.login(
         callbackHost: CodexOAuthConstants.callbackHost,
         callbackPort: 0,
         browserOpener: { _ in
-          // Intentionally left hanging.
         },
         timeout: 2.0
       )
@@ -89,10 +83,9 @@ struct CodexOAuthTests {
         Issue.record("Expected loginTimeout, got \(error)")
         return
       }
-      // Confirm the error arrived close to the configured deadline.
       let elapsed = start.duration(to: .now)
       #expect(elapsed >= .seconds(2))
-      #expect(elapsed < .seconds(8))  // generous upper bound to avoid flakes
+      #expect(elapsed < .seconds(8))
     }
   }
 }

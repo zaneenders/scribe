@@ -27,8 +27,6 @@ install -m 644 \
   "$package_root/share/icons/hicolor/512x512/apps/com.zaneenders.scribe.png" \
   "$icondirectory/com.zaneenders.scribe.png"
 
-# Desktop entries do not expand $HOME and desktop sessions do not always inherit
-# the shell PATH, so install an entry containing the absolute executable path.
 awk -v executable="$bindirectory/scribe-wayland" '
   {
     marker = "@SCRIBE_WAYLAND_EXEC@"

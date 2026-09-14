@@ -1,8 +1,6 @@
 import Chroma
 import Foundation
 
-/// The `$ cd` palette for choosing a session's working directory, shown both
-/// as the required first-run screen and as an overlay on the ready UI.
 struct DirectoryPalette: Block {
   let store: ScribeMacStore
   let theme: MacTheme
@@ -29,9 +27,6 @@ struct DirectoryPalette: Block {
           fontScale: theme.textScale,
           text: { store.directoryDraft },
           onChange: { store.updateDirectoryDraft($0) },
-          // Chroma fires onChange before onSubmit within a frame, so
-          // `directoryDraft` already holds the sanitized text — submit with no
-          // argument to use it rather than the field's raw buffer.
           onSubmit: { _ in store.submitDirectory() }
         )
       }

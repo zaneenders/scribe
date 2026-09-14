@@ -69,10 +69,8 @@ enum LoginProvider: String, ExpressibleByArgument {
       reason: "Scribe is only tested on macOS and Linux.")
     #endif
 
-    // Resolve paths first — safe even when no config or broken profile exists.
     let resolved = try ConfigLoader.resolvePaths()
 
-    // Commands that only need paths — no profile validation required.
     if let provider = login {
       switch provider {
       case .codex:
@@ -91,7 +89,6 @@ enum LoginProvider: String, ExpressibleByArgument {
       return
     }
 
-    // Everything below needs a fully validated active profile.
     let loaded = try await ConfigLoader.load(profileOverride: profile)
 
     if info {
@@ -162,7 +159,6 @@ enum LoginProvider: String, ExpressibleByArgument {
         reason: "Resumed conversation must begin with a system message.")
     }
 
-    // Resumes use their persisted prompt without even reading system.md.
     let systemPrompt =
       try resumeMetadata == nil
       ? ScribeSystemPrompt.load(tools: tools, cwd: cwd, paths: loaded.paths)
@@ -317,8 +313,6 @@ extension ScribeCLI {
     return
       "\u{001B}[2m\(timeCol)\u{001B}[0m  \u{001B}[36m\(shortId)\u{001B}[0m  \(cwd)  \u{001B}[2m\(logFile)\u{001B}[0m  \u{001B}[2m(\(version))\u{001B}[0m"
   }
-
-  // MARK: - Login / Logout
 
   func loginCodex(resolved: ResolvedPaths) async throws {
     print("Opening browser for ChatGPT login...")

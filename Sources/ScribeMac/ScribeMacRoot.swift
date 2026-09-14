@@ -76,7 +76,6 @@ struct ScribeMacRoot: Block {
           SelectionManager.shared.selectAll(
             isTranscriptVisible: store.active != nil)
         }
-        // Hit testing uses layouts retained from the preceding frame.
         if context.input.pointerPressed {
           SelectionManager.shared.clear()
         }

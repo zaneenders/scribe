@@ -33,7 +33,6 @@ public enum PTYSessionError: Error, CustomStringConvertible {
   }
 }
 
-/// A long-lived shell attached to a pseudo-terminal.
 public final class PTYSession: Sendable {
   private struct State {
     var outputHandler: (@Sendable (Data) -> Void)?
@@ -56,8 +55,6 @@ public final class PTYSession: Sendable {
 
   private let state: Mutex<State>
   private let descriptorLock = Mutex(())
-  // A PTY is one byte stream. Keep each logical write contiguous even when
-  // callers (and, eventually, daemon clients) submit input concurrently.
   private let writeLock = Mutex(())
   private let childPID: pid_t
 
@@ -164,8 +161,6 @@ public final class PTYSession: Sendable {
     }
   }
 
-  /// Writes the terminal's interrupt control byte. The PTY line discipline sends
-  /// SIGINT to its foreground process group, exactly like a native terminal.
   public func interrupt() throws { try write(Data([0x03])) }
 
   public func resize(columns: UInt16, rows: UInt16) throws {
@@ -175,9 +170,6 @@ public final class PTYSession: Sendable {
     if result != 0 { throw PTYSessionError.operationFailed(result) }
   }
 
-  // Duplicate while holding the state lock so cancellation cannot close and
-  // recycle the master descriptor between validation and dup(2). The duplicate
-  // keeps the PTY open for the complete operation without serializing writes.
   private func duplicateFileDescriptor() throws -> Int32 {
     try descriptorLock.withLock { _ in
       try state.withLock { state in
@@ -191,9 +183,6 @@ public final class PTYSession: Sendable {
   }
 
   public func close() {
-    // Use the same lock order as duplicateFileDescriptor(). The reader holds
-    // descriptorLock only around a bounded poll and a nonblocking read, so this
-    // closes the master promptly without racing descriptor reuse.
     let task = descriptorLock.withLock { _ in
       state.withLock { state -> Task<Void, Never>? in
         guard !state.isClosing else { return nil }
@@ -204,9 +193,6 @@ public final class PTYSession: Sendable {
         let fd = state.masterFD
         state.masterFD = -1
 
-        // Keep the transition and signal atomic with respect to the waiter.
-        // Before waitStatus is recorded, waitid(WNOWAIT) guarantees this PID is
-        // either the live child or its unreaped zombie; afterwards we do not signal.
         if state.waitStatus == nil, childPID > 0 { _ = systemKill(childPID, SIGHUP) }
         if fd >= 0 { _ = systemClose(fd) }
         return task
@@ -219,9 +205,6 @@ public final class PTYSession: Sendable {
   private func startReading(fileDescriptor: Int32) {
     let task = Task.detached(priority: .high) { [weak self] in
       while !Task.isCancelled {
-        // Poll without the descriptor lock so close() never waits for the timeout.
-        // Before reading, revalidate under the lock that close() has not invalidated
-        // the descriptor; this also prevents reading from a recycled descriptor.
         var descriptor = pollfd(fd: fileDescriptor, events: Int16(POLLIN), revents: 0)
         let pollResult = poll(&descriptor, 1, 100)
         if pollResult == 0 { continue }
@@ -310,9 +293,6 @@ public final class PTYSession: Sendable {
   private func startWaiting() {
     let pid = childPID
     DispatchQueue.global(qos: .utility).async { [weak self] in
-      // Observe exit without reaping first. While the child remains a zombie its
-      // PID cannot be reused, so close() can safely decide whether SIGHUP still
-      // targets this process while recording the transition under state.
       let waitResult = scribe_wait_until_exited(pid)
       guard waitResult == 0 else { return }
       var status: Int32 = 0

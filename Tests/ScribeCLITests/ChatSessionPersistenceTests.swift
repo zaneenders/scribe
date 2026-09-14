@@ -184,7 +184,6 @@ struct ChatSessionPersistenceTests {
           lastMessageAt: Date(timeIntervalSince1970: 20)),
         to: newerDirectory)
 
-      // Touching the older session directory must not promote it.
       try FileManager.default.setAttributes(
         [.modificationDate: Date(timeIntervalSince1970: 30)],
         ofItemAtPath: olderDirectory.string)

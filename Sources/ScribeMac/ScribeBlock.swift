@@ -1,10 +1,5 @@
 import Chroma
 
-/// The embeddable, backend-independent Scribe interface.
-///
-/// Hosts can place this block anywhere in a larger Chroma hierarchy. Scribe
-/// retains its own session store, so switching a host-level tab does not stop
-/// turns that are running in the background.
 public struct ScribeBlock: Block {
   public init() {}
 
@@ -30,7 +25,6 @@ enum ScribeCommandPickerCommand {
 }
 
 extension ScribeBlock {
-  /// Recommended editing and navigation bindings for a host Chroma app.
   public static var keyBindings: KeyBindings {
     #if os(macOS)
     let shortcutModifier = KeyModifiers.command
@@ -62,8 +56,6 @@ extension ScribeBlock {
       bind(.space, to: .action(.activate))
       bind(.pageUp, to: .navigation(.pageUp))
       bind(.pageDown, to: .navigation(.pageDown))
-      // Fork/TLDR picker commands. Their handlers are scoped to the ready layout,
-      // so these remain inert whenever no picker is open.
       bind("f", to: ScribeCommandPickerCommand.previous)
       bind("j", to: ScribeCommandPickerCommand.next)
       bind(.tab, to: ScribeCommandPickerCommand.toggle)

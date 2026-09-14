@@ -1,8 +1,6 @@
 import Chroma
 import Foundation
 
-/// Everything below the transcript: the queued-message tray (when non-empty),
-/// the composer, and the status bar.
 struct BottomChrome: Block {
   let store: ScribeMacStore
   let session: SessionController
@@ -57,7 +55,8 @@ struct ComposerBar: Block {
           onTextEvent: { event, text in
             guard event == .moveCaretUp || event == .moveCaretDown else { return nil }
             if session.draft != text { session.updateDraft(text) }
-            let recalled = event == .moveCaretUp
+            let recalled =
+              event == .moveCaretUp
               ? session.recallPreviousPrompt() : session.recallNextPrompt()
             return recalled ? session.draft : nil
           }
@@ -264,7 +263,6 @@ struct CommandPickerBar: Block {
       : "f/j move · Enter confirm · Esc cancel"
   }
 }
-
 
 struct QueuedTray: Block {
   let session: SessionController

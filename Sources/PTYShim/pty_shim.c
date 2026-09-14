@@ -112,8 +112,6 @@ int scribe_pty_spawn(
         dup2(slave, STDERR_FILENO) == -1) _exit(127);
     if (slave > STDERR_FILENO) close(slave);
     if (working_directory != NULL && chdir(working_directory) == -1) _exit(127);
-
-    // Signals ignored by GUI applications must have normal shell defaults.
     signal(SIGINT, SIG_DFL);
     signal(SIGQUIT, SIG_DFL);
     signal(SIGTSTP, SIG_DFL);

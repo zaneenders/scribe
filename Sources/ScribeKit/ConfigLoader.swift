@@ -100,9 +100,6 @@ public struct CodexProfileUpsert: Sendable, Equatable {
   }
 }
 
-/// Lightweight result that only resolves paths and config file location.
-/// Does NOT parse the manifest or validate any profile — safe for use by
-/// `--login`, `--logout`, and `--list-sessions` even when a profile is broken.
 public struct ResolvedPaths: Sendable {
   public var paths: ScribePaths
   public var configPath: FilePath
@@ -118,17 +115,12 @@ public enum ConfigLoader {
   public static let codexProfileBaseURL = "https://chatgpt.com/backend-api"
   public static let codexProfileModel = "gpt-5.6-sol"
 
-  /// Resolve Scribe data home and the config file path (creating a default
-  /// config when none exists).  No profile is selected or validated.
   public static func resolvePaths() throws -> ResolvedPaths {
     let paths = ScribePaths.resolve()
     let configPath = try resolveConfigurationPath(paths: paths)
     return ResolvedPaths(paths: paths, configPath: configPath)
   }
 
-  /// Fully load and validate the active profile (or the named override).
-  /// Throws when the config is missing, malformed, or the active profile fails
-  /// validation — use `resolvePaths()` for operations that only need paths.
   public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
     let resolved = try resolvePaths()
     return try await loadConfiguration(
@@ -396,9 +388,6 @@ public enum ConfigLoader {
     return summaries[0].name
   }
 
-  /// Adds the ChatGPT/Codex profile to the config file, or repairs the `api`
-  /// section of an existing profile with the same name. Called after a
-  /// successful `scribe --login` so the login leaves behind a runnable profile.
   @discardableResult
   public static func upsertCodexProfile(at configPath: FilePath) throws -> CodexProfileUpsert {
     let url = URL(fileURLWithPath: configPath.string)
@@ -427,7 +416,6 @@ public enum ConfigLoader {
     if let index = profiles.firstIndex(where: {
       $0.name.trimmingCharacters(in: .whitespacesAndNewlines) == codexProfileName
     }) {
-      // Keep the user's model/logging/apiKey; only repoint the API section.
       profiles[index].api.type = "codex"
       profiles[index].api.baseUrl = codexProfileBaseURL
     } else {

@@ -27,7 +27,6 @@ public struct ToolAttachment: Sendable {
 
 public struct ToolResult: Sendable {
 
-  /// Hard limits for text inserted into model context. Attachments are carried separately.
   public static let maxTextBytes = 128 * 1024
   public static let maxTextCharacters = 128_000
 
@@ -59,8 +58,6 @@ public struct ToolResult: Sendable {
       return (text, false)
     }
 
-    // Keep the replacement valid JSON so every tool and transcript consumer can handle it.
-    // The preview budget is reduced until JSON escaping and metadata also fit both ceilings.
     let characters = Array(text.prefix(maxTextCharacters))
     var low = 0
     var high = characters.count
@@ -107,9 +104,6 @@ public struct ToolResult: Sendable {
 public protocol AttachableToolResult {
   var toolAttachments: [ToolAttachment] { get }
 
-  /// Compact tool output sent back to the model alongside the attachments.
-  /// Use this to keep large attachment payloads (for example base64 image data)
-  /// out of ordinary tool messages, where they would otherwise be duplicated.
   var attachmentToolResultText: String? { get }
 }
 

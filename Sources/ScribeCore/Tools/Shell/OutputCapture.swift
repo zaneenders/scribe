@@ -24,15 +24,8 @@ struct OutputCapture: Sendable {
   let stdoutHandle: FileHandle
   let stderrHandle: FileHandle
 
-  // MARK: - Session capture directory
-
   private static let _sessionCaptureDir = Mutex<URL?>(nil)
 
-  /// Creates a process-specific subdirectory under
-  /// `\(dataHome)/tmp/shell/<UUID>/` so that concurrent Scribe processes do not
-  /// interfere with each other's capture files.
-  ///
-  /// Throws if the directory cannot be created.
   static func setupSessionCaptureDir(dataHome: String) throws {
     let processUUID = UUID()
     let baseDir = URL(fileURLWithPath: dataHome, isDirectory: true)
@@ -45,7 +38,6 @@ struct OutputCapture: Sendable {
     _sessionCaptureDir.withLock { $0 = dir }
   }
 
-  /// Removes only this process's capture subdirectory.
   static func teardownSessionCaptureDir() {
     let dir = _sessionCaptureDir.withLock {
       let d = $0
@@ -126,11 +118,6 @@ struct OutputCapture: Sendable {
       case deadline
       case errored
     }
-    // A task group would join the losing waiter, so a drain that ignores
-    // cancellation could prevent the deadline from ever returning. These
-    // unstructured waiters publish one result instead. The completion waiter
-    // remains until the underlying drain settles; cancellation cannot forcibly
-    // terminate it. The caller remains responsible for closing capture handles.
     return await withTaskCancellationShield {
       let (outcomes, continuation) = AsyncStream<RaceOutcome>.makeStream(
         bufferingPolicy: .bufferingOldest(1))
@@ -146,7 +133,6 @@ struct OutputCapture: Sendable {
           try await Task.sleep(for: .milliseconds(deadlineMs))
           continuation.yield(.deadline)
         } catch {
-          // Cancellation means another outcome won, not that time expired.
         }
       }
       defer {
@@ -288,17 +274,11 @@ struct DrainBytes: Sendable {
   let err: Int
 }
 
-/// Public surface for managing the per-session shell output capture directory.
 public enum ShellCaptureDirectory {
-  /// Creates a process-specific capture directory under
-  /// `\(dataHome)/tmp/shell/<UUID>/`.
-  ///
-  /// Throws if the directory cannot be created.
   public static func setup(dataHome: String) throws {
     try OutputCapture.setupSessionCaptureDir(dataHome: dataHome)
   }
 
-  /// Removes this process's capture directory and all contained files.
   public static func teardown() {
     OutputCapture.teardownSessionCaptureDir()
   }

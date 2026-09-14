@@ -7,14 +7,11 @@ import Testing
 @Suite
 struct CodexCredentialsTests {
 
-  // MARK: - File permissions
-
   @Test("write sets file permissions to 0o600 (owner-only)")
   func writeSetsOwnerOnlyFilePermissions() throws {
     try withTemporaryDirectory { tmpDir in
       let fileURL = tmpDir.appendingPathComponent("test-credentials.json")
 
-      // Write a credential directly to the temp path
       let credential = CodexCredential(
         access: "test-access-token",
         refresh: "test-refresh-token",
@@ -26,14 +23,11 @@ struct CodexCredentialsTests {
       let data = try encoder.encode(credential)
       try data.write(to: fileURL, options: .atomic)
 
-      // Now apply the secure permissions
       try CodexCredentialStore.setSecureFilePermissions(at: fileURL)
 
-      // Read back permissions
       let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
       let mode = try #require(attrs[.posixPermissions] as? NSNumber)
 
-      // Check owner r/w and nothing else
       #expect(mode.intValue == 0o600, "Expected 0o600 but got \(String(mode.intValue, radix: 8))")
     }
   }
@@ -43,7 +37,6 @@ struct CodexCredentialsTests {
     try withTemporaryDirectory { tmpDir in
       let fileURL = tmpDir.appendingPathComponent("test-credentials.json")
 
-      // Create a credential
       let credential = CodexCredential(
         access: "access",
         refresh: "refresh",
@@ -55,13 +48,11 @@ struct CodexCredentialsTests {
       let data = try encoder.encode(credential)
       try data.write(to: fileURL, options: .atomic)
 
-      // Set secure permissions
       try CodexCredentialStore.setSecureFilePermissions(at: fileURL)
 
       let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
       let mode = try #require(attrs[.posixPermissions] as? NSNumber)
 
-      // No group or other bits should be set
       let groupMask = 0o070
       let otherMask = 0o007
       #expect((mode.intValue & groupMask) == 0, "Group bits set: \(String(mode.intValue, radix: 8))")
@@ -74,15 +65,12 @@ struct CodexCredentialsTests {
     try withTemporaryDirectory { tmpDir in
       let subDir = tmpDir.appendingPathComponent("secure-subdir", isDirectory: true)
 
-      // Call the internal helper
       CodexCredentialStore.ensureSecureDirectory(at: subDir)
 
-      // Verify it exists
       var isDir: ObjCBool = false
       #expect(FileManager.default.fileExists(atPath: subDir.path, isDirectory: &isDir))
       #expect(isDir.boolValue)
 
-      // Check permissions
       let attrs = try FileManager.default.attributesOfItem(atPath: subDir.path)
       let mode = try #require(attrs[.posixPermissions] as? NSNumber)
 
@@ -93,14 +81,12 @@ struct CodexCredentialsTests {
   @Test("ensureSecureDirectory tightens overly permissive existing directory")
   func ensureSecureDirectoryTightensExistingPermissions() throws {
     try withTemporaryDirectory { tmpDir in
-      // Create a directory with wide permissions first (0o755)
       try FileManager.default.createDirectory(
         at: tmpDir,
         withIntermediateDirectories: true,
         attributes: [.posixPermissions: NSNumber(value: 0o755)]
       )
 
-      // Now call ensureSecureDirectory — it should tighten to 0o700
       CodexCredentialStore.ensureSecureDirectory(at: tmpDir)
 
       let attrs = try FileManager.default.attributesOfItem(atPath: tmpDir.path)
@@ -109,8 +95,6 @@ struct CodexCredentialsTests {
       #expect(mode.intValue == 0o700, "Expected 0o700 after tightening but got \(String(mode.intValue, radix: 8))")
     }
   }
-
-  // MARK: - Credential model
 
   @Test("credential round-trips through JSON")
   func credentialRoundTrip() throws {

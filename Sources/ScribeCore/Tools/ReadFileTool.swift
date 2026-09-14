@@ -205,13 +205,10 @@ public struct ReadFileTool: ScribeTool {
     let fp = try PathResolution.resolve(reading: path, cwd: workingDirectory)
     let s = fp.string
 
-    // Use withFileHandle for scoped access — the handle is auto-closed.
     return try await FileSystem.shared.withFileHandle(forReadingAt: fp, options: .init()) { fh in
       let info = try await fh.info()
       let totalBytes = Int(info.size)
 
-      // Determine starting byte position in the file. A valid byte offset takes
-      // precedence over line-based pagination, as documented by the tool schema.
       let startByte: Int
       let usesByteOffset: Bool
       if let bo = byteOffset, bo > 0, bo < totalBytes {
@@ -222,9 +219,7 @@ public struct ReadFileTool: ScribeTool {
         usesByteOffset = false
       }
 
-      let startLineIndex = usesByteOffset ? 0 : max(0, (offset ?? 1) - 1)  // 0-indexed
-      // nil means that no line limit applies. Avoid using Int.max as a sentinel:
-      // adding a positive line offset to it would overflow.
+      let startLineIndex = usesByteOffset ? 0 : max(0, (offset ?? 1) - 1)
       let resolvedLimit: Int?
       if let limit, limit > 0 {
         resolvedLimit = limit
@@ -234,22 +229,15 @@ public struct ReadFileTool: ScribeTool {
         resolvedLimit = nil
       }
 
-      // ---- Phase 1: streaming scan via async chunks ----
-      // readChunks(in:) returns an AsyncSequence of ByteBuffer slices over the
-      // requested byte range.  No seeking — we specify the range directly.
-      // Because 0x0A never appears inside a multi-byte UTF-8 sequence, scanning
-      // raw bytes is safe.
-
       enum ScanState {
         case skipping, collecting, countingOnly
       }
 
       var state: ScanState = (startLineIndex == 0) ? .collecting : .skipping
       var currentLine = 0
-      var totalLines = 1  // match split(…omittingEmptySubsequences:false) semantics
+      var totalLines = 1
       var bytePos = startByte
       var contentStartByte = startByte
-      // Exclusive end offset for the requested line range.
       var contentEndByte = startByte
       var collectedLineCount = 0
 
@@ -271,8 +259,6 @@ public struct ReadFileTool: ScribeTool {
             case .collecting:
               collectedLineCount += 1
               if let resolvedLimit, collectedLineCount >= resolvedLimit {
-                // The newline terminates the final requested line; don't include
-                // it in the result, matching ArraySlice.joined(separator: "\n").
                 contentEndByte = newlineByte
                 state = .countingOnly
               }
@@ -284,7 +270,6 @@ public struct ReadFileTool: ScribeTool {
         bytePos = chunkStart + chunk.readableBytes
       }
 
-      // If we never found the start line, return empty.
       if state == .skipping {
         return ReadFileResult(
           absolutePath: s,
@@ -299,9 +284,6 @@ public struct ReadFileTool: ScribeTool {
         )
       }
 
-      // If the requested range reaches EOF, use the file size as its exclusive
-      // end. This preserves a real trailing newline when the final empty line is
-      // part of the requested range.
       if state == .collecting {
         contentEndByte = totalBytes
         if totalBytes > contentStartByte {
@@ -309,14 +291,11 @@ public struct ReadFileTool: ScribeTool {
         }
       }
 
-      // ---- Phase 2: read a capped prefix of the collected byte range ----
       let rangeLen = max(0, contentEndByte - contentStartByte)
       let sliceStartByteOffset = contentStartByte
 
       let rawSlice: String
       if rangeLen > 0 {
-        // Four extra bytes guarantee that boundedContent can observe the byte
-        // cap even when the read ends in the middle of a four-byte UTF-8 scalar.
         let readLength = min(rangeLen, maxContentBytes + 4)
         let contentChunk = try await fh.readChunk(
           fromAbsoluteOffset: Int64(contentStartByte),
@@ -325,8 +304,6 @@ public struct ReadFileTool: ScribeTool {
         var contentData = Data(contentChunk.readableBytesView)
         var decoded = String(data: contentData, encoding: .utf8)
         if decoded == nil, readLength < rangeLen {
-          // A capped read may split the final UTF-8 scalar. Remove only that
-          // incomplete suffix; malformed UTF-8 within the prefix still fails.
           for _ in 0..<3 where decoded == nil && !contentData.isEmpty {
             contentData.removeLast()
             decoded = String(data: contentData, encoding: .utf8)
@@ -340,10 +317,8 @@ public struct ReadFileTool: ScribeTool {
         rawSlice = ""
       }
 
-      // ---- Apply content caps (same boundedContent as before) ----
       let bounded = boundedContent(rawSlice)
 
-      // Count lines in the bounded (possibly backtracked) content.
       let returnedLineCount = bounded.content.reduce(into: 1) { count, character in
         if character == "\n" { count += 1 }
       }
@@ -398,8 +373,6 @@ public struct ReadFileTool: ScribeTool {
       end = next
     }
 
-    // Backtrack to the last newline so we always end at a clean line boundary.
-    // The slice content[..<end] should either hit EOF or end with \n.
     if end < content.endIndex {
       let lastIncluded = content.index(before: end)
       if content[lastIncluded] != "\n" {
@@ -407,16 +380,12 @@ public struct ReadFileTool: ScribeTool {
         while backtrack > content.startIndex {
           backtrack = content.index(before: backtrack)
           if content[backtrack] == "\n" {
-            // Include the newline in the returned content
             end = content.index(after: backtrack)
             break
           }
         }
-        // If no newline found, keep the original truncation point (mid-line)
       }
-      // else: last included char is already \n — clean boundary, nothing to do
     }
-    // else: end == content.endIndex — consumed everything, no backtracking needed
 
     let reason: String
     if characters == maxContentCharacters && bytes == maxContentBytes {

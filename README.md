@@ -1,322 +1,90 @@
 # Scribe
 
-Ai Agent written in Swift
+AI coding agent written in Swift, with a CLI and macOS/Wayland apps.
+Supports OpenAI-compatible providers and ChatGPT/Codex.
+
+## Requirements
+
+- macOS 27+ or Linux (x86_64/aarch64); Windows is unsupported.
+- Swift tools 6.4+. Install [Swiftly](https://www.swift.org/install/), then run
+  `swiftly install` to use the snapshot pinned in `.swift-version` (currently
+  `main-snapshot-2026-09-10`, Swift 6.5-dev).
+
+Linux build dependencies:
+
+```sh
+sudo dnf install binutils file libcurl-devel libglvnd-devel libxkbcommon-devel pkgconf-pkg-config wayland-devel
+```
+
+Debian/Ubuntu:
+
+```sh
+sudo apt-get install binutils file libcurl4-openssl-dev libegl1-mesa-dev libgles2-mesa-dev libwayland-dev libxkbcommon-dev pkg-config
+```
 
 ## Install
 
-### Requirements
-
-- [Swift tools 6.4](https://www.swift.org/install/) or newer
-- macOS 26+ or Linux (x86_64 or aarch64)
-
-Until a release toolchain is available, `.swift-version` pins
-`main-snapshot-2026-09-10`, matching Chroma (the compiler identifies itself as
-Swift 6.5-dev). Install and use it with [Swiftly](https://www.swift.org/install/):
-
-```bash
-swiftly install
-swiftly run swift --version
-swiftly run swift build
-swiftly run swift test
+```sh
+./Scripts/install.sh
 ```
 
-With Swiftly's proxies on your `PATH`, the plain `swift` commands and build
-scripts below select the pin automatically. The tools requirement is 6.4;
-testing with this snapshot does not establish compatibility with a released
-6.4 compiler.
+- **macOS:** installs `/Applications/Scribe.app`; requires an Apple Development
+  signing certificate. Override with `SCRIBE_CODESIGN_IDENTITY` and
+  `SCRIBE_INSTALL_PATH`. Quit development instances and launch the installed
+  copy with `open /Applications/Scribe.app` to keep permissions consistent.
+- **Linux:** packages and installs to `~/.local`; override with `PREFIX`.
+  Run `./Scripts/package-linux.sh` to create an archive only. Packaging uses
+  SwiftPM's `native` engine to avoid a pinned-toolchain static-linking bug.
 
-On first run Scribe writes a default `scribe.config.json` targeting Ollama at
-`http://localhost:11434` with the **`gemma4:e2b`** model.  Edit the file or set
-`SCRIBE_CONFIG_PATH` to point to your own config.
+Use `./Scripts/install.sh --help` for overrides. No privileges are elevated automatically.
 
-Put the binary on your `PATH` (for example `~/.local/bin`):
+CLI only:
 
-```bash
-# ensure ~/.local/bin is on your PATH
+```sh
+swift build -c release --product scribe
 mkdir -p ~/.local/bin
-```
-
-Use `./Scripts/install.sh` on either macOS or Linux after installing the
-platform prerequisites below. It detects the host OS and uses the existing
-platform-specific build and install flow. Run `./Scripts/install.sh --help`
-for environment-variable overrides. No privileges are elevated automatically.
-Build output and diagnostics are inherited by the terminal, with stage messages
-for building, packaging, signing (macOS), and installation. On macOS, the initial
-build runs directly for live output; the bundler then reuses the artifacts and
-prints any additional captured build log.
-
-### macOS
-
-```bash
-# CLI
-swift build -c release
 install -m 755 .build/release/scribe ~/.local/bin/scribe
-
-# Mac app (build, stably sign, and install in /Applications)
-./Scripts/install.sh
+scribe
 ```
 
-Quit any development instance started with `swift run scribe-mac` before opening
-the installed app. Launch the installed bundle explicitly after rebuilding:
-
-```bash
-open /Applications/Scribe.app
-```
-
-Using the explicit path prevents Launch Services from selecting the copy under
-`dist/`, since both bundles have the same identifier. Removing the old app before
-copying also prevents stale files from a previous bundle from surviving an
-upgrade. The bundle embeds the CLI at `Scribe.app/Contents/Helpers/scribe` if you
-prefer a single install artifact over a separate `~/.local/bin/scribe`.
-
-The install script signs with the first **Apple Development** identity in your
-login keychain. This gives Scribe a stable designated requirement so macOS keeps
-its Accessibility and Screen Recording approvals across rebuilds. If you have
-multiple matching identities, set one explicitly:
-
-```bash
-SCRIBE_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" \
-  ./Scripts/install.sh
-```
-
-Set `SCRIBE_INSTALL_PATH="$HOME/Applications/Scribe.app"` to install somewhere
-other than `/Applications/Scribe.app`. The existing `Scripts/install-macos.sh`
-entry point remains available.
-
-Create an Apple Development certificate in Xcode if the script cannot find one.
-Unlike the bundler's ad-hoc signature, a development-signed app's identity does
-not change whenever its executable changes. Keep launching the installed copy at
-the same path (`/Applications/Scribe.app`) rather than granting access separately
-to `dist` or `swift run` builds.
-
-### Linux
-
-Scribe's graphical app currently targets Wayland and uses Chroma's native
-Wayland/EGL/OpenGL ES backend.
-
-#### Build from source
-
-Install the Swift toolchain described above and the native development packages first. Scribe's HTTP
-stack uses Swift's `FoundationNetworking` on Linux for `URLError` handling;
-that module adds the `libcurl` linker dependency. The OpenAI-compatible and
-Codex clients themselves send requests with AsyncHTTPClient.
-
-On Fedora/RHEL (including Fedora Asahi Remix):
-
-```bash
-sudo dnf install binutils file libcurl-devel libglvnd-devel \
-  libxkbcommon-devel pkgconf-pkg-config wayland-devel
-```
-
-On Debian/Ubuntu:
-
-```bash
-sudo apt-get install binutils file libcurl4-openssl-dev libegl1-mesa-dev \
-  libgles2-mesa-dev libwayland-dev libxkbcommon-dev pkg-config
-```
-
-The `-devel`/`-dev` curl package is required when building even if the libcurl
-runtime is already installed: it provides the unversioned `libcurl.so` linker
-entry and `libcurl.pc` metadata. Installing a prebuilt Scribe archive only
-requires the libcurl runtime package (`libcurl` on Fedora/RHEL or `libcurl4` on
-Debian/Ubuntu), not the development package. Then build Scribe:
-
-```bash
-# Build a redistributable archive with CLI, app, desktop entry, and icon, then
-# install it to ~/.local. The package script statically links the Swift runtime
-# and rejects a build containing a machine-specific Swift runtime path.
-./Scripts/install.sh
-
-# To create the archive under dist/ without installing it:
-./Scripts/package-linux.sh
-
-# Or build and run only the app locally (Swift remains required in this case).
-swift run -c release scribe-wayland
-```
-
-Packaging metadata and icons live in `Packaging/`; shell automation lives in
-`Scripts/`. The scripts in `Scripts/Linux/` are copied to the archive root as
-`install.sh` and `uninstall.sh` for managing prebuilt packages; use
-`Scripts/install.sh` to build and install from a source checkout.
-
-Set `PREFIX` to override the default `~/.local` install location. The unified
-installer also forwards the packaging script's environment overrides, including
-`CONFIGURATION`, `OUTPUT_DIRECTORY`, and prebuilt binary paths.
-
-Linux packaging defaults to SwiftPM's `native` build engine. The Swift 6.5-dev
-2026-09-10 snapshot's default `swiftbuild` engine fails to link the OpenAPI
-build tool with the static Swift runtime (unresolved Foundation/ICU symbols).
-Both executable builds and output-path discovery use the same engine. Set
-`SWIFT_BUILD_SYSTEM=swiftbuild` to retest with a toolchain that fixes this issue.
-Supplying both prebuilt binaries skips Swift entirely.
-
-For CLI-only static builds, first install a Swift static Linux SDK matching
-`swift --version`, using the download URL and checksum published for that
-specific toolchain at [Swift.org](https://www.swift.org/install/). The old 6.3
-SDK is not compatible with the pinned snapshot. If no matching SDK is available,
-use the native Linux build above instead.
-
-After installing the matching SDK, build for your architecture:
-
-```bash
-ARCH=$(uname -m)   # x86_64 or aarch64
-swift build -c release --swift-sdk "${ARCH}-swift-linux-musl"
-install -m 755 .build/release/scribe ~/.local/bin/scribe
-```
-
-### Windows 
-
-Currently not supported, I would start with updating [slate](https://github.com/zaneenders/slate) to support a Windows terminal.
+Ensure `~/.local/bin` is on `PATH`.
 
 ## Configuration
 
-Scribe looks for `scribe.config.json` in this order:
+Config lookup: `SCRIBE_CONFIG_PATH`, `~/.scribe/scribe.config.json`, then
+`./scribe.config.json`. If none exists, Scribe creates the default under
+`~/.scribe`, targeting Ollama at `http://localhost:11434` with `gemma4:e2b`.
+Set `SCRIBE_HOME` to change the data directory.
 
-1. `SCRIBE_CONFIG_PATH` environment variable (if set)
-2. `~/.scribe/scribe.config.json`
-3. `<cwd>/scribe.config.json`
-
-If no config is found, a default is written to `~/.scribe/scribe.config.json` and loaded.
-
-Set `SCRIBE_HOME` to override the `~/.scribe` data directory for config, logs, and sessions
-(e.g. `SCRIBE_HOME=~/.local/share/scribe scribe`).
-
-> `cwd` current working directory
-
-### Personal instructions
-
-Create `~/.scribe/system.md` (or `$SCRIBE_HOME/system.md`) to append personal
-instructions to the built-in prompt:
-
-```md
-- Keep explanations concise.
-- Never use @unchecked Sendable.
-- Run relevant tests after code changes.
-```
-
-The file is read as UTF-8 only when creating a **new session**. Missing or blank
-files have no effect; unreadable or invalid UTF-8 files report an error.
-The combined prompt is saved once. Active, resumed, and forked conversations
-keep their existing prompt unchanged, preserving history and cached prefixes.
-Edits take effect with the next new session; there is no hot reload.
-
-### Configuration schema
-
-The config file contains a `profiles` array — at least one profile is required.
-Scribe uses the first profile by default; override with `--profile <name>`.
-
-```jsonc
+```json
 {
   "profiles": [
     {
       "name": "local",
-      "api": {
-        "baseUrl": "http://localhost:11434",
-        "apiKey": "",
-        // "type": "codex"   // omit for OpenAI-compatible providers
-      },
-      "agent": {
-        "model": "gemma4:e2b",
-        "contextWindow": 128000,
-        "contextWindowThreshold": 0.8,
-        "reasoning": false,
-        // "reasoningEffort": "medium", // low | medium | high (reasoning models)
-        // "maxTokens": 4096            // reserved for provider-specific limits
-      },
-      "logging": {
-        "level": "trace"                // trace | debug | info | notice | warning | error
-      }
+      "api": { "baseUrl": "http://localhost:11434", "apiKey": "" },
+      "agent": { "model": "gemma4:e2b", "contextWindow": 128000 }
     }
   ]
 }
 ```
 
-#### Profile fields
+The first profile is the default; select another with `--profile <name>`.
+Set `api.type` to `"codex"` for ChatGPT/Codex; omit it for OpenAI-compatible APIs.
+Optional agent settings: `contextWindowThreshold` (default `0.8`), `reasoning`
+(`false`), `reasoningEffort` (`low`/`medium`/`high`), and `maxRetries` (`3`).
+Set `logging.level` to control verbosity (default `trace`).
 
-| Path | Default | Description |
-|------|---------|-------------|
-| `name` | *(required)* | Profile identifier; first profile is active by default |
-| `api.baseUrl` | *(required)* | API base URL (e.g. `http://localhost:11434` for Ollama) |
-| `api.apiKey` | `""` | Bearer token; leave empty when no auth is required |
-| `api.type` | *(omitted)* | `"codex"` for ChatGPT/Codex; omit for any OpenAI-compatible provider |
-| `agent.model` | *(required)* | Model name |
-| `agent.contextWindow` | *(required)* | Token context window size |
-| `agent.contextWindowThreshold` | `0.8` | Fraction (0–1) that triggers context compaction |
-| `agent.reasoning` | `false` | Enable reasoning/thinking tokens for models that support it |
-| `agent.reasoningEffort` | *(omitted)* | Reasoning effort: `"low"`, `"medium"`, or `"high"` |
-| `agent.maxTokens` | *(omitted)* | Reserved for provider-specific token limits |
-| `agent.maxRetries` | `3` | Retries with exponential backoff on transient network failures (HTTP 429/5xx, dropped connections, timeouts); `0` disables |
-| `logging.level` | `"trace"` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
+Personal instructions go in `~/.scribe/system.md` and apply to new sessions only.
+Sessions, metadata, and logs live in `~/.scribe/sessions/{uuid}/`.
+Built-in tools: `shell`, `read_file`, `write_file`, and `edit_file`.
 
-> Scribe supports OpenAI-compatible `completions` APIs, plus `codex` (ChatGPT
-> backend) — set `api.type` to `"codex"` to use it.
-
-## Tools
-
-Scribe has four built-in tools: `shell`, `read_file`, `write_file`, `edit_file`.
-
-## Sessions & Logs
-
-Both are stored under `~/.scribe/` (or `$SCRIBE_HOME` if set):
-
-```
-~/.scribe/
-├── scribe.config.json
-└── sessions/{uuid}/
-    ├── metadata.json
-    ├── messages.jsonl
-    └── scribe.log                       # diagnostic log for that session
-```
-
-Session names and pin state are stored in `metadata.json`. A session's default
-name is its abbreviated hash (the first eight characters of its UUID). In the
-graphical app, use **Rename** on a session row to assign a custom name; clearing
-it restores the hash. Use **Pin** to keep a session above unpinned sessions in
-the same workspace group.
-
-Per-session logs live under `sessions/{uuid}/scribe.log`. Older releases wrote
-`~/.scribe/logs/scribe-{uuid}.log`; those files are not moved automatically.
-
-### Embedding ScribeCore
-
-When building on ``ScribeAgent`` directly (server, tests, custom CLI):
-
-- Pass a host-owned `Logger` into ``ScribeAgent`` at init; it flows through the agent loop and built-in tools.
-- ``ToolRegistry`` requires `init(tools:logger:)`.
-- ``ToolExecutor/execute`` takes `logger:` for each invocation.
-- The global `ScribeCore.scribeSessionLogger` sink was removed — inject your own logger instead.
-
-See `DEVELOPMENT.md` (Logging) for line format and message conventions.
-
-## Documentation
-
-Preview generated documentation with Swift DocC (included in the Swift toolchain):
-
-### Core
-```bash
-docc preview Sources/ScribeCore/ScribeCore.docc
-```
-
-### CLI
-```bash
-docc preview Sources/ScribeCLI/ScribeCLI.docc
-```
-
-### macOS app development
-
-On macOS, `swift run scribe-mac` runs Scribe's block graph, sessions, and native
-Metal window in one process using Chroma's `MetalApp`. No backend subprocess or
-loopback connection is needed.
-
-Restart the development app after rebuilding; an already installed Scribe.app
-will not pick up changes.
-
-Integration regression checks:
+## Development
 
 ```sh
-swift test --filter 'ScribeBlocksTests|ScribeMacLaunchTests'
+swift build
+swift test
+swift run scribe-mac
 ```
 
-Keyboard integration tests exercise key binding resolution and feed input through
-Chroma's headless renderer; they do not synthesize native AppKit events.
-Scene captures use Chroma's version 2 JSON format, not the former remote-wire format.
+On Linux, use `swift run scribe-wayland` instead.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, profiling, logging, and embedding.

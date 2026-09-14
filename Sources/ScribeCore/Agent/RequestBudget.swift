@@ -11,9 +11,6 @@ struct RequestBudgetEstimate: Equatable, Sendable {
   var exceedsLimit: Bool { estimatedInputTokens > inputTokenLimit }
 }
 
-/// A deliberately conservative request-size estimate used to catch obviously unsafe requests
-/// before they reach a provider. This is not a tokenizer: UTF-8 text and tool schemas are charged
-/// at one token per three bytes, with fixed overhead for messages and images.
 func estimateRequestBudget(
   messages: [Components.Schemas.ChatMessage],
   tools: [Components.Schemas.ChatTool],
@@ -36,8 +33,6 @@ func estimateRequestBudget(
           case .text(let text):
             textBytes += text.text.utf8.count
           case .imageUrl:
-            // Do not count a data URI as ordinary text. Providers tokenize images according to
-            // dimensions/detail rather than charging for every base64 character.
             imageCount += 1
           }
         }
@@ -66,8 +61,6 @@ func estimateRequestBudget(
   let imageTokens = imageCount * 4_096
   let estimated = textTokens + imageTokens + structuralTokens
 
-  // Keep room for the response and provider-specific framing. Ten percent is enough for large
-  // windows; small windows always retain at least 1K tokens, capped at 8K for large models.
   let responseReserve = min(8_192, max(1_024, contextWindow / 10))
   let inputLimit = max(1, contextWindow - responseReserve)
   return RequestBudgetEstimate(
@@ -78,9 +71,6 @@ func estimateRequestBudget(
     toolDefinitionBytes: toolDefinitionBytes)
 }
 
-/// Compacts tool-generated context until the conservative estimate fits. Returns a recovery
-/// description when context changed, nil when it already fit, and throws when user/system content
-/// alone is too large to send safely.
 func enforceRequestBudget(
   messages: inout [Components.Schemas.ChatMessage],
   newMessages: inout [Components.Schemas.ChatMessage],
@@ -112,7 +102,6 @@ func enforceRequestBudget(
         messages: messages, tools: tools, contextWindow: contextWindow)
     else { break }
     estimate = next
-    // Avoid repeatedly replacing an already compact replacement when no meaningful space remains.
     if estimate.estimatedInputTokens >= before { break }
   }
 

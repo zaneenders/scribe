@@ -1,8 +1,6 @@
 import Chroma
 import Foundation
 
-/// An eight-dot activity indicator drawn with Chroma primitives so it does not
-/// depend on the Metal backend's ASCII-only bitmap font.
 struct ActivitySpinner: PrimitiveBlock {
   let color: Color
 

@@ -2,7 +2,6 @@ import DequeModule
 import Foundation
 import Synchronization
 
-/// Stable identity for a terminal owned by a ``TerminalRuntime``.
 public struct TerminalID: Hashable, Sendable, Codable {
   public let rawValue: UUID
 
@@ -37,8 +36,6 @@ public struct TerminalConfiguration: Equatable, Sendable {
   }
 }
 
-/// A range of terminal output. Cursors are byte offsets, so an attachment can
-/// resume after `endCursor` without knowing how the runtime chunked the bytes.
 public struct TerminalOutput: Equatable, Sendable {
   public let cursor: UInt64
   public let data: Data
@@ -53,7 +50,6 @@ public struct TerminalOutput: Equatable, Sendable {
 
 public enum TerminalEvent: Equatable, Sendable {
   case output(TerminalOutput)
-  /// The raw wait status returned by waitpid(2).
   case exit(Int32)
 }
 
@@ -102,8 +98,6 @@ extension TerminalClient {
   }
 }
 
-/// The event sequence for a terminal attachment. The sequence has a single
-/// consumer; copying an iterator and awaiting both copies concurrently is an error.
 public struct TerminalEventStream: AsyncSequence, Sendable {
   public typealias Element = TerminalEvent
 
@@ -130,8 +124,6 @@ public struct TerminalEventStream: AsyncSequence, Sendable {
   }
 }
 
-/// A bounded stream of events from one terminal. Dropping this value does not
-/// detach it immediately; callers should use ``detach()`` when they are done.
 public struct TerminalAttachment: Sendable {
   public let id: UUID
   public let terminalID: TerminalID
@@ -155,9 +147,6 @@ public struct TerminalAttachment: Sendable {
   }
 }
 
-/// A zero-scheduling-overhead attachment for an in-process renderer. Events are
-/// called synchronously on the PTY callback thread and `Data` retains its existing
-/// copy-on-write storage.
 public struct LocalTerminalAttachment: Sendable {
   public let id: UUID
   public let terminalID: TerminalID
@@ -172,12 +161,9 @@ public struct LocalTerminalAttachment: Sendable {
   public func detach() { detachAction() }
 }
 
-/// Owns PTYs independently of any UI or wire transport. Output is retained by
-/// byte count and each attachment has its own bounded delivery queue.
 public final class TerminalRuntime: Sendable {
   public struct Limits: Equatable, Sendable {
     public var replayBytes: Int
-    /// Maximum unread output bytes retained for one asynchronous attachment.
     public var attachmentBytes: Int
 
     public init(replayBytes: Int = 1024 * 1024, attachmentBytes: Int = 1024 * 1024) {
@@ -192,8 +178,6 @@ public final class TerminalRuntime: Sendable {
     var endCursor: UInt64 { cursor + UInt64(data.count) }
   }
 
-  // These mutable reference types are intentionally non-Sendable and confined
-  // to `sessions`. Only Sendable PTYs, callbacks, and events leave its lock.
   private final class Session {
     enum Lifecycle: Sendable {
       case running(PTYSession)
@@ -212,8 +196,6 @@ public final class TerminalRuntime: Sendable {
     }
   }
 
-  /// Mutable async-delivery state. Queue fields are protected by `sessions`;
-  /// exactly one consumer may suspend in `next()` at a time.
   private final class AsyncAttachmentState {
     var pending: Deque<TerminalEvent> = []
     var pendingOutputBytes = 0
@@ -242,8 +224,6 @@ public final class TerminalRuntime: Sendable {
     case fail(CheckedContinuation<TerminalEvent?, any Error>, any Error)
   }
 
-  /// Mutable local-delivery state. Every field is accessed while `sessions` is
-  /// locked; callbacks themselves are drained only after that lock is released.
   private final class LocalAttachmentState {
     let handler: @Sendable (TerminalEvent) -> Void
     var pending: Deque<TerminalEvent> = []
@@ -271,9 +251,6 @@ public final class TerminalRuntime: Sendable {
     let id = TerminalID()
     sessions.withLock { $0[id] = Session(pty: pty) }
 
-    // PTY callbacks are already delivered off the main thread. Process them
-    // synchronously so bytes retain read order and avoid allocating a Task for
-    // every output chunk.
     pty.onOutput = { [weak self] data in
       self?.receive(data, from: id)
     }
@@ -397,7 +374,6 @@ public final class TerminalRuntime: Sendable {
 
   public func write(_ data: Data, to terminalID: TerminalID) throws {
     let pty = try runningPTY(for: terminalID)
-    // Never hold the runtime lock across a potentially blocking write(2).
     try pty.write(data)
   }
 
@@ -584,8 +560,6 @@ public final class TerminalRuntime: Sendable {
     return true
   }
 
-  /// Drains one local attachment without holding `sessions`. The `isDelivering`
-  /// flag preserves event order when PTY callbacks arrive concurrently.
   private func drainLocalAttachment(_ attachmentID: UUID, from terminalID: TerminalID) {
     while true {
       let delivery: (@Sendable (TerminalEvent) -> Void, TerminalEvent)? = sessions.withLock { sessions in
@@ -644,8 +618,6 @@ public final class TerminalRuntime: Sendable {
 
 }
 
-/// The GUI's local adapter. It has the same async boundary a future socket
-/// client will have, while forwarding requests directly to the runtime actor.
 public final class InProcessTerminalClient: TerminalClient, Sendable {
   public let runtime: TerminalRuntime
 
@@ -653,8 +625,6 @@ public final class InProcessTerminalClient: TerminalClient, Sendable {
     self.runtime = runtime
   }
 
-  // The GUI uses these synchronous methods on the in-process transport. They
-  // deliberately avoid task creation and actor scheduling on the keystroke path.
   public func createSynchronously(
     configuration: TerminalConfiguration = TerminalConfiguration()
   ) throws -> TerminalID {
@@ -699,8 +669,6 @@ public final class InProcessTerminalClient: TerminalClient, Sendable {
   public func attach(to terminalID: TerminalID, after cursor: UInt64? = nil) async throws
     -> TerminalAttachment
   {
-    // This operation only mutates in-memory state and must install the attachment
-    // synchronously with respect to output delivery.
     try runtime.attach(to: terminalID, after: cursor)
   }
 

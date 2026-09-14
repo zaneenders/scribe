@@ -11,8 +11,6 @@ import Glibc
 import Musl
 #endif
 
-// MARK: - OAuth Flow
-
 private actor CallbackServerReadiness {
   private var result: Result<Void, Error>?
   private var continuation: CheckedContinuation<Void, Error>?
@@ -36,17 +34,6 @@ private actor CallbackServerReadiness {
 }
 
 public enum CodexOAuth {
-  /// Run the full OAuth login flow:
-  /// 1. Generate PKCE pair
-  /// 2. Start callback server on localhost:1455
-  /// 3. Open browser for user to authenticate
-  /// 4. Capture authorization code from callback
-  /// 5. Exchange code for access/refresh tokens
-  /// 6. Persist credentials to disk
-  ///
-  /// - Parameter baseDirectory: Explicit data-home directory for credential
-  ///   storage.  Pass `nil` (the default) to use the `SCRIBE_HOME`-aware default.
-  /// - Returns: The newly created credential.
   public static func login(baseDirectory: URL? = nil) async throws -> CodexCredential {
     try await login(
       callbackHost: CodexOAuthConstants.callbackHost,
@@ -56,7 +43,6 @@ public enum CodexOAuth {
     )
   }
 
-  /// Internal entry point with injectable callback-server settings for testing.
   static func login(
     callbackHost: String,
     callbackPort: UInt16,
@@ -64,11 +50,9 @@ public enum CodexOAuth {
     timeout: TimeInterval = CodexOAuthCallbackServer.loginTimeout,
     baseDirectory: URL? = nil
   ) async throws -> CodexCredential {
-    // 1. PKCE
     let pkce = PKCE.generate()
     let state = generateState()
 
-    // 2. Build authorization URL
     var urlComponents = URLComponents(string: CodexOAuthConstants.authorizeURL)!
     urlComponents.queryItems = [
       URLQueryItem(name: "response_type", value: "code"),
@@ -84,9 +68,6 @@ public enum CodexOAuth {
     ]
     let authURL = urlComponents.url!
 
-    // 3. Start the callback server. Its readiness callback carries startup
-    // failures, so login cannot get stuck waiting for a semaphore that is never
-    // signalled.
     let readiness = CallbackServerReadiness()
     async let codeTask = CodexOAuthCallbackServer.waitForCode(
       expectedState: state,
@@ -101,7 +82,6 @@ public enum CodexOAuth {
     do {
       try await readiness.wait()
     } catch {
-      // Observe and finish the server task before returning the startup error.
       _ = try? await codeTask
       throw error
     }
@@ -109,13 +89,10 @@ public enum CodexOAuth {
 
     let code = try await codeTask
 
-    // 4. Exchange authorization code for tokens
     let tokenResponse = try await exchangeCode(code: code, verifier: pkce.verifier)
 
-    // 5. Extract account ID from JWT
     let accountId = try extractAccountID(from: tokenResponse.accessToken)
 
-    // 6. Build credential
     let expiresMs =
       Int64(Date().timeIntervalSince1970 * 1000)
       + Int64(tokenResponse.expiresIn) * 1000
@@ -126,17 +103,11 @@ public enum CodexOAuth {
       accountId: accountId
     )
 
-    // 7. Persist
     try CodexCredentialStore.write(credential, baseDirectory: baseDirectory)
 
     return credential
   }
 
-  /// Refresh an expired (or about-to-expire) access token.
-  /// Returns a new credential with updated tokens.
-  ///
-  /// - Parameter baseDirectory: Explicit data-home directory for credential
-  ///   storage.  Pass `nil` to use the `SCRIBE_HOME`-aware default.
   public static func refresh(_ credential: CodexCredential, baseDirectory: URL? = nil) async throws -> CodexCredential {
     let tokenResponse = try await refreshAccessToken(refreshToken: credential.refresh)
     let accountId = try extractAccountID(from: tokenResponse.accessToken)
@@ -155,11 +126,6 @@ public enum CodexOAuth {
     return newCredential
   }
 
-  /// Get valid credentials, refreshing if necessary.
-  /// Throws `CodexOAuthError.noCredentials` if not logged in.
-  ///
-  /// - Parameter baseDirectory: Explicit data-home directory for credential
-  ///   storage.  Pass `nil` to use the `SCRIBE_HOME`-aware default.
   public static func getValidCredentials(baseDirectory: URL? = nil) async throws -> CodexCredential {
     guard let credential = try CodexCredentialStore.read(baseDirectory: baseDirectory) else {
       throw CodexOAuthError.noCredentials
@@ -170,15 +136,9 @@ public enum CodexOAuth {
     return credential
   }
 
-  /// Logout — delete stored credentials.
-  ///
-  /// - Parameter baseDirectory: Explicit data-home directory for credential
-  ///   storage.  Pass `nil` to use the `SCRIBE_HOME`-aware default.
   public static func logout(baseDirectory: URL? = nil) throws {
     try CodexCredentialStore.delete(baseDirectory: baseDirectory)
   }
-
-  // MARK: - Private
 
   private static func generateState() -> String {
     let bytes = secureRandomBytes(count: 16)
@@ -203,18 +163,12 @@ public enum CodexOAuth {
     #endif
   }
 
-  // MARK: - Token Exchange
-
   private struct TokenResponse {
     let accessToken: String
     let refreshToken: String
     let expiresIn: Int
   }
 
-  /// Shared HTTP client with redirect following **disabled**.
-  /// OAuth token endpoints must never redirect a POST — if they do
-  /// (301/302), many clients silently change the method to GET and
-  /// drop the body, producing an empty or unrelated response.
   private static let httpClient: HTTPClient = {
     var config = HTTPClient.Configuration()
     config.redirectConfiguration = .disallow
@@ -237,7 +191,7 @@ public enum CodexOAuth {
     request.body = .bytes(ByteBuffer(string: components.query ?? ""))
 
     let response = try await httpClient.execute(request, timeout: .seconds(30))
-    let body = try await response.body.collect(upTo: 1_048_576)  // 1 MiB
+    let body = try await response.body.collect(upTo: 1_048_576)
 
     guard response.status == .ok else {
       let bodyString = String(buffer: body)
@@ -261,7 +215,7 @@ public enum CodexOAuth {
     request.body = .bytes(ByteBuffer(string: components.query ?? ""))
 
     let response = try await httpClient.execute(request, timeout: .seconds(30))
-    let body = try await response.body.collect(upTo: 1_048_576)  // 1 MiB
+    let body = try await response.body.collect(upTo: 1_048_576)
 
     guard response.status == .ok else {
       let bodyString = String(buffer: body)
@@ -319,10 +273,6 @@ public enum CodexOAuth {
     )
   }
 
-  // MARK: - JWT Parsing
-
-  /// Extract the `chatgpt_account_id` from the JWT access token.
-  /// Does NOT verify the signature — only decodes the payload.
   static func extractAccountID(from jwt: String) throws -> String {
     let segments = jwt.split(separator: ".")
     guard segments.count >= 2 else {
@@ -330,7 +280,6 @@ public enum CodexOAuth {
     }
 
     let payloadSegment = String(segments[1])
-    // Add padding for base64 decode
     let padded = padBase64(payloadSegment)
 
     guard let payloadData = Data(base64Encoded: padded) else {
@@ -360,8 +309,6 @@ public enum CodexOAuth {
     return result
   }
 }
-
-// MARK: - Secure Random Bytes (platform wrapper)
 
 #if canImport(Darwin)
 private func secureRandomBytes(count: Int) -> [UInt8] {

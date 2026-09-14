@@ -3,8 +3,6 @@ import ScribeLLM
 import ScribeLLMCodex
 import SystemPackage
 
-/// Public agent facade. Provider-specific client, authentication, and request
-/// behavior live behind `AgentProvider` implementations.
 public struct ScribeAgent: Sendable {
   internal let chatTools: [ScribeLLM.Components.Schemas.ChatTool]
   private let toolExecutor: any ToolExecutor
@@ -13,7 +11,6 @@ public struct ScribeAgent: Sendable {
   private let logger: Logger
   private let abortNotifier = AbortNotifier()
 
-  /// Standard OpenAI-compatible initializer.
   public init(
     client: ScribeLLM.Client,
     model: String,
@@ -36,7 +33,6 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
   }
 
-  /// Codex initializer for callers that already own a configured client.
   public init(
     codexClient: ScribeLLMCodex.Client,
     model: String,
@@ -60,8 +56,6 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
   }
 
-  /// Creates an agent and selects its provider from configuration.
-  /// Codex credentials remain lazy and are resolved when the first turn runs.
   public init(configuration: ScribeConfig, logger: Logger) throws {
     let registry = ToolRegistry(tools: configuration.tools, logger: logger)
     self.toolExecutor = registry

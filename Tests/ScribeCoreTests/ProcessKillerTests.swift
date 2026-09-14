@@ -4,8 +4,6 @@ import Testing
 
 @testable import ScribeCore
 
-// MARK: - Mock ProcessTreeReader
-
 private struct MockProcessTreeReader: ProcessTreeReader {
   let children: [pid_t: [pid_t]]
 
@@ -20,8 +18,6 @@ private struct MockProcessTreeReader: ProcessTreeReader {
 
 @Suite
 struct ProcessKillerTests {
-
-  // MARK: - collectProcessTree
 
   @Test("collectProcessTree includes root PID")
   func collectProcessTreeIncludesRoot() {
@@ -83,7 +79,7 @@ struct ProcessKillerTests {
   func collectProcessTreeAvoidsDuplicates() {
     let reader = MockProcessTreeReader([
       100: [200, 300],
-      200: [300],  // 300 is a child of both 100 and 200
+      200: [300],
       300: [],
     ])
     let pids = collectProcessTree(rootPid: 100, reader: reader)
@@ -108,15 +104,11 @@ struct ProcessKillerTests {
     #expect(pids == [99999])
   }
 
-  // MARK: - PgroupKiller
-
   @Test("PgroupKiller initializes without crashing")
   func pgroupKillerInitializes() {
     let killer = PgroupKiller()
-    _ = killer  // Ensure it doesn't crash on init
+    _ = killer
   }
-
-  // MARK: - ProcTreeKiller with mock reader
 
   @Test("ProcTreeKiller initializes with mock reader")
   func procTreeKillerInitializes() {

@@ -24,8 +24,6 @@ struct OutputDrainDeadlineTests {
   }
 
   @Test(.timeLimit(.minutes(1))) func deadlineDoesNotJoinAnUncooperativeDrain() async {
-    // This gate deliberately ignores cancellation. Release it only AFTER the
-    // deadline returns: a task-group-based race would hang waiting for it.
     let (gate, release) = AsyncStream<Void>.makeStream()
     let drain = Task<DrainBytes, Error> {
       await withTaskCancellationShield {
@@ -46,8 +44,6 @@ struct OutputDrainDeadlineTests {
   }
 
   @Test func cancelledCallerStillWaitsForSuccessfulCleanup() async throws {
-    // Cancel before entering the helper so an unshielded AsyncStream iterator
-    // would return nil immediately, rather than observing the drain result.
     let caller = Task {
       withUnsafeCurrentTask { $0?.cancel() }
       #expect(Task.isCancelled)

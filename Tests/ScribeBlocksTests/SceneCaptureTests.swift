@@ -2,6 +2,7 @@ import Chroma
 import Foundation
 import HeadlessBackend
 import Testing
+
 @testable import ScribeBlocks
 
 struct SceneCaptureTests {
@@ -13,7 +14,6 @@ struct SceneCaptureTests {
     defer { try? FileManager.default.removeItem(at: root) }
     let directory = root.appendingPathComponent("captures", isDirectory: true)
     if shouldFail {
-      // A regular file at the destination makes directory creation fail deterministically.
       try Data().write(to: directory)
     }
     let capture = ScribeSceneCapture(directory: directory)
@@ -25,7 +25,6 @@ struct SceneCaptureTests {
     renderer.render()
     #expect(capture.status == "Saving scene...")
 
-    // Rearm observation after the synchronous transition to Saving.
     renderer.render()
     var redraws = 0
     let expected = shouldFail ? "Scene capture failed: retry" : "Scene saved — capture again"
@@ -39,10 +38,11 @@ struct SceneCaptureTests {
     #expect(capture.status == expected)
     #expect(redraws > 0)
     let frame = renderer.render()
-    #expect(frame.commands.contains { command in
-      if case .text(_, let text, _, _) = command { return text == expected }
-      return false
-    })
+    #expect(
+      frame.commands.contains { command in
+        if case .text(_, let text, _, _) = command { return text == expected }
+        return false
+      })
   }
 
   @Test @MainActor

@@ -1,8 +1,6 @@
 import Chroma
 import Foundation
 
-/// Groups open and saved sessions by working directory. Selecting a saved
-/// session loads it from ~/.scribe/sessions; open sessions keep running.
 struct SessionSidebar: Block {
   let store: ScribeMacStore
   let theme: MacTheme
@@ -201,8 +199,6 @@ struct SessionRow: Block {
               .fontScale(theme.smallScale)
               .foregroundColor(theme.textSecondary)
           }
-          // Keep actions in place while previewing the name so moving the pointer
-          // toward one cannot make its hit target disappear.
           sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
         }
         .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 6))
@@ -255,8 +251,6 @@ struct SavedSessionRow: Block {
   }
 }
 
-/// A single-line label that scrolls only when hovered and wider than its slot.
-/// The pause at each end keeps short names still and makes long names readable.
 @MainActor
 private final class MarqueeAnimationState {
   static let shared = MarqueeAnimationState()

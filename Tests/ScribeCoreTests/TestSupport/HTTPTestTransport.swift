@@ -3,9 +3,6 @@ import HTTPTypes
 import OpenAPIRuntime
 import Synchronization
 
-// MARK: - Captured Request
-
-/// A snapshot of an HTTP request made through ``ScriptedTransport``.
 public struct CapturedRequest: Sendable {
   public let method: HTTPRequest.Method
   public let path: String
@@ -31,22 +28,11 @@ public struct CapturedRequest: Sendable {
   }
 }
 
-// MARK: - Scripted Transport
-
-/// A scripted HTTP transport that returns pre-configured responses.
-///
-/// Responses are consumed in order. If more calls are made than there are
-/// responses, the last response is replayed. Every request is captured and
-/// available via ``capturedRequests`` for full endpoint / header assertions.
 final class ScriptedTransport: ClientTransport, Sendable {
   struct Response: Sendable {
     let status: Int
     let chunks: [HTTPBody.ByteChunk]
-    /// When set, `send` throws this error instead of producing a response, simulating
-    /// a transport-level failure such as a dropped connection.
     let error: (any Error)?
-    /// When set, the response body fails with this error after every chunk has been
-    /// delivered, simulating a mid-stream disconnect.
     let streamError: (any Error)?
 
     init(
@@ -61,7 +47,6 @@ final class ScriptedTransport: ClientTransport, Sendable {
       self.streamError = streamError
     }
 
-    /// A response with status 200 and no body.
     static let empty = Response(status: 200, chunks: [])
   }
 
@@ -73,12 +58,10 @@ final class ScriptedTransport: ClientTransport, Sendable {
     var callIndex = 0
   }
 
-  /// All captured requests, in call order.
   var capturedRequests: [CapturedRequest] {
     captured.withLock { $0 }
   }
 
-  /// Backward-compatible accessor for request bodies only.
   var requestBodies: [Data] {
     captured.withLock { $0.compactMap(\.body) }
   }
@@ -89,7 +72,6 @@ final class ScriptedTransport: ClientTransport, Sendable {
     self.captured = Mutex([])
   }
 
-  /// Convenience initializer for a single response.
   convenience init(status: Int = 200, chunks: [HTTPBody.ByteChunk] = []) {
     self.init(responses: [Response(status: status, chunks: chunks)])
   }
@@ -100,7 +82,6 @@ final class ScriptedTransport: ClientTransport, Sendable {
     baseURL: URL,
     operationID: String
   ) async throws -> (HTTPResponse, HTTPBody?) {
-    // Capture the request body
     var bodyData: Data? = nil
     if let body = body {
       var data = Data()
@@ -148,9 +129,6 @@ final class ScriptedTransport: ClientTransport, Sendable {
   }
 }
 
-// MARK: - Hanging Transport
-
-/// A transport that hangs indefinitely (for timeout / cancellation testing).
 final class HangingClientTransport: ClientTransport, Sendable {
   let readiness = TestReadiness()
 
