@@ -37,7 +37,6 @@ private struct PaletteEscapeContent: PrimitiveBlock {
         DirectoryPalette(store: store, theme: MacTheme(), required: store.requiresDirectoryBeforeStart),
         into: &list, in: rect, context: context)
     }
-    // Mirror the underlying command picker's modal guard and Escape handling.
     if !store.showDirectoryPicker, store.renamingSessionID == nil,
       context.input.textEvents.contains(.endEditing)
     {

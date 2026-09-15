@@ -8,8 +8,6 @@ import Testing
 @Suite
 struct BearerTokenMiddlewareTests {
 
-  // MARK: - Token injection
-
   @Test("injects Authorization header when token is provided")
   func injectsAuthorizationWhenTokenProvided() async throws {
     let request = try await interceptedRequest(
@@ -42,8 +40,6 @@ struct BearerTokenMiddlewareTests {
     #expect(captured.headerFields[.contentType] == "application/json")
     #expect(captured.headerFields[.authorization] == "Bearer token")
   }
-
-  // MARK: - Response pass-through
 
   @Test("passes through response unchanged")
   func passesThroughResponse() async throws {

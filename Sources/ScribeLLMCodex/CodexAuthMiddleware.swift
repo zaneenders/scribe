@@ -2,9 +2,6 @@ import Foundation
 import HTTPTypes
 import OpenAPIRuntime
 
-/// Middleware that injects both the Bearer token and the
-/// `chatgpt-account-id` header required by the ChatGPT
-/// subscription (Codex) backend API.
 struct CodexAuthMiddleware: ClientMiddleware {
   let token: String?
   let accountID: String?
@@ -28,7 +25,6 @@ struct CodexAuthMiddleware: ClientMiddleware {
     if let accountID, !accountID.isEmpty {
       req.headerFields[.init("chatgpt-account-id")!] = accountID
     }
-    // Identify as the pi/Codex CLI originator (required by the backend)
     if req.headerFields[.init("originator")!] == nil {
       req.headerFields[.init("originator")!] = "pi"
     }

@@ -160,7 +160,6 @@ struct ToolRunnerShellTests {
       }
       Issue.record("Expected AgentTurnInterruptedError, but tool returned normally")
     } catch is AgentTurnInterruptedError {
-      // The competing deadline starts at the abort request, not startup.
     }
   }
 
@@ -203,7 +202,6 @@ struct ToolRunnerShellTests {
       Issue.record("Expected AgentTurnInterruptedError, but tool returned normally")
       return
     } catch is AgentTurnInterruptedError {
-      // The competing deadline starts at the abort request, not startup.
     }
   }
   #endif

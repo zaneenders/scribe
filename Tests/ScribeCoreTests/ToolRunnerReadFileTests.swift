@@ -161,7 +161,6 @@ struct ToolRunnerReadFileTests {
     let registry = ToolRegistry(tools: [ReadFileTool()], logger: toolRunnerTestLogger)
     try await withTemporaryDirectory { dir in
       let fileURL = dir.appendingPathComponent("split-scalar.txt")
-      // maxContentBytes + 4 lands two bytes into the final four-byte scalar.
       let body = String(repeating: "a", count: ReadFileTool.maxContentBytes + 2) + "😀"
       try body.write(to: fileURL, atomically: true, encoding: .utf8)
 

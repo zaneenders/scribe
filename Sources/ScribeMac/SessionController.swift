@@ -5,13 +5,6 @@ import Observation
 import ScribeCore
 import ScribeKit
 
-/// One open chat session: its harness, transcript, composer draft, and any
-/// turn currently streaming.
-///
-/// Controllers live independently of which session is on screen, so a turn
-/// keeps running in the background while the user switches to another session
-/// or starts a new one. Activity arriving while off-screen raises
-/// `hasUnreadActivity` for the sidebar.
 @MainActor
 @Observable
 final class SessionController {
@@ -40,10 +33,6 @@ final class SessionController {
       WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
     }
 
-    /// Stable identities for text selection. Unlike `layoutID`, these must not
-    /// change while streamed content invalidates the row's measured layout.
-    /// The header and body are separate layouts so a drag can select every
-    /// character drawn in a transcript card, including its marker and title.
     var headerSelectionID: WidgetID {
       WidgetID("transcript-selection:\(id.uuidString):header")
     }
@@ -69,7 +58,6 @@ final class SessionController {
 
     var isCollapsible: Bool {
       guard kind == .user else { return false }
-      // Stop early: deciding disclosure should not scan a massive message.
       var characters = 0
       var lines = 1
       for character in text {
@@ -133,28 +121,20 @@ final class SessionController {
     var activeBoundary: Int { activeIsEnd ? endBoundary : startBoundary }
   }
 
-  /// The bootstrapped session this controller drives.
   let boot: BootstrappedSession
 
   var transcript: [TranscriptItem]
   private(set) var isLoadingTranscript = false
-  /// Original composer text; display transformations must not alter model input.
   var draft = "" {
     didSet { draftRevision &+= 1 }
   }
   @ObservationIgnored private(set) var draftRevision: UInt64 = 0
   @ObservationIgnored let composerLayoutCache = ComposerTextLayoutCache()
   var isRunning = false
-  /// Conversation recency used by the sidebar. Selecting or opening a session
-  /// does not change this value.
   private(set) var lastMessageAt: Date
   var usageText = ""
-  /// Set by the store. While false, incoming stream activity raises
-  /// `hasUnreadActivity` so the sidebar can flag background progress.
   var isActive = false
   var hasUnreadActivity = false
-  /// Set when a turn finishes while on screen; the store consumes it to
-  /// refocus the composer.
   var wantsComposerFocus = false
   let scroll = ScrollViewController()
 
@@ -165,7 +145,6 @@ final class SessionController {
   private(set) var commandPicker: CommandPickerState?
   private(set) var isRunningCommand = false
   var onIdentityChange: ((UUID, UUID) -> Void)?
-  /// Lets the store retain background controllers only while their model is running.
   var onRunningChange: ((Bool) -> Void)?
 
   private var currentSessionId: UUID
@@ -173,20 +152,13 @@ final class SessionController {
   private var promptHistory: [String]
   private var historyIndex: Int?
   private var draftBeforeHistory = ""
-  /// Non-nil when the user requested a force-send of a queued message while
-  /// the model was busy.  Consumed in `handle(_:)` after the current turn
-  /// finishes (including after an interrupt), so the queued message is not
-  /// lost.
   private var pendingForceSend: String?
 
   var sessionId: UUID { currentSessionId }
   var workingDirectory: String { boot.workingDirectory }
-  /// Messages queued while a turn is running, oldest first.
   var queuedTexts: [String] { boot.messageQueue.previewTexts() }
   var sessionIdText: String { sessionId.uuidString.prefix(8).uppercased() }
-  /// Uses the session hash until the user assigns a custom name.
   var displayName: String { sessionName ?? sessionIdText }
-  /// Short label for the session list: the working directory's basename.
   var directoryTitle: String {
     if workingDirectory == "/" { return "/" }
     let last = (workingDirectory as NSString).lastPathComponent
@@ -212,8 +184,6 @@ final class SessionController {
       transcript = Self.replay(initialMessages)
     } else {
       isLoadingTranscript = true
-      // Transcript conversion can be substantial for old tool-heavy sessions.
-      // Keep installation cheap and publish the rows after yielding a frame.
       Task { [weak self] in
         let replayed = await Self.buildTranscript(initialMessages)
         guard let self else { return }
@@ -240,8 +210,6 @@ final class SessionController {
     transcript[index].toggleTextDisclosure()
   }
 
-  // MARK: - Composer editing
-
   func updateDraft(_ text: String) {
     draft = text
     historyIndex = nil
@@ -255,9 +223,6 @@ final class SessionController {
     ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
   }
 
-  /// Recalls submitted prompts only when the composer is empty or already in
-  /// history-navigation mode, leaving arrow keys available for caret movement
-  /// while the user is editing a draft.
   @discardableResult
   func recallPreviousPrompt() -> Bool {
     guard !promptHistory.isEmpty, draft.isEmpty || historyIndex != nil else { return false }
@@ -286,8 +251,6 @@ final class SessionController {
     ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
     return true
   }
-
-  // MARK: - Fork / TLDR commands
 
   func openCommandPicker(_ command: SessionCommand) {
     guard !isRunning, !isRunningCommand else { return }
@@ -325,9 +288,6 @@ final class SessionController {
         command: command, boundaries: boundaries, startCursor: startCursor,
         endCursor: command == .tldr ? endCursor : nil, activeIsEnd: false,
         messageCount: snapshot.count)
-      // Leave composer editing while the picker owns f/j, Enter, and Escape.
-      // Otherwise printable picker keys are inserted into the draft and the
-      // editing submit/end events are consumed by the text field.
       ScribeRenderContext.activeTextInput = nil
       ScribeRenderContext.current?.endEditing()
       transcript = Self.replay(snapshot.messages)
@@ -428,8 +388,6 @@ final class SessionController {
     }
   }
 
-  // MARK: - Sending
-
   func submit(_ proposed: String? = nil) {
     guard commandPicker == nil, !isRunningCommand else { return }
     let text = proposed ?? draft
@@ -441,9 +399,6 @@ final class SessionController {
     startTurn(text: text)
   }
 
-  /// Starts a turn for `text`, wiring the harness's event callbacks into a
-  /// stream consumed on the main actor. Shared by `submit` and
-  /// `forceSendNext`.
   private func startTurn(text: String) {
     rememberPrompt(text)
     draft = ""
@@ -477,8 +432,6 @@ final class SessionController {
     }
   }
 
-  /// Queue a message while the model is busy. The harness drains the message
-  /// queue after the current turn, matching the CLI's Enter-while-busy path.
   private func enqueue(_ text: String) {
     guard boot.messageQueue.enqueue(text: text) else { return }
     rememberPrompt(text)
@@ -495,9 +448,6 @@ final class SessionController {
 
   func stop() {
     guard isRunning else { return }
-    // Interrupt the current turn while preserving queued messages so the
-    // user can still force-send them afterward (matching the CLI behaviour
-    // where Ctrl+C / Enter-on-empty during a turn keeps the queue intact).
     let queuedCount = boot.messageQueue.count()
     if queuedCount > 0 {
       transcript.append(
@@ -518,11 +468,6 @@ final class SessionController {
     scroll.scrollToBottom()
   }
 
-  /// Pops the next queued message and sends it immediately.
-  ///
-  /// When the model is busy the current turn is interrupted first; the
-  /// popped message is held in `pendingForceSend` and dispatched as soon as
-  /// the turn finishes.  When idle the message is sent directly.
   func forceSendNext() {
     guard let text = boot.messageQueue.popForRecall() else { return }
     transcript.append(
@@ -551,10 +496,6 @@ final class SessionController {
     return count
   }
 
-  /// Interrupts any in-flight turn and drops queued messages. When
-  /// `cancelTask` is false the streaming task is left to wind down so the
-  /// interrupted turn is persisted cleanly before the controller is released;
-  /// app teardown passes true to cancel immediately.
   func shutdown(cancelTask: Bool) {
     boot.messageQueue.clear()
     Task { await boot.harness.interrupt() }
@@ -564,10 +505,6 @@ final class SessionController {
     runTask = nil
   }
 
-  // MARK: - Model switching
-
-  /// Applies a profile to this session's harness. Returns the fresh profile
-  /// catalog on success so the store can update the shared picker list.
   @discardableResult
   func applyModelProfile(_ name: String) async -> [ProfileSummary]? {
     let previousName = profileName
@@ -610,16 +547,12 @@ final class SessionController {
     }
   }
 
-  // MARK: - Stream handling
-
   private func handle(_ event: StreamEvent) {
     if !isActive {
       hasUnreadActivity = true
     }
     switch event {
     case .userPrompt(let text):
-      // Echoes both the submitted message and queued messages as the harness
-      // dispatches them at the start of each turn.
       lastMessageAt = Date()
       transcript.append(TranscriptItem(kind: .user, title: "You", text: text))
       scroll.scrollToBottom()
@@ -647,10 +580,6 @@ final class SessionController {
       transcript.append(TranscriptItem(kind: .error, title: "Error", text: message))
       runTask = nil
     }
-    // The transcript ScrollView's sticksToBottom behavior follows new content
-    // only when it was already at the bottom. Do not enqueue an unconditional
-    // controller request here: streaming events would otherwise override a
-    // user's attempt to scroll back through the response.
   }
 
   private func reduce(_ event: AgentEvent) {
@@ -664,9 +593,6 @@ final class SessionController {
     case .output(.finalized):
       break
     case .tool(.invocation):
-      // Tool execution boundaries own the live transcript row. The invocation event
-      // carries the same arguments and output after toolExecutionEnd; rendering it
-      // again would append a duplicate completed row.
       break
     case .tool(.warning(let warning)):
       transcript.append(TranscriptItem(kind: .warning, title: "Warning", text: warning))
@@ -741,9 +667,6 @@ final class SessionController {
     }
   }
 
-  /// Human-readable summary of a tool call's arguments (e.g. the shell
-  /// command or file path), falling back to the raw JSON for tools without a
-  /// known summary format.
   nonisolated static func argumentSummaryText(name: String, arguments: String) -> String? {
     let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }

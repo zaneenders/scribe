@@ -28,16 +28,12 @@ EOF
 fi
 
 cd "$repo_root"
-# Build outside the plugin API so SwiftPM streams progress and diagnostics to
-# the terminal. The bundler's build then reuses these up-to-date artifacts.
 printf '[install] Building macOS products (release)...\n'
 swift build -c release
 printf '[install] Assembling Scribe.app...\n'
 SCRIBE_SKIP_ADHOC_SIGNING=1 \
   swift package --allow-writing-to-package-directory bundle
 
-# Sign outside the SwiftPM plugin sandbox, where codesign can access the user's
-# login keychain.
 printf 'Signing Scribe with "%s"...\n' "$identity"
 /usr/bin/codesign --force --sign "$identity" "$app/Contents/Helpers/scribe"
 /usr/bin/codesign --force --sign "$identity" "$app"

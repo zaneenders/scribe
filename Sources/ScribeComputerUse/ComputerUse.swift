@@ -54,8 +54,6 @@ private struct Observation {
   let treeTruncated: Bool
 }
 
-/// Owns all live AX references. Tool implementations share one actor so refs remain
-/// valid across find/observe/act calls without exposing AXUIElement as Sendable.
 public actor ComputerUseSession {
   private var observations: [String: Observation] = [:]
   private var observationOrder: [String] = []
@@ -244,8 +242,6 @@ public actor ComputerUseSession {
         closeFrameMatch = positionDelta <= 20 && sizeDelta <= 20
       }
 
-      // Never fall back to the first AX window. Acting on a weak or ambiguous
-      // match is worse than asking the caller to observe again.
       guard exactTitleMatch || closeFrameMatch else { continue }
       matches.append((candidate, (exactTitleMatch ? 100 : 0) + frameScore))
     }
@@ -263,8 +259,6 @@ public actor ComputerUseSession {
     elements: inout [String: AXUIElement],
     maximumDepth: Int
   ) -> ([UIOutlineNode], Bool) {
-    // Keep depth-first preorder so indentation represents the real AX hierarchy,
-    // while retaining the larger, configurable bounds used by filtered observations.
     let traversalLimit = 5_000
     let traversal = depthFirstPreorder(
       root: root, maxDepth: maximumDepth, maxCount: traversalLimit, maxChildren: 500,
@@ -630,7 +624,6 @@ private func integer(_ value: Any?) -> Int? {
 }
 
 public enum ComputerUseTools {
-  // TODO: Is this needed? Can we put the tools in there own files.
   public static func make() -> [any ScribeTool] {
     let session = ComputerUseSession()
     return [FindWindowsTool(session: session), ObserveUITool(session: session), ActUITool(session: session)]

@@ -42,15 +42,9 @@ package_name="scribe-linux-$architecture-$version"
 staging="$output_directory/$package_name"
 archive="$output_directory/$package_name.tar.gz"
 
-# CI can supply its static-musl CLI artifact. Local packages otherwise build a
-# native CLI with a static Swift runtime, just like the graphical executable.
 cli_binary=${SCRIBE_CLI_BINARY:-}
 wayland_binary=${SCRIBE_WAYLAND_BINARY:-}
 
-# Fail before the lengthy Swift build when a native development package is
-# absent. Having a versioned runtime library (for example libcurl.so.4) is not
-# enough: the linker and SwiftPM also need the unversioned library and pkg-config
-# metadata supplied by the distribution's development package.
 printf '[install] Checking Linux build prerequisites...\n'
 if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
   if ! command -v pkg-config >/dev/null 2>&1; then
@@ -77,15 +71,19 @@ if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
   fi
 fi
 
-bin_path=$(swift build -c "$configuration" --show-bin-path)
+build_system=${SWIFT_BUILD_SYSTEM:-native}
+bin_path=
+if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
+  bin_path=$(swift build --build-system "$build_system" -c "$configuration" --show-bin-path)
+fi
 if [ -z "$cli_binary" ]; then
   printf '[install] Building CLI (%s)...\n' "$configuration"
-  swift build -c "$configuration" --product scribe --static-swift-stdlib
+  swift build --build-system "$build_system" -c "$configuration" --product scribe --static-swift-stdlib
   cli_binary="$bin_path/scribe"
 fi
 if [ -z "$wayland_binary" ]; then
   printf '[install] Building Wayland app (%s)...\n' "$configuration"
-  swift build -c "$configuration" --product scribe-wayland --static-swift-stdlib
+  swift build --build-system "$build_system" -c "$configuration" --product scribe-wayland --static-swift-stdlib
   wayland_binary="$bin_path/scribe-wayland"
 fi
 
@@ -118,8 +116,6 @@ for binary in "$cli_binary" "$wayland_binary"; do
   fi
 done
 
-# A distributable build must not depend on Swift shared libraries or retain a
-# path into the build machine's toolchain.
 if command -v readelf >/dev/null 2>&1; then
   dynamic=$(readelf -d "$wayland_binary")
   if printf '%s\n' "$dynamic" | grep -q 'Shared library: \[libswift'; then
@@ -149,8 +145,6 @@ install -m 644 Packaging/Linux/com.zaneenders.scribe.png \
   "$staging/share/icons/hicolor/512x512/apps/com.zaneenders.scribe.png"
 install -m 644 LICENSE "$staging/LICENSE"
 
-# Exercise installation into an isolated prefix and ensure desktop substitution
-# and executable permissions are correct before publishing the archive.
 printf '[install] Testing package installation and removal...\n'
 test_prefix="$output_directory/.install-test-$architecture"
 rm -rf "$test_prefix"
@@ -175,5 +169,6 @@ printf 'Created %s\n' "$archive"
 printf 'Created %s\n' "$archive.sha256"
 
 if [ "$install_after_packaging" = true ]; then
-  printf '[install] Installing Linux package...\n'  "$staging/install.sh"
+  printf '[install] Installing Linux package...\n'
+  "$staging/install.sh"
 fi

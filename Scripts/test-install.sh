@@ -1,5 +1,4 @@
 #!/bin/sh
-# Test OS dispatch in isolation: never build, sign, or install the real app.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d)

@@ -1,8 +1,6 @@
 import Chroma
 import Foundation
 
-/// The main content area of a ready session: scrolling transcript above the
-/// composer and status chrome.
 struct ReadyLayout: Block {
   let store: ScribeMacStore
   let session: SessionController
@@ -44,8 +42,6 @@ struct TranscriptView: Block {
     } else {
       rows = transcriptRows()
     }
-    // The scroll identity is per session, so each session keeps its own
-    // scroll position while switching.
     return CommandRevealTranscript(
       id: WidgetID("transcript:\(session.sessionId.uuidString)"),
       session: session, controller: session.scroll, rows: rows,
@@ -132,13 +128,14 @@ struct TranscriptView: Block {
       id: item.layoutID,
       content: TranscriptItemBlock(
         item: item, theme: theme, selection: selection,
-        toggleText: { session.toggleTextDisclosure(id: item.id) })
-        .padding(
-          EdgeInsets(
-            top: theme.spacing / 2, leading: theme.margin,
-            bottom: theme.spacing / 2, trailing: theme.margin)
-        )
-        .sizing(x: .grow)
+        toggleText: { session.toggleTextDisclosure(id: item.id) }
+      )
+      .padding(
+        EdgeInsets(
+          top: theme.spacing / 2, leading: theme.margin,
+          bottom: theme.spacing / 2, trailing: theme.margin)
+      )
+      .sizing(x: .grow)
     )
   }
 
@@ -216,10 +213,6 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
   }
 }
 
-/// Pins the active command boundary to the top of the transcript viewport.
-/// LazyVStack only draws visible rows, so a marker cannot request its own reveal
-/// after it moves off-screen. This wrapper measures the rows before the marker
-/// and queues the exact content offset before LazyVStack handles the frame.
 private struct CommandRevealTranscript: PrimitiveBlock {
   let id: WidgetID
   let session: SessionController

@@ -7,7 +7,6 @@ var products: [Product] = [
   .library(name: "ScribeKit", targets: ["ScribeKit"]),
   .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
   .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
-  .library(name: "ScribeTerminal", targets: ["ScribeTerminal"]),
 ]
 
 var targets: [Target] = [
@@ -148,29 +147,6 @@ var targets: [Target] = [
       "GitVersionPlugin"
     ]
   ),
-  .target(
-    name: "ScribeTerminal",
-    dependencies: [
-      "PTYShim",
-      .product(name: "DequeModule", package: "swift-collections"),
-    ],
-    swiftSettings: [
-      .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
-    ]
-  ),
-  .target(
-    name: "PTYShim",
-    publicHeadersPath: "include"
-  ),
-  .testTarget(
-    name: "ScribeTerminalTests",
-    dependencies: ["ScribeTerminal"],
-    swiftSettings: [
-      .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
-    ]
-  ),
   .testTarget(
     name: "ScribeBlocksTests",
     dependencies: [
@@ -280,7 +256,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "55d970d"
+      revision: "4773d74fa732531264bcff9d344df7af866e5c99"
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),

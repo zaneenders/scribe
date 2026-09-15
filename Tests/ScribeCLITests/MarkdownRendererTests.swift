@@ -213,9 +213,7 @@ struct MarkdownRendererTests {
     let md = "Use `` `nested` `` syntax"
     let lines = render(md)
     let allSpans = lines.flatMap(\.spans)
-    // Double-backtick code span should produce code-colored output
     #expect(allSpans.contains { $0.fg == ScribePalette.markdownCode })
-    // Inner backtick must be preserved in the rendered text
     let allText = allSpans.map(\.text).joined()
     #expect(allText.contains("`nested`"))
   }
@@ -245,10 +243,8 @@ struct MarkdownRendererTests {
     let md = "~~~\ncode here\n~~~"
     let lines = render(md)
     let p = plainLines(lines)
-    // Tilde fences are normalized to backtick fences
     #expect(p.contains("```"))
     #expect(p.contains("code here"))
-    // Opening and closing fences present
     #expect(p.filter { $0 == "```" }.count == 2)
   }
 
@@ -305,7 +301,6 @@ struct MarkdownRendererTests {
     #expect(p.contains { $0.contains("child") })
     #expect(p.contains { $0.contains("child 2") })
     #expect(p.contains { $0.contains("parent 2") })
-    // Nested items should be indented more than parent items
     let parentLine = p.first { $0.contains("parent") && !$0.contains("parent 2") }!
     let childLine = p.first { $0.contains("child") }!
     #expect(childLine.count > parentLine.count)
@@ -530,25 +525,19 @@ struct MarkdownRendererTests {
     let md = "**bold***italic*`code`"
     let lines = render(md)
     let allSpans = lines.flatMap(\.spans)
-    // All three styles should be applied
     #expect(allSpans.contains { $0.bold && $0.text == "bold" })
     #expect(allSpans.contains { $0.fg == ScribePalette.markdownItalic && $0.text == "italic" })
     #expect(allSpans.contains { $0.fg == ScribePalette.markdownCode && $0.text == "code" })
-    // Text content preserved (delimiters correctly consumed)
     #expect(allSpans.map(\.text).joined() == "bolditaliccode")
   }
 
   @Test func emptyPatternContentPreservesDelimiters() {
-    // Valid markdown patterns with empty content — delimiters are consumed
     let md = "**** **** * * `` ``"
     let lines = render(md)
     let allSpans = lines.flatMap(\.spans)
-    // Bold spans with empty content
     let boldSpans = allSpans.filter { $0.bold }
     #expect(boldSpans.count >= 2)
-    // All bold spans have empty text (delimiters consumed)
     #expect(boldSpans.allSatisfy { $0.text.isEmpty })
-    // Total rendered text is just whitespace from between the patterns
     let text = allSpans.map(\.text).joined()
     #expect(text.allSatisfy { $0 == " " })
   }
@@ -600,9 +589,7 @@ struct MarkdownRendererTests {
   @Test func zeroWidthJoiners() {
     let md = "👨‍👩‍👧‍👦 family emoji"
     let lines = render(md)
-    // Plain text must exactly preserve all characters including ZWJ sequences
     #expect(renderedPlainText(md) == md)
-    // All spans must contain non-empty text
     #expect(lines.allSatisfy { $0.spans.allSatisfy { !$0.text.isEmpty } })
   }
 
@@ -610,14 +597,11 @@ struct MarkdownRendererTests {
     let md = "**café** résumé naïve"
     let lines = render(md)
     let allSpans = lines.flatMap(\.spans)
-    // Bold text with combining characters
     #expect(allSpans.contains { $0.bold && $0.text.contains("café") })
-    // Plain text preserves all accented characters (delimiters correctly consumed)
     let text = allSpans.map(\.text).joined()
     #expect(text.contains("café"))
     #expect(text.contains("résumé"))
     #expect(text.contains("naïve"))
-    // No characters lost from the original text content
     #expect(text.filter { !$0.isWhitespace } == "caférésuménaïve")
   }
 
@@ -659,11 +643,9 @@ struct MarkdownRendererTests {
     let md = "**bold *italic `code` italic* bold**"
     let lines = render(md)
     let allSpans = lines.flatMap(\.spans)
-    // All three inline styles should be present
     #expect(allSpans.contains { $0.bold && $0.text.contains("bold") })
     #expect(allSpans.contains { $0.fg == ScribePalette.markdownItalic && $0.text.contains("italic") })
     #expect(allSpans.contains { $0.fg == ScribePalette.markdownCode && $0.text.contains("code") })
-    // Text content should be preserved (delimiters correctly consumed)
     let text = allSpans.map(\.text).joined()
     #expect(text.contains("bold"))
     #expect(text.contains("italic"))
@@ -675,14 +657,11 @@ struct MarkdownRendererTests {
     let lines = render(md)
     let allSpans = lines.flatMap(\.spans)
     let text = allSpans.map(\.text).joined()
-    // Triple backtick code spans should consume the backticks as delimiters
-    // and preserve the inner text
     #expect(text.contains("a"))
     #expect(text.contains("b"))
     #expect(text.contains("c"))
     #expect(text.contains("d"))
     #expect(text.contains("e"))
-    // Backticks should not appear in rendered text (valid code span delimiters)
     #expect(!text.contains("`"))
   }
 

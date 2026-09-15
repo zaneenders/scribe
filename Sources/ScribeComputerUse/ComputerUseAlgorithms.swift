@@ -1,8 +1,5 @@
 import Foundation
 
-/// Produces a bounded depth-first preorder traversal. Keeping this independent
-/// of AXUIElement lets us test the ordering and limits without Accessibility
-/// permission or a running GUI application.
 func depthFirstPreorder<Element>(
   root: Element,
   maxDepth: Int,
@@ -27,8 +24,6 @@ func depthFirstPreorder<Element>(
   return output
 }
 
-/// Maps the agent-facing action vocabulary to native Accessibility action
-/// names. Attribute writes such as focus and set_text are intentionally absent.
 func semanticAccessibilityActionName(for action: String) -> String? {
   switch action {
   case "press": return "AXPress"

@@ -2,7 +2,6 @@ import Chroma
 import Foundation
 import Observation
 
-/// Opt-in, local display-list capture. Captures may contain conversation text and images.
 @MainActor
 @Observable
 public final class ScribeSceneCapture {
@@ -13,9 +12,10 @@ public final class ScribeSceneCapture {
   private var saving = false
   private let directory: URL
 
-  init(directory: URL = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".scribe/captures", isDirectory: true))
-  {
+  init(
+    directory: URL = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".scribe/captures", isDirectory: true)
+  ) {
     self.directory = directory
   }
 
@@ -44,8 +44,9 @@ public final class ScribeSceneCapture {
             attributes: [.posixPermissions: 0o700])
           let data = try SceneCapture.encode(frame)
           let url = directory.appendingPathComponent("scene-\(UUID().uuidString).chromacapture")
-          guard FileManager.default.createFile(
-            atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
+          guard
+            FileManager.default.createFile(
+              atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
           else { throw CocoaError(.fileWriteUnknown) }
           return url
         }

@@ -10,7 +10,6 @@ import Testing
 @testable import ScribeCore
 
 extension RetryPolicy {
-  /// Millisecond backoffs so retry tests stay fast.
   static let fastTestPolicy = RetryPolicy(
     maxRetries: 3,
     initialDelay: .milliseconds(1),
@@ -1049,8 +1048,6 @@ struct AgentLoopTests {
     #expect(stringContent(messages[2])?.contains("stopped") == true)
   }
 
-  // MARK: - Transient failure retry
-
   @Test func retriesTransientHTTPErrorWithBackoff() async throws {
     let transport = ScriptedTransport(responses: [
       ScriptedTransport.Response(status: 429, chunks: [errorBody("engine overloaded")]),
@@ -1227,7 +1224,6 @@ struct AgentLoopTests {
       logger: testLogger,
       abortObserver: AbortNotifier()
     )
-    // The round fails mid-stream; the error surfaces without replaying the round.
     guard case .error = termination else {
       #expect(Bool(false), "Expected error termination, got \(termination)")
       return

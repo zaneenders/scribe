@@ -5,10 +5,6 @@ import Testing
 
 @testable import ScribeCore
 
-// MARK: - Test Helpers
-
-/// Drives a CodexStreamProcessor with the given SSE string and returns the
-/// events emitted and the final turn state.
 private func driveProcessor(
   sse: String
 ) async throws -> (events: [AgentEvent], turn: CodexAssistantTurn, processor: CodexStreamProcessor<NoOpAbortObserver>) {
@@ -25,8 +21,6 @@ private func driveProcessor(
   try await processor.process(httpBody: body, httpStart: .now, turn: &turn)
   return (events, turn, processor)
 }
-
-// MARK: - Terminal Event Finalization Tests
 
 @Test
 func codexStreamEmitsFinalizedOnResponseCompletedWithTextDelta() async throws {
@@ -126,8 +120,6 @@ func codexStreamEmitsEmptyWhenNoContentBeforeResponseCompleted() async throws {
 
 @Test
 func codexStreamWithDoneSentinelStillFinalizes() async throws {
-  // When only [DONE] terminates the stream (no response.completed event),
-  // the post-loop finalization should still kick in.
   let sse =
     makeSSE(
       #"{"type":"response.output_text.delta","delta":"Hi"}"#
@@ -190,9 +182,6 @@ func codexStreamIncludesRawEventWhenErrorHasNoMessage() async throws {
 
 @Test
 func codexStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent() async throws {
-  // If both response.completed and [DONE] appear, the early return
-  // from response.completed must prevent a double-finalize from the
-  // post-loop path.
   let sse =
     makeSSE(
       #"{"type":"response.output_text.delta","delta":"One and only one"}"#,

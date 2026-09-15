@@ -1,6 +1,5 @@
 import Foundation
 
-/// One-shot, buffered readiness notification for async test doubles.
 struct TestReadiness: Sendable {
   private let channel = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
 
@@ -29,7 +28,6 @@ private struct TestReadinessTimeout: Error, CustomStringConvertible {
   var description: String { "Test operation did not signal readiness within 15 seconds" }
 }
 
-/// A child process signals only after reaching the point under test.
 struct ShellReadinessMarker: Sendable {
   let directory: URL
   let marker: URL

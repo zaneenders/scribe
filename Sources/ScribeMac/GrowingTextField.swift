@@ -1,8 +1,6 @@
 import Chroma
 import Foundation
 
-/// A multiline, monospace text input that grows from one to `maxLines` visual
-/// rows. Return inserts a newline; sending uses a backend-neutral command.
 struct GrowingTextField: PrimitiveBlock {
 
   let id: WidgetID

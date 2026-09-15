@@ -20,8 +20,6 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     guard build.succeeded else {
       throw BundlerError.buildFailed(log: build.logText)
     }
-    // The plugin API captures build output; retain warnings and progress even
-    // when the build succeeds. install-macos.sh streams the initial build live.
     if !build.logText.isEmpty {
       print(build.logText)
     }
@@ -60,8 +58,6 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     try FileManager.default.copyItem(at: infoPlist, to: contentsURL.appendingPathComponent("Info.plist"))
     try FileManager.default.copyItem(at: appIcon, to: resourcesURL.appendingPathComponent("AppIcon.icns"))
 
-    // Resource bundles are emitted beside the products, not included in the executable artifacts.
-    // Discover them from the actual build output rather than assuming a particular SwiftPM backend.
     var installedBundles: Set<String> = []
     for directory in Set([macBinary.deletingLastPathComponent(), cliBinary.deletingLastPathComponent()]) {
       let entries = try FileManager.default.contentsOfDirectory(
@@ -74,7 +70,6 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
         guard installedBundles.insert(name).inserted else { continue }
         Diagnostics.remark("Installing resource bundle \(name)…")
         try FileManager.default.copyItem(at: bundle, to: resourcesURL.appendingPathComponent(name))
-        // The embedded command-line tool searches beside its executable.
         try FileManager.default.createSymbolicLink(
           atPath: helpersURL.appendingPathComponent(name).path,
           withDestinationPath: "../Resources/\(name)"
@@ -115,8 +110,6 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     try FileManager.default.copyItem(at: source, to: destination)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
   }
-
-  // Signing is intentionally ad-hoc here because SwiftPM command plugins run sandboxed.
 
   private static func run(_ executable: String, arguments: [String]) throws {
     let process = Process()

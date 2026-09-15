@@ -59,7 +59,6 @@ public struct PendingMessageQueue: Sendable {
   }
 }
 
-/// The single FIFO queue of user messages waiting behind the active turn.
 public final class SessionMessageQueue: Sendable {
   private let lock: Mutex<PendingMessageQueue>
 

@@ -71,7 +71,7 @@ struct ShortcutTests {
     key(.enter)
     #expect(state.text == "previous prompt\n")
     key(.character("f"), text: "f")
-    #expect(state.text.contains("f")) // printable picker keys still type in composer
+    #expect(state.text.contains("f"))
     context.endEditing()
     key(.character("f"), text: "f")
     key(.character("j"), text: "j")
@@ -80,6 +80,6 @@ struct ShortcutTests {
     #expect(state.commands.contains(ScribeCommandPickerCommand.next))
     #expect(state.commands.contains(ScribeCommandPickerCommand.toggle))
     key(.enter, modifiers: modifier)
-    #expect(state.submitted == 1) // sending is inert outside composer editing
+    #expect(state.submitted == 1)
   }
 }

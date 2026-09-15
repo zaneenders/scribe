@@ -2,10 +2,8 @@ import Foundation
 import ScribeComputerUse
 import ScribeCore
 
-/// Builds the system prompt every Scribe front-end (CLI, macOS app) shares.
 public enum ScribeSystemPrompt {
 
-  /// Pure composition; file loading happens only when creating a new session.
   public static func make(tools: [any ScribeTool], cwd: String, additionalInstructions: String = "") -> String {
     let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
     let base = """
@@ -22,17 +20,12 @@ public enum ScribeSystemPrompt {
       Scribe's configuration, logs, and sessions live under `~/.scribe/` by default.
       This is runtime data storage, not a required source-code workspace.
 
-      Prefer the current working directory when it is a Scribe checkout, unless the user specifies another location.
-      If no suitable checkout exists, you may clone the zaneenders/scribe repository
-      from GitHub into `~/.scribe/scribe`, using the user's preferred Git transport.
-
       Your current working directory is (relative paths resolve here): \(cwd)
       """
     guard !additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return base }
     return base + "\n\n# Additional user-configured instructions\n\n" + additionalInstructions
   }
 
-  /// Called only for new sessions. The combined prompt is persisted once.
   public static func load(tools: [any ScribeTool], cwd: String, paths: ScribePaths) throws -> String {
     let url = URL(fileURLWithPath: paths.systemPromptPath.string)
     let instructions: String
@@ -53,7 +46,6 @@ public enum ScribeSystemPrompt {
     var errorDescription: String? { description }
   }
 
-  /// The default tool set every front-end offers the agent.
   public static func defaultTools() -> [any ScribeTool] {
     [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()] + ComputerUseTools.make()
   }

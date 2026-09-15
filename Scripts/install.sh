@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: ./Scripts/install.sh [--help]
 
-Build and install Scribe for the current platform using Swift's default build system.
+Build and install Scribe for the current platform using the platform build scripts.
 
 macOS:
   Builds and signs Scribe.app (including the embedded CLI).
@@ -16,6 +16,7 @@ Linux:
   Builds a redistributable archive and installs the CLI and Wayland app.
   PREFIX                   Install prefix (default: ~/.local)
   CONFIGURATION            Swift build configuration (default: release)
+  SWIFT_BUILD_SYSTEM       SwiftPM build engine (default: native; static-link workaround)
   OUTPUT_DIRECTORY         Archive output directory (default: repository dist/)
   VERSION                  Override the archive version
   SCRIBE_CLI_BINARY         Use an existing CLI executable

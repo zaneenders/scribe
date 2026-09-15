@@ -3,7 +3,6 @@ import Logging
 import ScribeCore
 import SystemPackage
 
-/// A fully initialized session suitable for a graphical or terminal front end.
 public struct BootstrappedSession: Sendable {
   public let harness: SessionHarness
   public let messageQueue: SessionMessageQueue
@@ -35,7 +34,6 @@ public struct BootstrappedSession: Sendable {
   }
 }
 
-/// Shared session construction for non-CLI front ends.
 public enum ScribeSessionBootstrap {
   public static func open(
     resumeLatest: Bool = false,

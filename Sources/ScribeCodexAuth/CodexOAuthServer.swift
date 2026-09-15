@@ -9,8 +9,6 @@ import Glibc
 import Musl
 #endif
 
-// MARK: - OAuth Constants
-
 public enum CodexOAuthConstants {
   public static let clientId = "app_EMoamEEZ73f0CkXaXp7hrann"
   public static let authBaseURL = "https://auth.openai.com"
@@ -23,25 +21,10 @@ public enum CodexOAuthConstants {
   public static let callbackHost = "127.0.0.1"
 }
 
-// MARK: - Callback Server
-
-/// Minimal HTTP server for the OAuth callback.
-/// Uses a raw POSIX socket — no NIO dependency needed for this simple task.
-///
-/// The server keeps accepting connections until a valid OAuth callback arrives
-/// or the overall timeout expires.  Invalid or unrelated requests are answered
-/// with an appropriate HTTP error and the server continues listening.
 enum CodexOAuthCallbackServer {
 
-  /// Overall timeout for the login flow (seconds).
-  static let loginTimeout: TimeInterval = 300  // 5 minutes
+  static let loginTimeout: TimeInterval = 300
 
-  /// Thread-safe ownership of the listening socket.
-  ///
-  /// Cancellation may arrive before or after the server creates its socket.
-  /// `install` transfers ownership into this state unless cancellation already
-  /// won; `closeIfOpen` atomically takes ownership before closing so the file
-  /// descriptor is closed exactly once.
   private final class ListeningSocket: Sendable {
     private struct State: ~Copyable {
       var descriptor: Int32?
@@ -50,7 +33,6 @@ enum CodexOAuthCallbackServer {
 
     private let state = Mutex(State())
 
-    /// Install a newly created descriptor, returning false if cancellation won.
     func install(_ descriptor: Int32) -> Bool {
       state.withLock { state in
         guard !state.cancelled else { return false }
@@ -60,7 +42,6 @@ enum CodexOAuthCallbackServer {
       }
     }
 
-    /// Close the descriptor once and prevent any later descriptor installation.
     func closeIfOpen() {
       let descriptor = state.withLock { state -> Int32? in
         state.cancelled = true
@@ -73,15 +54,6 @@ enum CodexOAuthCallbackServer {
     }
   }
 
-  /// Start the callback server and wait for a valid authorization code.
-  /// - Parameters:
-  ///   - expectedState: CSRF state token to verify in the callback.
-  ///   - host: Bind address (default 127.0.0.1).
-  ///   - port: Bind port (default 1455).
-  ///   - timeout: Maximum time to wait (default 5 minutes).
-  ///   - onReady: Called with success after bind+listen, or with the startup
-  ///     error if the server cannot begin listening.
-  /// - Returns: The authorization code.
   static func waitForCode(
     expectedState: String,
     host: String = CodexOAuthConstants.callbackHost,
@@ -93,13 +65,11 @@ enum CodexOAuthCallbackServer {
 
     return try await withTaskCancellationHandler {
       try await withThrowingTaskGroup(of: String.self) { group in
-        // Timeout task — fires after `timeout` seconds.
         group.addTask {
           try await Task.sleep(for: .seconds(timeout))
           throw CodexOAuthError.loginTimeout
         }
 
-        // Server task — blocks until a valid callback is received.
         group.addTask {
           try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -115,15 +85,10 @@ enum CodexOAuthCallbackServer {
               }.start()
             }
           } onCancel: {
-            // When the server task is cancelled (e.g. timeout wins),
-            // close the socket so accept() unblocks with EBADF and
-            // the continuation is resumed rather than left dangling.
             box.closeIfOpen()
           }
         }
 
-        // Take the first completed child.
-        // Wrap in do/catch so cancelAll runs on every exit path.
         let code: String
         do {
           code = try await group.next()!
@@ -135,12 +100,9 @@ enum CodexOAuthCallbackServer {
         return code
       }
     } onCancel: {
-      // Close the listening socket so accept() unblocks (returns EBADF).
       box.closeIfOpen()
     }
   }
-
-  // MARK: - Synchronous Server (runs on a dedicated Thread)
 
   private static func runServer(
     host: String,
@@ -155,7 +117,6 @@ enum CodexOAuthCallbackServer {
       continuation.resume(throwing: error)
     }
 
-    // --- Create socket ---
     #if canImport(Glibc) || canImport(Musl)
     let sock = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
     #else
@@ -165,8 +126,6 @@ enum CodexOAuthCallbackServer {
       failStartup(.serverError("socket() failed: \(errno)"))
       return
     }
-    // Transfer ownership to the cancellation state. If cancellation arrived
-    // before socket creation, retain ownership here and close it immediately.
     guard box.install(sock) else {
       close(sock)
       failStartup(.loginCancelled)
@@ -174,15 +133,12 @@ enum CodexOAuthCallbackServer {
     }
     defer { box.closeIfOpen() }
 
-    // --- SO_REUSEADDR ---
     var reuse: Int32 = 1
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
 
-    // --- Per-accept timeout so we can notice cancellation ---
     var tv = timeval(tv_sec: 2, tv_usec: 0)
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
-    // --- Bind ---
     var addr = sockaddr_in()
     addr.sin_family = sa_family_t(AF_INET)
     addr.sin_port = port.bigEndian
@@ -197,28 +153,21 @@ enum CodexOAuthCallbackServer {
       return
     }
 
-    // --- Listen ---
     guard listen(sock, 1) >= 0 else {
       failStartup(.serverError("listen() failed: \(errno)"))
       return
     }
 
-    // --- Signal readiness ---
-    // The caller can now safely launch the browser.
     onReady?(.success(()))
 
-    // --- Accept loop ---
-    // Keep accepting connections until we get a valid OAuth callback.
     while true {
       let client = accept(sock, nil, nil)
       if client < 0 {
         switch errno {
         case EBADF, EINVAL:
-          // Socket was closed (cancellation).
           continuation.resume(throwing: CodexOAuthError.loginCancelled)
           return
         case EAGAIN, EWOULDBLOCK, EINTR:
-          // SO_RCVTIMEO fired or a signal interrupted — retry.
           continue
         default:
           continuation.resume(
@@ -227,7 +176,6 @@ enum CodexOAuthCallbackServer {
         }
       }
 
-      // Try to extract a valid authorization code from this connection.
       if let code = handleConnection(client, expectedState: expectedState) {
         close(client)
         continuation.resume(returning: code)
@@ -235,40 +183,30 @@ enum CodexOAuthCallbackServer {
       }
 
       close(client)
-      // Invalid request — loop and accept the next connection.
     }
   }
 
-  // MARK: - Connection Handling
-
-  /// Parse one HTTP connection.  Returns the authorization code on success,
-  /// or `nil` after sending an appropriate error response so the caller
-  /// can continue accepting.
   private static func handleConnection(
     _ client: Int32,
     expectedState: String
   ) -> String? {
-    // Read the request.
     var requestBuffer = [UInt8](repeating: 0, count: 4096)
     let bytesRead = read(client, &requestBuffer, requestBuffer.count)
     guard bytesRead > 0 else { return nil }
 
     let request = String(decoding: requestBuffer[0..<bytesRead], as: UTF8.self)
 
-    // Parse the request line.
     guard let firstLine = request.split(separator: "\r\n").first.map(String.init) else {
       sendResponse(client, status: 400, body: htmlPage(title: "Error", body: "Bad request"))
       return nil
     }
 
-    // GET /auth/callback?code=...&state=... HTTP/1.1
     let parts = firstLine.split(separator: " ")
     guard parts.count >= 2, let path = parts.dropFirst().first.map(String.init) else {
       sendResponse(client, status: 400, body: htmlPage(title: "Error", body: "Bad request"))
       return nil
     }
 
-    // Only the callback route is recognised.
     guard
       let urlComponents = URLComponents(string: path),
       urlComponents.path == "/auth/callback"
@@ -284,7 +222,6 @@ enum CodexOAuthCallbackServer {
         dict[item.name] = item.value
       } ?? [:]
 
-    // Verify CSRF state.
     guard params["state"] == expectedState else {
       sendResponse(
         client, status: 400,
@@ -292,7 +229,6 @@ enum CodexOAuthCallbackServer {
       return nil
     }
 
-    // Extract authorization code.
     guard let code = params["code"], !code.isEmpty else {
       sendResponse(
         client, status: 400,
@@ -300,7 +236,6 @@ enum CodexOAuthCallbackServer {
       return nil
     }
 
-    // Success — send the landing page and return the code.
     sendResponse(
       client, status: 200,
       body: htmlPage(
@@ -308,8 +243,6 @@ enum CodexOAuthCallbackServer {
         body: "OpenAI authentication completed. You can close this window."))
     return code
   }
-
-  // MARK: - HTTP Response Helpers
 
   private static func sendResponse(_ sock: Int32, status: Int, body: String) {
     let statusText: String = {
@@ -341,8 +274,6 @@ enum CodexOAuthCallbackServer {
     """
   }
 }
-
-// MARK: - OAuth Errors
 
 public enum CodexOAuthError: Error, CustomStringConvertible {
   case stateMismatch

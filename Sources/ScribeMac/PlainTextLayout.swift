@@ -1,12 +1,7 @@
 import Chroma
 
-/// One linear pass, no Markdown parser, ASCII conversion, or retained cache.
-/// Hard wrapping preserves every source character, including whitespace. A tab
-/// occupies one cell in this initial literal renderer; it is not expanded in data.
 func layoutPlainText(_ text: String, columns: Int, color: Color) -> [VisualLine] {
   let columns = max(1, columns)
-  // ASCII byte offsets are also character boundaries. Avoid Swift grapheme
-  // indexing for large logs, without changing any bytes or retaining a cache.
   if text.utf8.allSatisfy({ $0 < 128 }) {
     let bytes = Array(text.utf8)
     var lines: [VisualLine] = []
@@ -14,9 +9,10 @@ func layoutPlainText(_ text: String, columns: Int, color: Color) -> [VisualLine]
     var index = 0
     func emit(_ end: Int, separator: String) {
       let value = String(decoding: bytes[start..<end], as: UTF8.self)
-      lines.append(VisualLine(
-        runs: value.isEmpty ? [] : [VisualRun(text: value, color: color)],
-        columnCount: end - start, trailingText: separator))
+      lines.append(
+        VisualLine(
+          runs: value.isEmpty ? [] : [VisualRun(text: value, color: color)],
+          columnCount: end - start, trailingText: separator))
     }
     while index < bytes.count {
       if bytes[index] == 10 || bytes[index] == 13 {
@@ -42,9 +38,10 @@ func layoutPlainText(_ text: String, columns: Int, color: Color) -> [VisualLine]
 
   func emit(end: String.Index, separator: String) {
     let value = String(text[start..<end])
-    lines.append(VisualLine(
-      runs: value.isEmpty ? [] : [VisualRun(text: value, color: color)],
-      columnCount: count, trailingText: separator))
+    lines.append(
+      VisualLine(
+        runs: value.isEmpty ? [] : [VisualRun(text: value, color: color)],
+        columnCount: count, trailingText: separator))
   }
 
   while index < text.endIndex {

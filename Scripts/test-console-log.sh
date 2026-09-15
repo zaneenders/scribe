@@ -1,5 +1,4 @@
 #!/bin/sh
-# Keep descriptor redirection isolated from the test runner.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d)

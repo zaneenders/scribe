@@ -8,8 +8,6 @@ import Testing
 @Suite
 struct CodexAuthMiddlewareTests {
 
-  // MARK: - Token injection
-
   @Test("injects Authorization and account-id when both provided")
   func injectsBothHeaders() async throws {
     let request = try await interceptedRequest(
@@ -51,8 +49,6 @@ struct CodexAuthMiddlewareTests {
     #expect(request.headerFields[.init("chatgpt-account-id")!] == nil)
   }
 
-  // MARK: - Originator header
-
   @Test("always sets originator header to pi")
   func setsOriginatorHeader() async throws {
     let request = try await interceptedRequest(
@@ -74,8 +70,6 @@ struct CodexAuthMiddlewareTests {
 
     #expect(captured.headerFields[.init("originator")!] == "custom")
   }
-
-  // MARK: - Response pass-through
 
   @Test("passes through response unchanged")
   func passesThroughResponse() async throws {

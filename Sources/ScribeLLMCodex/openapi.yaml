@@ -30,9 +30,6 @@ paths:
 
 components:
   schemas:
-    # ------------------------------------------------------------------
-    # Request
-    # ------------------------------------------------------------------
     CreateCodexResponseRequest:
       type: object
       required: [model]
@@ -111,9 +108,6 @@ components:
           description: Reasoning summary style
       additionalProperties: true
 
-    # ------------------------------------------------------------------
-    # Input Items (conversation messages)
-    # ------------------------------------------------------------------
     CodexInputItem:
       oneOf:
         - $ref: "#/components/schemas/CodexSystemMessage"
@@ -289,9 +283,6 @@ components:
                 $ref: "#/components/schemas/CodexInputContent"
           description: Tool result text or content array (for images)
 
-    # ------------------------------------------------------------------
-    # Tools
-    # ------------------------------------------------------------------
     CodexTool:
       type: object
       required: [type, name]
@@ -317,9 +308,6 @@ components:
             Only included in tool_search_output items, not as a top-level tool.
       additionalProperties: true
 
-    # ------------------------------------------------------------------
-    # SSE Stream Events (simplified union of key event types)
-    # ------------------------------------------------------------------
     CodexResponseStreamEvent:
       type: object
       description: >
@@ -345,21 +333,16 @@ components:
             - response.incomplete
             - response.failed
             - error
-        # --- response.created ---
         response:
           $ref: "#/components/schemas/CodexCreatedResponse"
-        # --- response.output_item.added ---
         output_index:
           type: integer
         item:
           $ref: "#/components/schemas/CodexOutputItem"
-        # --- delta events ---
         delta:
           type: string
-        # --- response.function_call_arguments.done ---
         arguments:
           type: string
-        # --- error ---
         code:
           type: string
         message:
@@ -461,9 +444,6 @@ components:
           type: string
       additionalProperties: true
 
-    # ------------------------------------------------------------------
-    # Terminal response (response.completed / response.incomplete)
-    # ------------------------------------------------------------------
     CodexTerminalResponse:
       type: object
       properties:

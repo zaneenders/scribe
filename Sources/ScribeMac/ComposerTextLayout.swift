@@ -1,5 +1,3 @@
-/// Row boundaries use Character offsets for editing and String indices for slicing.
-/// Offscreen rows never allocate their own strings.
 struct ComposerTextLayout {
   struct Row {
     let range: Range<String.Index>
@@ -58,8 +56,6 @@ struct ComposerTextLayout {
   func text(for row: Row) -> String { String(text[row.range]) }
 }
 
-/// Owned by a session, not the ephemeral block graph. One full layout is retained.
-/// A revision avoids even comparing a large unchanged draft on each frame.
 @MainActor
 final class ComposerTextLayoutCache {
   private var revision: UInt64?

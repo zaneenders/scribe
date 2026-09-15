@@ -72,8 +72,6 @@ public actor SessionHarness {
     )
   }
 
-  /// The active configuration, used by front ends for session-level actions
-  /// such as TLDR summarization that must use the session's selected profile.
   public func configurationSnapshot() -> ScribeConfig {
     configuration
   }

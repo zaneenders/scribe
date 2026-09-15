@@ -8,8 +8,6 @@ import Synchronization
 import SystemPackage
 import Testing
 
-// MARK: - Shared helpers (kept minimal — loop-level tests own detailed behaviour)
-
 private let defaultHistory: [ScribeMessage] = [
   ScribeMessage(role: .system, content: "You are a test agent.")
 ]
@@ -32,9 +30,6 @@ private func makeAgent(
   )
 }
 
-/// Drains the event stream of a `TurnStream` while awaiting its result.
-/// Ensures events are fully consumed *before* the result is returned,
-/// preventing unstructured tasks from outliving the test.
 private func consume(_ ts: TurnStream) async throws -> TurnResult {
   let eventTask = Task {
     for await _ in ts.events {}
@@ -44,12 +39,8 @@ private func consume(_ ts: TurnStream) async throws -> TurnResult {
   return result
 }
 
-// MARK: -
-
 @Suite
 struct ScribeAgentTests {
-
-  // MARK: - Input wiring
 
   @Test func stringInputIsConvertedToUserMessage() async throws {
     let chunks = [
@@ -78,8 +69,6 @@ struct ScribeAgentTests {
     #expect(result.newMessages.last?.content == "ack")
   }
 
-  // MARK: - Abort lifecycle
-
   @Test func abortBetweenRunsDoesNotLeak() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
@@ -91,8 +80,6 @@ struct ScribeAgentTests {
     let result = try await consume(ts)
     #expect(result.outcome == .completed)
   }
-
-  // MARK: - Custom ToolExecutor
 
   private struct UnreachableTool: ScribeTool {
     static var name: String { "unreachable" }
@@ -167,8 +154,6 @@ struct ScribeAgentTests {
     #expect(stringContent(toolMessage) == recorder.canned)
   }
 
-  // MARK: - TurnStream: events + result consumption
-
   @Test func turnStreamEventsAndResultCanBothBeConsumed() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","choices":[{"index":0,"delta":{"content":"hello"}}]}"#),
@@ -178,11 +163,9 @@ struct ScribeAgentTests {
     let agent = makeAgent(chunks: chunks)
     let ts = agent.run("greet", history: defaultHistory)
 
-    // Consume events
     var eventCount = 0
     for await _ in ts.events { eventCount += 1 }
 
-    // Then consume the result
     let result = try await ts.result.value
     #expect(result.outcome == .completed)
     #expect(eventCount > 0)

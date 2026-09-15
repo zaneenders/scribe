@@ -114,7 +114,6 @@ struct AbortNotifierTests {
         try await Task.sleep(for: .seconds(2))
         outcomes.continuation.yield(.timeout)
       } catch {
-        // The tool completed first and cancelled this deadline.
       }
     }
 
@@ -126,9 +125,6 @@ struct AbortNotifierTests {
 
     switch outcome {
     case .interrupted:
-      // Receiving this before the deadline proves the event-driven abort path
-      // woke the registry. Avoid a sub-second scheduling assertion: heavily
-      // loaded CI runners can pause the test task after the abort is delivered.
       break
     case .unexpectedSuccess:
       Issue.record("Expected AgentTurnInterruptedError, but the tool completed")

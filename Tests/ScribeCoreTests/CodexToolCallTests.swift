@@ -20,8 +20,6 @@ func codexToolCallIdentifiersSupportLegacyUnencodedIDs() {
 
 @Test
 func codexToolCallIdentifiersSanitizeForeignProviderIDs() {
-  // Mid-session model switch left this non-Codex ID in the history; the ChatGPT
-  // backend rejected it with: Expected an ID that begins with 'fc'.
   let identifiers = CodexToolCallIdentifiers(encoded: "tool_3AXlpi3mBRnQCMzIr7HgDba0")
 
   #expect(identifiers.callID == "call_tool_3AXlpi3mBRnQCMzIr7HgDba0")

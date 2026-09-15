@@ -12,20 +12,10 @@ import Glibc
 import Musl
 #endif
 
-/// Controls how the agent loop reacts to transient networking failures: a failed
-/// provider round is retried up to `maxRetries` times with full-jitter exponential
-/// backoff between attempts.
-///
-/// A round is only retried while it has produced no visible stream output; once
-/// assistant content reaches the transcript, replaying the round would duplicate it.
 public struct RetryPolicy: Sendable {
-  /// Number of retries after the initial attempt. `0` disables retrying.
   public var maxRetries: Int
-  /// Backoff ceiling for the first retry; later retries grow by `multiplier`.
   public var initialDelay: Duration
-  /// Upper bound for a single backoff.
   public var maxDelay: Duration
-  /// Growth factor applied per retry attempt.
   public var multiplier: Double
 
   public init(
@@ -40,11 +30,8 @@ public struct RetryPolicy: Sendable {
     self.multiplier = multiplier
   }
 
-  /// Default policy: 3 retries, 1s initial backoff doubling to at most 20s.
   public static let `default` = RetryPolicy()
 
-  /// Full-jitter exponential backoff for a 1-based retry attempt: a random delay
-  /// between zero and `min(maxDelay, initialDelay * multiplier^(attempt - 1))`.
   func delay(forRetryAttempt attempt: Int) -> Duration {
     let base = Self.seconds(initialDelay)
     let cap = Self.seconds(maxDelay)
@@ -59,13 +46,7 @@ public struct RetryPolicy: Sendable {
   }
 }
 
-// MARK: - Transient failure classification
-
 extension RetryPolicy {
-  /// True when `error` is a transient networking failure worth retrying: rate limiting
-  /// (HTTP 429), request timeout (408), server errors (5xx), or a transport-level
-  /// failure such as a dropped connection or timeout. Other client errors (4xx),
-  /// malformed streams, and cancellations are not retried.
   func isRetryable(_ error: any Error) -> Bool {
     switch error {
     case is CancellationError, is AgentTurnInterruptedError:
@@ -80,7 +61,6 @@ extension RetryPolicy {
         return false
       }
     case let clientError as ClientError:
-      // OpenAPIRuntime wraps transport and middleware failures; classify the cause.
       return isRetryable(clientError.underlyingError)
     case let urlError as URLError:
       return urlError.code.isTransientNetworkFailure
@@ -134,8 +114,6 @@ extension RetryPolicy {
 }
 
 extension URLError.Code {
-  /// Connection-level failures that may succeed on retry, mirroring the transient
-  /// transport failures surfaced by the NIO stack.
   fileprivate var isTransientNetworkFailure: Bool {
     switch self {
     case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,

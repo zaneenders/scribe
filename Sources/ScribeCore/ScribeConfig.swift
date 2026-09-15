@@ -13,11 +13,7 @@ public struct ScribeConfig: Sendable {
   public var reasoningEffort: String?
   public var maxTokens: Int?
   public var sendsOpenCodeHeader: Bool
-  /// Optional per-profile sampling temperature. When `nil`, providers use
-  /// their default (currently 0 for OpenAI-compatible requests).
   public var temperature: Double?
-  /// Retries per provider round on transient networking failures; `nil` uses the
-  /// default policy, `0` disables retrying.
   public var maxRetries: Int?
   public init(
     agentModel: String,

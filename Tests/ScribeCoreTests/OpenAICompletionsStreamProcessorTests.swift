@@ -5,9 +5,6 @@ import Testing
 
 @testable import ScribeCore
 
-// MARK: - Test Helpers
-
-/// Drives a StreamProcessor with the given SSE string and returns the events and turn state.
 private func driveProcessor(
   sse: String
 ) async throws -> (events: [AgentEvent], turn: StreamedAssistantTurn, processor: StreamProcessor<NoOpAbortObserver>) {
@@ -24,8 +21,6 @@ private func driveProcessor(
   try await processor.process(httpBody: body, httpStart: .now, turn: &turn)
   return (events, turn, processor)
 }
-
-// MARK: - Terminal Event Finalization
 
 @Suite
 struct OpenAICompletionsStreamProcessorTests {
@@ -106,8 +101,6 @@ struct OpenAICompletionsStreamProcessorTests {
     #expect(sections.count == 2)
   }
 
-  // MARK: - [DONE] sentinel
-
   @Test("handles [DONE] sentinel after content")
   func handlesDoneSentinel() async throws {
     let sse =
@@ -151,8 +144,6 @@ struct OpenAICompletionsStreamProcessorTests {
     #expect(turn.text == "X")
   }
 
-  // MARK: - Usage tracking
-
   @Test("tracks usage from chunk with usage field")
   func tracksUsage() async throws {
     let sse = makeSSE(
@@ -176,8 +167,6 @@ struct OpenAICompletionsStreamProcessorTests {
 
     #expect(processor.lastUsage == nil)
   }
-
-  // MARK: - Stream flags
 
   @Test("streamStarted is false when no content received")
   func streamNotStartedWhenNoContent() async throws {
