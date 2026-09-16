@@ -39,6 +39,12 @@ extension ScribeBlock {
       bind("x", modifiers: shortcutModifier, to: .editing(.cut))
       bind("v", modifiers: shortcutModifier, to: .editing(.paste))
       bind("a", modifiers: shortcutModifier, to: .editing(.selectAll))
+      #if os(Linux)
+      bind("c", modifiers: .control, to: .editing(.copy))
+      bind("x", modifiers: .control, to: .editing(.cut))
+      bind("v", modifiers: .control, to: .editing(.paste))
+      bind("a", modifiers: .control, to: .editing(.selectAll))
+      #endif
       bind(.backspace, to: .editing(.backspace))
       bind(.delete, to: .editing(.deleteForward))
       bind(.leftArrow, to: .editing(.moveCaretLeft))
