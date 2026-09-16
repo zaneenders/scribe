@@ -3,7 +3,7 @@
 ## Requirements
 
 Until a 1.0.0 release the project targets the latest Swift version only.
-Swift tools 6.4 or newer are required; use the Chroma-matched snapshot pinned
+Swift tools 6.4 or newer are required; use the official Swift 6.4.0 release pinned
 in `.swift-version`. See [README.md](README.md#requirements) for Swiftly setup.
 
 Currently only working on MacOs and Linux support so Windows is not currently

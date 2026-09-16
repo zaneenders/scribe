@@ -256,7 +256,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "4773d74fa732531264bcff9d344df7af866e5c99"
+      revision: "6524b50"
     ),
     .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),

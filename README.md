@@ -7,8 +7,7 @@ Supports OpenAI-compatible providers and ChatGPT/Codex.
 
 - macOS 27+ or Linux (x86_64/aarch64); Windows is unsupported.
 - Swift tools 6.4+. Install [Swiftly](https://www.swift.org/install/), then run
-  `swiftly install` to use the snapshot pinned in `.swift-version` (currently
-  `main-snapshot-2026-09-10`, Swift 6.5-dev).
+  `swiftly install` to use the official Swift 6.4.0 release pinned in `.swift-version`.
 
 Linux build dependencies:
 
