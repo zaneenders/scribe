@@ -737,6 +737,7 @@ final class SelectionManager {
       if let entry = MarkdownLayoutRegistry.entry(at: origin),
         let hit = entry.layout.hitTest(point: origin)
       {
+        context.endEditing()
         originLayoutID = entry.id
         endLayoutID = entry.id
         selectionStart = hit
@@ -991,7 +992,7 @@ final class SelectionManager {
       if entry.id == endID { return (id: entry.id, layout: endLayout) }
       return (id: entry.id, layout: entry.layout(columns: columns, matching: template))
     }
-    return (entries, originIndex <= endIndex)
+    return (entries, originIndex < endIndex)
   }
 
   private func retainCurrentSelection() {

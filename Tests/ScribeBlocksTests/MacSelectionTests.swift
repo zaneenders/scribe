@@ -1,4 +1,4 @@
-import Chroma
+@testable import Chroma
 import Foundation
 import Testing
 
@@ -50,6 +50,59 @@ struct MacSelectionTests {
     #expect(
       SelectionManager.shared.copyText(isTranscriptVisible: true)
         == "selected transcript")
+  }
+
+  @MainActor
+  @Test("dragging transcript text replaces the composer's clipboard selection")
+  func transcriptDragReleasesEditorSelection() {
+    let cleanup = installSelectionFixture(text: "selected transcript")
+    defer { cleanup() }
+    let interaction = Interaction()
+    let context = RenderContext(interaction: interaction)
+    context.setCopyTextProvider {
+      SelectionManager.shared.copyText(isTranscriptVisible: true)
+    }
+    interaction.beginFrame(input: InputState())
+    var drawList = DrawList()
+    BlockEngine.draw(
+      TextField(id: WidgetID("composer"), text: { "draft" }, onChange: { _ in }),
+      into: &drawList, in: Rect(x: 0, y: 100, width: 300, height: 40), context: context)
+    interaction.endFrame()
+    interaction.beginEditing(WidgetID("composer"), caretOffset: 5)
+    interaction.editingText = "draft"
+    interaction.textSelectionRange = 0..<5
+    let origin = Point(x: 10, y: 11)
+    interaction.beginFrame(input: InputState(
+      pointerPosition: origin, pointerPressPosition: origin,
+      pointerDown: true, pointerPressed: true))
+    SelectionManager.shared.updateFromDrag(context: context)
+    interaction.beginFrame(input: InputState(
+      pointerPosition: Point(x: 74, y: 11), pointerReleased: true))
+    SelectionManager.shared.updateFromDrag(context: context)
+
+    #expect(interaction.copyText() == "selected")
+    #expect(context.activeTextInput == nil)
+  }
+
+  @MainActor
+  @Test("copy normalizes drag direction within a transcript block", arguments: [false, true])
+  func copyWithinBlockInEitherDirection(backward: Bool) {
+    let cleanup = installSelectionFixture(text: "selected transcript")
+    defer { cleanup() }
+    let interaction = Interaction()
+    let context = RenderContext(interaction: interaction)
+    let left = Point(x: 10, y: 11)
+    let right = Point(x: 74, y: 11)
+    let origin = backward ? right : left
+    interaction.beginFrame(input: InputState(
+      pointerPosition: origin, pointerPressPosition: origin,
+      pointerDown: true, pointerPressed: true))
+    SelectionManager.shared.updateFromDrag(context: context)
+    interaction.beginFrame(input: InputState(
+      pointerPosition: backward ? left : right, pointerReleased: true))
+    SelectionManager.shared.updateFromDrag(context: context)
+
+    #expect(SelectionManager.shared.copyText(isTranscriptVisible: true) == "selected")
   }
 
   @MainActor

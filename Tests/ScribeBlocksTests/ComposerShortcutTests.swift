@@ -6,7 +6,7 @@ import Testing
 struct ComposerShortcutTests {
   @Test func clipboardShortcutsUsePlatformModifiers() {
     #if os(macOS)
-    let modifiers: [KeyModifiers] = [.command]
+    let modifiers: [KeyModifiers] = [.command, .control]
     #elseif os(Linux)
     let modifiers: [KeyModifiers] = [.control, .superKey]
     #else
