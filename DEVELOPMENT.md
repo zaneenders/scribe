@@ -63,13 +63,8 @@ No `sudo`, no `CAP_SYS_PTRACE`, no restart needed.
 ### Setup
 
 The mac executable starts the profiler automatically in debug builds, using
-`/tmp/scribe-mac-{PID}.sock`. The CLI starts it when
-`PROFILE_RECORDER_SERVER_URL_PATTERN` is set at launch time. Release builds do
-not start it unless that variable is set.
-
-```bash
-PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' scribe
-```
+`/tmp/scribe-mac-{PID}.sock`. Release builds only start it when
+`PROFILE_RECORDER_SERVER_URL_PATTERN` is set at launch time.
 
 For the mac executable, launch the built binary from a terminal so it inherits
 the environment variable:
@@ -82,7 +77,7 @@ swift build --product scribe-mac
 Set `PROFILE_RECORDER_SERVER_URL_PATTERN` only when you want to override the
 default debug socket path.
 
-The CLI and mac executable both include frame pointers, so release-mode
+The mac app includes frame pointers, so release-mode
 profiling is also available when needed.
 
 The `{PID}` template is replaced with the process ID at runtime.
@@ -92,7 +87,7 @@ The `{PID}` template is replaced with the process ID at runtime.
 While scribe is doing work, trigger a sample from another terminal:
 
 ```bash
-curl --unix-socket /tmp/scribe-$(ls /tmp/scribe-*.sock | head -1 | sed 's/.*scribe-//;s/\.sock//').sock \
+curl --unix-socket /tmp/scribe-mac-$(ls /tmp/scribe-mac-*.sock | head -1 | sed 's/.*scribe-mac-//;s/\.sock//').sock \
   -sd '{"numberOfSamples":500,"timeInterval":"10ms"}' \
   http://localhost/sample > ./samples.perf
 ```
@@ -135,12 +130,12 @@ Drag `./samples.perf` onto [speedscope.app](https://speedscope.app).
 ### Release builds
 
 Release builds omit frame pointers by default, which breaks stack walking.
-The `ScribeCLI` target already includes `-Xcc -fno-omit-frame-pointer` so
+The `ScribeBlocks` target already includes `-Xcc -fno-omit-frame-pointer` so
 release-mode profiling works out of the box.
 
 ## Logging
 
-- **CLI file logs:** `~/.scribe/sessions/{sessionId}/scribe.log` (see `Sources/ScribeCLI/Logging/`).
+- **Session file logs:** `~/.scribe/sessions/{sessionId}/scribe.log` (see `Sources/ScribeKit/Logging/`).
 - **Legacy path:** `~/.scribe/logs/scribe-{sessionId}.log` from older builds is not migrated.
 - **Format:** `2026-05-18T12:00:00.123Z [info] chat.session.start session_id=… mode=new …`
 - **Convention:** message = `domain.action` (e.g. `agent.tool.start`); dimensions in swift-log `metadata`.

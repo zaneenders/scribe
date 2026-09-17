@@ -5,7 +5,6 @@ prefix=${PREFIX:-"$HOME/.local"}
 sharedirectory="$prefix/share"
 
 rm -f \
-  "$prefix/bin/scribe" \
   "$prefix/bin/scribe-wayland" \
   "$sharedirectory/applications/com.zaneenders.scribe.desktop" \
   "$sharedirectory/icons/hicolor/512x512/apps/com.zaneenders.scribe.png"

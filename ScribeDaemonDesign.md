@@ -18,4 +18,4 @@ The daemon owns session access and running agents. Sessions persist across daemo
 
 5. **Add SSH transport.** Implement the byte-only remote bridge and GUI SSH connection to the same daemon protocol. **Why:** Reusing the established protocol makes remote Scribe a transport change rather than a second runtime, storage, or lifecycle implementation.
 
-6. **Finish distribution.** Move setup and auth commands to `scribe-daemon`, package the daemon and process helper, define upgrade behavior, and remove deprecated Slate entry points. **Why:** This makes the architecture installable and maintainable for users and removes old paths that would otherwise duplicate ownership and setup behavior.
+6. **Finish distribution.** Move setup and auth commands to `scribe-daemon`, package the daemon and process helper, define upgrade behavior. **Why:** This makes the architecture installable and maintainable for users and removes old paths that would otherwise duplicate ownership and setup behavior.
