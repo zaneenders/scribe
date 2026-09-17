@@ -1,5 +1,4 @@
 import Foundation
-import ScribeComputerUse
 import ScribeCore
 
 public enum ScribeSystemPrompt {
@@ -47,6 +46,6 @@ public enum ScribeSystemPrompt {
   }
 
   public static func defaultTools() -> [any ScribeTool] {
-    [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()] + ComputerUseTools.make()
+    [ShellTool(), ReadFileTool(), WriteFileTool(), EditFileTool()]
   }
 }

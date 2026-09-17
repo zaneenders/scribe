@@ -5,7 +5,6 @@ var products: [Product] = [
   .executable(name: "scribe", targets: ["ScribeCLI"]),
   .library(name: "ScribeCore", targets: ["ScribeCore"]),
   .library(name: "ScribeKit", targets: ["ScribeKit"]),
-  .library(name: "ScribeComputerUse", targets: ["ScribeComputerUse"]),
   .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
 ]
 
@@ -55,7 +54,6 @@ var targets: [Target] = [
     name: "ScribeKit",
     dependencies: [
       "ScribeCore",
-      "ScribeComputerUse",
       "ScribeLLM",
       .product(name: "Logging", package: "swift-log"),
       .product(name: "SystemPackage", package: "swift-system"),
@@ -64,23 +62,6 @@ var targets: [Target] = [
     swiftSettings: [
       .swiftLanguageMode(.v6),
       .treatAllWarnings(as: .error),
-    ]
-  ),
-  .target(
-    name: "ScribeComputerUse",
-    dependencies: [
-      "ScribeCore",
-      .product(name: "Logging", package: "swift-log"),
-      .product(name: "SystemPackage", package: "swift-system"),
-    ],
-    swiftSettings: [
-      .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
-    ],
-    linkerSettings: [
-      .linkedFramework("AppKit", .when(platforms: [.macOS])),
-      .linkedFramework("ApplicationServices", .when(platforms: [.macOS])),
-      .linkedFramework("ScreenCaptureKit", .when(platforms: [.macOS])),
     ]
   ),
   .target(
@@ -153,14 +134,6 @@ var targets: [Target] = [
       "ScribeBlocks",
       .product(name: "HeadlessBackend", package: "chroma"),
     ],
-    swiftSettings: [
-      .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
-    ]
-  ),
-  .testTarget(
-    name: "ScribeComputerUseTests",
-    dependencies: ["ScribeComputerUse"],
     swiftSettings: [
       .swiftLanguageMode(.v6),
       .treatAllWarnings(as: .error),

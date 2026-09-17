@@ -20,9 +20,6 @@ if [ -z "$identity" ]; then
 error: no Apple Development signing identity was found.
 Create one in Xcode (Settings > Accounts > Manage Certificates), or set
 SCRIBE_CODESIGN_IDENTITY to another stable code-signing identity.
-
-A stable signature is required for macOS to retain Accessibility and Screen
-Recording grants across Scribe rebuilds.
 EOF
   exit 1
 fi

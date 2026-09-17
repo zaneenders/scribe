@@ -4,6 +4,11 @@ import SystemPackage
 import Testing
 
 struct ScribeSystemPromptTests {
+  @Test func defaultToolsAreShellAndFileTools() {
+    let names = ScribeSystemPrompt.defaultTools().map { type(of: $0).name }
+    #expect(names == ["shell", "read_file", "write_file", "edit_file"])
+  }
+
   private func withPaths(_ body: (ScribePaths) throws -> Void) throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
