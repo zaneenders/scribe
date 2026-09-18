@@ -3,7 +3,6 @@ import Foundation
 
 struct GrowingTextField: PrimitiveBlock {
 
-  let id: String
   let placeholder: String
   let fontScale: Float
   let minLines: Int
@@ -27,7 +26,6 @@ struct GrowingTextField: PrimitiveBlock {
 
   @MainActor init(
     _ placeholder: String,
-    id: String,
     fontScale: Float,
     minLines: Int = 1,
     maxLines: Int = 6,
@@ -42,7 +40,6 @@ struct GrowingTextField: PrimitiveBlock {
   ) {
     self.layoutCache = layoutCache
     self.revision = revision
-    self.id = id
     self.placeholder = placeholder
     self.fontScale = fontScale
     self.minLines = minLines
@@ -111,11 +108,6 @@ struct GrowingTextField: PrimitiveBlock {
         let target = rows[targetIndex]
         return target.start + min(column, target.count)
       })
-    if state.editing {
-      ScribeRenderContext.activeTextInput = id
-    } else if ScribeRenderContext.activeTextInput == id {
-      ScribeRenderContext.activeTextInput = nil
-    }
 
     drawList.fillRect(
       rect,

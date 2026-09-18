@@ -288,7 +288,6 @@ final class SessionController {
         command: command, boundaries: boundaries, startCursor: startCursor,
         endCursor: command == .tldr ? endCursor : nil, activeIsEnd: false,
         messageCount: snapshot.count)
-      ScribeRenderContext.activeTextInput = nil
       ScribeRenderContext.current?.endEditing()
       transcript = Self.replay(snapshot.messages)
     }

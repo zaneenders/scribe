@@ -48,6 +48,7 @@ struct TranscriptView: Block {
     )
     .sizing(x: .grow, y: .grow)
     .background(theme.panelBackground)
+    .id(session.sessionId)
   }
 
   @MainActor private func activeBoundaryRow(in rows: [LazyVStack.Row]) -> Int? {

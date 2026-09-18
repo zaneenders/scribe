@@ -95,8 +95,7 @@ struct ScribeMacRoot: Block {
         for command in context.input.commands {
           if !store.showDirectoryPicker, store.renamingSessionID == nil,
             store.active?.commandPicker == nil,
-            context.interactionMode == .editing,
-            ScribeComposerCommand.shouldSubmit(command, activeTextInput: ScribeRenderContext.activeTextInput)
+            ScribeComposerCommand.shouldSubmit(command, composerFocus: ScribeMacStore.composerFocus)
           {
             store.active?.submit()
           }

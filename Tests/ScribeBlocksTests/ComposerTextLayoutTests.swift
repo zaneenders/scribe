@@ -12,7 +12,7 @@ struct ComposerTextLayoutTests {
     let cache = ComposerTextLayoutCache()
     let renderer = HeadlessRenderer(size: Size(width: 500, height: 140))
     renderer.content = GrowingTextField(
-      "", id: "large-draft", fontScale: 1,
+      "", fontScale: 1,
       text: { text }, layoutCache: cache, revision: { revision },
       onChange: { text = $0; revision &+= 1 }, onNewline: {})
     defer { renderer.close() }

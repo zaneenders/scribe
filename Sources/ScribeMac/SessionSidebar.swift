@@ -62,7 +62,7 @@ struct SessionSidebar: Block {
               theme: theme,
               isCollapsed: store.isGroupCollapsed(group.cwd))
             if !store.isGroupCollapsed(group.cwd) {
-              for entry in group.entries {
+              ForEach(group.entries, id: \.id) { entry in
                 switch entry {
                 case .open(let session):
                   SessionRow(

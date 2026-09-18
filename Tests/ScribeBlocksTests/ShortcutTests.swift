@@ -20,11 +20,11 @@ private struct ShortcutSurface: PrimitiveBlock {
     state.context = context
     state.commands += context.input.commands
     for command in context.input.commands {
-      if context.interactionMode == .editing, ScribeComposerCommand.shouldSubmit(command, activeTextInput: ScribeRenderContext.activeTextInput) {
+      if ScribeComposerCommand.shouldSubmit(command, composerFocus: state.focus) {
         state.submitted += 1
       }
     }
-    let field = GrowingTextField("", id: ScribeMacStore.composerID, fontScale: 1,
+    let field = GrowingTextField("", fontScale: 1,
       text: { state.text }, onChange: { state.text = $0 }, onNewline: { state.text += "\n" },
       onEndEditing: { state.stopped += 1; return .handled },
       onTextEvent: { event, text in event == .moveCaretUp && text.isEmpty ? "previous prompt" : nil })
@@ -69,7 +69,7 @@ struct ShortcutTests {
     #expect(state.text == "previous prompt")
     key(.escape)
     #expect(state.stopped == 1)
-    #expect(ScribeRenderContext.activeTextInput == ScribeMacStore.composerID)
+    #expect(state.focus.isEditing)
     key(.enter)
     #expect(state.text == "previous prompt\n")
     key(.character("f"), text: "f")

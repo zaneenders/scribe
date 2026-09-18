@@ -76,7 +76,6 @@ final class ScribeMacStore {
   static let composerFocus = FocusTarget()
   static let directoryPaletteFocus = FocusTarget()
   static let renameSessionFieldFocus = FocusTarget()
-  static let composerID = "scribe-composer"
 
   var phase: Phase = .starting
 

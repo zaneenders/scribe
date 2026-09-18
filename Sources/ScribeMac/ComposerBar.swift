@@ -40,7 +40,6 @@ struct ComposerBar: Block {
       TrailingControlsRow(spacing: 8) {
         GrowingTextField(
           session.isRunning ? "Queue a message..." : "Message Scribe",
-          id: ScribeMacStore.composerID,
           fontScale: theme.textScale,
           text: { session.draft },
           layoutCache: session.composerLayoutCache,
@@ -128,7 +127,7 @@ struct BottomModelPicker: Block {
 
   @MainActor var body: some Block {
     VStack(spacing: 0) {
-      for (_, profile) in store.profileCatalog.enumerated() {
+      ForEach(store.profileCatalog, id: \.name) { profile in
         let isActive = profile.name == session.profileName
         Interactive(
           action: { store.selectProfile(profile.name) }

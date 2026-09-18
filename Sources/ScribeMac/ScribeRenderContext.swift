@@ -3,7 +3,6 @@ import Chroma
 @MainActor
 enum ScribeRenderContext {
   static var current: RenderContext?
-  static var activeTextInput: String?
 }
 
 struct RenderContextBridge<Content: Block>: PrimitiveBlock {

@@ -13,8 +13,8 @@ public struct ScribeBlock: Block {
 enum ScribeComposerCommand {
   static let submit: Command = .application("scribe.composer.submit")
 
-  @MainActor static func shouldSubmit(_ command: Command, activeTextInput: String?) -> Bool {
-    command == submit && activeTextInput == ScribeMacStore.composerID
+  @MainActor static func shouldSubmit(_ command: Command, composerFocus: FocusTarget) -> Bool {
+    command == submit && composerFocus.isEditing
   }
 }
 
