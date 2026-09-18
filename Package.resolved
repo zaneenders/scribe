@@ -1,5 +1,5 @@
 {
-  "originHash" : "a6b98bac35313ae91b690ede7a9e278263521c0b3d1d8994ab6b7c7a666f7f15",
+  "originHash" : "74a6ed852de6e65bf6f083a87d490f43a5c64f1d1191aebfa44756760a0dd65f",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/zaneenders/chroma",
       "state" : {
-        "branch" : "6524b50",
-        "revision" : "6524b50505ed1cc52b1b229a8ca2a4ac448e00ed"
+        "branch" : "10a2952",
+        "revision" : "10a2952a0006e49f65498ae69ea18cb39221bced"
       }
     },
     {
@@ -267,8 +267,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-subprocess.git",
       "state" : {
-        "branch" : "049ddf9",
-        "revision" : "049ddf99c37c50411ce2997dc92a36eb74460b98"
+        "revision" : "b3937ab85dd32f6e9435914599c1519074769c1a",
+        "version" : "1.0.0"
       }
     },
     {

@@ -29,7 +29,7 @@ struct TranscriptClipboardTests {
     renderer.content = RenderContextBridge(
       content: MarkdownText(
         markdown: "Two details will narrow this down:", theme: MacTheme(),
-        baseColor: .white, scale: 1, itemID: WidgetID("clipboard-test")),
+        baseColor: .white, scale: 1, itemID: "clipboard-test"),
       prepare: { context in
         context.setCopyTextProvider {
           SelectionManager.shared.copyText(isTranscriptVisible: true)
@@ -38,7 +38,7 @@ struct TranscriptClipboardTests {
     let view = MTKView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
     renderer.draw(in: view)
     TranscriptSelectionDocumentRegistry.setEntries(ownerID: UUID(), [
-      .init(id: WidgetID("clipboard-test"), linesForColumns: { columns in
+      .init(id: "clipboard-test", linesForColumns: { columns in
         layoutPlainText("Two details will narrow this down:", columns: columns, color: .white)
       })
     ])

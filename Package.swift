@@ -203,7 +203,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "6524b50"
+      revision: "10a2952"
     ),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
@@ -212,7 +212,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-configuration", from: "1.0.0"),
     .package(
       url: "https://github.com/swiftlang/swift-subprocess.git",
-      revision: "049ddf9",
+      from: "1.0.0",
       traits: ["SubprocessFoundation"]
     ),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),

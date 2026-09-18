@@ -9,11 +9,11 @@ struct SessionSidebar: Block {
     VStack(spacing: 0) {
       HStack(spacing: 6) {
         Button(
-          "Folder", id: WidgetID("directory-toggle"), fontScale: theme.smallScale,
+          "Folder", fontScale: theme.smallScale,
           padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
         ) { store.toggleDirectoryPicker() }
         Button(
-          "Resume", id: WidgetID("resume-latest"), fontScale: theme.smallScale,
+          "Resume", fontScale: theme.smallScale,
           padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
         ) { store.resumeLatest() }
         Spacer()
@@ -28,7 +28,7 @@ struct SessionSidebar: Block {
           .fontScale(theme.smallScale)
           .foregroundColor(theme.textSecondary)
         Spacer()
-        Interactive(id: WidgetID("sidebar-refresh"), action: { store.refreshSavedSessions() }) { phase in
+        Interactive(action: { store.refreshSavedSessions() }) { phase in
           Text("↻")
             .fontScale(theme.smallScale)
             .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
@@ -36,7 +36,7 @@ struct SessionSidebar: Block {
             .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
         }
-        Interactive(id: WidgetID("sidebar-close"), action: { store.closeSessionSidebar() }) { phase in
+        Interactive(action: { store.closeSessionSidebar() }) { phase in
           Text("×")
             .fontScale(theme.textScale)
             .foregroundColor(phase == .idle ? theme.textSecondary : theme.textPrimary)
@@ -51,19 +51,18 @@ struct SessionSidebar: Block {
       .border(theme.border)
 
       ScrollView(
-        id: WidgetID("sidebar-session-scroll"),
         showsIndicator: true,
         controller: store.sidebarScroll
       ) {
         VStack(spacing: 1) {
-          for group in store.sessionGroups {
+          ForEach(store.sessionGroups) { group in
             SessionGroupHeader(
               store: store,
               group: group,
               theme: theme,
               isCollapsed: store.isGroupCollapsed(group.cwd))
             if !store.isGroupCollapsed(group.cwd) {
-              for (_, entry) in group.entries.enumerated() {
+              ForEach(group.entries, id: \.id) { entry in
                 switch entry {
                 case .open(let session):
                   SessionRow(
@@ -119,7 +118,6 @@ struct SessionGroupHeader: Block {
   @MainActor var body: some Block {
     HStack(spacing: 4) {
       Interactive(
-        id: WidgetID("group-toggle:\(group.cwd)"),
         action: { store.toggleGroup(group.cwd) }
       ) { phase in
         HStack(spacing: 5) {
@@ -128,7 +126,7 @@ struct SessionGroupHeader: Block {
             .foregroundColor(theme.textSecondary)
           MarqueeText(
             sanitizeASCII(group.title),
-            id: WidgetID("group-name:\(group.cwd)"),
+            id: "group-name:\(group.cwd)",
             color: group.open.contains(where: \.isRunning)
               ? theme.purple : phase == .hovered ? theme.accent : theme.textPrimary,
             scale: theme.smallScale,
@@ -143,7 +141,6 @@ struct SessionGroupHeader: Block {
         .background(phase == .hovered ? theme.sidebarHover : .clear)
       }
       Interactive(
-        id: WidgetID("group-new-session:\(group.cwd)"),
         action: { store.newSession(in: group.cwd) }
       ) { phase in
         VStack(spacing: 0) {
@@ -175,7 +172,6 @@ struct SessionRow: Block {
 
   @MainActor var body: some Block {
     Interactive(
-      id: WidgetID("session-row:\(session.sessionId.uuidString)"),
       action: { store.switchTo(session.sessionId) },
       content: { phase in
         HStack(spacing: 5) {
@@ -184,7 +180,7 @@ struct SessionRow: Block {
           }
           MarqueeText(
             sanitizeASCII(session.displayName),
-            id: WidgetID("session-name:\(session.sessionId.uuidString)"),
+            id: "session-name:\(session.sessionId.uuidString)",
             color: session.isRunning
               ? theme.purple
               : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary,
@@ -219,7 +215,6 @@ struct SavedSessionRow: Block {
   @MainActor var body: some Block {
     let isSelected = store.selectedSavedSession?.id == saved.id
     return Interactive(
-      id: WidgetID("saved-session:\(saved.id.uuidString)"),
       action: { store.openSavedSession(saved) },
       content: { phase in
         HStack(spacing: 5) {
@@ -228,7 +223,7 @@ struct SavedSessionRow: Block {
             .foregroundColor(theme.textSecondary)
           MarqueeText(
             sanitizeASCII(saved.metadata.displayName),
-            id: WidgetID("saved-session-name:\(saved.id.uuidString)"),
+            id: "saved-session-name:\(saved.id.uuidString)",
             color: phase == .hovered ? theme.textPrimary : theme.textSecondary,
             scale: theme.smallScale,
             isScrolling: phase == .hovered
@@ -254,9 +249,9 @@ struct SavedSessionRow: Block {
 @MainActor
 private final class MarqueeAnimationState {
   static let shared = MarqueeAnimationState()
-  private var startTimes: [WidgetID: TimeInterval] = [:]
+  private var startTimes: [String: TimeInterval] = [:]
 
-  func elapsed(for id: WidgetID, scrolling: Bool, now: TimeInterval) -> TimeInterval {
+  func elapsed(for id: String, scrolling: Bool, now: TimeInterval) -> TimeInterval {
     guard scrolling else {
       startTimes[id] = nil
       return 0
@@ -269,7 +264,7 @@ private final class MarqueeAnimationState {
 
 private struct MarqueeText: PrimitiveBlock {
   let text: String
-  let id: WidgetID
+  let id: String
   let color: Color
   let scale: Float
   let isScrolling: Bool
@@ -277,7 +272,7 @@ private struct MarqueeText: PrimitiveBlock {
   private let pointsPerSecond: Float = 28
   private let endPause: TimeInterval = 0.8
 
-  init(_ text: String, id: WidgetID, color: Color, scale: Float, isScrolling: Bool) {
+  init(_ text: String, id: String, color: Color, scale: Float, isScrolling: Bool) {
     self.text = text
     self.id = id
     self.color = color
@@ -332,7 +327,6 @@ private func sessionActions(
 ) -> some Block {
   HStack(spacing: 2) {
     Interactive(
-      id: WidgetID("session-pin:\(id.uuidString)"),
       action: { store.toggleSessionPin(id) }
     ) { phase in
       Text(pinned ? "◆" : "◇")
@@ -342,7 +336,6 @@ private func sessionActions(
         .background(phase == .idle ? .clear : theme.sidebarHover)
     }
     Interactive(
-      id: WidgetID("session-rename:\(id.uuidString)"),
       action: { store.renameSession(id) }
     ) { phase in
       Text("✎")
@@ -361,7 +354,6 @@ struct ShowMoreSessionsRow: Block {
 
   @MainActor var body: some Block {
     Interactive(
-      id: WidgetID("show-more-sessions:\(group.cwd)"),
       action: { store.showMoreSavedSessions(for: group.cwd) },
       content: { phase in
         HStack(spacing: 5) {

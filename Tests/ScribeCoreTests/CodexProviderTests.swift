@@ -34,6 +34,7 @@ struct CodexProviderTests {
       model: "codex-test-model",
       reasoningEnabled: false,
       reasoningEffort: nil,
+      serviceTier: "priority",
       contextWindow: 128_000
     )
 
@@ -69,6 +70,7 @@ struct CodexProviderTests {
       JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
     #expect(json["model"] as? String == "codex-test-model")
     #expect(json["stream"] as? Bool == true)
+    #expect(json["service_tier"] as? String == "priority")
 
     let input = try #require(json["input"] as? [[String: Any]])
     #expect(!input.isEmpty, "Expected non-empty input items")

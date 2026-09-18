@@ -346,7 +346,7 @@ func selectionAutoscrollTarget(pointer: Point, viewport: Rect, step: Float = 18)
 @MainActor
 enum TranscriptSelectionDocumentRegistry {
   struct Entry {
-    let id: WidgetID
+    let id: String
     let linesForColumns: (Int) -> [VisualLine]
 
     func layout(columns: Int, matching template: MarkdownLayout) -> MarkdownLayout {
@@ -372,7 +372,7 @@ enum TranscriptSelectionDocumentRegistry {
     self.entries = entries
   }
 
-  static func entry(for id: WidgetID) -> Entry? {
+  static func entry(for id: String) -> Entry? {
     entries.first { $0.id == id }
   }
 }
@@ -576,24 +576,24 @@ struct MarkdownLayout {
 
 @MainActor
 enum MarkdownLayoutRegistry {
-  private static var layouts: [WidgetID: MarkdownLayout] = [:]
+  private static var layouts: [String: MarkdownLayout] = [:]
 
-  static func register(_ id: WidgetID, layout: MarkdownLayout) {
+  static func register(_ id: String, layout: MarkdownLayout) {
     layouts[id] = layout
   }
 
-  static func layout(for id: WidgetID) -> MarkdownLayout? {
+  static func layout(for id: String) -> MarkdownLayout? {
     layouts[id]
   }
 
-  static func entry(at point: Point) -> (id: WidgetID, layout: MarkdownLayout)? {
+  static func entry(at point: Point) -> (id: String, layout: MarkdownLayout)? {
     for (id, layout) in layouts where !layout.lines.isEmpty && layout.rect.contains(point) {
       return (id, layout)
     }
     return nil
   }
 
-  static func orderedEntries() -> [(id: WidgetID, layout: MarkdownLayout)] {
+  static func orderedEntries() -> [(id: String, layout: MarkdownLayout)] {
     layouts.compactMap { id, layout in
       layout.lines.isEmpty ? nil : (id: id, layout: layout)
     }.sorted {
@@ -616,7 +616,7 @@ struct MarkdownText: PrimitiveBlock {
   var scale: Float = 0.5
   var lineSpacing: Float = 4
   var isPlainText = false
-  var itemID: WidgetID? = nil
+  var itemID: String? = nil
 
   func lines(forWidth width: Float, metrics: FontMetrics) -> [VisualLine] {
     let columns = Int(width / (metrics.cellAdvance * scale))
@@ -661,7 +661,7 @@ struct WrappedText: Block {
   var theme: MacTheme
   var color: Color
   var scale: Float = 0.5
-  var itemID: WidgetID? = nil
+  var itemID: String? = nil
 
   var body: MarkdownText {
     MarkdownText(
@@ -682,9 +682,9 @@ func shouldProcessSelectionDrag(
 final class SelectionManager {
   static let shared = SelectionManager()
 
-  private var originLayoutID: WidgetID? = nil
-  private var endLayoutID: WidgetID? = nil
-  private var retainedSelectionEntries: [(id: WidgetID, layout: MarkdownLayout)]? = nil
+  private var originLayoutID: String? = nil
+  private var endLayoutID: String? = nil
+  private var retainedSelectionEntries: [(id: String, layout: MarkdownLayout)]? = nil
   private(set) var selectionStart: (line: Int, column: Int)?
   private(set) var selectionEnd: (line: Int, column: Int)?
   private var selectionStartGlyphOffset: Int?
@@ -764,7 +764,7 @@ final class SelectionManager {
 
     let entries = visibleEntries
     guard !entries.isEmpty else { return }
-    let entry: (id: WidgetID, layout: MarkdownLayout)
+    let entry: (id: String, layout: MarkdownLayout)
     if current.y < entries[0].layout.rect.minY {
       entry = entries[0]
       endLayoutID = entry.id
@@ -802,7 +802,7 @@ final class SelectionManager {
   }
 
   func selection(
-    for id: WidgetID,
+    for id: String,
     layout: MarkdownLayout
   ) -> (start: (line: Int, column: Int), end: (line: Int, column: Int))? {
     guard let originID = originLayoutID, let endID = endLayoutID,
@@ -847,7 +847,7 @@ final class SelectionManager {
     return (start, end)
   }
 
-  func selectionEndpointsAreContained(in entryIDs: Set<WidgetID>) -> Bool {
+  func selectionEndpointsAreContained(in entryIDs: Set<String>) -> Bool {
     guard let originLayoutID, let endLayoutID else { return true }
     return entryIDs.contains(originLayoutID) && entryIDs.contains(endLayoutID)
   }
@@ -856,7 +856,7 @@ final class SelectionManager {
     guard isTranscriptVisible else { return false }
     let document = TranscriptSelectionDocumentRegistry.entries
     let documentIDs = Set(document.map(\.id))
-    let anchor: (id: WidgetID, layout: MarkdownLayout)?
+    let anchor: (id: String, layout: MarkdownLayout)?
     if let layoutID = originLayoutID, let layout = MarkdownLayoutRegistry.layout(for: layoutID) {
       anchor = (layoutID, layout)
     } else if let pointed = MarkdownLayoutRegistry.entry(
@@ -920,7 +920,7 @@ final class SelectionManager {
   private typealias Position = (line: Int, column: Int)
 
   private func orderedSelection() -> (
-    entries: [(id: WidgetID, layout: MarkdownLayout)],
+    entries: [(id: String, layout: MarkdownLayout)],
     startIndex: Int, endIndex: Int, start: Position, end: Position
   )? {
     guard let originID = originLayoutID, let endID = endLayoutID,
@@ -971,9 +971,9 @@ final class SelectionManager {
   }
 
   private func documentSelectionEntries(
-    originID: WidgetID,
-    endID: WidgetID
-  ) -> (entries: [(id: WidgetID, layout: MarkdownLayout)], originPrecedesEnd: Bool)? {
+    originID: String,
+    endID: String
+  ) -> (entries: [(id: String, layout: MarkdownLayout)], originPrecedesEnd: Bool)? {
     let document = TranscriptSelectionDocumentRegistry.entries
     guard let originIndex = document.firstIndex(where: { $0.id == originID }),
       let endIndex = document.firstIndex(where: { $0.id == endID }),
@@ -1006,7 +1006,7 @@ final class SelectionManager {
   }
 
   private func mergeSelectionEntries(
-    _ visible: [(id: WidgetID, layout: MarkdownLayout)],
+    _ visible: [(id: String, layout: MarkdownLayout)],
     appendIfDisjoint: Bool
   ) {
     guard !visible.isEmpty else { return }

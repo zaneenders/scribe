@@ -56,6 +56,7 @@ public enum ScribeSessionBootstrap {
       workingDirectory: workingDirectory,
       reasoningEnabled: base.reasoningEnabled,
       reasoningEffort: base.reasoningEffort,
+      serviceTier: base.serviceTier,
       maxTokens: base.maxTokens,
       sendsOpenCodeHeader: base.sendsOpenCodeHeader,
       temperature: base.temperature,

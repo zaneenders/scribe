@@ -36,6 +36,7 @@ enum AgentProviderFactory {
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEffort: configuration.reasoningEffort,
+        serviceTier: configuration.serviceTier,
         defaultTemperature: configuration.temperature,
         contextWindow: configuration.contextWindow,
         retryPolicy: retryPolicy)

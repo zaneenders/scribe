@@ -25,7 +25,7 @@ struct TranscriptView: Block {
     if session.transcript.isEmpty {
       rows = [
         LazyVStack.Row(
-          id: WidgetID("transcript-empty"),
+          id: "transcript-empty",
           content: VStack(spacing: 8) {
             Text(session.isLoadingTranscript ? "Loading transcript..." : "Ready")
               .fontScale(theme.textScale).foregroundColor(theme.accent)
@@ -43,20 +43,19 @@ struct TranscriptView: Block {
       rows = transcriptRows()
     }
     return CommandRevealTranscript(
-      id: WidgetID("transcript:\(session.sessionId.uuidString)"),
       session: session, controller: session.scroll, rows: rows,
       revealRow: activeBoundaryRow(in: rows)
     )
     .sizing(x: .grow, y: .grow)
     .background(theme.panelBackground)
+    .id(session.sessionId)
   }
 
   @MainActor private func activeBoundaryRow(in rows: [LazyVStack.Row]) -> Int? {
     guard let picker = session.commandPicker else { return nil }
     let isStart = picker.command == .fork || !picker.activeIsEnd
-    let id = WidgetID(
-      "command-boundary:\(picker.command.rawValue):\(picker.activeBoundary):\(isStart)")
-    return rows.firstIndex { $0.id == id }
+    let id = "command-boundary:\(picker.command.rawValue):\(picker.activeBoundary):\(isStart)"
+    return rows.firstIndex { $0.id == AnyHashable(id) }
   }
 
   @MainActor private func updateSelectionDocument() {
@@ -167,7 +166,7 @@ struct TranscriptView: Block {
         : "TLDR END · CONVERSATION BELOW IS PRESERVED"
     }
     return LazyVStack.Row(
-      id: WidgetID("command-boundary:\(picker.command.rawValue):\(boundary):\(isStart)"),
+      id: "command-boundary:\(picker.command.rawValue):\(boundary):\(isStart)",
       content: CommandBoundaryMarker(
         label: label, active: active,
         color: picker.command == .fork ? theme.red : theme.yellow,
@@ -214,7 +213,6 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
 }
 
 private struct CommandRevealTranscript: PrimitiveBlock {
-  let id: WidgetID
   let session: SessionController
   let controller: ScrollViewController
   let rows: [LazyVStack.Row]
@@ -238,8 +236,7 @@ private struct CommandRevealTranscript: PrimitiveBlock {
       }
       controller.scroll(to: offset)
     }
-    let stack = LazyVStack(
-      id: id, sticksToBottom: true, controller: controller, rows: rows)
+    let stack = LazyVStack(sticksToBottom: true, controller: controller, rows: rows)
     TranscriptViewportRegistry.current = rect
     TranscriptViewportRegistry.lastDrawn = rect
     TranscriptViewportRegistry.scrollController = controller
@@ -266,7 +263,6 @@ struct TranscriptItemBlock: Block {
         HStack {
           Button(
             item.isTextCollapsed ? "Show full text" : "Hide text",
-            id: WidgetID("text-disclosure:\(item.id.uuidString)"),
             fontScale: theme.smallScale
           ) { toggleText() }
           Spacer()

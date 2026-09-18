@@ -13,8 +13,8 @@ public struct ScribeBlock: Block {
 enum ScribeComposerCommand {
   static let submit: Command = .application("scribe.composer.submit")
 
-  @MainActor static func shouldSubmit(_ command: Command, activeTextInput: WidgetID?) -> Bool {
-    command == submit && activeTextInput == ScribeMacStore.composerID
+  @MainActor static func shouldSubmit(_ command: Command, composerFocus: FocusTarget) -> Bool {
+    command == submit && composerFocus.isEditing
   }
 }
 
@@ -60,8 +60,6 @@ extension ScribeBlock {
       bind(.enter, modifiers: .shift, to: .editing(.submit))
       bind(.escape, to: .editing(.endEditing))
       bind(.space, to: .action(.activate))
-      bind(.pageUp, to: .navigation(.pageUp))
-      bind(.pageDown, to: .navigation(.pageDown))
       bind("f", to: ScribeCommandPickerCommand.previous)
       bind("j", to: ScribeCommandPickerCommand.next)
       bind(.tab, to: ScribeCommandPickerCommand.toggle)

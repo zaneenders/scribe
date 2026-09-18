@@ -5,6 +5,7 @@ import Testing
 
 @MainActor
 private final class ShortcutState {
+  let focus = FocusTarget()
   var context: RenderContext?
   var text = ""
   var submitted = 0
@@ -19,15 +20,15 @@ private struct ShortcutSurface: PrimitiveBlock {
     state.context = context
     state.commands += context.input.commands
     for command in context.input.commands {
-      if ScribeComposerCommand.shouldSubmit(command, activeTextInput: context.activeTextInput) {
+      if ScribeComposerCommand.shouldSubmit(command, composerFocus: state.focus) {
         state.submitted += 1
       }
     }
-    let field = GrowingTextField("", id: ScribeMacStore.composerID, fontScale: 1,
+    let field = GrowingTextField("", fontScale: 1,
       text: { state.text }, onChange: { state.text = $0 }, onNewline: { state.text += "\n" },
       onEndEditing: { state.stopped += 1; return .handled },
       onTextEvent: { event, text in event == .moveCaretUp && text.isEmpty ? "previous prompt" : nil })
-    field.draw(into: &list, in: rect, context: context)
+    BlockEngine.draw(field.focusTarget(state.focus), into: &list, in: rect, context: context)
   }
 }
 
@@ -39,12 +40,13 @@ struct ShortcutTests {
     renderer.content = ShortcutSurface(state: state)
     renderer.render()
     let context = try #require(state.context)
-    context.focus(ScribeMacStore.composerID, editing: true)
+    state.focus.focus(editing: true)
+    renderer.render()
     func key(_ key: Key, modifiers: KeyModifiers = [], text: String? = nil) {
       let chord = KeyChord(key, modifiers: modifiers)
       let bindings = ScribeBlock.keyBindings
       var input = InputState()
-      if bindings.prefersTextInsertion(chord: chord, text: text, isTextEditing: context.activeTextInput != nil) {
+      if bindings.prefersTextInsertion(chord: chord, text: text, isTextEditing: context.interactionMode == .editing) {
         if let text { input.textEvents.append(.insert(text)) }
       } else if let resolution = bindings.command(for: chord), let command = resolution {
         if case .editing(let event) = command {
@@ -67,7 +69,7 @@ struct ShortcutTests {
     #expect(state.text == "previous prompt")
     key(.escape)
     #expect(state.stopped == 1)
-    #expect(context.activeTextInput == ScribeMacStore.composerID)
+    #expect(state.focus.isEditing)
     key(.enter)
     #expect(state.text == "previous prompt\n")
     key(.character("f"), text: "f")

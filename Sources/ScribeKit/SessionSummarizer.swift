@@ -76,6 +76,7 @@ public enum SessionSummarizer {
       tools: [],
       workingDirectory: configuration.workingDirectory,
       reasoningEnabled: configuration.reasoningEnabled,
+      serviceTier: configuration.serviceTier,
       sendsOpenCodeHeader: configuration.sendsOpenCodeHeader
     )
     let agent = try ScribeAgent(

@@ -1,4 +1,5 @@
 import Chroma
+import HeadlessBackend
 import Testing
 
 @testable import ScribeBlocks
@@ -26,6 +27,33 @@ struct ComposerShortcutTests {
   }
 
   @MainActor
+  @Test func submitRequiresComposerEditing() {
+    let composer = FocusTarget()
+    let directory = FocusTarget()
+    let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
+    renderer.content = VStack {
+      GrowingTextField("", fontScale: 1, text: { "" }, onChange: { _ in }, onNewline: {})
+        .focusTarget(composer)
+      TextField(text: { "" }, onChange: { _ in })
+        .focusTarget(directory)
+    }
+    renderer.render()
+    #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, composerFocus: composer))
+    composer.focus()
+    renderer.render()
+    #expect(composer.isFocused)
+    #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, composerFocus: composer))
+    composer.focus(editing: true)
+    renderer.render()
+    #expect(ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, composerFocus: composer))
+    #expect(!ScribeComposerCommand.shouldSubmit(.action(.activate), composerFocus: composer))
+    directory.focus(editing: true)
+    renderer.render()
+    #expect(directory.isEditing)
+    #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, composerFocus: composer))
+  }
+
+  @MainActor
   @Test func commandEnterIsTransportableAndScopedToComposer() {
     #if os(macOS)
     let modifier = KeyModifiers.command
@@ -34,10 +62,6 @@ struct ComposerShortcutTests {
     #endif
     let bindings = ScribeBlock.keyBindings
     #expect(bindings.command(for: KeyChord(.enter, modifiers: modifier)) == .some(.some(ScribeComposerCommand.submit)))
-    #expect(
-      ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, activeTextInput: ScribeMacStore.composerID))
-    #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, activeTextInput: nil))
-    #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, activeTextInput: WidgetID("directory")))
     #expect(bindings.command(for: KeyChord(.enter)) == .some(.some(.editing(.submit))))
     #expect(bindings.command(for: KeyChord(.enter, modifiers: .shift)) == .some(.some(.editing(.submit))))
   }

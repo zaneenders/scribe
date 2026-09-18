@@ -34,7 +34,8 @@ struct ConfigLoaderTests {
               "agent": {
                 "model": "big-model",
                 "contextWindow": 256000,
-                "contextWindowThreshold": 0.9
+                "contextWindowThreshold": 0.9,
+                "serviceTier": "priority"
               },
               "logging": { "level": "trace" }
             }
@@ -47,6 +48,7 @@ struct ConfigLoaderTests {
       #expect(loaded.activeProfileName == "cloud")
       #expect(loaded.scribeConfig.agentModel == "big-model")
       #expect(loaded.scribeConfig.serverURL == "https://api.example.com")
+      #expect(loaded.scribeConfig.serviceTier == "priority")
       #expect(loaded.profiles.map(\.name) == ["local", "cloud"])
       #expect(loaded.resolvedConfigurationPath == paths.profileManifestPath.string)
     }

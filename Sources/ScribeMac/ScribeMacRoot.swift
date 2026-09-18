@@ -33,10 +33,10 @@ struct ScribeMacRoot: Block {
               Text("Could not start Scribe").fontScale(theme.textScale).foregroundColor(theme.errorText)
               WrappedText(text: message, theme: theme, color: theme.textPrimary)
               HStack(spacing: 8) {
-                Button("New session", id: WidgetID("retry-new"), fontScale: theme.textScale) {
+                Button("New session", fontScale: theme.textScale) {
                   store.newSession()
                 }
-                Button("Resume latest", id: WidgetID("retry-resume"), fontScale: theme.textScale) {
+                Button("Resume latest", fontScale: theme.textScale) {
                   store.resumeLatest()
                 }
               }
@@ -95,7 +95,7 @@ struct ScribeMacRoot: Block {
         for command in context.input.commands {
           if !store.showDirectoryPicker, store.renamingSessionID == nil,
             store.active?.commandPicker == nil,
-            ScribeComposerCommand.shouldSubmit(command, activeTextInput: context.activeTextInput)
+            ScribeComposerCommand.shouldSubmit(command, composerFocus: ScribeMacStore.composerFocus)
           {
             store.active?.submit()
           }
@@ -145,12 +145,12 @@ struct ScribeMacRoot: Block {
             theme: theme, color: theme.textSecondary, scale: theme.smallScale)
           HStack(spacing: 8) {
             Button(
-              "Choose project", id: WidgetID("empty-new"), fontScale: theme.textScale,
+              "Choose project", fontScale: theme.textScale,
               style: theme.buttonStyle(pressedColor: theme.accent),
               padding: EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
             ) { store.newSession() }
             Button(
-              "Resume latest", id: WidgetID("empty-resume"), fontScale: theme.textScale,
+              "Resume latest", fontScale: theme.textScale,
               padding: EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
             ) { store.resumeLatest() }
             Spacer()
@@ -177,14 +177,13 @@ struct ScribeMacRoot: Block {
         .fontScale(theme.titleScale)
         .foregroundColor(theme.accent)
       Button(
-        store.isSessionSidebarVisible ? "Sessions ◀" : "Sessions ▶",
-        id: WidgetID("sidebar-toggle"), fontScale: theme.smallScale,
+        store.isSessionSidebarVisible ? "Sessions ◀" : "Sessions ▶", fontScale: theme.smallScale,
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
       if ScribeSceneCapture.shared.isEnabled {
         Button(
-          ScribeSceneCapture.shared.status, id: WidgetID("scene-snapshot"),
+          ScribeSceneCapture.shared.status,
           fontScale: theme.smallScale,
           padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
         ) { ScribeSceneCapture.shared.request() }
@@ -204,7 +203,7 @@ struct ScribeMacRoot: Block {
         .foregroundColor(theme.errorText)
       Spacer()
       Button(
-        "Dismiss", id: WidgetID("error-dismiss"), fontScale: theme.smallScale,
+        "Dismiss", fontScale: theme.smallScale,
         padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
       ) { store.dismissError() }
     }
