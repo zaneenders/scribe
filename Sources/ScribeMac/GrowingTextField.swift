@@ -3,7 +3,7 @@ import Foundation
 
 struct GrowingTextField: PrimitiveBlock {
 
-  let id: WidgetID
+  let id: String
   let placeholder: String
   let fontScale: Float
   let minLines: Int
@@ -27,7 +27,7 @@ struct GrowingTextField: PrimitiveBlock {
 
   @MainActor init(
     _ placeholder: String,
-    id: WidgetID,
+    id: String,
     fontScale: Float,
     minLines: Int = 1,
     maxLines: Int = 6,
@@ -90,7 +90,6 @@ struct GrowingTextField: PrimitiveBlock {
     let cellWidth = metrics.cellAdvance * fontScale
     let textOrigin = Point(x: rect.minX + padding, y: rect.minY + padding + 1)
     let state = context.textInputState(
-      id: id,
       in: rect,
       text: getText,
       onChange: onChange,

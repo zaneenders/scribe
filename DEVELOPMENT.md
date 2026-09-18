@@ -20,7 +20,7 @@ by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 ## Chroma observation integration
 
-Chroma is pinned to a GitHub commit in `Package.swift`.
+Chroma tracks the `clean-up` branch; `Package.resolved` pins the resolved commit.
 A sibling `../chroma` checkout is not required to build Scribe.
 
 `ScribeMacStore` and `SessionController` use Swift Observation so model changes

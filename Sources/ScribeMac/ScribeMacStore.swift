@@ -73,9 +73,10 @@ final class ScribeMacStore {
   }
 
   static let shared = ScribeMacStore()
-  static let composerID = WidgetID("scribe-composer")
-  static let directoryPaletteID = WidgetID("directory-palette")
-  static let renameSessionFieldID = WidgetID("rename-session-field")
+  static let composerFocus = FocusTarget()
+  static let directoryPaletteFocus = FocusTarget()
+  static let renameSessionFieldFocus = FocusTarget()
+  static let composerID = "scribe-composer"
 
   var phase: Phase = .starting
 
@@ -482,14 +483,14 @@ final class ScribeMacStore {
 
   func applyPendingFocus() {
     if renameFocusPending {
-      ScribeRenderContext.current?.focus(Self.renameSessionFieldID, editing: true)
+      Self.renameSessionFieldFocus.focus(editing: true)
       if ScribeRenderContext.current != nil {
         renameFocusPending = false
       }
       return
     }
     if directoryFocusPending {
-      ScribeRenderContext.current?.focus(Self.directoryPaletteID, editing: true)
+      Self.directoryPaletteFocus.focus(editing: true)
       if ScribeRenderContext.current != nil {
         directoryFocusPending = false
       }
@@ -500,7 +501,7 @@ final class ScribeMacStore {
       composerFocusPending = true
     }
     guard composerFocusPending else { return }
-    ScribeRenderContext.current?.focus(Self.composerID, editing: true)
+    Self.composerFocus.focus(editing: true)
     if ScribeRenderContext.current != nil {
       composerFocusPending = false
     }
@@ -528,7 +529,7 @@ final class ScribeMacStore {
       context.input.textEvents.contains(.endEditing)
     else { return }
     if requiresDirectoryBeforeStart {
-      context.focus(Self.directoryPaletteID, editing: true)
+      Self.directoryPaletteFocus.focus(editing: true)
     } else {
       closeDirectoryPicker()
     }

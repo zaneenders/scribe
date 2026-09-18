@@ -61,21 +61,22 @@ struct ComposerBar: Block {
             return recalled ? session.draft : nil
           }
         )
+        .focusTarget(ScribeMacStore.composerFocus)
       } controls: {
         if session.isRunning {
           HStack(spacing: 6) {
             Button(
-              "Queue ↵", id: WidgetID("queue"), fontScale: theme.textScale,
+              "Queue ↵", fontScale: theme.textScale,
               style: theme.buttonStyle(pressedColor: theme.accent)
             ) { session.submit() }
             Button(
-              "Stop ■", id: WidgetID("stop"), fontScale: theme.textScale,
+              "Stop ■", fontScale: theme.textScale,
               style: theme.buttonStyle(pressedColor: theme.red)
             ) { session.stop() }
           }
         } else {
           Button(
-            "Send ↵", id: WidgetID("send"), fontScale: theme.textScale,
+            "Send ↵", fontScale: theme.textScale,
             style: theme.buttonStyle(pressedColor: theme.accent)
           ) { session.submit() }
         }
@@ -83,7 +84,7 @@ struct ComposerBar: Block {
 
       HStack(spacing: 6) {
         if !session.isRunning {
-          Interactive(id: WidgetID("model-picker-toggle"), action: { store.toggleModelPicker() }) { phase in
+          Interactive(action: { store.toggleModelPicker() }) { phase in
             HStack(spacing: 5) {
               Text(sanitizeASCII(session.profileName))
                 .fontScale(theme.smallScale)
@@ -97,12 +98,12 @@ struct ComposerBar: Block {
             .border(theme.border)
           }
           Button(
-            "TLDR", id: WidgetID("tldr"), fontScale: theme.smallScale,
+            "TLDR", fontScale: theme.smallScale,
             style: theme.buttonStyle(pressedColor: theme.purple),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.tldr) }
           Button(
-            "Fork", id: WidgetID("fork"), fontScale: theme.smallScale,
+            "Fork", fontScale: theme.smallScale,
             style: theme.buttonStyle(pressedColor: theme.orange),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.fork) }
@@ -130,7 +131,6 @@ struct BottomModelPicker: Block {
       for (_, profile) in store.profileCatalog.enumerated() {
         let isActive = profile.name == session.profileName
         Interactive(
-          id: WidgetID("model-picker-item-\(profile.name)"),
           action: { store.selectProfile(profile.name) }
         ) { phase in
           HStack(spacing: 6) {
@@ -277,12 +277,12 @@ struct QueuedTray: Block {
           .foregroundColor(theme.yellow)
         Spacer()
         Button(
-          "Send next", id: WidgetID("force-send-queue"), fontScale: theme.smallScale,
+          "Send next", fontScale: theme.smallScale,
           style: theme.buttonStyle(pressedColor: theme.accent),
           padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
         ) { session.forceSendNext() }
         Button(
-          "Clear", id: WidgetID("clear-queue"), fontScale: theme.smallScale,
+          "Clear", fontScale: theme.smallScale,
           padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
         ) { session.clearQueue() }
       }

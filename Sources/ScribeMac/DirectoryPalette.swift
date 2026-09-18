@@ -23,12 +23,12 @@ struct DirectoryPalette: Block {
         Text("$ cd").fontScale(theme.textScale).foregroundColor(theme.green)
         TextField(
           required ? "/path/to/project" : "path",
-          id: ScribeMacStore.directoryPaletteID,
           fontScale: theme.textScale,
           text: { store.directoryDraft },
           onChange: { store.updateDirectoryDraft($0) },
           onSubmit: { _ in store.submitDirectory() }
         )
+        .focusTarget(ScribeMacStore.directoryPaletteFocus)
       }
       if !store.directoryError.isEmpty {
         Text(sanitizeASCII(store.directoryError))
@@ -54,7 +54,7 @@ struct DirectoryPalette: Block {
       }
       if !required {
         HStack(spacing: 8) {
-          Button("Cancel", id: WidgetID("directory-cancel"), fontScale: theme.smallScale) {
+          Button("Cancel", fontScale: theme.smallScale) {
             store.closeDirectoryPicker()
           }
         }

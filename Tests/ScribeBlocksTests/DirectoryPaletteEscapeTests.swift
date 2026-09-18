@@ -69,13 +69,13 @@ struct DirectoryPaletteEscapeTests {
     let renderer = HeadlessRenderer(size: Size(width: 640, height: 400))
     renderer.content = PaletteEscapeSurface(store: store, state: state)
     renderer.render()
-    let context = try #require(state.context)
-    context.focus(ScribeMacStore.directoryPaletteID, editing: true)
+    _ = try #require(state.context)
+    ScribeMacStore.directoryPaletteFocus.focus(editing: true)
+    renderer.render()
     renderer.render(input: InputState(textEvents: [.endEditing]))
     #expect(store.showDirectoryPicker == required)
     #expect(!state.underlyingPickerCancelled)
     if required {
-      #expect(context.activeTextInput == ScribeMacStore.directoryPaletteID)
       let before = store.directoryDraft
       renderer.render(input: InputState(textEvents: [.insert("x")]))
       #expect(store.directoryDraft == before + "x")

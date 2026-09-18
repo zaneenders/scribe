@@ -29,16 +29,16 @@ final class SessionController {
     var isTextExpanded = false
     var sourceMessageIndex: Int?
 
-    var layoutID: WidgetID {
-      WidgetID("transcript-row:\(id.uuidString):\(layoutRevision)")
+    var layoutID: String {
+      "transcript-row:\(id.uuidString):\(layoutRevision)"
     }
 
-    var headerSelectionID: WidgetID {
-      WidgetID("transcript-selection:\(id.uuidString):header")
+    var headerSelectionID: String {
+      "transcript-selection:\(id.uuidString):header"
     }
 
-    var selectionID: WidgetID {
-      WidgetID("transcript-selection:\(id.uuidString):body")
+    var selectionID: String {
+      "transcript-selection:\(id.uuidString):body"
     }
 
     var selectionHeader: String {
@@ -220,7 +220,7 @@ final class SessionController {
     draft.append("\n")
     historyIndex = nil
     draftBeforeHistory = ""
-    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeMacStore.composerFocus.focus(editing: true)
   }
 
   @discardableResult
@@ -233,7 +233,7 @@ final class SessionController {
       historyIndex = index - 1
     }
     if let historyIndex { draft = promptHistory[historyIndex] }
-    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeMacStore.composerFocus.focus(editing: true)
     return true
   }
 
@@ -248,7 +248,7 @@ final class SessionController {
       draft = draftBeforeHistory
       draftBeforeHistory = ""
     }
-    ScribeRenderContext.current?.focus(ScribeMacStore.composerID, editing: true)
+    ScribeMacStore.composerFocus.focus(editing: true)
     return true
   }
 

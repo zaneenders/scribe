@@ -19,7 +19,6 @@ struct StatusBar: Block {
         }
       }
       Interactive(
-        id: WidgetID("cwd-toggle"),
         action: { store.toggleDirectoryPicker() }
       ) { phase in
         HStack(spacing: 4) {
@@ -35,7 +34,7 @@ struct StatusBar: Block {
       }
       Text("Session: \(session.sessionIdText)")
         .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
-        .selectable(WidgetID("session-id"))
+        .selectable()
       Spacer()
       if !session.usageText.isEmpty {
         Text(session.usageText).fontScale(theme.smallScale).foregroundColor(theme.textSecondary)

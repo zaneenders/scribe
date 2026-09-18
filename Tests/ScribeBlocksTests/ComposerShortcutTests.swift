@@ -37,7 +37,7 @@ struct ComposerShortcutTests {
     #expect(
       ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, activeTextInput: ScribeMacStore.composerID))
     #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, activeTextInput: nil))
-    #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, activeTextInput: WidgetID("directory")))
+    #expect(!ScribeComposerCommand.shouldSubmit(ScribeComposerCommand.submit, activeTextInput: "directory"))
     #expect(bindings.command(for: KeyChord(.enter)) == .some(.some(.editing(.submit))))
     #expect(bindings.command(for: KeyChord(.enter, modifiers: .shift)) == .some(.some(.editing(.submit))))
   }

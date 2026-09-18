@@ -64,11 +64,13 @@ struct MacSelectionTests {
     }
     interaction.beginFrame(input: InputState())
     var drawList = DrawList()
+    let focus = FocusTarget()
+    focus.focus(editing: true)
     BlockEngine.draw(
-      TextField(id: WidgetID("composer"), text: { "draft" }, onChange: { _ in }),
+      TextField(text: { "draft" }, onChange: { _ in }).focusTarget(focus),
       into: &drawList, in: Rect(x: 0, y: 100, width: 300, height: 40), context: context)
     interaction.endFrame()
-    interaction.beginEditing(WidgetID("composer"), caretOffset: 5)
+    interaction.caretOffset = 5
     interaction.editingText = "draft"
     interaction.textSelectionRange = 0..<5
     let origin = Point(x: 10, y: 11)
@@ -81,7 +83,7 @@ struct MacSelectionTests {
     SelectionManager.shared.updateFromDrag(context: context)
 
     #expect(interaction.copyText() == "selected")
-    #expect(context.activeTextInput == nil)
+    #expect(context.interactionMode != .editing)
   }
 
   @MainActor
@@ -137,7 +139,7 @@ struct MacSelectionTests {
 
     var entries: [TranscriptSelectionDocumentRegistry.Entry] = []
     for (index, text) in texts.enumerated() {
-      let id = WidgetID("selection-test-\(UUID().uuidString)")
+      let id = "selection-test-\(UUID().uuidString)"
       let layout = makeLayout(
         text: text,
         rect: Rect(x: 10, y: 10 + Float(index) * 20, width: Float(text.count) * 8, height: 12))

@@ -10,7 +10,6 @@ struct RenameSessionDialog: Block {
     RenameSessionInput(store: store) {
       ZStack {
         Interactive(
-          id: WidgetID("rename-session-scrim"),
           action: { store.cancelSessionRename() }
         ) { _ in
           VStack(spacing: 0) {
@@ -39,19 +38,19 @@ struct RenameSessionDialog: Block {
               theme: theme, color: theme.textSecondary, scale: theme.smallScale)
             TextField(
               String(sessionID.uuidString.prefix(8)).uppercased(),
-              id: ScribeMacStore.renameSessionFieldID,
               fontScale: theme.textScale,
               text: { store.renameSessionDraft },
               onChange: { store.updateRenameSessionDraft($0) },
               onSubmit: { _ in store.submitSessionRename() }
             )
+            .focusTarget(ScribeMacStore.renameSessionFieldFocus)
             HStack(spacing: 8) {
               Spacer()
               Button(
-                "Cancel", id: WidgetID("rename-session-cancel"), fontScale: theme.smallScale
+                "Cancel", fontScale: theme.smallScale
               ) { store.cancelSessionRename() }
               Button(
-                "Rename", id: WidgetID("rename-session-submit"), fontScale: theme.smallScale,
+                "Rename", fontScale: theme.smallScale,
                 style: theme.buttonStyle(pressedColor: theme.green)
               ) { store.submitSessionRename() }
             }
