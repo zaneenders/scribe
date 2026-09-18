@@ -42,28 +42,20 @@ package_name="scribe-linux-$architecture-$version"
 staging="$output_directory/$package_name"
 archive="$output_directory/$package_name.tar.gz"
 
-cli_binary=${SCRIBE_CLI_BINARY:-}
 wayland_binary=${SCRIBE_WAYLAND_BINARY:-}
 
 printf '[install] Checking Linux build prerequisites...\n'
-if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
+if [ -z "$wayland_binary" ]; then
   if ! command -v pkg-config >/dev/null 2>&1; then
     echo "error: pkg-config is required to build the Linux package" >&2
     exit 1
   fi
   missing=
-  for module in libcurl; do
+  for module in libcurl wayland-client wayland-cursor wayland-egl egl glesv2 xkbcommon; do
     if ! pkg-config --exists "$module"; then
       missing="$missing $module"
     fi
   done
-  if [ -z "$wayland_binary" ]; then
-    for module in wayland-client wayland-cursor wayland-egl egl glesv2 xkbcommon; do
-      if ! pkg-config --exists "$module"; then
-        missing="$missing $module"
-      fi
-    done
-  fi
   if [ -n "$missing" ]; then
     echo "error: missing native development modules:$missing" >&2
     echo "Install your distribution's corresponding development packages and retry." >&2
@@ -72,34 +64,24 @@ if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
 fi
 
 build_system=${SWIFT_BUILD_SYSTEM:-native}
-bin_path=
-if [ -z "$cli_binary" ] || [ -z "$wayland_binary" ]; then
-  bin_path=$(swift build --build-system "$build_system" -c "$configuration" --show-bin-path)
-fi
-if [ -z "$cli_binary" ]; then
-  printf '[install] Building CLI (%s)...\n' "$configuration"
-  swift build --build-system "$build_system" -c "$configuration" --product scribe --static-swift-stdlib
-  cli_binary="$bin_path/scribe"
-fi
 if [ -z "$wayland_binary" ]; then
+  bin_path=$(swift build --build-system "$build_system" -c "$configuration" --show-bin-path)
   printf '[install] Building Wayland app (%s)...\n' "$configuration"
   swift build --build-system "$build_system" -c "$configuration" --product scribe-wayland --static-swift-stdlib
   wayland_binary="$bin_path/scribe-wayland"
 fi
 
-for binary in "$cli_binary" "$wayland_binary"; do
-  if [ ! -x "$binary" ]; then
-    echo "error: executable not found: $binary" >&2
+if [ ! -x "$wayland_binary" ]; then
+  echo "error: executable not found: $wayland_binary" >&2
+  exit 1
+fi
+case "$(file -b "$wayland_binary")" in
+  ELF*executable*) ;;
+  *)
+    echo "error: expected a Linux ELF executable: $wayland_binary" >&2
     exit 1
-  fi
-  case "$(file -b "$binary")" in
-    ELF*executable*) ;;
-    *)
-      echo "error: expected a Linux ELF executable: $binary" >&2
-      exit 1
-      ;;
-  esac
-done
+    ;;
+esac
 
 binary_architecture() {
   case "$(file -b "$1")" in
@@ -108,13 +90,11 @@ binary_architecture() {
     *) printf unknown ;;
   esac
 }
-for binary in "$cli_binary" "$wayland_binary"; do
-  actual=$(binary_architecture "$binary")
-  if [ "$actual" != "$architecture" ]; then
-    echo "error: $binary is $actual, expected $architecture" >&2
-    exit 1
-  fi
-done
+actual=$(binary_architecture "$wayland_binary")
+if [ "$actual" != "$architecture" ]; then
+  echo "error: $wayland_binary is $actual, expected $architecture" >&2
+  exit 1
+fi
 
 if command -v readelf >/dev/null 2>&1; then
   dynamic=$(readelf -d "$wayland_binary")
@@ -135,7 +115,6 @@ mkdir -p \
   "$staging/bin" \
   "$staging/share/applications" \
   "$staging/share/icons/hicolor/512x512/apps"
-install -m 755 "$cli_binary" "$staging/bin/scribe"
 install -m 755 "$wayland_binary" "$staging/bin/scribe-wayland"
 install -m 755 Scripts/Linux/install.sh "$staging/install.sh"
 install -m 755 Scripts/Linux/uninstall.sh "$staging/uninstall.sh"
@@ -149,12 +128,11 @@ printf '[install] Testing package installation and removal...\n'
 test_prefix="$output_directory/.install-test-$architecture"
 rm -rf "$test_prefix"
 PREFIX="$test_prefix" "$staging/install.sh"
-test -x "$test_prefix/bin/scribe"
 test -x "$test_prefix/bin/scribe-wayland"
 grep -F "Exec=\"$test_prefix/bin/scribe-wayland\"" \
   "$test_prefix/share/applications/com.zaneenders.scribe.desktop" >/dev/null
 PREFIX="$test_prefix" "$staging/uninstall.sh"
-test ! -e "$test_prefix/bin/scribe"
+test ! -e "$test_prefix/bin/scribe-wayland"
 rm -rf "$test_prefix"
 
 printf '[install] Creating archive and checksum...\n'

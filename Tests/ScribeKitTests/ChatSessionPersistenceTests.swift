@@ -4,7 +4,6 @@ import ScribeCore
 import SystemPackage
 import Testing
 
-@testable import ScribeCLI
 @testable import ScribeKit
 
 @Suite

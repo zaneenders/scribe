@@ -10,7 +10,6 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/build output" "$tmp/repo with spaces"
 cp -R "$root/Scripts" "$root/Packaging" "$root/LICENSE" "$tmp/repo with spaces/"
 export TEST_BIN_PATH="$tmp/build output" TEST_TRACE="$tmp/trace"
-cp /bin/true "$TEST_BIN_PATH/scribe"
 cp /bin/true "$TEST_BIN_PATH/scribe-wayland"
 cat > "$tmp/bin/swift" <<'SH'
 #!/bin/sh
@@ -29,11 +28,11 @@ for command in update-desktop-database gtk-update-icon-cache; do
 done
 chmod +x "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH" VERSION=test OUTPUT_DIRECTORY="$tmp/dist" PREFIX="$tmp/install prefix"
-unset SCRIBE_CLI_BINARY SCRIBE_WAYLAND_BINARY SWIFT_BUILD_SYSTEM
+unset SCRIBE_WAYLAND_BINARY SWIFT_BUILD_SYSTEM
 installer="$tmp/repo with spaces/Scripts/install.sh"
 "$installer"
-test "$(wc -l < "$TEST_TRACE")" -eq 3
-test -x "$PREFIX/bin/scribe"
+test "$(wc -l < "$TEST_TRACE")" -eq 2
+test ! -e "$PREFIX/bin/scribe"
 test -x "$PREFIX/bin/scribe-wayland"
 grep -F "Exec=\"$PREFIX/bin/scribe-wayland\"" "$PREFIX/share/applications/com.zaneenders.scribe.desktop"
 archive=$(find "$OUTPUT_DIRECTORY" -name '*.tar.gz')
@@ -42,11 +41,11 @@ test -f "$archive.sha256"
 
 : > "$TEST_TRACE"
 SWIFT_BUILD_SYSTEM=swiftbuild PREFIX="$tmp/override prefix" "$installer"
-test "$(wc -l < "$TEST_TRACE")" -eq 3
-test -x "$tmp/override prefix/bin/scribe"
+test "$(wc -l < "$TEST_TRACE")" -eq 2
+test -x "$tmp/override prefix/bin/scribe-wayland"
 
 : > "$TEST_TRACE"
-SCRIBE_CLI_BINARY="$TEST_BIN_PATH/scribe" SCRIBE_WAYLAND_BINARY="$TEST_BIN_PATH/scribe-wayland" \
+SCRIBE_WAYLAND_BINARY="$TEST_BIN_PATH/scribe-wayland" \
   PREFIX="$tmp/not installed" "$tmp/repo with spaces/Scripts/package-linux.sh"
 test ! -s "$TEST_TRACE"
 test ! -e "$tmp/not installed"
