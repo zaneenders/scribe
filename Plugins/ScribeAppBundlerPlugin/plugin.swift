@@ -27,10 +27,6 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
     guard let macBinary = Self.executable(named: "scribe-mac", in: build.builtArtifacts) else {
       throw BundlerError.missingArtifact("scribe-mac")
     }
-    guard let cliBinary = Self.executable(named: "scribe", in: build.builtArtifacts) else {
-      throw BundlerError.missingArtifact("scribe")
-    }
-
     let packagingDirectory = packageDirectory.appendingPathComponent("Packaging", isDirectory: true)
     let infoPlist = packagingDirectory.appendingPathComponent("Info.plist")
     let appIcon = packagingDirectory.appendingPathComponent("AppIcon.icns")
@@ -43,46 +39,31 @@ struct ScribeAppBundlerPlugin: CommandPlugin {
 
     let contentsURL = outputURL.appendingPathComponent("Contents", isDirectory: true)
     let macOSURL = contentsURL.appendingPathComponent("MacOS", isDirectory: true)
-    let helpersURL = contentsURL.appendingPathComponent("Helpers", isDirectory: true)
     let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
 
     if FileManager.default.fileExists(atPath: outputURL.path) {
       try FileManager.default.removeItem(at: outputURL)
     }
-    for directory in [macOSURL, helpersURL, resourcesURL] {
+    for directory in [macOSURL, resourcesURL] {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
     try Self.installExecutable(from: macBinary, to: macOSURL.appendingPathComponent("scribe-mac"))
-    try Self.installExecutable(from: cliBinary, to: helpersURL.appendingPathComponent("scribe"))
     try FileManager.default.copyItem(at: infoPlist, to: contentsURL.appendingPathComponent("Info.plist"))
     try FileManager.default.copyItem(at: appIcon, to: resourcesURL.appendingPathComponent("AppIcon.icns"))
 
-    var installedBundles: Set<String> = []
-    for directory in Set([macBinary.deletingLastPathComponent(), cliBinary.deletingLastPathComponent()]) {
-      let entries = try FileManager.default.contentsOfDirectory(
-        at: directory, includingPropertiesForKeys: [.isDirectoryKey]
-      )
-      for bundle in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-      where bundle.pathExtension == "bundle" {
-        guard try bundle.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { continue }
-        let name = bundle.lastPathComponent
-        guard installedBundles.insert(name).inserted else { continue }
-        Diagnostics.remark("Installing resource bundle \(name)…")
-        try FileManager.default.copyItem(at: bundle, to: resourcesURL.appendingPathComponent(name))
-        try FileManager.default.createSymbolicLink(
-          atPath: helpersURL.appendingPathComponent(name).path,
-          withDestinationPath: "../Resources/\(name)"
-        )
-      }
+    let entries = try FileManager.default.contentsOfDirectory(
+      at: macBinary.deletingLastPathComponent(), includingPropertiesForKeys: [.isDirectoryKey]
+    )
+    for bundle in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+    where bundle.pathExtension == "bundle" {
+      guard try bundle.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else { continue }
+      let name = bundle.lastPathComponent
+      Diagnostics.remark("Installing resource bundle \(name)…")
+      try FileManager.default.copyItem(at: bundle, to: resourcesURL.appendingPathComponent(name))
     }
 
     if ProcessInfo.processInfo.environment["SCRIBE_SKIP_ADHOC_SIGNING"] != "1" {
-      Diagnostics.remark("Signing embedded CLI…")
-      try Self.run(
-        "/usr/bin/codesign",
-        arguments: ["--force", "--sign", "-", helpersURL.appendingPathComponent("scribe").path]
-      )
       Diagnostics.remark("Signing app bundle…")
       try Self.run("/usr/bin/codesign", arguments: ["--force", "--sign", "-", outputURL.path])
       Diagnostics.remark("Verifying app signature…")

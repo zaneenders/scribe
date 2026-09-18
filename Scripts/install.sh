@@ -8,18 +8,17 @@ Usage: ./Scripts/install.sh [--help]
 Build and install Scribe for the current platform using the platform build scripts.
 
 macOS:
-  Builds and signs Scribe.app (including the embedded CLI).
+  Builds and signs Scribe.app.
   SCRIBE_INSTALL_PATH       App destination (default: /Applications/Scribe.app)
   SCRIBE_CODESIGN_IDENTITY  Stable signing identity (default: first Apple Development identity)
 
 Linux:
-  Builds a redistributable archive and installs the CLI and Wayland app.
+  Builds a redistributable archive and installs the Wayland app.
   PREFIX                   Install prefix (default: ~/.local)
   CONFIGURATION            Swift build configuration (default: release)
   SWIFT_BUILD_SYSTEM       SwiftPM build engine (default: native; static-link workaround)
   OUTPUT_DIRECTORY         Archive output directory (default: repository dist/)
   VERSION                  Override the archive version
-  SCRIBE_CLI_BINARY         Use an existing CLI executable
   SCRIBE_WAYLAND_BINARY     Use an existing Wayland executable
 
 Install prerequisites first; see README.md. This script does not elevate privileges.
