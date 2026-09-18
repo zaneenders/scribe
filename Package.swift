@@ -212,7 +212,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-configuration", from: "1.0.0"),
     .package(
       url: "https://github.com/swiftlang/swift-subprocess.git",
-      revision: "049ddf9",
+      from: "1.0.0",
       traits: ["SubprocessFoundation"]
     ),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
