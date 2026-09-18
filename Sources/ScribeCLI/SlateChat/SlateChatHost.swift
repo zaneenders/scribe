@@ -920,6 +920,7 @@ extension SlateChatHost {
       newConfig.apiType = loaded.apiType
       newConfig.reasoningEnabled = loaded.scribeConfig.reasoningEnabled
       newConfig.reasoningEffort = loaded.scribeConfig.reasoningEffort
+      newConfig.serviceTier = loaded.scribeConfig.serviceTier
       newConfig.maxTokens = loaded.scribeConfig.maxTokens
       newConfig.sendsOpenCodeHeader = loaded.scribeConfig.sendsOpenCodeHeader
       newConfig.temperature = loaded.scribeConfig.temperature

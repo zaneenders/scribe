@@ -13,6 +13,7 @@ public enum ScribeConfigBinding {
   public static let contextWindowThreshold = "agent.contextWindowThreshold"
   public static let reasoningEnabled = "agent.reasoning"
   public static let reasoningEffort = "agent.reasoningEffort"
+  public static let serviceTier = "agent.serviceTier"
   public static let temperature = "agent.temperature"
   public static let maxRetries = "agent.maxRetries"
   public static let loggingLevel = "logging.level"
@@ -43,6 +44,7 @@ private struct ConfigManifest: Codable {
     var contextWindowThreshold: Double
     var reasoning: Bool?
     var reasoningEffort: String?
+    var serviceTier: String? = nil
     var maxTokens: Int?
     var temperature: Double?
     var maxRetries: Int?
@@ -346,6 +348,7 @@ public enum ConfigLoader {
       workingDirectory: ".",
       reasoningEnabled: profile.agent.reasoning,
       reasoningEffort: profile.agent.reasoningEffort,
+      serviceTier: profile.agent.serviceTier,
       maxTokens: profile.agent.maxTokens,
       sendsOpenCodeHeader: profile.api.opencodeHeader ?? false,
       temperature: profile.agent.temperature,

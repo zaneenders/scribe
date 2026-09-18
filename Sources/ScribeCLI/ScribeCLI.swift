@@ -119,6 +119,7 @@ enum LoginProvider: String, ExpressibleByArgument {
       workingDirectory: cwd,
       reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
       reasoningEffort: loaded.scribeConfig.reasoningEffort,
+      serviceTier: loaded.scribeConfig.serviceTier,
       maxTokens: loaded.scribeConfig.maxTokens,
       temperature: loaded.scribeConfig.temperature,
       maxRetries: loaded.scribeConfig.maxRetries

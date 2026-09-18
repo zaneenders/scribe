@@ -11,6 +11,7 @@ public struct ScribeConfig: Sendable {
   public var workingDirectory: String
   public var reasoningEnabled: Bool?
   public var reasoningEffort: String?
+  public var serviceTier: String?
   public var maxTokens: Int?
   public var sendsOpenCodeHeader: Bool
   public var temperature: Double?
@@ -26,6 +27,7 @@ public struct ScribeConfig: Sendable {
     workingDirectory: String,
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
+    serviceTier: String? = nil,
     maxTokens: Int? = nil,
     sendsOpenCodeHeader: Bool = false,
     temperature: Double? = nil,
@@ -41,6 +43,7 @@ public struct ScribeConfig: Sendable {
     self.workingDirectory = workingDirectory
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEffort = reasoningEffort
+    self.serviceTier = serviceTier
     self.maxTokens = maxTokens
     self.sendsOpenCodeHeader = sendsOpenCodeHeader
     self.temperature = temperature
