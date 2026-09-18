@@ -2,7 +2,6 @@
 import PackageDescription
 
 var products: [Product] = [
-  .executable(name: "scribe", targets: ["ScribeCLI"]),
   .library(name: "ScribeCore", targets: ["ScribeCore"]),
   .library(name: "ScribeKit", targets: ["ScribeKit"]),
   .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
@@ -84,30 +83,6 @@ var targets: [Target] = [
       .treatAllWarnings(as: .error),
     ]
   ),
-  .executableTarget(
-    name: "ScribeCLI",
-    dependencies: [
-      "ScribeCore",
-      "ScribeCodexAuth",
-      "ScribeKit",
-      .product(name: "SystemPackage", package: "swift-system"),
-      .product(name: "Subprocess", package: "swift-subprocess"),
-      .product(name: "SlateCore", package: "slate"),
-      .product(name: "ArgumentParser", package: "swift-argument-parser"),
-      .product(name: "Markdown", package: "swift-markdown"),
-      .product(name: "_RopeModule", package: "swift-collections"),
-      .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
-      .product(name: "_NIOFileSystem", package: "swift-nio"),
-    ],
-    swiftSettings: [
-      .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
-      .unsafeFlags(["-Xcc", "-fno-omit-frame-pointer"]),
-    ],
-    plugins: [
-      "GitVersionPlugin"
-    ]
-  ),
   .target(
     name: "ScribeBlocks",
     dependencies: [
@@ -153,9 +128,8 @@ var targets: [Target] = [
     ]
   ),
   .testTarget(
-    name: "ScribeCLITests",
+    name: "ScribeKitTests",
     dependencies: [
-      "ScribeCLI",
       "ScribeKit",
     ],
     swiftSettings: [
@@ -172,7 +146,7 @@ var targets: [Target] = [
     capability: .command(
       intent: .custom(
         verb: "bundle",
-        description: "Build Scribe.app from the scribe-mac and scribe executables"
+        description: "Build Scribe.app from the scribe-mac executable"
       ),
       permissions: [
         .writeToPackageDirectory(
@@ -231,7 +205,6 @@ let package = Package(
       url: "https://github.com/zaneenders/chroma",
       revision: "10a2952"
     ),
-    .package(url: "https://github.com/zaneenders/slate", revision: "b9e8dca"),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
     .package(url: "https://github.com/swift-server/swift-openapi-async-http-client", from: "1.0.0"),
@@ -242,10 +215,7 @@ let package = Package(
       revision: "049ddf9",
       traits: ["SubprocessFoundation"]
     ),
-    .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
-    .package(url: "https://github.com/apple/swift-markdown.git", from: "0.6.0"),
-    .package(url: "https://github.com/apple/swift-collections.git", from: "1.4.1"),
     .package(url: "https://github.com/apple/swift-profile-recorder.git", .upToNextMinor(from: "0.3.13")),
     .package(url: "https://github.com/apple/swift-nio.git", from: "2.100.0"),
     .package(url: "https://github.com/apple/swift-crypto.git", from: "3.10.0"),

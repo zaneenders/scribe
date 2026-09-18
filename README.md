@@ -1,6 +1,6 @@
 # Scribe
 
-AI coding agent written in Swift, with a CLI and macOS/Wayland apps.
+AI coding agent written in Swift, with macOS/Wayland apps.
 Supports OpenAI-compatible providers and ChatGPT/Codex.
 
 ## Requirements
@@ -37,17 +37,6 @@ sudo apt-get install binutils file libcurl4-openssl-dev libegl1-mesa-dev libgles
 
 Use `./Scripts/install.sh --help` for overrides. No privileges are elevated automatically.
 
-CLI only:
-
-```sh
-swift build -c release --product scribe
-mkdir -p ~/.local/bin
-install -m 755 .build/release/scribe ~/.local/bin/scribe
-scribe
-```
-
-Ensure `~/.local/bin` is on `PATH`.
-
 ## Configuration
 
 Config lookup: `SCRIBE_CONFIG_PATH`, `~/.scribe/scribe.config.json`, then
@@ -67,7 +56,7 @@ Set `SCRIBE_HOME` to change the data directory.
 }
 ```
 
-The first profile is the default; select another with `--profile <name>`.
+The first profile is the default.
 Set `api.type` to `"codex"` for ChatGPT/Codex; omit it for OpenAI-compatible APIs.
 Optional agent settings: `contextWindowThreshold` (default `0.8`), `reasoning`
 (`false`), `reasoningEffort` (`low`/`medium`/`high`), and `maxRetries` (`3`).

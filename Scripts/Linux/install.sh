@@ -9,7 +9,6 @@ desktopdirectory="$sharedirectory/applications"
 icondirectory="$sharedirectory/icons/hicolor/512x512/apps"
 
 for file in \
-  "$package_root/bin/scribe" \
   "$package_root/bin/scribe-wayland" \
   "$package_root/share/applications/com.zaneenders.scribe.desktop" \
   "$package_root/share/icons/hicolor/512x512/apps/com.zaneenders.scribe.png"
@@ -21,7 +20,6 @@ do
 done
 
 mkdir -p "$bindirectory" "$desktopdirectory" "$icondirectory"
-install -m 755 "$package_root/bin/scribe" "$bindirectory/scribe"
 install -m 755 "$package_root/bin/scribe-wayland" "$bindirectory/scribe-wayland"
 install -m 644 \
   "$package_root/share/icons/hicolor/512x512/apps/com.zaneenders.scribe.png" \
@@ -53,5 +51,5 @@ fi
 printf 'Installed Scribe to %s\n' "$prefix"
 case ":${PATH:-}:" in
   *":$bindirectory:"*) ;;
-  *) printf 'Add %s to PATH to run scribe from a terminal.\n' "$bindirectory" ;;
+  *) printf 'Add %s to PATH to run scribe-wayland from a terminal.\n' "$bindirectory" ;;
 esac

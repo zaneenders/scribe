@@ -3,7 +3,6 @@ import ScribeCore
 import SystemPackage
 import Testing
 
-@testable import ScribeCLI
 @testable import ScribeKit
 
 @Suite(.serialized)
@@ -133,10 +132,5 @@ struct CodexProfileUpsertTests {
       #expect(api["baseUrl"] as? String == "http://localhost:11434")
       #expect(api["type"] == nil)
     }
-  }
-
-  @Test func loginOptionAcceptsCodex() throws {
-    let cli = try ScribeCLI.parse(["--login", "codex"])
-    #expect(cli.login == .codex)
   }
 }

@@ -32,7 +32,6 @@ SCRIBE_SKIP_ADHOC_SIGNING=1 \
   swift package --allow-writing-to-package-directory bundle
 
 printf 'Signing Scribe with "%s"...\n' "$identity"
-/usr/bin/codesign --force --sign "$identity" "$app/Contents/Helpers/scribe"
 /usr/bin/codesign --force --sign "$identity" "$app"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
 
