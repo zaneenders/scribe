@@ -4,6 +4,7 @@ import Logging
 import Observation
 import ScribeCore
 import ScribeKit
+import SystemPackage
 
 @MainActor
 @Observable
@@ -140,6 +141,8 @@ final class SessionController {
 
   var profileName: String
   var modelName: String
+  var tldrModel: String
+  var isTLDRModelPickerOpen = false
   private(set) var sessionName: String?
   private(set) var isPinned: Bool
   private(set) var commandPicker: CommandPickerState?
@@ -148,6 +151,7 @@ final class SessionController {
   var onRunningChange: ((Bool) -> Void)?
 
   private var currentSessionId: UUID
+  private(set) var sessionDirectory: FilePath
   private var runTask: Task<Void, Never>?
   private var promptHistory: [String]
   private var historyIndex: Int?
@@ -169,10 +173,12 @@ final class SessionController {
     self.boot = boot
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
+    self.tldrModel = boot.profileCatalog.first?.model ?? boot.profile.model
     let metadata = try? ChatSessionStore.loadMetadata(from: boot.sessionDirectory)
     self.sessionName = metadata?.name
     self.isPinned = metadata?.isPinned ?? false
     self.currentSessionId = boot.sessionId
+    self.sessionDirectory = boot.sessionDirectory
     self.lastMessageAt = ChatSessionStore.lastMessageDate(
       in: boot.sessionDirectory, metadata: metadata)
     self.transcript = []
@@ -310,6 +316,16 @@ final class SessionController {
     commandPicker = picker
   }
 
+  func toggleTLDRModelPicker() {
+    guard !isRunningCommand, commandPicker?.command == .tldr else { return }
+    isTLDRModelPickerOpen.toggle()
+  }
+
+  func selectTLDRModel(_ model: String) {
+    tldrModel = model
+    isTLDRModelPickerOpen = false
+  }
+
   func toggleCommandBoundary() {
     guard !isRunningCommand, var picker = commandPicker, picker.command == .tldr else { return }
     picker.activeIsEnd.toggle()
@@ -327,6 +343,7 @@ final class SessionController {
   func cancelCommandPicker() {
     guard !isRunningCommand else { return }
     commandPicker = nil
+    isTLDRModelPickerOpen = false
   }
 
   func confirmCommandPicker() {
@@ -350,20 +367,26 @@ final class SessionController {
             throw ScribeError.generic("The selected TLDR range is no longer valid.")
           }
           let configuration = await harness.configurationSnapshot()
-          let summary = try await SessionSummarizer.summarize(
+          let result = try await SessionSummarizer.summarize(
             slice: Array(snapshot.messages[start..<end]),
             configuration: configuration,
+            model: tldrModel,
             sessionId: currentSessionId,
             logger: Logger(label: "scribe.mac.tldr"))
+          let audit = ScribeMessage(
+            role: .system,
+            content: "TLDR audit\nModel: \(result.model)\nSystem prompt:\n\(result.systemPrompt)\nUser prompt:\n\(result.userPrompt)")
           change = try await harness.applyEdit(
             .forkSplice(
               startCut: start, endCut: end,
-              replacement: [ScribeMessage(role: .assistant, content: summary)],
+              replacement: [audit, ScribeMessage(role: .assistant, content: result.summary)],
               newSessionId: newId))
         }
         if let change {
           let previous = currentSessionId
           currentSessionId = change.newSessionId
+          sessionDirectory = change.newDirectory
+          isPinned = false
           onIdentityChange?(previous, change.newSessionId)
         }
         let updated = await harness.snapshot()

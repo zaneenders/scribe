@@ -366,7 +366,8 @@ struct ChatSessionPersistenceTests {
         model: "m",
         cwd: "/tmp",
         baseURL: "http://x",
-        scribeVersion: "parent-ver"
+        scribeVersion: "parent-ver",
+        isPinned: true
       )
       let messages: [ScribeMessage] = [
         ScribeMessage(role: .system, content: "sys"),
@@ -394,6 +395,7 @@ struct ChatSessionPersistenceTests {
       #expect(childMeta.parentSessionId == parentId)
       #expect(childMeta.forkedAtIndex == 3)
       #expect(childMeta.model == "m")
+      #expect(!childMeta.isPinned)
       #expect(childMeta.scribeVersion == "child-ver")
 
       let childMessages = try ChatSessionStore.loadMessages(from: result.sessionDirectory)
