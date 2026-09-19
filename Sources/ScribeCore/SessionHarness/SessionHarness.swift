@@ -82,13 +82,19 @@ public actor SessionHarness {
 
   public var lastPromptTokens: Int { tokenTracker.lastPromptTokens }
 
-  public func reconfigure(configuration: ScribeConfig) throws {
-    self.configuration = configuration
-    self.agent = try ScribeAgent(configuration: configuration, logger: logger)
-    self.tokenTracker = TokenTracker(
+  public func reconfigure(configuration: ScribeConfig, profileName: String? = nil) async throws {
+    let agent = try ScribeAgent(configuration: configuration, logger: logger)
+    let tokenTracker = TokenTracker(
       contextWindow: configuration.contextWindow,
       threshold: configuration.contextWindowThreshold
     )
+    try await persister.reconfigure(
+      model: configuration.agentModel,
+      profileName: profileName,
+      baseURL: configuration.serverURL)
+    self.configuration = configuration
+    self.agent = agent
+    self.tokenTracker = tokenTracker
     logger.notice(
       "session.harness.reconfigure",
       metadata: [
