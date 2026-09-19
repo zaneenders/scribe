@@ -54,6 +54,43 @@ struct ConfigLoaderTests {
     }
   }
 
+  @Test func profileOverrideTakesPrecedenceOverResumedSessionProfile() async throws {
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
+
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        { "profiles": [
+          { "name": "local", "api": { "baseUrl": "http://localhost:11434", "apiKey": "" }, "agent": { "model": "local-model", "contextWindow": 128000, "contextWindowThreshold": 0.8 }, "logging": { "level": "trace" } },
+          { "name": "cloud", "api": { "baseUrl": "https://api.example.com", "apiKey": "secret" }, "agent": { "model": "cloud-model", "contextWindow": 128000, "contextWindowThreshold": 0.8 }, "logging": { "level": "trace" } }
+        ] }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+
+      let sessionID = UUID()
+      let directory = paths.sessionDirectory(sessionId: sessionID)
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: sessionID, createdAt: .distantPast, model: "local-model", profileName: "local",
+          cwd: root.path, baseURL: "http://localhost:11434", scribeVersion: nil),
+        to: directory)
+      try ChatSessionStore.appendMessages([ScribeMessage(role: .system, content: "system")], to: directory)
+
+      let session = try await ScribeSessionBootstrap.open(
+        resumeDirectory: directory,
+        profileOverride: "cloud",
+        workingDirectory: root.path,
+        version: "test")
+
+      let configuration = await session.harness.configurationSnapshot()
+      #expect(session.profile.name == "cloud")
+      #expect(configuration.agentModel == "cloud-model")
+    }
+  }
+
   @Test func profileOverrideDoesNotRequireActiveProfileFile() async throws {
     try await withTemporaryDirectory { root in
       setenv("SCRIBE_HOME", root.path, 1)

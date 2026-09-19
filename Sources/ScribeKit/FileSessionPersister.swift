@@ -13,10 +13,15 @@ public final class FileSessionPersister: SessionPersister {
     var appender: ChatSessionStore.MessagesAppender
   }
 
+  private struct Settings {
+    var model: String
+    var profileName: String?
+    var baseURL: String?
+  }
+
   private let state: Mutex<State>
-  private let model: String
+  private let settings: Mutex<Settings>
   private let cwd: String
-  private let baseURL: String?
   private let scribeVersion: String?
   private let logger: Logger
 
@@ -26,18 +31,21 @@ public final class FileSessionPersister: SessionPersister {
     sessionCreatedAt: Date,
     isNewSession: Bool,
     model: String,
+    profileName: String?,
     cwd: String,
     baseURL: String?,
     scribeVersion: String?,
     logger: Logger
   ) async throws -> FileSessionPersister {
+    let settings = Settings(model: model, profileName: profileName, baseURL: baseURL)
     if isNewSession {
       let meta = ChatSessionMetadata(
         id: sessionId,
         createdAt: sessionCreatedAt,
-        model: model,
+        model: settings.model,
+        profileName: settings.profileName,
         cwd: cwd,
-        baseURL: baseURL,
+        baseURL: settings.baseURL,
         scribeVersion: scribeVersion
       )
       try await ChatSessionStore.saveMetadata(meta, to: directory)
@@ -45,9 +53,8 @@ public final class FileSessionPersister: SessionPersister {
     let appender = try ChatSessionStore.MessagesAppender(directory: directory)
     return FileSessionPersister(
       initialState: State(sessionId: sessionId, directory: directory, appender: appender),
-      model: model,
+      settings: settings,
       cwd: cwd,
-      baseURL: baseURL,
       scribeVersion: scribeVersion,
       logger: logger
     )
@@ -55,16 +62,14 @@ public final class FileSessionPersister: SessionPersister {
 
   private init(
     initialState: State,
-    model: String,
+    settings: Settings,
     cwd: String,
-    baseURL: String?,
     scribeVersion: String?,
     logger: Logger
   ) {
     self.state = Mutex(initialState)
-    self.model = model
+    self.settings = Mutex(settings)
     self.cwd = cwd
-    self.baseURL = baseURL
     self.scribeVersion = scribeVersion
     self.logger = logger
   }
@@ -78,6 +83,15 @@ public final class FileSessionPersister: SessionPersister {
       logger.error(
         "session.persister.append.fail",
         metadata: ["err": "\(String(describing: error))"])
+    }
+  }
+
+  public func reconfigure(model: String, profileName: String?, baseURL: String?) async throws {
+    let directory = state.withLock { $0.directory }
+    try await ChatSessionStore.updateConfiguration(
+      in: directory, model: model, profileName: profileName, baseURL: baseURL)
+    settings.withLock {
+      $0 = Settings(model: model, profileName: profileName, baseURL: baseURL)
     }
   }
 
@@ -97,12 +111,14 @@ public final class FileSessionPersister: SessionPersister {
     try await FileSystem.shared.createDirectory(
       at: newDir, withIntermediateDirectories: true)
 
+    let settings = settings.withLock { $0 }
     let meta = ChatSessionMetadata(
       id: newSessionId,
       createdAt: Date(),
-      model: model,
+      model: settings.model,
+      profileName: settings.profileName,
       cwd: cwd,
-      baseURL: baseURL,
+      baseURL: settings.baseURL,
       scribeVersion: scribeVersion,
       parentSessionId: parent.sessionId,
       forkedAtIndex: parent.forkPoint

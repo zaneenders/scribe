@@ -42,26 +42,7 @@ public enum ScribeSessionBootstrap {
     workingDirectory: String = FilePath.currentDirectory.string,
     version: String
   ) async throws -> BootstrappedSession {
-    let loaded = try await ConfigLoader.load(profileOverride: profileOverride)
-    let tools = ScribeSystemPrompt.defaultTools()
-    let base = loaded.scribeConfig
-    let configuration = ScribeConfig(
-      agentModel: base.agentModel,
-      contextWindow: base.contextWindow,
-      contextWindowThreshold: base.contextWindowThreshold,
-      serverURL: base.serverURL,
-      apiKey: base.apiKey,
-      apiType: loaded.apiType,
-      tools: tools,
-      workingDirectory: workingDirectory,
-      reasoningEnabled: base.reasoningEnabled,
-      reasoningEffort: base.reasoningEffort,
-      serviceTier: base.serviceTier,
-      maxTokens: base.maxTokens,
-      sendsOpenCodeHeader: base.sendsOpenCodeHeader,
-      temperature: base.temperature,
-      maxRetries: base.maxRetries
-    )
+    var loaded = try await ConfigLoader.load(profileOverride: profileOverride)
 
     let sessionId: UUID
     let directory: FilePath
@@ -92,6 +73,32 @@ public enum ScribeSessionBootstrap {
       messages = []
     }
 
+    if profileOverride == nil,
+      let profileName = (try? ChatSessionStore.loadMetadata(from: directory))?.profileName,
+      profileName != loaded.activeProfileName
+    {
+      loaded = try await ConfigLoader.load(profileOverride: profileName)
+    }
+    let tools = ScribeSystemPrompt.defaultTools()
+    let base = loaded.scribeConfig
+    let configuration = ScribeConfig(
+      agentModel: base.agentModel,
+      contextWindow: base.contextWindow,
+      contextWindowThreshold: base.contextWindowThreshold,
+      serverURL: base.serverURL,
+      apiKey: base.apiKey,
+      apiType: loaded.apiType,
+      tools: tools,
+      workingDirectory: workingDirectory,
+      reasoningEnabled: base.reasoningEnabled,
+      reasoningEffort: base.reasoningEffort,
+      serviceTier: base.serviceTier,
+      maxTokens: base.maxTokens,
+      sendsOpenCodeHeader: base.sendsOpenCodeHeader,
+      temperature: base.temperature,
+      maxRetries: base.maxRetries
+    )
+
     let isResuming = resumeLatest || resumeDirectory != nil
     var logger = loaded.makeSessionLogger(sessionId: sessionId)
     logger[metadataKey: "mode"] = isResuming ? "resume" : "new"
@@ -116,6 +123,7 @@ public enum ScribeSessionBootstrap {
       sessionCreatedAt: Date(),
       isNewSession: isNew,
       model: configuration.agentModel,
+      profileName: loaded.activeProfileName,
       cwd: workingDirectory,
       baseURL: configuration.serverURL,
       scribeVersion: version,

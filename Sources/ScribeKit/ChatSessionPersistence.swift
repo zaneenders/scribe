@@ -8,6 +8,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
   public var id: UUID
   public var createdAt: Date
   public var model: String
+  public var profileName: String?
   public var cwd: String
   public var baseURL: String?
   public var scribeVersion: String?
@@ -27,6 +28,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     id: UUID,
     createdAt: Date,
     model: String,
+    profileName: String? = nil,
     cwd: String,
     baseURL: String?,
     scribeVersion: String?,
@@ -40,6 +42,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     self.id = id
     self.createdAt = createdAt
     self.model = model
+    self.profileName = profileName
     self.cwd = cwd
     self.baseURL = baseURL
     self.scribeVersion = scribeVersion
@@ -51,7 +54,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case schemaVersion, id, createdAt, model, cwd, baseURL, scribeVersion, lastMessageAt
+    case schemaVersion, id, createdAt, model, profileName, cwd, baseURL, scribeVersion, lastMessageAt
     case name, isPinned, parentSessionId, forkedAtIndex
   }
 
@@ -61,6 +64,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     id = try container.decode(UUID.self, forKey: .id)
     createdAt = try container.decode(Date.self, forKey: .createdAt)
     model = try container.decode(String.self, forKey: .model)
+    profileName = try container.decodeIfPresent(String.self, forKey: .profileName)
     cwd = try container.decode(String.self, forKey: .cwd)
     baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL)
     scribeVersion = try container.decodeIfPresent(String.self, forKey: .scribeVersion)
@@ -326,6 +330,21 @@ public enum ChatSessionStore {
       metadata.name = trimmed.isEmpty ? nil : trimmed
     }
     if let isPinned { metadata.isPinned = isPinned }
+    try await saveMetadata(metadata, to: directory)
+    return metadata
+  }
+
+  @discardableResult
+  public static func updateConfiguration(
+    in directory: FilePath,
+    model: String,
+    profileName: String?,
+    baseURL: String?
+  ) async throws -> ChatSessionMetadata {
+    var metadata = try loadMetadata(from: directory)
+    metadata.model = model
+    metadata.profileName = profileName
+    metadata.baseURL = baseURL
     try await saveMetadata(metadata, to: directory)
     return metadata
   }

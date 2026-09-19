@@ -120,6 +120,23 @@ struct ChatSessionPersistenceTests {
     }
   }
 
+  @Test func updatesSessionConfiguration() async throws {
+    try await withTemporaryDirectory { directory in
+      let path = FilePath(directory.path)
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: UUID(), createdAt: .distantPast, model: "old", cwd: "/tmp",
+          baseURL: "https://old.example", scribeVersion: nil),
+        to: path)
+
+      let updated = try await ChatSessionStore.updateConfiguration(
+        in: path, model: "new", profileName: "economy", baseURL: "https://new.example")
+      #expect(updated.model == "new")
+      #expect(updated.profileName == "economy")
+      #expect(updated.baseURL == "https://new.example")
+    }
+  }
+
   @Test func updatesSessionNameAndPinWithoutChangingRecency() async throws {
     try await withTemporaryDirectory { directory in
       let path = FilePath(directory.path)

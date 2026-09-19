@@ -82,6 +82,31 @@ struct SessionHarnessTests {
     #expect(tracking.openedSessionCount == 1)
   }
 
+  @Test func reconfigurePersistsProfile() async throws {
+    let tracking = TrackingPersister()
+    let (harness, _) = try makeHarness(persister: tracking)
+    var configuration = ScribeConfig.testValue
+    configuration.agentModel = "economy-model"
+
+    try await harness.reconfigure(configuration: configuration, profileName: "economy")
+
+    #expect(tracking.configuration?.model == "economy-model")
+    #expect(tracking.configuration?.profileName == "economy")
+  }
+
+  @Test func failedReconfigureKeepsCurrentConfiguration() async throws {
+    let tracking = TrackingPersister(failsReconfiguration: true)
+    let (harness, _) = try makeHarness(persister: tracking)
+    var configuration = ScribeConfig.testValue
+    configuration.agentModel = "economy-model"
+
+    await #expect(throws: ScribeError.self) {
+      try await harness.reconfigure(configuration: configuration, profileName: "economy")
+    }
+
+    #expect(await harness.configurationSnapshot().agentModel == "test-model")
+  }
+
   @Test func submitEmptyIsNoOp() async throws {
     let (harness, _) = try makeHarness()
     let outcome = try await harness.submit("   ") { _ in }
@@ -307,6 +332,13 @@ private final class TrackingPersister: SessionPersister, Sendable {
   private struct State {
     var appended: [ScribeMessage] = []
     var openedSessions: [SessionPersistenceSnapshot] = []
+    var configuration: (model: String, profileName: String?, baseURL: String?)?
+  }
+
+  private let failsReconfiguration: Bool
+
+  init(failsReconfiguration: Bool = false) {
+    self.failsReconfiguration = failsReconfiguration
   }
 
   var appendedMessages: [ScribeMessage] {
@@ -317,8 +349,17 @@ private final class TrackingPersister: SessionPersister, Sendable {
     lock.withLock { $0.openedSessions.count }
   }
 
+  var configuration: (model: String, profileName: String?, baseURL: String?)? {
+    lock.withLock { $0.configuration }
+  }
+
   func append(_ messages: [ScribeMessage]) async throws {
     lock.withLock { $0.appended.append(contentsOf: messages) }
+  }
+
+  func reconfigure(model: String, profileName: String?, baseURL: String?) async throws {
+    if failsReconfiguration { throw ScribeError.generic("persistence failed") }
+    lock.withLock { $0.configuration = (model, profileName, baseURL) }
   }
 
   func directory(for newSessionId: UUID) -> FilePath {

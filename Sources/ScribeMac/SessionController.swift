@@ -526,7 +526,7 @@ final class SessionController {
         temperature: loaded.scribeConfig.temperature,
         maxRetries: loaded.scribeConfig.maxRetries
       )
-      try await boot.harness.reconfigure(configuration: newConfig)
+      try await boot.harness.reconfigure(configuration: newConfig, profileName: loaded.activeProfileName)
       profileName = loaded.activeProfileName
       modelName = loaded.scribeConfig.agentModel
       let message: String
