@@ -4,6 +4,20 @@ import ScribeCore
 
 public enum SessionSummarizer {
 
+  public struct Result: Sendable {
+    public let model: String
+    public let systemPrompt: String
+    public let userPrompt: String
+    public let summary: String
+
+    public init(model: String, systemPrompt: String, userPrompt: String, summary: String) {
+      self.model = model
+      self.systemPrompt = systemPrompt
+      self.userPrompt = userPrompt
+      self.summary = summary
+    }
+  }
+
   private static let summarizerSystemPrompt = """
     You are describing the PATH an AI coding assistant took through a slice \
     of a coding session. The transcript below shows the assistant's actions \
@@ -63,11 +77,13 @@ public enum SessionSummarizer {
   public static func summarize(
     slice: [ScribeMessage],
     configuration: ScribeConfig,
+    model: String? = nil,
     sessionId: UUID,
     logger: Logger
-  ) async throws -> String {
+  ) async throws -> Result {
+    let selectedModel = model ?? configuration.agentModel
     let summarizerConfig = ScribeConfig(
-      agentModel: configuration.agentModel,
+      agentModel: selectedModel,
       contextWindow: configuration.contextWindow,
       contextWindowThreshold: configuration.contextWindowThreshold,
       serverURL: configuration.serverURL,
@@ -110,6 +126,10 @@ public enum SessionSummarizer {
     logger.info(
       "summarize.end",
       metadata: ["summary_chars": "\(summary.count)"])
-    return summary
+    return Result(
+      model: selectedModel,
+      systemPrompt: summarizerSystemPrompt,
+      userPrompt: userPrompt,
+      summary: summary)
   }
 }

@@ -248,7 +248,7 @@ final class ScribeMacStore {
 
   private func sessionDirectory(for id: UUID) -> FilePath? {
     if let session = sessions.first(where: { $0.sessionId == id }) {
-      return session.boot.sessionDirectory
+      return session.sessionDirectory
     }
     return savedSessions.first(where: { $0.id == id })?.directory
   }

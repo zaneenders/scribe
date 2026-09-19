@@ -14,7 +14,7 @@ struct BottomChrome: Block {
       if let picker = session.commandPicker {
         CommandPickerInput(store: store, session: session) {
           VStack(spacing: 0) {
-            CommandPickerBar(session: session, picker: picker, theme: theme)
+            CommandPickerBar(store: store, session: session, picker: picker, theme: theme)
             StatusBar(store: store, session: session, theme: theme)
           }
         }
@@ -213,53 +213,77 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
 }
 
 struct CommandPickerBar: Block {
+  let store: ScribeMacStore
   let session: SessionController
   let picker: SessionController.CommandPickerState
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    HStack(spacing: 0) {
-      Text("[\(picker.command.rawValue.uppercased())] ")
-        .fontScale(theme.smallScale)
-        .foregroundColor(picker.command == .tldr ? theme.purple : theme.orange)
-      if picker.command == .fork {
-        Text("msg \(picker.startBoundary) / \(picker.messageCount)")
+    VStack(spacing: 0) {
+      HStack(spacing: 0) {
+        Text("[\(picker.command.rawValue.uppercased())] ")
           .fontScale(theme.smallScale)
-          .foregroundColor(theme.textPrimary)
-      } else {
-        boundaryLabel("start", value: picker.startBoundary, active: !picker.activeIsEnd)
-        Text(" · ")
-          .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
-        boundaryLabel("end", value: picker.endBoundary, active: picker.activeIsEnd)
-        Text(" of \(picker.messageCount)")
-          .fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
+          .foregroundColor(picker.command == .tldr ? theme.purple : theme.orange)
+        if picker.command == .fork {
+          Text("msg \(picker.startBoundary) / \(picker.messageCount)")
+            .fontScale(theme.smallScale)
+            .foregroundColor(theme.textPrimary)
+        } else {
+          boundaryLabel("start", value: picker.startBoundary, active: !picker.activeIsEnd)
+          Text(" · ").fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+          boundaryLabel("end", value: picker.endBoundary, active: picker.activeIsEnd)
+          Text(" of \(picker.messageCount)").fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
+        }
+        Spacer()
+        Text(commandHint).fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
       }
-      Spacer()
-      Text(commandHint)
-        .fontScale(theme.smallScale)
-        .foregroundColor(theme.textSecondary)
+      if picker.command == .tldr {
+        VStack(spacing: 0) {
+          HStack(spacing: 6) {
+            Text("model").fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+            Interactive(action: { session.toggleTLDRModelPicker() }) { phase in
+              HStack(spacing: 5) {
+                Text(session.tldrModel).fontScale(theme.smallScale)
+                Text(session.isTLDRModelPickerOpen ? "▼" : "▲")
+                  .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+              }
+              .padding(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+              .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
+              .border(theme.border)
+            }
+            Spacer()
+          }
+          if session.isTLDRModelPickerOpen {
+            ForEach(store.profileCatalog, id: \.name) { profile in
+              Interactive(action: { session.selectTLDRModel(profile.model) }) { phase in
+                HStack(spacing: 6) {
+                  Text(profile.model).fontScale(theme.smallScale)
+                    .foregroundColor(profile.model == session.tldrModel ? theme.purple : theme.textSecondary)
+                  Spacer()
+                }
+                .padding(EdgeInsets(top: 5, leading: theme.margin, bottom: 5, trailing: theme.margin))
+                .background(phase == .hovered ? theme.buttonHover : theme.panelBackground)
+              }
+            }
+          }
+        }
+        .padding(EdgeInsets(top: 4, leading: theme.margin, bottom: 4, trailing: theme.margin))
+      }
     }
     .padding(EdgeInsets(top: 7, leading: theme.margin, bottom: 7, trailing: theme.margin))
-    .sizing(x: .grow)
-    .background(theme.statusBackground)
-    .border(theme.border)
+    .sizing(x: .grow).background(theme.statusBackground).border(theme.border)
   }
 
   @MainActor private func boundaryLabel(_ label: String, value: Int, active: Bool) -> some Block {
     HStack(spacing: 0) {
-      Text("\(label) ")
-        .fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
-      Text("\(value)")
-        .fontScale(theme.smallScale)
-        .foregroundColor(active ? theme.yellow : theme.textPrimary)
+      Text("\(label) ").fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
+      Text("\(value)").fontScale(theme.smallScale).foregroundColor(active ? theme.yellow : theme.textPrimary)
     }
   }
 
   @MainActor private var commandHint: String {
     if session.isRunningCommand { return "working..." }
-    return picker.command == .tldr
-      ? "f/j move · Tab switch · Enter confirm · Esc cancel"
-      : "f/j move · Enter confirm · Esc cancel"
+    return picker.command == .tldr ? "f/j move · Tab switch · Enter confirm · Esc cancel" : "f/j move · Enter confirm · Esc cancel"
   }
 }
 
