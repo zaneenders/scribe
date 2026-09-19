@@ -605,7 +605,7 @@ final class SessionController {
     }
   }
 
-  private func reduce(_ event: AgentEvent) {
+  func reduce(_ event: AgentEvent) {
     switch event {
     case .output(.sectionStarted(let section, _)):
       ensureStreamItem(section)
@@ -696,7 +696,7 @@ final class SessionController {
     return ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: trimmed) ?? trimmed
   }
 
-  nonisolated private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
+  nonisolated static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
     var result: [TranscriptItem] = []
     for (messageIndex, message) in messages.enumerated() {
       switch message.role {

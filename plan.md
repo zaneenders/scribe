@@ -211,7 +211,7 @@ The standalone shell may retain the app header, profile recorder, shell capture,
 
 Agents work in the following merge order. Work may be parallelized only where noted.
 
-### Wave 0 — Baseline and fixtures
+### Wave 0 — Baseline and fixtures ✅ completed
 
 Owner: one Scribe agent.
 
@@ -220,6 +220,13 @@ Owner: one Scribe agent.
 3. Do not refactor production code beyond seams required by the tests.
 
 Exit: current behavior has tests strong enough to detect migration regressions.
+
+Completed. Baseline was green (`swift build` clean; `swift test` 2 + 58 + 306 + 43 passed).
+Added +26 characterization tests in `Tests/ScribeBlocksTests/SessionControllerTests.swift`,
+`Tests/ScribeCoreTests/SessionHarnessTests.swift`, and
+`Tests/ScribeKitTests/SessionPresentationCharacterizationTests.swift`. Only test-enabling
+visibility seams were touched (`SessionController.replay`/`reduce`, `ScribeBlocksTests`
+dependencies). Post-change: `swift test` 2 + 63 + 309 + 61 passed. Details in `WAVE0.md`.
 
 ### Wave 1A — Contracts and reducer
 
