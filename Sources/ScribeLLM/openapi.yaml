@@ -73,6 +73,13 @@ components:
           $ref: "#/components/schemas/ChatCompletionStreamOptions"
         reasoning:
           $ref: "#/components/schemas/ChatCompletionReasoning"
+        thinking:
+          $ref: "#/components/schemas/ChatCompletionThinking"
+        reasoning_effort:
+          type: string
+          description: >-
+            Reasoning effort hint for providers that take a top-level string (e.g. DeepSeek:
+            `low` / `high` / `max`).
     ChatCompletionStreamOptions:
       type: object
       description: OpenAI-style streaming options
@@ -97,6 +104,17 @@ components:
         enabled:
           type: boolean
           description: Enable reasoning (OpenRouter-style).
+      additionalProperties: true
+    ChatCompletionThinking:
+      type: object
+      description: >
+        DeepSeek-style thinking toggle. `disabled` turns separate reasoning off; the model
+        reasons by default when the field is omitted.
+      properties:
+        type:
+          type: string
+          enum: [enabled, disabled]
+          description: Whether the model streams chain-of-thought reasoning.
       additionalProperties: true
     ChatMessage:
       type: object

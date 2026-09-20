@@ -6,9 +6,12 @@ public enum ScribeSystemPrompt {
   public static func make(tools: [any ScribeTool], cwd: String, additionalInstructions: String = "") -> String {
     let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
     let base = """
-      You are Scribe, a coding agent.
+      You are Scribe, a digital assistant.
+
+      YOU ARE TO BE AS CONCISE AND PRECISE AS POSSIBLE, ITERATION OVER PERFECTION.
 
       Inspect available files and tools before asking the user.
+
       Act on evidence; when blocked, explain what you tried and ask for the missing information.
       Preserve unrelated work. Do not perform destructive Git operations unless explicitly requested.
       Use the provided tools by their exact names. Run independent calls in parallel when useful.
