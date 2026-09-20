@@ -9,8 +9,8 @@ public struct BootstrappedSession: Sendable {
   public let initialMessages: [ScribeMessage]
   public let sessionId: UUID
   public let sessionDirectory: FilePath
-  public let profile: ProfileSummary
-  public let profileCatalog: [ProfileSummary]
+  public let profile: ScribeProfileSummary
+  public let profileCatalog: [ScribeProfileSummary]
   public let workingDirectory: String
 
   public init(
@@ -19,8 +19,8 @@ public struct BootstrappedSession: Sendable {
     initialMessages: [ScribeMessage],
     sessionId: UUID,
     sessionDirectory: FilePath,
-    profile: ProfileSummary,
-    profileCatalog: [ProfileSummary],
+    profile: ScribeProfileSummary,
+    profileCatalog: [ScribeProfileSummary],
     workingDirectory: String
   ) {
     self.harness = harness
@@ -35,6 +35,10 @@ public struct BootstrappedSession: Sendable {
 }
 
 public enum ScribeSessionBootstrap {
+
+  /// Environment-resolving convenience open. Resolves the data home and
+  /// configuration file from the process environment, then delegates to the
+  /// explicit `open(context:...)` overload.
   public static func open(
     resumeLatest: Bool = false,
     resumeDirectory: FilePath? = nil,
@@ -42,7 +46,52 @@ public enum ScribeSessionBootstrap {
     workingDirectory: String = FilePath.currentDirectory.string,
     version: String
   ) async throws -> BootstrappedSession {
-    var loaded = try await ConfigLoader.load(profileOverride: profileOverride)
+    let resolved = try ConfigLoader.resolvePaths()
+    let context = ScribeRuntimeContext(
+      paths: resolved.paths,
+      configurationFile: resolved.configPath,
+      defaultWorkingDirectory: workingDirectory,
+      version: version)
+    return try await open(
+      context: context,
+      resumeLatest: resumeLatest,
+      resumeDirectory: resumeDirectory,
+      profileOverride: profileOverride)
+  }
+
+  /// Explicit open: reads no environment variables and no current directory.
+  /// All runtime inputs come from `context`.
+  public static func open(
+    context: ScribeRuntimeContext,
+    resumeLatest: Bool = false,
+    resumeDirectory: FilePath? = nil,
+    profileOverride: String? = nil
+  ) async throws -> BootstrappedSession {
+    try await open(
+      context: context,
+      resumeLatest: resumeLatest,
+      resumeDirectory: resumeDirectory,
+      profileOverride: profileOverride,
+      agentFactory: { configuration, logger in
+        try ScribeAgent(configuration: configuration, logger: logger)
+      })
+  }
+
+  /// Explicit open with an injected agent factory (used by the local session
+  /// service and its tests).
+  package static func open(
+    context: ScribeRuntimeContext,
+    resumeLatest: Bool = false,
+    resumeDirectory: FilePath? = nil,
+    profileOverride: String? = nil,
+    agentFactory: @Sendable (ScribeConfig, Logger) throws -> ScribeAgent
+  ) async throws -> BootstrappedSession {
+    let workingDirectory = context.defaultWorkingDirectory
+    let version = context.version
+    var loaded = try await ConfigLoader.load(
+      paths: context.paths,
+      configurationFile: context.configurationFile,
+      profileOverride: profileOverride)
 
     let sessionId: UUID
     let directory: FilePath
@@ -54,8 +103,7 @@ public enum ScribeSessionBootstrap {
         directory = try await ChatSessionStore.resolveResumeDirectory(
           specifier: "latest",
           sessionsRoot: loaded.paths.sessionsDirectory,
-          preferCWD: workingDirectory
-        )
+          preferCWD: workingDirectory)
       }
       let metadata = try ChatSessionStore.loadMetadata(from: directory)
       sessionId = metadata.id
@@ -77,7 +125,10 @@ public enum ScribeSessionBootstrap {
       let profileName = (try? ChatSessionStore.loadMetadata(from: directory))?.profileName,
       profileName != loaded.activeProfileName
     {
-      loaded = try await ConfigLoader.load(profileOverride: profileName)
+      loaded = try await ConfigLoader.load(
+        paths: context.paths,
+        configurationFile: context.configurationFile,
+        profileOverride: profileName)
     }
     let tools = ScribeSystemPrompt.defaultTools()
     let base = loaded.scribeConfig
@@ -141,16 +192,18 @@ public enum ScribeSessionBootstrap {
     }
 
     let queue = SessionMessageQueue()
-    let harness = try SessionHarness(
+    let agent = try agentFactory(configuration, logger)
+    let harness = SessionHarness(
       configuration: configuration,
       document: consume document,
       persister: persister,
+      agent: agent,
       logger: logger,
       messageQueue: queue
     )
     let profile =
       loaded.profiles.first { $0.name == loaded.activeProfileName }
-      ?? ProfileSummary(
+      ?? ScribeProfileSummary(
         name: loaded.activeProfileName,
         model: configuration.agentModel,
         baseURL: configuration.serverURL)

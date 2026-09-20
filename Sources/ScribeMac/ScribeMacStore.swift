@@ -94,7 +94,7 @@ final class ScribeMacStore {
   private(set) var isSessionSidebarVisible = true
   var lastError: String?
 
-  var profileCatalog: [ProfileSummary] = []
+  var profileCatalog: [ScribeProfileSummary] = []
 
   var showModelPicker = false
 

@@ -31,7 +31,7 @@ public actor SessionHarness {
     self.messageQueue = messageQueue
   }
 
-  init(
+  package init(
     configuration: ScribeConfig,
     document: consuming SessionDocument,
     persister: any SessionPersister,

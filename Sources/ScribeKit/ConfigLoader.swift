@@ -19,9 +19,14 @@ public enum ScribeConfigBinding {
   public static let loggingLevel = "logging.level"
 }
 
-public struct ProfileSummary: Sendable, Equatable {
+/// The single public, Codable profile summary type used by configuration,
+/// snapshots, and the service contract.
+public struct ScribeProfileSummary: Codable, Sendable, Equatable {
+
   public var name: String
+
   public var model: String
+
   public var baseURL: String
 
   public init(name: String, model: String, baseURL: String) {
@@ -70,7 +75,7 @@ public struct LoadedConfig: Sendable {
   public var chatSessionsDirectoryPath: String
   public var resolvedConfigurationPath: String
   public var activeProfileName: String
-  public var profiles: [ProfileSummary]
+  public var profiles: [ScribeProfileSummary]
   public var paths: ScribePaths
 
   public func makeClient() throws -> Client {
@@ -118,37 +123,29 @@ public enum ConfigLoader {
   public static let codexProfileBaseURL = "https://chatgpt.com/backend-api"
   public static let codexProfileModel = "gpt-5.6-sol"
 
+  /// Environment-resolving convenience: resolves the data home from
+  /// `SCRIBE_HOME` (or `~/.scribe`) and the configuration file from
+  /// `SCRIBE_CONFIG_PATH` or the current directory, then delegates to the
+  /// explicit overload.
   public static func resolvePaths() throws -> ResolvedPaths {
     let paths = ScribePaths.resolve()
-    let configPath = try resolveConfigurationPath(paths: paths)
-    return ResolvedPaths(paths: paths, configPath: configPath)
+    let candidate = environmentConfigurationCandidate(paths: paths)
+    return try resolvePaths(paths: paths, configurationFile: candidate)
   }
 
-  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
-    let resolved = try resolvePaths()
-    return try await loadConfiguration(
-      at: resolved.configPath, paths: resolved.paths, profileOverride: profileOverride)
-  }
-
-  private static func resolveConfigurationPath(paths: ScribePaths) throws -> FilePath {
-    if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
-      let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !t.isEmpty {
-        return FilePath(t)
-      }
+  /// Explicit resolution: inspects no environment variables and no current
+  /// directory. When `configurationFile` is `nil`, the profile manifest inside
+  /// `paths` is used, and a default manifest is written there if missing.
+  public static func resolvePaths(
+    paths: ScribePaths,
+    configurationFile: FilePath? = nil
+  ) throws -> ResolvedPaths {
+    if let configurationFile {
+      return ResolvedPaths(paths: paths, configPath: configurationFile)
     }
-
     if FileStat.stat(paths.profileManifestPath).exists {
-      return paths.profileManifestPath
+      return ResolvedPaths(paths: paths, configPath: paths.profileManifestPath)
     }
-
-    let cwd = FilePath.currentDirectory.string
-    let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
-      .appendingPathComponent(configFileName).path
-    if FileStat.stat(FilePath(cwdCandidate)).exists {
-      return FilePath(cwdCandidate)
-    }
-
     try writeDefaultSetup(paths: paths)
     if let data =
       "scribe: no config found — wrote default \(configFileName) to \(paths.dataHomePath)\n"
@@ -156,7 +153,48 @@ public enum ConfigLoader {
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
-    return paths.profileManifestPath
+    return ResolvedPaths(paths: paths, configPath: paths.profileManifestPath)
+  }
+
+  /// Environment-resolving convenience load; delegates to the explicit
+  /// overload after resolving paths from the environment.
+  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
+    let resolved = try resolvePaths()
+    return try await load(
+      paths: resolved.paths, configurationFile: resolved.configPath,
+      profileOverride: profileOverride)
+  }
+
+  /// Explicit load: reads only the supplied paths and configuration file.
+  public static func load(
+    paths: ScribePaths,
+    configurationFile: FilePath? = nil,
+    profileOverride: String? = nil
+  ) async throws -> LoadedConfig {
+    let resolved = try resolvePaths(paths: paths, configurationFile: configurationFile)
+    return try await loadConfiguration(
+      at: resolved.configPath, paths: resolved.paths, profileOverride: profileOverride)
+  }
+
+  /// Computes the environment- or cwd-derived configuration candidate for the
+  /// convenience APIs: `SCRIBE_CONFIG_PATH` when set, else a `scribe.config.json`
+  /// in the current directory when the data home has no manifest yet.
+  private static func environmentConfigurationCandidate(paths: ScribePaths) -> FilePath? {
+    if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
+      let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !t.isEmpty {
+        return FilePath(t)
+      }
+    }
+    if !FileStat.stat(paths.profileManifestPath).exists {
+      let cwd = FilePath.currentDirectory.string
+      let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
+        .appendingPathComponent(configFileName).path
+      if FileStat.stat(FilePath(cwdCandidate)).exists {
+        return FilePath(cwdCandidate)
+      }
+    }
+    return nil
   }
 
   private static func loadConfiguration(
@@ -225,7 +263,7 @@ public enum ConfigLoader {
     }
 
     let summaries = manifest.profiles.map { entry in
-      ProfileSummary(
+      ScribeProfileSummary(
         name: entry.name.trimmingCharacters(in: .whitespacesAndNewlines),
         model: entry.agent.model,
         baseURL: entry.api.baseUrl)
@@ -258,7 +296,7 @@ public enum ConfigLoader {
     profile: ConfigManifest.ProfileEntry,
     profileName: String,
     configPath: FilePath,
-    summaries: [ProfileSummary],
+    summaries: [ScribeProfileSummary],
     paths: ScribePaths
   ) throws -> LoadedConfig {
     let baseURL = profile.api.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -369,7 +407,7 @@ public enum ConfigLoader {
   }
 
   private static func resolveActiveProfileName(
-    summaries: [ProfileSummary],
+    summaries: [ScribeProfileSummary],
     override: String?
   ) throws -> String {
     if let override {

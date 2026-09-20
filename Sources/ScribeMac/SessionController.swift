@@ -528,7 +528,7 @@ final class SessionController {
   }
 
   @discardableResult
-  func applyModelProfile(_ name: String) async -> [ProfileSummary]? {
+  func applyModelProfile(_ name: String) async -> [ScribeProfileSummary]? {
     let previousName = profileName
     do {
       let loaded = try await ConfigLoader.load(profileOverride: name)

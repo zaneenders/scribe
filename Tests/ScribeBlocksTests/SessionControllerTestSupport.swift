@@ -175,7 +175,7 @@ func makeBoot(
     agent: agent,
     logger: logger,
     messageQueue: queue)
-  let profile = ProfileSummary(name: "default", model: "test-model", baseURL: "http://test")
+  let profile = ScribeProfileSummary(name: "default", model: "test-model", baseURL: "http://test")
   return BootstrappedSession(
     harness: harness,
     messageQueue: queue,
