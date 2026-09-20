@@ -228,7 +228,7 @@ Added +26 characterization tests in `Tests/ScribeBlocksTests/SessionControllerTe
 visibility seams were touched (`SessionController.replay`/`reduce`, `ScribeBlocksTests`
 dependencies). Post-change: `swift test` 2 + 63 + 309 + 61 passed. Details in `WAVE0.md`.
 
-### Wave 1A — Contracts and reducer
+### Wave 1A — Contracts and reducer ✅ completed
 
 Owner: ScribeKit contract agent.
 
@@ -242,7 +242,7 @@ Likely files: new files under `Sources/ScribeKit`, `ConfigLoader.swift`, and `Te
 
 Exit: ScribeKit has no Chroma import; contract and reducer tests pass.
 
-### Wave 1B — Explicit paths
+### Wave 1B — Explicit paths ✅ completed
 
 Owner: ScribeKit runtime agent. May run in parallel with Wave 1A if it avoids the new contract files.
 
@@ -254,7 +254,7 @@ Likely files: `ScribePaths.swift`, `ConfigLoader.swift`, `ScribeSessionBootstrap
 
 Exit: explicit calls do not inspect environment or current directory.
 
-### Wave 2 — Local service
+### Wave 2 — Local service ✅ completed
 
 Owner: ScribeKit local-service agent. Starts after both Wave 1 changes merge.
 
@@ -266,6 +266,11 @@ Owner: ScribeKit local-service agent. Starts after both Wave 1 changes merge.
 6. Test fork and TLDR before moving those controls.
 
 Exit: a new service instance can reopen and continue a session created by an old instance.
+
+Completed in `54f9403`. `ScribeKit` holds the contracts, event vocabulary, reducer,
+`ScribeRuntimeContext`/explicit-path APIs, `LocalScribeSessionService`,
+`FakeScribeSessionService`, and shared contract scenarios run against both
+services. Package tests: 2 + 154 + 309 + 61 pass.
 
 ### Wave 3 — Workspace model
 
