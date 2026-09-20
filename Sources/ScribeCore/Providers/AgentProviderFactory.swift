@@ -6,6 +6,8 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
     client: ScribeLLM.Client,
     model: String,
     reasoningEnabled: Bool?,
+    reasoningEncoding: ReasoningEncoding = .openRouter,
+    reasoningEffort: String? = nil,
     contextWindow: Int = 0,
     sendsOpenCodeHeader: Bool = false
   ) -> Self {
@@ -13,6 +15,8 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
       client: client,
       model: model,
       reasoningEnabled: reasoningEnabled,
+      reasoningEncoding: reasoningEncoding,
+      reasoningEffort: reasoningEffort,
       contextWindow: contextWindow,
       sendsOpenCodeHeader: sendsOpenCodeHeader)
   }
@@ -48,6 +52,8 @@ enum AgentProviderFactory {
           apiKey: configuration.apiKey),
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
+        reasoningEncoding: configuration.apiType == "deepseek" ? .deepSeek : .openRouter,
+        reasoningEffort: configuration.reasoningEffort,
         contextWindow: configuration.contextWindow,
         sendsOpenCodeHeader: configuration.sendsOpenCodeHeader,
         defaultTemperature: configuration.temperature ?? 0,
