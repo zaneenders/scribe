@@ -4,6 +4,14 @@ import OpenAPIRuntime
 import ScribeLLM
 import SystemPackage
 
+/// How a provider expects reasoning controls to be expressed in the request body.
+enum ReasoningEncoding: Sendable {
+  /// `reasoning: {"enabled": bool}` (OpenRouter-style).
+  case openRouter
+  /// `thinking: {"type": "enabled"|"disabled"}` plus top-level `reasoning_effort` (DeepSeek-style).
+  case deepSeek
+}
+
 struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let model: String
   let client: Client
@@ -17,6 +25,8 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let maxToolRounds: Int
   let workingDirectory: FilePath
   let reasoningEnabled: Bool?
+  let reasoningEncoding: ReasoningEncoding
+  let reasoningEffort: String?
   let hooks: AgentLoopHooks
   let contextWindow: Int
   let retryPolicy: RetryPolicy
@@ -30,6 +40,8 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     maxToolRounds: Int,
     workingDirectory: FilePath,
     reasoningEnabled: Bool?,
+    reasoningEncoding: ReasoningEncoding = .openRouter,
+    reasoningEffort: String? = nil,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0,
     retryPolicy: RetryPolicy = .default,
@@ -46,6 +58,8 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.maxToolRounds = maxToolRounds
     self.workingDirectory = workingDirectory
     self.reasoningEnabled = reasoningEnabled
+    self.reasoningEncoding = reasoningEncoding
+    self.reasoningEffort = reasoningEffort
     self.hooks = hooks
     self.contextWindow = contextWindow
     self.retryPolicy = retryPolicy
@@ -254,7 +268,13 @@ private func makeChatCompletionRequest(
     tools: tools,
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
-    reasoning: config.reasoningEnabled == nil
-      ? nil : Components.Schemas.ChatCompletionReasoning(enabled: config.reasoningEnabled)
+    reasoning: config.reasoningEncoding == .openRouter
+      ? config.reasoningEnabled.map { Components.Schemas.ChatCompletionReasoning(enabled: $0) } : nil,
+    thinking: config.reasoningEncoding == .deepSeek
+      ? config.reasoningEnabled.map {
+        Components.Schemas.ChatCompletionThinking(_type: $0 ? .enabled : .disabled)
+      } : nil,
+    reasoningEffort: config.reasoningEncoding == .deepSeek && config.reasoningEnabled != false
+      ? config.reasoningEffort : nil
   )
 }

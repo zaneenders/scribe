@@ -8,6 +8,8 @@ struct OpenAICompletionsProvider: AgentProvider {
   let client: ScribeLLM.Client
   let model: String
   let reasoningEnabled: Bool?
+  var reasoningEncoding: ReasoningEncoding = .openRouter
+  var reasoningEffort: String? = nil
   let contextWindow: Int
   var sendsOpenCodeHeader: Bool = false
   var defaultTemperature: Double = 0
@@ -33,6 +35,8 @@ struct OpenAICompletionsProvider: AgentProvider {
       maxToolRounds: options.maxToolRounds,
       workingDirectory: workingDirectory,
       reasoningEnabled: reasoningEnabled,
+      reasoningEncoding: reasoningEncoding,
+      reasoningEffort: reasoningEffort,
       hooks: .default,
       contextWindow: contextWindow,
       retryPolicy: retryPolicy,

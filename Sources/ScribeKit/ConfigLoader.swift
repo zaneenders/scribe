@@ -357,11 +357,11 @@ public enum ConfigLoader {
     let resolvedAPIType: String? = apiType.flatMap { $0.isEmpty ? nil : $0 }
 
     if let resolvedAPIType {
-      guard resolvedAPIType == "codex" else {
+      guard resolvedAPIType == "codex" || resolvedAPIType == "deepseek" else {
         throw ScribeError.configuration(
           key: ScribeConfigBinding.apiType,
           reason:
-            "Unknown `\(ScribeConfigBinding.apiType)` value \"\(resolvedAPIType)\" for profile `\(profileName)`; use \"codex\", or omit it for OpenAI-compatible providers."
+            "Unknown `\(ScribeConfigBinding.apiType)` value \"\(resolvedAPIType)\" for profile `\(profileName)`; use \"codex\", \"deepseek\", or omit it for OpenAI-compatible providers."
         )
       }
     }
