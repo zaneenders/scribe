@@ -3,6 +3,7 @@ import HTTPTypes
 import OpenAPIRuntime
 import ScribeCore
 import ScribeLLM
+import Synchronization
 import SystemPackage
 import Testing
 
@@ -149,6 +150,66 @@ struct LocalScribeSessionServiceTests {
       let after = try await newService.openSession(id: sessionID)
       #expect(
         after.messages.contains { $0.role == .assistant && $0.content == "second answer" })
+    }
+  }
+
+  @Test func reopenedSessionKeepsItsWorkingDirectory() async throws {
+    try await withLocalServiceFixture(replies: ["first answer", "second answer"]) { fixture in
+      let oldService = try await fixture.makeService()
+      let created = try await oldService.createSession(
+        ScribeCreateSessionRequest(workingDirectory: "/tmp/project"))
+      let sessionID = created.summary.id
+      _ = try await ScribeServiceContractScenarios.collectEvents(
+        from: try await oldService.submit(
+          ScribeSubmitRequest(sessionID: sessionID, prompt: "hello")))
+
+      // Bootstrapping the reopened session must continue in the session's own
+      // directory, not the service default ("/tmp").
+      let observed = Mutex<String?>(nil)
+      let transport = fixture.transport
+      let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+      let newService = LocalScribeSessionService(
+        context: fixture.context,
+        agentFactory: { configuration, logger in
+          observed.withLock { $0 = configuration.workingDirectory }
+          return ScribeAgent(
+            client: client,
+            model: configuration.agentModel,
+            workingDirectory: FilePath(configuration.workingDirectory),
+            reasoningEnabled: nil,
+            logger: logger)
+        })
+
+      _ = try await newService.openSession(id: sessionID)
+      #expect(observed.withLock { $0 } == "/tmp/project")
+    }
+  }
+
+  @Test func firstTurnOfNewSessionRunsInRequestedDirectory() async throws {
+    // `createSession` bootstraps and discards its runtime, so the first submit
+    // reopens the session by id; that reopen must keep the requested directory.
+    try await withLocalServiceFixture(replies: ["answer"]) { fixture in
+      let observed = Mutex<String?>(nil)
+      let transport = fixture.transport
+      let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+      let service = LocalScribeSessionService(
+        context: fixture.context,
+        agentFactory: { configuration, logger in
+          observed.withLock { $0 = configuration.workingDirectory }
+          return ScribeAgent(
+            client: client,
+            model: configuration.agentModel,
+            workingDirectory: FilePath(configuration.workingDirectory),
+            reasoningEnabled: nil,
+            logger: logger)
+        })
+
+      let created = try await service.createSession(
+        ScribeCreateSessionRequest(workingDirectory: "/tmp/project"))
+      _ = try await ScribeServiceContractScenarios.collectEvents(
+        from: try await service.submit(
+          ScribeSubmitRequest(sessionID: created.summary.id, prompt: "hello")))
+      #expect(observed.withLock { $0 } == "/tmp/project")
     }
   }
 

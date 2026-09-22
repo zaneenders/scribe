@@ -393,6 +393,13 @@ public actor LocalScribeSessionService: ScribeSessionService {
     var context = self.context
     if let workingDirectory {
       context.defaultWorkingDirectory = workingDirectory
+    } else if let resumeDirectory,
+      let saved = try? ChatSessionStore.loadMetadata(from: resumeDirectory).cwd,
+      !saved.isEmpty
+    {
+      // Resuming must continue in the session's own directory, not the host's
+      // default. Otherwise a reopened session silently runs somewhere else.
+      context.defaultWorkingDirectory = saved
     }
     return try await ScribeSessionBootstrap.open(
       context: context,
