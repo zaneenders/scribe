@@ -214,8 +214,6 @@ struct LocalScribeSessionServiceTests {
   }
 
   @Test func firstTurnOfNewSessionRunsInRequestedDirectory() async throws {
-    // `createSession` bootstraps and discards its runtime, so the first submit
-    // reopens the session by id; that reopen must keep the requested directory.
     try await withLocalServiceFixture(replies: ["answer"]) { fixture in
       let observed = Mutex<String?>(nil)
       let transport = fixture.transport
@@ -284,6 +282,24 @@ struct LocalScribeSessionServiceTests {
       let terminalIndexes = events.indices.filter { events[$0].isTerminal }
       #expect(!sectionIndexes.isEmpty && !terminalIndexes.isEmpty)
       #expect(sectionIndexes[0] < terminalIndexes[0])
+    }
+  }
+
+  @Test func emptySecondTurnDoesNotReuseEarlierAssistantAnswer() async throws {
+    try await withLocalServiceFixture(replies: ["first answer", ""]) { fixture in
+      let service = try await fixture.makeService()
+      let created = try await service.createSession(
+        ScribeCreateSessionRequest(workingDirectory: "/tmp"))
+      let id = created.summary.id
+      _ = try await ScribeServiceContractScenarios.collectEvents(
+        from: try await service.submit(.init(sessionID: id, prompt: "first")))
+      let events = try await ScribeServiceContractScenarios.collectEvents(
+        from: try await service.submit(.init(sessionID: id, prompt: "second")))
+      #expect(events.contains { event in
+        if case .turnCompleted(.completed, _) = event { return false }
+        if case .turnFailed = event { return true }
+        return false
+      })
     }
   }
 

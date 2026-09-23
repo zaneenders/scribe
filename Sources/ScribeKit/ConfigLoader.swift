@@ -19,9 +19,9 @@ public enum ScribeConfigBinding {
   public static let loggingLevel = "logging.level"
 }
 
-/// The single public, Codable profile summary type used by configuration,
-/// snapshots, and the service contract.
-public struct ScribeProfileSummary: Codable, Sendable, Equatable {
+public typealias ScribeProfileSummary = ProfileSummary
+
+public struct ProfileSummary: Codable, Sendable, Equatable {
 
   public var name: String
 
@@ -263,7 +263,7 @@ public enum ConfigLoader {
     }
 
     let summaries = manifest.profiles.map { entry in
-      ScribeProfileSummary(
+      ProfileSummary(
         name: entry.name.trimmingCharacters(in: .whitespacesAndNewlines),
         model: entry.agent.model,
         baseURL: entry.api.baseUrl)

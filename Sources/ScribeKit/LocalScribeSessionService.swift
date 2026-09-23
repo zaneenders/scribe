@@ -36,6 +36,10 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   private var activeSubmissions: Set<UUID> = []
 
+  private var activeEdits: Set<UUID> = []
+
+  private var loadingSessions: Set<UUID> = []
+
   /// Resumed when the active submission for a session releases its slot, so
   /// `interrupt` can return only once the turn has fully ended.
   private var submissionCompletionWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
@@ -92,16 +96,21 @@ public actor LocalScribeSessionService: ScribeSessionService {
         profileOverride: request.profileName,
         resumeDirectory: nil)
       let metadata = try ChatSessionStore.loadMetadata(from: boot.sessionDirectory)
-      return ScribeSessionSnapshot(
+      let snapshot = ScribeSessionSnapshot(
         summary: self.summary(for: metadata, directory: boot.sessionDirectory),
         messages: boot.initialMessages,
         profileCatalog: boot.profileCatalog)
+      self.runtimes[boot.sessionId] = LoadedSession(boot: boot, profileCatalog: boot.profileCatalog)
+      return snapshot
     }
   }
 
   public func openSession(id: UUID) async throws -> ScribeSessionSnapshot {
     try await perform {
-      try await self.snapshot(of: self.loadedSession(for: id))
+      guard !self.activeEdits.contains(id) else {
+        throw ScribeSessionServiceError.busy(sessionID: id)
+      }
+      return try await self.snapshot(of: self.loadedSession(for: id))
     }
   }
 
@@ -109,9 +118,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
     _ request: ScribeSubmitRequest
   ) async throws -> AsyncThrowingStream<ScribeSessionEvent, any Error> {
     let sessionID = request.sessionID
-    guard !activeSubmissions.contains(sessionID) else {
-      throw ScribeSessionServiceError.busy(sessionID: sessionID)
-    }
+    try guardIdle(sessionID)
     let prompt = request.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !prompt.isEmpty else {
       throw ScribeSessionServiceError.invalidRequest("Prompt must not be empty.")
@@ -144,6 +151,9 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   public func interrupt(sessionID: UUID) async throws {
     try await perform {
+      if self.activeEdits.contains(sessionID) {
+        throw ScribeSessionServiceError.busy(sessionID: sessionID)
+      }
       guard let loaded = self.runtimes[sessionID] else {
         // Nothing is running for an unloaded session; still surface unknown IDs.
         guard self.sessionExists(sessionID) else {
@@ -192,20 +202,16 @@ public actor LocalScribeSessionService: ScribeSessionService {
         throw ScribeSessionServiceError.unsupported(feature: "profile switching")
       }
       try self.guardIdle(request.sessionID)
+      self.activeEdits.insert(request.sessionID)
+      defer { self.activeEdits.remove(request.sessionID) }
       let loaded: LoadedSession
       if let cached = self.runtimes[request.sessionID] {
         loaded = cached
       } else {
-        let boot = try await self.bootstrap(
-          workingDirectory: nil,
-          profileOverride: nil,
-          resumeDirectory: try self.existingSessionDirectory(for: request.sessionID))
-        loaded = self.cache(boot)
+        loaded = try await self.loadedSession(for: request.sessionID)
       }
-      try self.guardIdle(request.sessionID)
 
       let loadedConfig = try await self.loadConfiguration(profileOverride: request.profileName)
-      try self.guardIdle(request.sessionID)
       let base = loadedConfig.scribeConfig
       let harness = loaded.boot.harness
       let workingDirectory = loaded.boot.workingDirectory
@@ -227,7 +233,8 @@ public actor LocalScribeSessionService: ScribeSessionService {
         maxRetries: base.maxRetries
       )
       try await harness.reconfigure(
-        configuration: newConfig, profileName: loadedConfig.activeProfileName)
+        configuration: newConfig, profileName: loadedConfig.activeProfileName,
+        agentFactory: self.agentFactory)
       var updated = loaded
       updated.profileCatalog = loadedConfig.profiles
       self.runtimes[request.sessionID] = updated
@@ -243,8 +250,9 @@ public actor LocalScribeSessionService: ScribeSessionService {
         throw ScribeSessionServiceError.unsupported(feature: "fork")
       }
       try self.guardIdle(request.sessionID)
+      self.activeEdits.insert(request.sessionID)
+      defer { self.activeEdits.remove(request.sessionID) }
       let loaded = try await self.loadedSession(for: request.sessionID)
-      try self.guardIdle(request.sessionID)
 
       let harness = loaded.boot.harness
       let document = await harness.snapshot()
@@ -272,8 +280,9 @@ public actor LocalScribeSessionService: ScribeSessionService {
         throw ScribeSessionServiceError.unsupported(feature: "TLDR")
       }
       try self.guardIdle(request.sessionID)
+      self.activeEdits.insert(request.sessionID)
+      defer { self.activeEdits.remove(request.sessionID) }
       let loaded = try await self.loadedSession(for: request.sessionID)
-      try self.guardIdle(request.sessionID)
 
       let harness = loaded.boot.harness
       let document = await harness.snapshot()
@@ -322,7 +331,8 @@ public actor LocalScribeSessionService: ScribeSessionService {
   /// Discards the loaded runtime cache for a session. The persisted session is
   /// unaffected and can be reopened later. Active submissions are kept.
   public func discardRuntime(sessionID: UUID) {
-    guard !activeSubmissions.contains(sessionID) else { return }
+    guard !activeSubmissions.contains(sessionID), !activeEdits.contains(sessionID),
+      !loadingSessions.contains(sessionID) else { return }
     runtimes[sessionID] = nil
   }
 
@@ -335,6 +345,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
     continuation: AsyncThrowingStream<ScribeSessionEvent, any Error>.Continuation
   ) async {
     do {
+      let previousMessageCount = await harness.snapshot().messages.count
       let outcome = try await harness.submit(
         prompt,
         onUserPrompt: { text in
@@ -353,7 +364,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
       endSubmission(sessionID: sessionID)
       // A stream that ends without any assistant text is an unexpected
       // disconnection, not a completed turn.
-      if case .completed = outcome, Self.assistantText(in: document.messages).isEmpty {
+      if case .completed = outcome, Self.assistantText(in: Array(document.messages.dropFirst(previousMessageCount))).isEmpty {
         continuation.yield(.turnFailed("No assistant response."))
       } else {
         continuation.yield(
@@ -409,9 +420,12 @@ public actor LocalScribeSessionService: ScribeSessionService {
   }
 
   private func loadedSession(for sessionID: UUID) async throws -> LoadedSession {
-    if let cached = runtimes[sessionID] {
-      return cached
+    if let cached = runtimes[sessionID] { return cached }
+    guard !loadingSessions.contains(sessionID) else {
+      throw ScribeSessionServiceError.busy(sessionID: sessionID)
     }
+    loadingSessions.insert(sessionID)
+    defer { loadingSessions.remove(sessionID) }
     let boot = try await bootstrap(
       workingDirectory: nil,
       profileOverride: nil,
@@ -445,7 +459,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
   }
 
   private func guardIdle(_ sessionID: UUID) throws {
-    guard !activeSubmissions.contains(sessionID) else {
+    guard !activeSubmissions.contains(sessionID), !activeEdits.contains(sessionID) else {
       throw ScribeSessionServiceError.busy(sessionID: sessionID)
     }
   }

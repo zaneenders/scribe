@@ -158,41 +158,6 @@ struct LocalServiceFixture: ScribeServiceContractFixture {
   }
 }
 
-/// Fixture running the shared contract scenarios against the in-memory fake.
-struct FakeServiceFixture: ScribeServiceContractFixture {
-
-  let service: FakeScribeSessionService
-
-  init() {
-    self.service = FakeScribeSessionService(
-      profiles: [
-        ScribeProfileSummary(name: "alpha", model: "model-alpha", baseURL: "http://test"),
-        ScribeProfileSummary(name: "beta", model: "model-beta", baseURL: "http://test"),
-      ])
-  }
-
-  func makeService() async throws -> FakeScribeSessionService {
-    service
-  }
-
-  func startBlockedTurn(
-    _ service: FakeScribeSessionService,
-    sessionID: UUID,
-    prompt: String
-  ) async throws -> AsyncThrowingStream<ScribeSessionEvent, any Error> {
-    await service.setSubmitBehavior(.hangUntilInterrupted(events: []), for: sessionID)
-    return try await service.submit(
-      ScribeSubmitRequest(sessionID: sessionID, prompt: prompt))
-  }
-
-  func finishBlockedTurn(_ service: FakeScribeSessionService, sessionID: UUID) async throws {
-    try await service.interrupt(sessionID: sessionID)
-    // The hang behavior is one-shot from the caller's perspective; later turns
-    // in the same scenario expect a normal scripted completion.
-    await service.setSubmitBehavior(.turn(events: [], persisted: []), for: sessionID)
-  }
-}
-
 func withLocalServiceFixture<T>(
   replies: [String] = ["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"],
   _ body: (LocalServiceFixture) async throws -> T

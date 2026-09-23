@@ -530,7 +530,7 @@ final class SessionController {
   }
 
   @discardableResult
-  func applyModelProfile(_ name: String) async -> [ScribeProfileSummary]? {
+  func applyModelProfile(_ name: String) async -> [ProfileSummary]? {
     let previousName = profileName
     do {
       let loaded = try await ConfigLoader.load(profileOverride: name)
@@ -607,7 +607,7 @@ final class SessionController {
     }
   }
 
-  func reduce(_ event: AgentEvent) {
+  private func reduce(_ event: AgentEvent) {
     switch event {
     case .output(.sectionStarted(let section, _)):
       ensureStreamItem(section)
@@ -698,7 +698,7 @@ final class SessionController {
     return ToolInvocationFormatting.argumentSummary(name: name, argumentsJSON: trimmed) ?? trimmed
   }
 
-  nonisolated static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
+  nonisolated private static func replay(_ messages: [ScribeMessage]) -> [TranscriptItem] {
     var result: [TranscriptItem] = []
     for (messageIndex, message) in messages.enumerated() {
       switch message.role {

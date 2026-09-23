@@ -107,9 +107,6 @@ var targets: [Target] = [
     name: "ScribeBlocksTests",
     dependencies: [
       "ScribeBlocks",
-      "ScribeCore",
-      "ScribeKit",
-      "ScribeLLM",
       .product(name: "HeadlessBackend", package: "chroma"),
     ],
     swiftSettings: [
