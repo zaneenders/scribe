@@ -1,5 +1,6 @@
 import Foundation
 import ScribeLLM
+import ScribeLLMCodex
 
 extension AgentProvider where Self == OpenAICompletionsProvider {
   static func openAICompletions(
@@ -34,6 +35,17 @@ enum AgentProviderFactory {
       configuration.maxRetries.map { RetryPolicy(maxRetries: $0) } ?? .default
 
     switch configuration.apiType {
+    case "responses":
+      return CodexProvider(
+        source: .configured(OpenAICodexClient.makeResponses(
+          serverURL: serverURL,
+          apiKey: configuration.apiKey)),
+        model: configuration.agentModel,
+        reasoningEnabled: configuration.reasoningEnabled,
+        reasoningEffort: configuration.reasoningEffort,
+        defaultTemperature: configuration.temperature,
+        contextWindow: configuration.contextWindow,
+        retryPolicy: retryPolicy)
     case "codex":
       return CodexProvider(
         source: .credentials(serverURL: serverURL),

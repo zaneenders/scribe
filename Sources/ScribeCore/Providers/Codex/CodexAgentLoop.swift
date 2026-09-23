@@ -204,7 +204,7 @@ private func runSingleCodexRound(
       }
     }
     logger.warning("agent.http.response.codex", metadata: ["status": "\(code)"])
-    throw ScribeError.apiHTTPError(statusCode: code, detail: detail, hint: nil)
+    throw ScribeError.responsesHTTPError(statusCode: code, detail: detail)
   }
 
   var turn = CodexAssistantTurn()

@@ -21,11 +21,14 @@ struct MacMarkdownSanitizationTests {
         └── Server        -> SSH tunnel -> server backend
       """
     #expect(renderedText("```\n\(tree)\n```") == tree)
+    #expect(sanitizeASCII(tree) == tree)
+    #expect(segmentMarkdown(sanitizeASCII("```\n\(tree)\n```")) == [.code(language: nil, code: tree)])
   }
 
   @Test func preservesEntireBoxDrawingBlock() {
     let symbols = String((0x2500...0x257F).map { Character(String(UnicodeScalar($0)!)) })
     #expect(renderedText(symbols, columns: 200) == symbols)
+    #expect(sanitizeASCII(symbols) == symbols)
   }
 
   @Test func preservesUnicodeThroughRenderingAndSelection() {
