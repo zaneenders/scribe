@@ -107,6 +107,62 @@ struct SessionHarnessTests {
     #expect(await harness.configurationSnapshot().agentModel == "test-model")
   }
 
+  @Test func reconfigureUpdatesConfigurationSnapshot() async throws {
+    let tracking = TrackingPersister()
+    let (harness, _) = try makeHarness(persister: tracking)
+    var configuration = ScribeConfig.testValue
+    configuration.agentModel = "economy-model"
+
+    try await harness.reconfigure(configuration: configuration, profileName: "economy")
+
+    #expect(await harness.configurationSnapshot().agentModel == "economy-model")
+    #expect(tracking.configuration?.model == "economy-model")
+    #expect(tracking.configuration?.profileName == "economy")
+  }
+
+  @Test func reconfigureWithoutProfileNamePersistsNilProfile() async throws {
+    let tracking = TrackingPersister()
+    let (harness, _) = try makeHarness(persister: tracking)
+
+    try await harness.reconfigure(configuration: .testValue)
+
+    #expect(tracking.configuration?.profileName == nil)
+  }
+
+  @Test func forkSpliceReplacesRangeAndReturnsIdentityChange() async throws {
+    let tracking = TrackingPersister()
+    let (harness, _) = try makeHarness(
+      seed: [
+        ScribeMessage(role: .system, content: "sys"),
+        ScribeMessage(role: .user, content: "q1"),
+        ScribeMessage(role: .assistant, content: "a1"),
+        ScribeMessage(role: .user, content: "q2"),
+        ScribeMessage(role: .assistant, content: "a2"),
+      ],
+      persister: tracking
+    )
+    let parentId = await harness.sessionId
+    let childId = UUID()
+    let replacement: [ScribeMessage] = [
+      ScribeMessage(role: .tool, content: "tldr-audit"),
+      ScribeMessage(role: .assistant, content: "summary"),
+    ]
+
+    let change = try await harness.applyEdit(
+      .forkSplice(
+        startCut: 1,
+        endCut: 4,
+        replacement: replacement,
+        newSessionId: childId
+      ))
+
+    #expect(change?.previousSessionId == parentId)
+    #expect(change?.newSessionId == childId)
+    #expect(tracking.openedSessionCount == 1)
+    let snap = await harness.snapshot()
+    #expect(snap.messages.map(\.content) == ["sys", "tldr-audit", "summary", "a2"])
+  }
+
   @Test func submitEmptyIsNoOp() async throws {
     let (harness, _) = try makeHarness()
     let outcome = try await harness.submit("   ") { _ in }

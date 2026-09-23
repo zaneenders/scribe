@@ -81,6 +81,25 @@ public enum SessionSummarizer {
     sessionId: UUID,
     logger: Logger
   ) async throws -> Result {
+    try await summarize(
+      slice: slice,
+      configuration: configuration,
+      model: model,
+      sessionId: sessionId,
+      logger: logger,
+      agentFactory: { summarizerConfig, summarizerLogger in
+        try ScribeAgent(configuration: summarizerConfig, logger: summarizerLogger)
+      })
+  }
+
+  package static func summarize(
+    slice: [ScribeMessage],
+    configuration: ScribeConfig,
+    model: String? = nil,
+    sessionId: UUID,
+    logger: Logger,
+    agentFactory: @Sendable (ScribeConfig, Logger) throws -> ScribeAgent
+  ) async throws -> Result {
     let selectedModel = model ?? configuration.agentModel
     let summarizerConfig = ScribeConfig(
       agentModel: selectedModel,
@@ -95,10 +114,7 @@ public enum SessionSummarizer {
       serviceTier: configuration.serviceTier,
       sendsOpenCodeHeader: configuration.sendsOpenCodeHeader
     )
-    let agent = try ScribeAgent(
-      configuration: summarizerConfig,
-      logger: logger
-    )
+    let agent = try agentFactory(summarizerConfig, logger)
     let rendered = renderSlice(slice)
     let userPrompt = "Transcript to summarize:\n\n\(rendered)"
 

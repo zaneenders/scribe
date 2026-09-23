@@ -1,7 +1,7 @@
 import Foundation
 import SystemPackage
 
-public struct ScribePaths: Sendable {
+public struct ScribePaths: Sendable, Equatable {
 
   public let dataHome: FilePath
 

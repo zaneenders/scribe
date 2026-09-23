@@ -19,9 +19,14 @@ public enum ScribeConfigBinding {
   public static let loggingLevel = "logging.level"
 }
 
-public struct ProfileSummary: Sendable, Equatable {
+public typealias ScribeProfileSummary = ProfileSummary
+
+public struct ProfileSummary: Codable, Sendable, Equatable {
+
   public var name: String
+
   public var model: String
+
   public var baseURL: String
 
   public init(name: String, model: String, baseURL: String) {
@@ -70,7 +75,7 @@ public struct LoadedConfig: Sendable {
   public var chatSessionsDirectoryPath: String
   public var resolvedConfigurationPath: String
   public var activeProfileName: String
-  public var profiles: [ProfileSummary]
+  public var profiles: [ScribeProfileSummary]
   public var paths: ScribePaths
 
   public func makeClient() throws -> Client {
@@ -120,35 +125,20 @@ public enum ConfigLoader {
 
   public static func resolvePaths() throws -> ResolvedPaths {
     let paths = ScribePaths.resolve()
-    let configPath = try resolveConfigurationPath(paths: paths)
-    return ResolvedPaths(paths: paths, configPath: configPath)
+    let candidate = environmentConfigurationCandidate(paths: paths)
+    return try resolvePaths(paths: paths, configurationFile: candidate)
   }
 
-  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
-    let resolved = try resolvePaths()
-    return try await loadConfiguration(
-      at: resolved.configPath, paths: resolved.paths, profileOverride: profileOverride)
-  }
-
-  private static func resolveConfigurationPath(paths: ScribePaths) throws -> FilePath {
-    if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
-      let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !t.isEmpty {
-        return FilePath(t)
-      }
+  public static func resolvePaths(
+    paths: ScribePaths,
+    configurationFile: FilePath? = nil
+  ) throws -> ResolvedPaths {
+    if let configurationFile {
+      return ResolvedPaths(paths: paths, configPath: configurationFile)
     }
-
     if FileStat.stat(paths.profileManifestPath).exists {
-      return paths.profileManifestPath
+      return ResolvedPaths(paths: paths, configPath: paths.profileManifestPath)
     }
-
-    let cwd = FilePath.currentDirectory.string
-    let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
-      .appendingPathComponent(configFileName).path
-    if FileStat.stat(FilePath(cwdCandidate)).exists {
-      return FilePath(cwdCandidate)
-    }
-
     try writeDefaultSetup(paths: paths)
     if let data =
       "scribe: no config found — wrote default \(configFileName) to \(paths.dataHomePath)\n"
@@ -156,7 +146,42 @@ public enum ConfigLoader {
     {
       try? FileHandle.standardError.write(contentsOf: data)
     }
-    return paths.profileManifestPath
+    return ResolvedPaths(paths: paths, configPath: paths.profileManifestPath)
+  }
+
+  public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
+    let resolved = try resolvePaths()
+    return try await load(
+      paths: resolved.paths, configurationFile: resolved.configPath,
+      profileOverride: profileOverride)
+  }
+
+  public static func load(
+    paths: ScribePaths,
+    configurationFile: FilePath? = nil,
+    profileOverride: String? = nil
+  ) async throws -> LoadedConfig {
+    let resolved = try resolvePaths(paths: paths, configurationFile: configurationFile)
+    return try await loadConfiguration(
+      at: resolved.configPath, paths: resolved.paths, profileOverride: profileOverride)
+  }
+
+  private static func environmentConfigurationCandidate(paths: ScribePaths) -> FilePath? {
+    if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
+      let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !t.isEmpty {
+        return FilePath(t)
+      }
+    }
+    if !FileStat.stat(paths.profileManifestPath).exists {
+      let cwd = FilePath.currentDirectory.string
+      let cwdCandidate = URL(fileURLWithPath: cwd, isDirectory: true)
+        .appendingPathComponent(configFileName).path
+      if FileStat.stat(FilePath(cwdCandidate)).exists {
+        return FilePath(cwdCandidate)
+      }
+    }
+    return nil
   }
 
   private static func loadConfiguration(
@@ -258,7 +283,7 @@ public enum ConfigLoader {
     profile: ConfigManifest.ProfileEntry,
     profileName: String,
     configPath: FilePath,
-    summaries: [ProfileSummary],
+    summaries: [ScribeProfileSummary],
     paths: ScribePaths
   ) throws -> LoadedConfig {
     let baseURL = profile.api.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -369,7 +394,7 @@ public enum ConfigLoader {
   }
 
   private static func resolveActiveProfileName(
-    summaries: [ProfileSummary],
+    summaries: [ScribeProfileSummary],
     override: String?
   ) throws -> String {
     if let override {
