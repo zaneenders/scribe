@@ -219,7 +219,25 @@ private func runSingleCodexRound(
     abortObserver: abortObserver,
     streamWallStart: clock.now
   )
-  try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
+  do {
+    try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
+  } catch let error as ScribeError {
+    let hasPartialMessage = !turn.text.isEmpty || !turn.reasoningText.isEmpty
+    guard hasPartialMessage else { throw error }
+    let description = error.errorDescription ?? String(describing: error)
+    let partialMessage = ScribeLLM.Components.Schemas.ChatMessage(
+      role: .assistant,
+      content: turn.text.isEmpty ? nil : .case1(turn.text),
+      name: nil,
+      toolCalls: nil,
+      toolCallId: nil,
+      reasoningContent: turn.reasoningText.isEmpty ? nil : turn.reasoningText
+    )
+    emit(.boundary(.messageEnd(role: .assistant, round: round)))
+    return RoundResult(
+      assistantMessage: partialMessage,
+      kind: .error(description: description, hasPartialMessage: true))
+  }
 
   let toolInvocations = turn.resolvedToolCalls()
   let assistantContent: ScribeLLM.Components.Schemas.ChatMessage.ContentPayload? =

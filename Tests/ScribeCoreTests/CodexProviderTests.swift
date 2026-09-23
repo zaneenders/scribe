@@ -104,6 +104,53 @@ struct CodexProviderTests {
     #expect(json["include"] == nil)
   }
 
+  @Test("A failed stream preserves its partial assistant response")
+  func failedStreamPreservesPartialAssistantResponse() async throws {
+    let transport = ScriptedTransport(responses: [
+      .init(
+        status: 200,
+        chunks: sseChunks(
+          #"{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"test_tool","arguments":"{}"},"output_index":0}"#,
+          #"{"type":"response.completed","response":{"id":"resp_tools"}}"#
+        )),
+      .init(
+        status: 200,
+        chunks: sseChunks(
+          #"{"type":"response.output_text.delta","delta":"Partial answer"}"#,
+          #"{"type":"error","sequence_number":2}"#
+        )),
+    ])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport)
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "codex-test-model",
+      reasoningEnabled: false,
+      reasoningEffort: nil,
+      contextWindow: 128_000)
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: testLogger,
+      abortNotifier: AbortNotifier())
+
+    for await _ in stream.events {}
+    let result = try await stream.result.value
+
+    guard case .error(let description) = result.outcome else {
+      Issue.record("Expected the stream error to be returned")
+      return
+    }
+    #expect(description.contains("Codex stream error (sequence_number: 2)"))
+    #expect(result.newMessages.map(\.role) == [.user, .assistant, .tool, .assistant])
+    #expect(result.newMessages.last?.content == "Partial answer")
+  }
+
   @Test("Responses middleware targets the Zen endpoint with bearer authentication")
   func responsesMiddlewareUsesZenEndpoint() async throws {
     let transport = ScriptedTransport(

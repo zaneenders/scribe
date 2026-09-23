@@ -234,12 +234,14 @@ struct CodexStreamProcessor<AO: AbortObserver> {
       response?["error_type"]
     )
     let responseID = firstNonEmptyString(response?["id"], event["response_id"])
+    let sequenceNumber = (event["sequence_number"] as? Int).map(String.init)
 
     var description = message ?? fallback
     let details = [
       code.map { "code: \($0)" },
       errorType.map { "type: \($0)" },
       responseID.map { "response: \($0)" },
+      sequenceNumber.map { "sequence_number: \($0)" },
     ].compactMap { $0 }
     if !details.isEmpty {
       description += " (\(details.joined(separator: ", ")))"
