@@ -18,6 +18,7 @@ struct CodexProvider: AgentProvider {
   var serviceTier: String? = nil
   var defaultTemperature: Double? = nil
   let contextWindow: Int
+  var responsesAPI = false
   var retryPolicy: RetryPolicy = .default
 
   func run(
@@ -63,6 +64,7 @@ struct CodexProvider: AgentProvider {
         reasoningEnabled: reasoningEnabled,
         reasoningEffort: reasoningEffort,
         serviceTier: serviceTier,
+        responsesAPI: responsesAPI,
         temperature: options.temperature ?? defaultTemperature,
         hooks: .default,
         contextWindow: contextWindow,

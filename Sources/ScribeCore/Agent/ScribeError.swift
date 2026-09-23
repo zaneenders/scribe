@@ -3,6 +3,7 @@ import Foundation
 public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
   case configuration(key: String?, reason: String)
   case apiHTTPError(statusCode: Int, detail: String, hint: String?)
+  case responsesHTTPError(statusCode: Int, detail: String)
   case providerStreamError(detail: String, code: String?, type: String?)
   case toolUnknown(name: String)
   case sessionCorrupted(reason: String)
@@ -22,6 +23,12 @@ public enum ScribeError: Error, Sendable, LocalizedError, Equatable {
       }
       if let hint, !hint.isEmpty {
         msg += ".\(hint)"
+      }
+      return msg
+    case .responsesHTTPError(let statusCode, let detail):
+      var msg = "responses returned HTTP \(statusCode)"
+      if !detail.isEmpty {
+        msg += " — \(detail)"
       }
       return msg
     case .providerStreamError(let detail, _, _):

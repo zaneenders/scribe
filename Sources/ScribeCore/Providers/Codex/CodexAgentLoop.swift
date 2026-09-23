@@ -55,6 +55,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let reasoningEnabled: Bool?
   let reasoningEffort: String?
   let serviceTier: String?
+  let responsesAPI: Bool
   let temperature: Double?
   let hooks: AgentLoopHooks
   let contextWindow: Int
@@ -70,6 +71,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
     serviceTier: String? = nil,
+    responsesAPI: Bool = false,
     temperature: Double? = nil,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0,
@@ -84,6 +86,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEffort = reasoningEffort
     self.serviceTier = serviceTier
+    self.responsesAPI = responsesAPI
     self.temperature = temperature
     self.hooks = hooks
     self.contextWindow = contextWindow
@@ -156,10 +159,12 @@ private func runSingleCodexRound(
         return r
       }()
       : nil,
-    serviceTier: config.serviceTier.flatMap(
-      ScribeLLMCodex.Components.Schemas.CreateCodexResponseRequest.ServiceTierPayload.init(rawValue:)),
+    serviceTier: config.responsesAPI
+      ? nil
+      : config.serviceTier.flatMap(
+        ScribeLLMCodex.Components.Schemas.CreateCodexResponseRequest.ServiceTierPayload.init(rawValue:)),
     text: nil,
-    include: ["reasoning.encrypted_content"],
+    include: config.responsesAPI ? nil : ["reasoning.encrypted_content"],
     promptCacheKey: nil
   )
 
@@ -204,7 +209,7 @@ private func runSingleCodexRound(
       }
     }
     logger.warning("agent.http.response.codex", metadata: ["status": "\(code)"])
-    throw ScribeError.apiHTTPError(statusCode: code, detail: detail, hint: nil)
+    throw ScribeError.responsesHTTPError(statusCode: code, detail: detail)
   }
 
   var turn = CodexAssistantTurn()

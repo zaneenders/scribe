@@ -1,6 +1,10 @@
 import Chroma
 import Foundation
 
+// MARK: - ASCII sanitization
+
+/// Sanitize editable labels and fields while retaining single-cell box drawing.
+/// Markdown rendering preserves Unicode without calling this function.
 func sanitizeASCII(_ text: String) -> String {
   var out = String()
   out.reserveCapacity(text.count)

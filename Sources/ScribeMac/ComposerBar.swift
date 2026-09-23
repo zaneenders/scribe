@@ -283,7 +283,8 @@ struct CommandPickerBar: Block {
 
   @MainActor private var commandHint: String {
     if session.isRunningCommand { return "working..." }
-    return picker.command == .tldr ? "f/j move · Tab switch · Enter confirm · Esc cancel" : "f/j move · Enter confirm · Esc cancel"
+    return picker.command == .tldr
+      ? "f/j move · Tab switch · Enter confirm · Esc cancel" : "f/j move · Enter confirm · Esc cancel"
   }
 }
 

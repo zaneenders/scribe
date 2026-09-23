@@ -1,6 +1,7 @@
 import Chroma
 import HeadlessBackend
 import Testing
+
 @testable import ScribeBlocks
 
 @MainActor
@@ -24,9 +25,13 @@ private struct ShortcutSurface: PrimitiveBlock {
         state.submitted += 1
       }
     }
-    let field = GrowingTextField("", fontScale: 1,
+    let field = GrowingTextField(
+      "", fontScale: 1,
       text: { state.text }, onChange: { state.text = $0 }, onNewline: { state.text += "\n" },
-      onEndEditing: { state.stopped += 1; return .handled },
+      onEndEditing: {
+        state.stopped += 1
+        return .handled
+      },
       onTextEvent: { event, text in event == .moveCaretUp && text.isEmpty ? "previous prompt" : nil })
     BlockEngine.draw(field.focusTarget(state.focus), into: &list, in: rect, context: context)
   }

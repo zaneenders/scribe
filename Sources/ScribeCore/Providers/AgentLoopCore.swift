@@ -422,6 +422,9 @@ func isImageInputUnsupportedError(_ error: ScribeError) -> Bool {
   case .apiHTTPError(let statusCode, let message, _):
     guard statusCode == 400 || statusCode == 422 else { return false }
     detail = message
+  case .responsesHTTPError(let statusCode, let message):
+    guard statusCode == 400 || statusCode == 422 else { return false }
+    detail = message
   case .generic(let message), .providerStreamError(let message, _, _):
     detail = message
   default:
@@ -491,6 +494,9 @@ func isContextLengthError(_ error: ScribeError) -> Bool {
   let detail: String
   switch error {
   case .apiHTTPError(let statusCode, let message, _):
+    guard statusCode == 400 || statusCode == 413 else { return false }
+    detail = message
+  case .responsesHTTPError(let statusCode, let message):
     guard statusCode == 400 || statusCode == 413 else { return false }
     detail = message
   case .generic(let message), .providerStreamError(let message, _, _):

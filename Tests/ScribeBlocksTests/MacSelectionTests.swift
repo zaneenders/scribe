@@ -1,7 +1,7 @@
-@testable import Chroma
 import Foundation
 import Testing
 
+@testable import Chroma
 @testable import ScribeBlocks
 
 @Suite("Mac transcript selection")
@@ -74,12 +74,14 @@ struct MacSelectionTests {
     interaction.editingText = "draft"
     interaction.textSelectionRange = 0..<5
     let origin = Point(x: 10, y: 11)
-    interaction.beginFrame(input: InputState(
-      pointerPosition: origin, pointerPressPosition: origin,
-      pointerDown: true, pointerPressed: true))
+    interaction.beginFrame(
+      input: InputState(
+        pointerPosition: origin, pointerPressPosition: origin,
+        pointerDown: true, pointerPressed: true))
     SelectionManager.shared.updateFromDrag(context: context)
-    interaction.beginFrame(input: InputState(
-      pointerPosition: Point(x: 74, y: 11), pointerReleased: true))
+    interaction.beginFrame(
+      input: InputState(
+        pointerPosition: Point(x: 74, y: 11), pointerReleased: true))
     SelectionManager.shared.updateFromDrag(context: context)
 
     #expect(interaction.copyText() == "selected")
@@ -96,12 +98,14 @@ struct MacSelectionTests {
     let left = Point(x: 10, y: 11)
     let right = Point(x: 74, y: 11)
     let origin = backward ? right : left
-    interaction.beginFrame(input: InputState(
-      pointerPosition: origin, pointerPressPosition: origin,
-      pointerDown: true, pointerPressed: true))
+    interaction.beginFrame(
+      input: InputState(
+        pointerPosition: origin, pointerPressPosition: origin,
+        pointerDown: true, pointerPressed: true))
     SelectionManager.shared.updateFromDrag(context: context)
-    interaction.beginFrame(input: InputState(
-      pointerPosition: backward ? left : right, pointerReleased: true))
+    interaction.beginFrame(
+      input: InputState(
+        pointerPosition: backward ? left : right, pointerReleased: true))
     SelectionManager.shared.updateFromDrag(context: context)
 
     #expect(SelectionManager.shared.copyText(isTranscriptVisible: true) == "selected")
