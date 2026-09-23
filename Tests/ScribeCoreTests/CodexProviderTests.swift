@@ -151,6 +151,46 @@ struct CodexProviderTests {
     #expect(result.newMessages.last?.content == "Partial answer")
   }
 
+  @Test("A transport failure preserves partial assistant output")
+  func transportFailurePreservesPartialAssistantOutput() async throws {
+    let transport = ScriptedTransport(responses: [
+      .init(
+        status: 200,
+        chunks: sseChunks(
+          #"{"type":"response.output_text.delta","delta":"Partial answer"}"#
+        ),
+        streamError: URLError(.networkConnectionLost)),
+    ])
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://codex.example.com")!,
+      transport: transport)
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "codex-test-model",
+      reasoningEnabled: false,
+      reasoningEffort: nil,
+      contextWindow: 128_000)
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: testLogger,
+      abortNotifier: AbortNotifier())
+
+    for await _ in stream.events {}
+    let result = try await stream.result.value
+
+    guard case .error = result.outcome else {
+      Issue.record("Expected the stream error to be returned")
+      return
+    }
+    #expect(result.newMessages.map(\.role) == [.user, .assistant])
+    #expect(result.newMessages.last?.content == "Partial answer")
+  }
+
   @Test("Responses middleware targets the Zen endpoint with bearer authentication")
   func responsesMiddlewareUsesZenEndpoint() async throws {
     let transport = ScriptedTransport(

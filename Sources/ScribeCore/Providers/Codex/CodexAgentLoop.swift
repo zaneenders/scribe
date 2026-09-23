@@ -224,19 +224,25 @@ private func runSingleCodexRound(
   } catch let error as ScribeError {
     let hasPartialMessage = !turn.text.isEmpty || !turn.reasoningText.isEmpty
     guard hasPartialMessage else { throw error }
-    let description = error.errorDescription ?? String(describing: error)
-    let partialMessage = ScribeLLM.Components.Schemas.ChatMessage(
-      role: .assistant,
-      content: turn.text.isEmpty ? nil : .case1(turn.text),
-      name: nil,
-      toolCalls: nil,
-      toolCallId: nil,
-      reasoningContent: turn.reasoningText.isEmpty ? nil : turn.reasoningText
-    )
-    emit(.boundary(.messageEnd(role: .assistant, round: round)))
-    return RoundResult(
-      assistantMessage: partialMessage,
-      kind: .error(description: description, hasPartialMessage: true))
+    return partialRoundResult(
+      text: turn.text,
+      reasoning: turn.reasoningText,
+      error: error,
+      round: round,
+      emit: emit)
+  } catch is AgentTurnInterruptedError {
+    throw AgentTurnInterruptedError()
+  } catch is CancellationError {
+    throw CancellationError()
+  } catch {
+    let hasPartialMessage = !turn.text.isEmpty || !turn.reasoningText.isEmpty
+    guard hasPartialMessage else { throw error }
+    return partialRoundResult(
+      text: turn.text,
+      reasoning: turn.reasoningText,
+      error: error,
+      round: round,
+      emit: emit)
   }
 
   let toolInvocations = turn.resolvedToolCalls()

@@ -641,3 +641,25 @@ extension ScribeError {
     }
   }
 }
+
+func partialRoundResult(
+  text: String,
+  reasoning: String,
+  error: any Error,
+  round: Int,
+  emit: @Sendable (AgentEvent) -> Void
+) -> RoundResult {
+  let message = Components.Schemas.ChatMessage(
+    role: .assistant,
+    content: text.isEmpty ? nil : .case1(text),
+    name: nil,
+    toolCalls: nil,
+    toolCallId: nil,
+    reasoningContent: reasoning.isEmpty ? nil : reasoning
+  )
+  let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+  emit(.boundary(.messageEnd(role: .assistant, round: round)))
+  return RoundResult(
+    assistantMessage: message,
+    kind: .error(description: description, hasPartialMessage: true))
+}
