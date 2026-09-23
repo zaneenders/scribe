@@ -28,7 +28,9 @@ struct CodexProviderTests {
       model: "gpt-6-luna",
       reasoningEnabled: false,
       reasoningEffort: nil,
+      serviceTier: "priority",
       contextWindow: 128_000,
+      responsesAPI: true,
       retryPolicy: .fastTestPolicy
     )
     let stream = provider.run(
@@ -52,6 +54,54 @@ struct CodexProviderTests {
       Issue.record("Unexpected error: \(error)")
     }
     #expect(transport.capturedRequests.count == 1)
+    let requestBody = try #require(transport.capturedRequests.first?.body)
+    let requestJSON = try #require(JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    #expect(requestJSON["service_tier"] == nil)
+    #expect(requestJSON["include"] == nil)
+  }
+
+  @Test("Responses API uses standard request fields and handles standard SSE events")
+  func responsesAPIUsesStandardRequestAndStream() async throws {
+    let transport = ScriptedTransport(
+      status: 200,
+      chunks: sseChunks(
+        #"{"type":"response.output_text.delta","delta":"Hello"}"#,
+        #"{"type":"response.completed","response":{"id":"resp_test"}}"#
+      )
+    )
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://opencode.ai/zen/v1")!,
+      transport: transport,
+      middlewares: [ResponsesAPIMiddleware(apiKey: "test-key")]
+    )
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "gpt-6-luna",
+      reasoningEnabled: false,
+      reasoningEffort: nil,
+      serviceTier: "priority",
+      contextWindow: 128_000,
+      responsesAPI: true
+    )
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hi"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: testLogger,
+      abortNotifier: AbortNotifier()
+    )
+    for await _ in stream.events {}
+    let result = try await stream.result.value
+    #expect(result.outcome == .completed)
+    #expect(result.newMessages.contains { $0.content == "Hello" })
+
+    let body = try #require(transport.capturedRequests.first?.body)
+    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(json["service_tier"] == nil)
+    #expect(json["include"] == nil)
   }
 
   @Test("Responses middleware targets the Zen endpoint with bearer authentication")

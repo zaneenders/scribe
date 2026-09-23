@@ -45,6 +45,7 @@ enum AgentProviderFactory {
         reasoningEffort: configuration.reasoningEffort,
         defaultTemperature: configuration.temperature,
         contextWindow: configuration.contextWindow,
+        responsesAPI: true,
         retryPolicy: retryPolicy)
     case "codex":
       return CodexProvider(

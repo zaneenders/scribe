@@ -91,6 +91,7 @@ struct AgentProviderFactoryTests {
     }
     #expect(responsesProvider.model == "gpt-6-sol")
     #expect(responsesProvider.reasoningEffort == "medium")
+    #expect(responsesProvider.responsesAPI)
   }
 
   // MARK: - Configuration passthrough
