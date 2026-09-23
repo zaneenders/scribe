@@ -5,9 +5,6 @@ import Testing
 
 @testable import ScribeKit
 
-/// Wave 1B: explicit-path APIs must let one process operate two independent
-/// Scribe homes concurrently — without mutating environment variables or the
-/// process current directory.
 @Suite
 struct ExplicitRuntimeIsolationTests {
 
@@ -77,14 +74,12 @@ struct ExplicitRuntimeIsolationTests {
       let sessionA = try await ScribeSessionBootstrap.open(context: homeA.context)
       let sessionB = try await ScribeSessionBootstrap.open(context: homeB.context)
 
-      // Each session directory lives under its own data home.
       #expect(
         sessionA.sessionDirectory.string.hasPrefix(homeA.paths.sessionsDirectory.string))
       #expect(
         sessionB.sessionDirectory.string.hasPrefix(homeB.paths.sessionsDirectory.string))
       #expect(sessionA.sessionId != sessionB.sessionId)
 
-      // Metadata and messages were persisted in the right home.
       let metadataA = try ChatSessionStore.loadMetadata(from: sessionA.sessionDirectory)
       #expect(metadataA.id == sessionA.sessionId)
       #expect(metadataA.model == "model-alpha")
@@ -95,7 +90,6 @@ struct ExplicitRuntimeIsolationTests {
       let messagesA = try ChatSessionStore.loadMessages(from: sessionA.sessionDirectory)
       #expect(messagesA.first?.role == .system)
 
-      // Listing each home sees only its own session.
       let directoriesA = try await ChatSessionStore.listSessionDirectories(
         sessionsRoot: homeA.paths.sessionsDirectory)
       let directoriesB = try await ChatSessionStore.listSessionDirectories(
@@ -123,7 +117,6 @@ struct ExplicitRuntimeIsolationTests {
       #expect(resumed.initialMessages.count == 3)
       #expect(resumed.initialMessages.last?.content == "hi")
 
-      // Home B knows nothing about home A's session.
       let listedB = try await ChatSessionStore.listSessionDirectories(
         sessionsRoot: homeB.paths.sessionsDirectory)
       #expect(listedB.isEmpty)
@@ -134,13 +127,10 @@ struct ExplicitRuntimeIsolationTests {
     try await withTwoHomes { homeA, _ in
       _ = try await ScribeSessionBootstrap.open(context: homeA.context)
       let second = try await ScribeSessionBootstrap.open(context: homeA.context)
-      // Metadata timestamps round-trip at second precision, so pin the second
-      // session explicitly to a strictly newer last-message date.
       var metadata = try ChatSessionStore.loadMetadata(from: second.sessionDirectory)
       metadata.lastMessageAt = Date(timeIntervalSinceNow: 60)
       try await ChatSessionStore.saveMetadata(metadata, to: second.sessionDirectory)
 
-      // "latest" resolves within home A's sessions root using the context cwd.
       let resumed = try await ScribeSessionBootstrap.open(
         context: homeA.context, resumeLatest: true)
       #expect(resumed.sessionId == second.sessionId)
@@ -150,7 +140,6 @@ struct ExplicitRuntimeIsolationTests {
 
   @Test func resolvePathsExplicitUsesGivenManifestAndNeverTheEnvironment() async throws {
     try await withTwoHomes { homeA, homeB in
-      // An explicit configuration file wins even when a manifest exists.
       let customConfig = homeA.root.appendingPathComponent("custom.json")
       try
         #"{"profiles":[{"name":"custom","api":{"baseUrl":"http://x","apiKey":""},"agent":{"model":"custom-model","contextWindow":1000,"contextWindowThreshold":0.5},"logging":{"level":"trace"}}}]}"#
@@ -160,7 +149,6 @@ struct ExplicitRuntimeIsolationTests {
       #expect(resolved.configPath == customConfig)
       #expect(resolved.paths == homeB.paths)
 
-      // Nil configuration file falls back to the home's own manifest.
       let resolvedA = try ConfigLoader.resolvePaths(paths: homeA.paths, configurationFile: nil)
       #expect(resolvedA.configPath == homeA.paths.profileManifestPath)
       let resolvedB = try ConfigLoader.resolvePaths(paths: homeB.paths, configurationFile: nil)
@@ -171,12 +159,10 @@ struct ExplicitRuntimeIsolationTests {
   @Test func resolvePathsExplicitWritesDefaultOnlyInsideSuppliedPaths() async throws {
     try await withTemporaryDirectory { root in
       let paths = ScribePaths(dataHome: FilePath(root.path))
-      // No manifest exists; explicit resolution writes the default there.
       let resolved = try ConfigLoader.resolvePaths(paths: paths, configurationFile: nil)
       #expect(resolved.configPath == paths.profileManifestPath)
       #expect(FileStat.stat(paths.profileManifestPath).exists)
 
-      // The written default loads and points at the local provider.
       let loaded = try await ConfigLoader.load(paths: paths)
       #expect(loaded.profiles.count == 1)
       #expect(loaded.activeProfileName == "local")

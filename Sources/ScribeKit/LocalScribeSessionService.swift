@@ -3,24 +3,6 @@ import Logging
 import ScribeCore
 import SystemPackage
 
-/// Actor-owned local `ScribeSessionService`. Adapts the existing runtime —
-/// `ScribeSessionBootstrap`, `SessionHarness`, `ChatSessionStore`, and
-/// `FileSessionPersister` — behind the transport-neutral contract, driven
-/// entirely by an explicit `ScribeRuntimeContext` (no environment or current
-/// directory access).
-///
-/// Responsibilities:
-/// - list metadata without loading agents;
-/// - lazily bootstrap an existing session by UUID;
-/// - own at most one loaded runtime per session ID;
-/// - reject overlapping direct submissions for one session (`busy`);
-/// - map `AgentEvent`/`TurnOutcome` through `ScribeAgentEventMapper`;
-/// - persist before emitting terminal success;
-/// - update rename/pin metadata for loaded and unloaded sessions;
-/// - reconfigure profiles and return refreshed snapshots;
-/// - carry identity changes through fork and TLDR, re-keying the runtime cache;
-/// - allow idle runtime caches to be discarded without affecting persisted
-///   sessions.
 public actor LocalScribeSessionService: ScribeSessionService {
 
   private struct LoadedSession {
@@ -40,8 +22,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   private var loadingSessions: Set<UUID> = []
 
-  /// Resumed when the active submission for a session releases its slot, so
-  /// `interrupt` can return only once the turn has fully ended.
   private var submissionCompletionWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
 
   private let capabilitiesValue = ScribeSessionCapabilities()
@@ -54,8 +34,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
       })
   }
 
-  /// Init with an injected agent factory (used by tests to script turns
-  /// without network access).
   package init(
     context: ScribeRuntimeContext,
     agentFactory: @Sendable @escaping (ScribeConfig, Logger) throws -> ScribeAgent
@@ -64,7 +42,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
     self.agentFactory = agentFactory
   }
 
-  // MARK: - ScribeSessionService
 
   public func capabilities() async -> ScribeSessionCapabilities {
     capabilitiesValue
@@ -155,7 +132,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
         throw ScribeSessionServiceError.busy(sessionID: sessionID)
       }
       guard let loaded = self.runtimes[sessionID] else {
-        // Nothing is running for an unloaded session; still surface unknown IDs.
         guard self.sessionExists(sessionID) else {
           throw ScribeSessionServiceError.notFound(sessionID: sessionID)
         }
@@ -163,8 +139,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
       }
       guard self.activeSubmissions.contains(sessionID) else { return }
       await loaded.boot.harness.interrupt()
-      // Wait for the turn to release its slot so callers observe a session that
-      // already accepts the next submission (e.g. fork/reconfigure) after await.
       guard self.activeSubmissions.contains(sessionID) else { return }
       await withCheckedContinuation { (waiter: CheckedContinuation<Void, Never>) in
         self.submissionCompletionWaiters[sessionID, default: []].append(waiter)
@@ -329,10 +303,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
     }
   }
 
-  // MARK: - Runtime cache management
 
-  /// Discards the loaded runtime cache for a session. The persisted session is
-  /// unaffected and can be reopened later. Active submissions are kept.
   public func discardRuntime(sessionID: UUID) {
     guard !activeSubmissions.contains(sessionID), !activeEdits.contains(sessionID),
       !loadingSessions.contains(sessionID)
@@ -340,7 +311,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
     runtimes[sessionID] = nil
   }
 
-  // MARK: - Turn execution
 
   private func runTurn(
     sessionID: UUID,
@@ -360,14 +330,8 @@ public actor LocalScribeSessionService: ScribeSessionService {
             continuation.yield(mapped)
           }
         })
-      // The harness persists completed turn messages before `submit` returns,
-      // so persistence precedes the terminal event.
       let document = await harness.snapshot()
-      // Release the submission slot before the terminal event so consumers see
-      // a session that already accepts the next turn.
       endSubmission(sessionID: sessionID)
-      // A stream that ends without any assistant text is an unexpected
-      // disconnection, not a completed turn.
       if case .completed = outcome,
         Self.assistantText(in: Array(document.messages.dropFirst(previousMessageCount))).isEmpty
       {
@@ -394,7 +358,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
     submissionCompletionWaiters.removeValue(forKey: sessionID)?.forEach { $0.resume() }
   }
 
-  // MARK: - Bootstrap and cache
 
   private func bootstrap(
     workingDirectory: String?,
@@ -408,8 +371,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
       let saved = try? ChatSessionStore.loadMetadata(from: resumeDirectory).cwd,
       !saved.isEmpty
     {
-      // Resuming must continue in the session's own directory, not the host's
-      // default. Otherwise a reopened session silently runs somewhere else.
       context.defaultWorkingDirectory = saved
     }
     return try await ScribeSessionBootstrap.open(
@@ -440,8 +401,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
     return cache(boot)
   }
 
-  /// Re-keys the runtime cache after a fork/TLDR identity change; the harness
-  /// document now represents the successor session.
   private func rekey(
     _ loaded: LoadedSession, from previousID: UUID, to change: SessionIdentityChange
   ) -> LoadedSession {
@@ -470,7 +429,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
     }
   }
 
-  // MARK: - Snapshots and summaries
 
   private func snapshot(of loaded: LoadedSession) async throws -> ScribeSessionSnapshot {
     let harness = loaded.boot.harness
@@ -506,7 +464,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
       profileOverride: profileOverride)
   }
 
-  /// Wraps thrown errors into display-safe service errors at the API boundary.
   private func perform<T>(_ body: () async throws -> T) async throws -> T {
     do {
       return try await body()

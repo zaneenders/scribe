@@ -9,9 +9,6 @@ import Testing
 
 @testable import ScribeKit
 
-/// Local-service-specific behavior: lazy bootstrapping, runtime cache
-/// lifecycle, rejection rules, and persistence across service
-/// reconstruction.
 @Suite
 struct LocalScribeSessionServiceTests {
 
@@ -151,8 +148,6 @@ struct LocalScribeSessionServiceTests {
       let sessionID = session.summary.id
       _ = try await ScribeServiceContractScenarios.collectEvents(
         from: try await service.submit(ScribeSubmitRequest(sessionID: sessionID, prompt: "hi")))
-      // Messages are [system, user, assistant]; boundaries are 1, 2, 3. A cut
-      // in the middle of a tool round (or out of range) is rejected.
       do {
         _ = try await service.fork(ScribeForkSessionRequest(sessionID: sessionID, cutAtMessageIndex: 99))
         Issue.record("Expected invalidRequest")
@@ -187,7 +182,6 @@ struct LocalScribeSessionServiceTests {
         #expect(error == .busy(sessionID: sessionID))
       }
       try await fixture.finishBlockedTurn(service, sessionID: sessionID)
-      // After the turn ends, fork succeeds.
       let forked = try await service.fork(
         ScribeForkSessionRequest(sessionID: sessionID, cutAtMessageIndex: 2))
       #expect(forked.summary.id != sessionID)
@@ -198,7 +192,6 @@ struct LocalScribeSessionServiceTests {
     try await withLocalServiceFixture(
       replies: ["first answer", "second answer", "third answer"]
     ) { fixture in
-      // Old instance creates and runs a turn.
       let oldService = try await fixture.makeService()
       let created = try await oldService.createSession(
         ScribeCreateSessionRequest(workingDirectory: "/tmp/project"))
@@ -208,8 +201,6 @@ struct LocalScribeSessionServiceTests {
           ScribeSubmitRequest(sessionID: sessionID, prompt: "hello")))
       #expect(events.filter(\.isTerminal).count == 1)
 
-      // A brand-new service instance over the same home lists, reopens, and
-      // continues the session — persistence is authoritative.
       let newService = try await fixture.makeService()
       let listed = try await newService.listSessions()
       #expect(listed.map(\.id).contains(sessionID))
@@ -220,7 +211,6 @@ struct LocalScribeSessionServiceTests {
       #expect(reopened.messages.contains { $0.role == .user && $0.content == "hello" })
       #expect(reopened.messages.contains { $0.role == .assistant && $0.content == "first answer" })
 
-      // Lazy continuation: submit without an explicit open.
       let continued = try await ScribeServiceContractScenarios.collectEvents(
         from: try await newService.submit(
           ScribeSubmitRequest(sessionID: sessionID, prompt: "continue")))
@@ -241,8 +231,6 @@ struct LocalScribeSessionServiceTests {
         from: try await oldService.submit(
           ScribeSubmitRequest(sessionID: sessionID, prompt: "hello")))
 
-      // Bootstrapping the reopened session must continue in the session's own
-      // directory, not the service default ("/tmp").
       let observed = Mutex<String?>(nil)
       let transport = fixture.transport
       let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
@@ -298,13 +286,11 @@ struct LocalScribeSessionServiceTests {
       _ = try await ScribeServiceContractScenarios.collectEvents(
         from: try await service.submit(ScribeSubmitRequest(sessionID: sessionID, prompt: "hi")))
 
-      // Evict the cached runtime; the persisted session survives.
       await service.discardRuntime(sessionID: sessionID)
       let reopened = try await service.openSession(id: sessionID)
       #expect(reopened.summary.id == sessionID)
       #expect(reopened.messages.contains { $0.role == .user && $0.content == "hi" })
 
-      // Listing never needed the runtime in the first place.
       let listed = try await service.listSessions()
       #expect(listed.map(\.id).contains(sessionID))
     }
@@ -319,7 +305,6 @@ struct LocalScribeSessionServiceTests {
         from: try await service.submit(
           ScribeSubmitRequest(sessionID: created.summary.id, prompt: "hello")))
 
-      // The scripted reply streams through section events before terminal.
       #expect(events.contains { $0 == .sectionStarted(.answer) })
       #expect(
         events.contains {
@@ -355,7 +340,6 @@ struct LocalScribeSessionServiceTests {
   }
 
   @Test func unexpectedDisconnectSurfacesAsTerminalFailure() async throws {
-    // Script a reply that is not valid SSE JSON so the stream errors mid-turn.
     try await withTemporaryDirectory { root in
       let fixture = try LocalServiceFixture(root: FilePath(root.path))
       let transport = BadPayloadTransport()
@@ -386,14 +370,12 @@ struct LocalScribeSessionServiceTests {
           }
         }
       } catch {
-        // A thrown stream is also acceptable for an unexpected disconnect.
       }
       #expect(sawTerminalFailure)
     }
   }
 }
 
-/// Transport that returns a malformed payload so the agent stream errors.
 private struct BadPayloadTransport: ClientTransport, Sendable {
   func send(
     _ request: HTTPRequest,

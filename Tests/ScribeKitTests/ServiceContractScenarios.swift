@@ -4,29 +4,19 @@ import Testing
 
 @testable import ScribeKit
 
-/// Fixture protocol that lets the same service contract scenarios run against
-/// the fake service (in-memory) and the local service (filesystem + scripted
-/// agent runtime).
 protocol ScribeServiceContractFixture: Sendable {
 
   associatedtype Service: ScribeSessionService
 
-  /// A fresh service instance. Local fixtures reuse the same home so
-  /// reconstruction scenarios work; fake fixtures create a new actor.
   func makeService() async throws -> Service
 
-  /// Starts a turn for the session that blocks until `finishBlockedTurn`.
-  /// Returns the live event stream.
   func startBlockedTurn(
     _ service: Service, sessionID: UUID, prompt: String
   ) async throws -> AsyncThrowingStream<ScribeSessionEvent, any Error>
 
-  /// Unblocks a turn started by `startBlockedTurn` (usually via interrupt).
   func finishBlockedTurn(_ service: Service, sessionID: UUID) async throws
 }
 
-/// Shared contract scenarios run against every `ScribeSessionService`
-/// implementation.
 enum ScribeServiceContractScenarios {
 
   static func collectEvents(
@@ -89,7 +79,6 @@ enum ScribeServiceContractScenarios {
     #expect(messages.first?.role == .system)
     #expect(messages.contains { $0.role == .user && $0.content == "hello" })
 
-    // The persisted snapshot reflects the turn.
     let reopened = try await service.openSession(id: sessionID)
     #expect(reopened.messages.contains { $0.role == .user && $0.content == "hello" })
   }
@@ -115,7 +104,6 @@ enum ScribeServiceContractScenarios {
     let events = try await collectEvents(from: blocked)
     #expect(events.filter(\.isTerminal).count == 1)
 
-    // The session accepts submissions again after the turn ended.
     let next = try await collectEvents(
       from: try await service.submit(ScribeSubmitRequest(sessionID: sessionID, prompt: "again")))
     #expect(next.filter(\.isTerminal).count == 1)
@@ -129,7 +117,6 @@ enum ScribeServiceContractScenarios {
     let b = try await service.createSession(ScribeCreateSessionRequest(workingDirectory: "/tmp/b"))
 
     let blockedA = try await fixture.startBlockedTurn(service, sessionID: a.summary.id, prompt: "a")
-    // Session B completes normally while A is blocked.
     let eventsB = try await collectEvents(
       from: try await service.submit(ScribeSubmitRequest(sessionID: b.summary.id, prompt: "b")))
     #expect(eventsB.filter(\.isTerminal).count == 1)
@@ -158,7 +145,6 @@ enum ScribeServiceContractScenarios {
     }
     #expect(outcome == .interrupted)
 
-    // Interrupting again is a harmless no-op.
     try await service.interrupt(sessionID: sessionID)
   }
 
@@ -185,7 +171,6 @@ enum ScribeServiceContractScenarios {
     #expect(cleared.isPinned)
     #expect(cleared.displayName == String(sessionID.uuidString.prefix(8)).uppercased())
 
-    // Unloaded sessions can be renamed and pinned too.
     let second = try await service.createSession(
       ScribeCreateSessionRequest(workingDirectory: "/tmp/other"))
     let renamedSecond = try await service.updatePresentation(
@@ -214,7 +199,6 @@ enum ScribeServiceContractScenarios {
     #expect(reconfigured.profileCatalog.map(\.name).contains("beta"))
     #expect(reconfigured.messages.first?.role == .system)
 
-    // The switch is visible in listings.
     let listed = try await service.listSessions()
     #expect(listed.first(where: { $0.id == sessionID })?.model == "model-beta")
 
@@ -223,7 +207,6 @@ enum ScribeServiceContractScenarios {
         ScribeReconfigureSessionRequest(sessionID: sessionID, profileName: "gamma"))
       Issue.record("Expected failure for unknown profile")
     } catch {
-      // Both services reject unknown profiles; the concrete error differs.
     }
   }
 
@@ -239,7 +222,6 @@ enum ScribeServiceContractScenarios {
 
     let opened = try await service.openSession(id: sessionID)
     let messageCount = opened.messages.count
-    // Cut after the latest safe boundary (end of the turn).
     let forked = try await service.fork(
       ScribeForkSessionRequest(sessionID: sessionID, cutAtMessageIndex: messageCount))
     #expect(forked.summary.id != sessionID)
@@ -247,14 +229,12 @@ enum ScribeServiceContractScenarios {
     #expect(forked.messages.map(\.role) == opened.messages.map(\.role))
     #expect(!forked.summary.isPinned)
 
-    // The parent session remains listed and openable.
     let listed = try await service.listSessions()
     #expect(listed.map(\.id).contains(sessionID))
     #expect(listed.map(\.id).contains(forked.summary.id))
     let parent = try await service.openSession(id: sessionID)
     #expect(parent.summary.id == sessionID)
 
-    // The fork can be submitted to independently.
     let events = try await collectEvents(
       from: try await service.submit(
         ScribeSubmitRequest(sessionID: forked.summary.id, prompt: "after fork")))
@@ -279,11 +259,9 @@ enum ScribeServiceContractScenarios {
     #expect(summarized.summary.id != sessionID)
     #expect(summarized.messages.first?.role == .system)
     #expect(summarized.messages.contains { $0.role == .assistant })
-    // The summarized range no longer appears as raw user/assistant messages.
     #expect(
       !summarized.messages.contains { $0.role == .user && $0.content == "hello" })
 
-    // The successor can be opened by ID and continues from the summary.
     let reopened = try await service.openSession(id: summarized.summary.id)
     #expect(reopened.summary.id == summarized.summary.id)
     #expect(reopened.messages.count == summarized.messages.count)

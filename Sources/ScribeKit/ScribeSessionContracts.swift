@@ -1,16 +1,11 @@
 import Foundation
 import ScribeCore
 
-// MARK: - Session summaries
 
-/// Transport-neutral description of a persisted session, suitable for lists
-/// and sidebars. Mirrors the persisted `ChatSessionMetadata` without exposing
-/// filesystem locations.
 public struct ScribeSessionSummary: Codable, Sendable, Equatable, Identifiable {
 
   public var id: UUID
 
-  /// Custom session name, or `nil` when the session falls back to its short ID.
   public var name: String?
 
   public var isPinned: Bool
@@ -25,7 +20,6 @@ public struct ScribeSessionSummary: Codable, Sendable, Equatable, Identifiable {
 
   public var model: String
 
-  /// Name shown in UI lists; matches the persisted metadata fallback.
   public var displayName: String {
     name ?? String(id.uuidString.prefix(8)).uppercased()
   }
@@ -51,9 +45,6 @@ public struct ScribeSessionSummary: Codable, Sendable, Equatable, Identifiable {
   }
 }
 
-/// Full presentation state for one open session: summary, persisted messages
-/// (including the system message), and the profile catalog needed to render
-/// profile controls immediately.
 public struct ScribeSessionSnapshot: Codable, Sendable, Equatable {
 
   public var summary: ScribeSessionSummary
@@ -73,7 +64,6 @@ public struct ScribeSessionSnapshot: Codable, Sendable, Equatable {
   }
 }
 
-// MARK: - Requests
 
 public struct ScribeCreateSessionRequest: Sendable, Equatable {
 
@@ -99,7 +89,6 @@ public struct ScribeSubmitRequest: Sendable, Equatable {
   }
 }
 
-/// Distinguishes "leave the name unchanged" from "clear the name".
 public enum ScribeNameUpdate: Codable, Sendable, Equatable {
 
   case unchanged
@@ -144,7 +133,6 @@ public struct ScribeForkSessionRequest: Sendable, Equatable {
 
   public var sessionID: UUID
 
-  /// Message index the new session keeps; must be a safe fork boundary.
   public var cutAtMessageIndex: Int
 
   public init(sessionID: UUID, cutAtMessageIndex: Int) {
@@ -157,13 +145,10 @@ public struct ScribeSummarizeSessionRequest: Sendable, Equatable {
 
   public var sessionID: UUID
 
-  /// Half-open message range `[startMessageIndex, endMessageIndex)` replaced
-  /// by the summary.
   public var startMessageIndex: Int
 
   public var endMessageIndex: Int
 
-  /// Model used to produce the summary; `nil` uses the session's model.
   public var model: String?
 
   public init(
@@ -179,10 +164,7 @@ public struct ScribeSummarizeSessionRequest: Sendable, Equatable {
   }
 }
 
-// MARK: - Capabilities
 
-/// Features a `ScribeSessionService` supports; the workspace hides controls
-/// for unsupported capabilities.
 public struct ScribeSessionCapabilities: Codable, Sendable, Equatable {
 
   public var supportsProfileSwitching: Bool
@@ -206,25 +188,17 @@ public struct ScribeSessionCapabilities: Codable, Sendable, Equatable {
   }
 }
 
-// MARK: - Errors
 
-/// Display-safe service failures. Adapters map underlying errors into these
-/// cases before surfacing them through the service contract.
 public enum ScribeSessionServiceError: Error, Sendable, Equatable, LocalizedError {
 
-  /// No session exists with the given identifier.
   case notFound(sessionID: UUID)
 
-  /// The session already has an active submission; one turn at a time.
   case busy(sessionID: UUID)
 
-  /// The service does not support the requested feature.
   case unsupported(feature: String)
 
-  /// The request values are invalid (empty prompt, out-of-range indexes, …).
   case invalidRequest(String)
 
-  /// Display-safe failure description for unexpected service errors.
   case failed(String)
 
   public var errorDescription: String? {
@@ -243,11 +217,7 @@ public enum ScribeSessionServiceError: Error, Sendable, Equatable, LocalizedErro
   }
 }
 
-// MARK: - Service
 
-/// Transport-neutral session service. Implementations own persistence and
-/// agent execution; consumers (the shared workspace model) own queueing and
-/// presentation state.
 public protocol ScribeSessionService: Sendable {
 
   func capabilities() async -> ScribeSessionCapabilities

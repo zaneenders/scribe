@@ -1,14 +1,8 @@
 import Foundation
 import ScribeCore
 
-/// Single mapper from harness-level `AgentEvent` and `TurnOutcome` values to
-/// the transport-neutral `ScribeSessionEvent` contract. The local service and
-/// any future adapter share this mapping so streamed reduction sees one event
-/// vocabulary.
 public enum ScribeAgentEventMapper {
 
-  /// Maps one harness event. Returns `nil` for events with no session-level
-  /// meaning (ignored by the shared reducer).
   public static func map(_ event: AgentEvent) -> ScribeSessionEvent? {
     switch event {
     case .output(.sectionStarted(let section, _)):
@@ -49,7 +43,6 @@ public enum ScribeAgentEventMapper {
     }
   }
 
-  /// Maps a harness turn outcome to the Codable contract value.
   public static func map(_ outcome: TurnOutcome) -> ScribeTurnOutcome {
     switch outcome {
     case .completed:
@@ -65,8 +58,6 @@ public enum ScribeAgentEventMapper {
     }
   }
 
-  /// Display-safe terminal failure message for an error thrown while running
-  /// a turn.
   public static func failureMessage(for error: any Error) -> String {
     if let localized = error as? any LocalizedError, let message = localized.errorDescription {
       return message

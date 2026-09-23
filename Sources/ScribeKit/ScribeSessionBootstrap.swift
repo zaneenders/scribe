@@ -36,9 +36,6 @@ public struct BootstrappedSession: Sendable {
 
 public enum ScribeSessionBootstrap {
 
-  /// Environment-resolving convenience open. Resolves the data home and
-  /// configuration file from the process environment, then delegates to the
-  /// explicit `open(context:...)` overload.
   public static func open(
     resumeLatest: Bool = false,
     resumeDirectory: FilePath? = nil,
@@ -59,8 +56,6 @@ public enum ScribeSessionBootstrap {
       profileOverride: profileOverride)
   }
 
-  /// Explicit open: reads no environment variables and no current directory.
-  /// All runtime inputs come from `context`.
   public static func open(
     context: ScribeRuntimeContext,
     resumeLatest: Bool = false,
@@ -77,8 +72,6 @@ public enum ScribeSessionBootstrap {
       })
   }
 
-  /// Explicit open with an injected agent factory (used by the local session
-  /// service and its tests).
   package static func open(
     context: ScribeRuntimeContext,
     resumeLatest: Bool = false,

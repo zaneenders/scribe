@@ -123,19 +123,12 @@ public enum ConfigLoader {
   public static let codexProfileBaseURL = "https://chatgpt.com/backend-api"
   public static let codexProfileModel = "gpt-5.6-sol"
 
-  /// Environment-resolving convenience: resolves the data home from
-  /// `SCRIBE_HOME` (or `~/.scribe`) and the configuration file from
-  /// `SCRIBE_CONFIG_PATH` or the current directory, then delegates to the
-  /// explicit overload.
   public static func resolvePaths() throws -> ResolvedPaths {
     let paths = ScribePaths.resolve()
     let candidate = environmentConfigurationCandidate(paths: paths)
     return try resolvePaths(paths: paths, configurationFile: candidate)
   }
 
-  /// Explicit resolution: inspects no environment variables and no current
-  /// directory. When `configurationFile` is `nil`, the profile manifest inside
-  /// `paths` is used, and a default manifest is written there if missing.
   public static func resolvePaths(
     paths: ScribePaths,
     configurationFile: FilePath? = nil
@@ -156,8 +149,6 @@ public enum ConfigLoader {
     return ResolvedPaths(paths: paths, configPath: paths.profileManifestPath)
   }
 
-  /// Environment-resolving convenience load; delegates to the explicit
-  /// overload after resolving paths from the environment.
   public static func load(profileOverride: String? = nil) async throws -> LoadedConfig {
     let resolved = try resolvePaths()
     return try await load(
@@ -165,7 +156,6 @@ public enum ConfigLoader {
       profileOverride: profileOverride)
   }
 
-  /// Explicit load: reads only the supplied paths and configuration file.
   public static func load(
     paths: ScribePaths,
     configurationFile: FilePath? = nil,
@@ -176,9 +166,6 @@ public enum ConfigLoader {
       at: resolved.configPath, paths: resolved.paths, profileOverride: profileOverride)
   }
 
-  /// Computes the environment- or cwd-derived configuration candidate for the
-  /// convenience APIs: `SCRIBE_CONFIG_PATH` when set, else a `scribe.config.json`
-  /// in the current directory when the data home has no manifest yet.
   private static func environmentConfigurationCandidate(paths: ScribePaths) -> FilePath? {
     if let raw = ProcessInfo.processInfo.environment["SCRIBE_CONFIG_PATH"] {
       let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)

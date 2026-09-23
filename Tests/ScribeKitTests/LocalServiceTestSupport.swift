@@ -10,9 +10,6 @@ import Testing
 
 @testable import ScribeKit
 
-/// A `ClientTransport` whose responses are scripted per call. Supports
-/// hanging a specific call (until cancelled, e.g. by interrupt) and polling
-/// the number of started calls so tests can synchronize with in-flight turns.
 final class ScriptedSSETransport: ClientTransport, Sendable {
 
   private struct State {
@@ -27,7 +24,6 @@ final class ScriptedSSETransport: ClientTransport, Sendable {
     self.replies = Mutex(replies)
   }
 
-  /// Makes the next HTTP call hang until cancelled.
   func hangNextCall() {
     _ = state.withLock { $0.hangCallIDs.insert($0.callIndex) }
   }
@@ -79,10 +75,6 @@ final class ScriptedSSETransport: ClientTransport, Sendable {
   }
 }
 
-/// Fixture running the shared contract scenarios against
-/// `LocalScribeSessionService` over a temporary home with a scripted agent
-/// runtime. All service instances created from one fixture share the home and
-/// the transport, so reconstruction scenarios work.
 struct LocalServiceFixture: ScribeServiceContractFixture {
 
   let root: FilePath
@@ -148,7 +140,6 @@ struct LocalServiceFixture: ScribeServiceContractFixture {
     transport.hangNextCall()
     let stream = try await service.submit(
       ScribeSubmitRequest(sessionID: sessionID, prompt: prompt))
-    // Deterministically wait until the scripted call is in flight.
     _ = await transport.waitForCallCount(callsBefore + 1)
     return stream
   }

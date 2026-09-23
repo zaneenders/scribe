@@ -92,8 +92,6 @@ public enum SessionSummarizer {
       })
   }
 
-  /// Summarize with an injected agent factory (used by the local session
-  /// service and its tests).
   package static func summarize(
     slice: [ScribeMessage],
     configuration: ScribeConfig,

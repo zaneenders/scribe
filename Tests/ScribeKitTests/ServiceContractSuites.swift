@@ -3,8 +3,6 @@ import Testing
 
 @testable import ScribeKit
 
-/// The same shared contract scenarios, run against the local service with a
-/// scripted agent runtime and a temporary home.
 @Suite
 struct LocalServiceContractTests {
 
