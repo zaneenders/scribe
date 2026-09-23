@@ -172,7 +172,31 @@ private func runSingleRound(
     abortObserver: abortObserver,
     streamWallStart: clock.now
   )
-  try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
+  do {
+    try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)
+  } catch let error as ScribeError {
+    let hasPartialMessage = !turn.text.isEmpty || !turn.reasoningText.isEmpty
+    guard hasPartialMessage else { throw error }
+    return partialRoundResult(
+      text: turn.text,
+      reasoning: turn.reasoningText,
+      error: error,
+      round: round,
+      emit: emit)
+  } catch is AgentTurnInterruptedError {
+    throw AgentTurnInterruptedError()
+  } catch is CancellationError {
+    throw CancellationError()
+  } catch {
+    let hasPartialMessage = !turn.text.isEmpty || !turn.reasoningText.isEmpty
+    guard hasPartialMessage else { throw error }
+    return partialRoundResult(
+      text: turn.text,
+      reasoning: turn.reasoningText,
+      error: error,
+      round: round,
+      emit: emit)
+  }
 
   let toolInvocations = turn.resolvedToolCalls()
   let assistantContent: Components.Schemas.ChatMessage.ContentPayload? =

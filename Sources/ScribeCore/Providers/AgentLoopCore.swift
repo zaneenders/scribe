@@ -27,6 +27,7 @@ struct RoundResult: Sendable {
 enum RoundOutcome: Sendable, Equatable {
   case completed
   case incomplete(reason: String?)
+  case error(description: String, hasPartialMessage: Bool)
   case toolCalls([ToolInvocation])
 }
 
@@ -160,8 +161,17 @@ func runAgentLoopCore(
       outcome = .error(description)
       return (newMessages, outcome)
     } catch let scribeError as ScribeError {
-      outcome = .error(scribeError.errorDescription ?? String(describing: scribeError))
-      throw scribeError
+      let description = scribeError.errorDescription ?? String(describing: scribeError)
+      guard scribeError.isInBandStreamError else {
+        outcome = .error(description)
+        throw scribeError
+      }
+      logger.error(
+        "agent.loop.error\(logTag)",
+        metadata: ["round": "\(round)", "partial_messages": "\(newMessages.count)", "err": "\(description)"])
+      emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
+      outcome = .error(description)
+      return (newMessages, outcome)
     } catch {
       let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
       logger.error(
@@ -190,6 +200,14 @@ func runAgentLoopCore(
       emit(.boundary(.turnEnd(round: round, outcome: .completed)))
       commit(&currentContext.messages, &newMessages, roundBuffer)
       outcome = .completed
+      return (newMessages, outcome)
+
+    case .error(let description, let hasPartialMessage):
+      emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
+      if hasPartialMessage {
+        commit(&currentContext.messages, &newMessages, roundBuffer)
+      }
+      outcome = .error(description)
       return (newMessages, outcome)
 
     case .incomplete(let reason):
@@ -622,4 +640,26 @@ extension ScribeError {
       return false
     }
   }
+}
+
+func partialRoundResult(
+  text: String,
+  reasoning: String,
+  error: any Error,
+  round: Int,
+  emit: @Sendable (AgentEvent) -> Void
+) -> RoundResult {
+  let message = Components.Schemas.ChatMessage(
+    role: .assistant,
+    content: text.isEmpty ? nil : .case1(text),
+    name: nil,
+    toolCalls: nil,
+    toolCallId: nil,
+    reasoningContent: reasoning.isEmpty ? nil : reasoning
+  )
+  let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+  emit(.boundary(.messageEnd(role: .assistant, round: round)))
+  return RoundResult(
+    assistantMessage: message,
+    kind: .error(description: description, hasPartialMessage: true))
 }
