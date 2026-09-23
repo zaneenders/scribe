@@ -30,6 +30,12 @@ struct ScribeErrorTests {
     #expect(error.errorDescription == "chat/completions returned HTTP 401 — unauthorized")
   }
 
+  @Test func responsesHTTPErrorNamesTheEndpoint() {
+    let error = ScribeError.responsesHTTPError(
+      statusCode: 401, detail: #"{"error":{"message":"Invalid credential"}}"#)
+    #expect(error.errorDescription == #"responses returned HTTP 401 — {"error":{"message":"Invalid credential"}}"#)
+  }
+
   @Test func sessionCorruptedDescription() {
     let error = ScribeError.sessionCorrupted(reason: "Missing system message.")
     #expect(error.errorDescription == "Missing system message.")

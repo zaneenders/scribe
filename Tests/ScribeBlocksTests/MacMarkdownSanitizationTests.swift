@@ -10,7 +10,8 @@ struct MacMarkdownSanitizationTests {
     let metrics = FontMetrics()
     let lines = block.lines(forWidth: Float(columns) * metrics.cellAdvance, metrics: metrics)
     let layout = MarkdownLayout(lines: lines, lineHeight: 10, cellWidth: 5, scale: 1)
-    return layout.textInRange(from: (line: 0, column: 0), to: (line: max(0, lines.count - 1), column: lines.last?.columnCount ?? 0))
+    return layout.textInRange(
+      from: (line: 0, column: 0), to: (line: max(0, lines.count - 1), column: lines.last?.columnCount ?? 0))
   }
 
   @Test func preservesTreeDiagramsInCodeBlocks() {
@@ -21,11 +22,14 @@ struct MacMarkdownSanitizationTests {
         └── Server        -> SSH tunnel -> server backend
       """
     #expect(renderedText("```\n\(tree)\n```") == tree)
+    #expect(sanitizeASCII(tree) == tree)
+    #expect(segmentMarkdown(sanitizeASCII("```\n\(tree)\n```")) == [.code(language: nil, code: tree)])
   }
 
   @Test func preservesEntireBoxDrawingBlock() {
     let symbols = String((0x2500...0x257F).map { Character(String(UnicodeScalar($0)!)) })
     #expect(renderedText(symbols, columns: 200) == symbols)
+    #expect(sanitizeASCII(symbols) == symbols)
   }
 
   @Test func preservesUnicodeThroughRenderingAndSelection() {

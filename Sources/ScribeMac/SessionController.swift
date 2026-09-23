@@ -375,7 +375,9 @@ final class SessionController {
             logger: Logger(label: "scribe.mac.tldr"))
           let audit = ScribeMessage(
             role: .system,
-            content: "TLDR audit\nModel: \(result.model)\nSystem prompt:\n\(result.systemPrompt)\nUser prompt:\n\(result.userPrompt)")
+            content:
+              "TLDR audit\nModel: \(result.model)\nSystem prompt:\n\(result.systemPrompt)\nUser prompt:\n\(result.userPrompt)"
+          )
           change = try await harness.applyEdit(
             .forkSplice(
               startCut: start, endCut: end,

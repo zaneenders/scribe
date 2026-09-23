@@ -57,7 +57,9 @@ Set `SCRIBE_HOME` to change the data directory.
 ```
 
 The first profile is the default.
-Set `api.type` to `"codex"` for ChatGPT/Codex; omit it for OpenAI-compatible APIs.
+Set `api.type` to `"codex"` for ChatGPT/Codex, `"deepseek"` for DeepSeek-style
+reasoning, or `"responses"` for a bearer-key Responses API; omit it for other
+OpenAI-compatible chat completions APIs.
 Optional agent settings: `contextWindowThreshold` (default `0.8`), `reasoning`
 (`false`), `reasoningEffort` (`low`/`medium`/`high`), and `maxRetries` (`3`).
 Set `logging.level` to control verbosity (default `trace`).
@@ -68,6 +70,25 @@ with the stable session ID on every request (default `false`).
 Personal instructions go in `~/.scribe/system.md` and apply to new sessions only.
 Sessions, metadata, and logs live in `~/.scribe/sessions/{uuid}/`.
 Built-in tools: `shell`, `read_file`, `write_file`, and `edit_file`.
+
+| Path | Default | Description |
+|------|---------|-------------|
+| `name` | *(required)* | Profile identifier; first profile is active by default |
+| `api.baseUrl` | *(required)* | API base URL (e.g. `http://localhost:11434` for Ollama) |
+| `api.apiKey` | `""` | Bearer token; leave empty when no auth is required |
+| `api.type` | *(omitted)* | `"codex"` for ChatGPT/Codex, `"deepseek"` for DeepSeek-style reasoning, `"responses"` for a bearer-key Responses API (e.g. OpenCode Zen); omit for other chat completions providers |
+| `agent.model` | *(required)* | Model name |
+| `agent.contextWindow` | *(required)* | Token context window size |
+| `agent.contextWindowThreshold` | `0.8` | Fraction (0–1) that triggers context compaction |
+| `agent.reasoning` | `false` | Enable reasoning/thinking tokens for models that support it |
+| `agent.reasoningEffort` | *(omitted)* | Reasoning effort: `"low"`, `"medium"`, or `"high"` |
+| `agent.maxTokens` | *(omitted)* | Reserved for provider-specific token limits |
+| `agent.maxRetries` | `3` | Retries with exponential backoff on transient network failures (HTTP 429/5xx, dropped connections, timeouts); `0` disables |
+| `logging.level` | `"trace"` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |
+
+> Scribe supports OpenAI-compatible chat completions, bearer-key Responses APIs,
+> and `codex` (ChatGPT backend). For OpenCode Zen GPT models, use
+> `"type": "responses"` with `"baseUrl": "https://opencode.ai/zen/v1"`.
 
 ## Development
 

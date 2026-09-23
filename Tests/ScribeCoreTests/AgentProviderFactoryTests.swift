@@ -75,6 +75,27 @@ struct AgentProviderFactoryTests {
     #expect(codexProvider.contextWindow == 128_000)
   }
 
+  @Test("responses apiType uses a configured Responses client")
+  func responsesApiTypeReturnsConfiguredProvider() throws {
+    let provider = try AgentProviderFactory.make(
+      configuration: configuration(
+        model: "gpt-6-sol",
+        serverURL: "https://opencode.ai/zen/v1",
+        apiType: "responses",
+        reasoningEnabled: true,
+        reasoningEffort: "medium"
+      ))
+    let responsesProvider = try #require(provider as? CodexProvider)
+    guard case .configured = responsesProvider.source else {
+      Issue.record("Expected a bearer-key configured client")
+      return
+    }
+    #expect(responsesProvider.model == "gpt-6-sol")
+    #expect(responsesProvider.reasoningEffort == "medium")
+    #expect(responsesProvider.responsesAPI)
+  }
+
+  // MARK: - Configuration passthrough
   @Test("contextWindow is propagated to provider")
   func contextWindowPropagated() throws {
     let config = configuration(contextWindow: 50000)

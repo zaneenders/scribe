@@ -15,11 +15,12 @@ struct TranscriptClipboardTests {
     }
     defer {
       pasteboard.clearContents()
-      pasteboard.writeObjects(saved.map { values in
-        let item = NSPasteboardItem()
-        for (type, data) in values { item.setData(data, forType: type) }
-        return item
-      })
+      pasteboard.writeObjects(
+        saved.map { values in
+          let item = NSPasteboardItem()
+          for (type, data) in values { item.setData(data, forType: type) }
+          return item
+        })
       SelectionManager.shared.clear()
       MarkdownLayoutRegistry.clear()
       TranscriptSelectionDocumentRegistry.setEntries(ownerID: UUID(), [])
@@ -37,21 +38,26 @@ struct TranscriptClipboardTests {
       })
     let view = MTKView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
     renderer.draw(in: view)
-    TranscriptSelectionDocumentRegistry.setEntries(ownerID: UUID(), [
-      .init(id: "clipboard-test", linesForColumns: { columns in
-        layoutPlainText("Two details will narrow this down:", columns: columns, color: .white)
-      })
-    ])
+    TranscriptSelectionDocumentRegistry.setEntries(
+      ownerID: UUID(),
+      [
+        .init(
+          id: "clipboard-test",
+          linesForColumns: { columns in
+            layoutPlainText("Two details will narrow this down:", columns: columns, color: .white)
+          })
+      ])
     #expect(SelectionManager.shared.selectAll(isTranscriptVisible: true))
     pasteboard.clearContents()
     pasteboard.setString("previous clipboard", forType: .string)
 
     let inputView = ChromaInputView(frame: view.frame, device: MTLCreateSystemDefaultDevice())
     inputView.onKey = { chord, text in renderer.handleKey(chord, text: text) }
-    let event = try #require(NSEvent.keyEvent(
-      with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
-      windowNumber: 0, context: nil, characters: "c", charactersIgnoringModifiers: "c",
-      isARepeat: false, keyCode: 8))
+    let event = try #require(
+      NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+        windowNumber: 0, context: nil, characters: "c", charactersIgnoringModifiers: "c",
+        isARepeat: false, keyCode: 8))
     inputView.keyDown(with: event)
 
     #expect(pasteboard.string(forType: .string) == "Two details will narrow this down:")

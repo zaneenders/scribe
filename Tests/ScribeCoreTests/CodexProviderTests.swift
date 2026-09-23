@@ -12,6 +12,120 @@ import Testing
 @Suite
 struct CodexProviderTests {
 
+  @Test("Responses 401 identifies the endpoint and is not retried")
+  func responsesUnauthorizedIsReportedAccurately() async throws {
+    let transport = ScriptedTransport(
+      status: 401,
+      chunks: [Array(#"{"error":{"message":"Invalid credential"}}"#.utf8)[...]]
+    )
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://opencode.ai/zen/v1")!,
+      transport: transport,
+      middlewares: [ResponsesAPIMiddleware(apiKey: "test-key")]
+    )
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "gpt-6-luna",
+      reasoningEnabled: false,
+      reasoningEffort: nil,
+      serviceTier: "priority",
+      contextWindow: 128_000,
+      responsesAPI: true,
+      retryPolicy: .fastTestPolicy
+    )
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hi"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: testLogger,
+      abortNotifier: AbortNotifier()
+    )
+    for await _ in stream.events {}
+    do {
+      _ = try await stream.result.value
+      Issue.record("Expected an HTTP error")
+    } catch let ScribeError.responsesHTTPError(statusCode, detail) {
+      #expect(statusCode == 401)
+      #expect(detail.contains("Invalid credential"))
+    } catch {
+      Issue.record("Unexpected error: \(error)")
+    }
+    #expect(transport.capturedRequests.count == 1)
+    let requestBody = try #require(transport.capturedRequests.first?.body)
+    let requestJSON = try #require(JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    #expect(requestJSON["service_tier"] == nil)
+    #expect(requestJSON["include"] == nil)
+  }
+
+  @Test("Responses API uses standard request fields and handles standard SSE events")
+  func responsesAPIUsesStandardRequestAndStream() async throws {
+    let transport = ScriptedTransport(
+      status: 200,
+      chunks: sseChunks(
+        #"{"type":"response.output_text.delta","delta":"Hello"}"#,
+        #"{"type":"response.completed","response":{"id":"resp_test"}}"#
+      )
+    )
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://opencode.ai/zen/v1")!,
+      transport: transport,
+      middlewares: [ResponsesAPIMiddleware(apiKey: "test-key")]
+    )
+    let provider = CodexProvider(
+      source: .configured(client),
+      model: "gpt-6-luna",
+      reasoningEnabled: false,
+      reasoningEffort: nil,
+      serviceTier: "priority",
+      contextWindow: 128_000,
+      responsesAPI: true
+    )
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hi"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: testLogger,
+      abortNotifier: AbortNotifier()
+    )
+    for await _ in stream.events {}
+    let result = try await stream.result.value
+    #expect(result.outcome == .completed)
+    #expect(result.newMessages.contains { $0.content == "Hello" })
+
+    let body = try #require(transport.capturedRequests.first?.body)
+    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(json["service_tier"] == nil)
+    #expect(json["include"] == nil)
+  }
+
+  @Test("Responses middleware targets the Zen endpoint with bearer authentication")
+  func responsesMiddlewareUsesZenEndpoint() async throws {
+    let transport = ScriptedTransport(
+      status: 200,
+      chunks: sseChunks(#"{"type":"response.completed","response":{"id":"resp_test"}}"#)
+    )
+    let client = ScribeLLMCodex.Client(
+      serverURL: URL(string: "https://opencode.ai/zen/v1")!,
+      transport: transport,
+      middlewares: [ResponsesAPIMiddleware(apiKey: "test-key")]
+    )
+    _ = try await client.createCodexResponse(body: .json(.init(model: "gpt-6-sol")))
+
+    let request = try #require(transport.capturedRequests.first)
+    #expect(request.baseURL.path == "/zen/v1")
+    #expect(request.path == "/responses")
+    #expect(request.headers[.authorization] == "Bearer test-key")
+  }
+
+  /// Integration test: a `.configured` provider issues an HTTP request through the
+  /// supplied transport, streams SSE text deltas as `AgentEvent` values, and
+  /// produces a `TurnResult` containing the assistant message.
   @Test("run with configured client produces expected SSE response")
   func runWithConfiguredClientProducesExpectedResponse() async throws {
     let transport = ScriptedTransport(

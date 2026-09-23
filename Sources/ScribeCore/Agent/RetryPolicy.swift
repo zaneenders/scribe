@@ -55,6 +55,8 @@ extension RetryPolicy {
       switch scribeError {
       case .apiHTTPError(let statusCode, _, _):
         return statusCode == 408 || statusCode == 429 || (500...599).contains(statusCode)
+      case .responsesHTTPError(let statusCode, _):
+        return statusCode == 408 || statusCode == 429 || (500...599).contains(statusCode)
       case .providerStreamError(_, let code, let type):
         return Self.isRetryableProviderStreamError(code: code, type: type)
       default:

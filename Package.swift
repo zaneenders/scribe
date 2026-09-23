@@ -130,7 +130,7 @@ var targets: [Target] = [
   .testTarget(
     name: "ScribeKitTests",
     dependencies: [
-      "ScribeKit",
+      "ScribeKit"
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
