@@ -101,14 +101,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   public func openSession(id: UUID) async throws -> ScribeSessionSnapshot {
     try await perform {
-      if let loaded = self.runtimes[id] {
-        return try await self.snapshot(of: loaded)
-      }
-      let boot = try await self.bootstrap(
-        workingDirectory: nil,
-        profileOverride: nil,
-        resumeDirectory: try self.existingSessionDirectory(for: id))
-      return try await self.snapshot(of: self.cache(boot))
+      try await self.snapshot(of: self.loadedSession(for: id))
     }
   }
 
@@ -116,21 +109,16 @@ public actor LocalScribeSessionService: ScribeSessionService {
     _ request: ScribeSubmitRequest
   ) async throws -> AsyncThrowingStream<ScribeSessionEvent, any Error> {
     let sessionID = request.sessionID
+    guard !activeSubmissions.contains(sessionID) else {
+      throw ScribeSessionServiceError.busy(sessionID: sessionID)
+    }
+    let prompt = request.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !prompt.isEmpty else {
+      throw ScribeSessionServiceError.invalidRequest("Prompt must not be empty.")
+    }
+    activeSubmissions.insert(sessionID)
     do {
-      if runtimes[sessionID] == nil {
-        _ = try await openSession(id: sessionID)
-      }
-      guard let loaded = runtimes[sessionID] else {
-        throw ScribeSessionServiceError.notFound(sessionID: sessionID)
-      }
-      guard !activeSubmissions.contains(sessionID) else {
-        throw ScribeSessionServiceError.busy(sessionID: sessionID)
-      }
-      let prompt = request.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !prompt.isEmpty else {
-        throw ScribeSessionServiceError.invalidRequest("Prompt must not be empty.")
-      }
-      activeSubmissions.insert(sessionID)
+      let loaded = try await loadedSession(for: sessionID)
       let harness = loaded.boot.harness
       return AsyncThrowingStream { continuation in
         let task = Task {
@@ -145,8 +133,10 @@ public actor LocalScribeSessionService: ScribeSessionService {
         }
       }
     } catch let error as ScribeSessionServiceError {
+      endSubmission(sessionID: sessionID)
       throw error
     } catch {
+      endSubmission(sessionID: sessionID)
       throw ScribeSessionServiceError.failed(
         ScribeAgentEventMapper.failureMessage(for: error))
     }
@@ -201,6 +191,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
       guard self.capabilitiesValue.supportsProfileSwitching else {
         throw ScribeSessionServiceError.unsupported(feature: "profile switching")
       }
+      try self.guardIdle(request.sessionID)
       let loaded: LoadedSession
       if let cached = self.runtimes[request.sessionID] {
         loaded = cached
@@ -214,6 +205,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
       try self.guardIdle(request.sessionID)
 
       let loadedConfig = try await self.loadConfiguration(profileOverride: request.profileName)
+      try self.guardIdle(request.sessionID)
       let base = loadedConfig.scribeConfig
       let harness = loaded.boot.harness
       let workingDirectory = loaded.boot.workingDirectory
@@ -250,6 +242,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
       guard self.capabilitiesValue.supportsFork else {
         throw ScribeSessionServiceError.unsupported(feature: "fork")
       }
+      try self.guardIdle(request.sessionID)
       let loaded = try await self.loadedSession(for: request.sessionID)
       try self.guardIdle(request.sessionID)
 
@@ -278,6 +271,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
       guard self.capabilitiesValue.supportsTLDR else {
         throw ScribeSessionServiceError.unsupported(feature: "TLDR")
       }
+      try self.guardIdle(request.sessionID)
       let loaded = try await self.loadedSession(for: request.sessionID)
       try self.guardIdle(request.sessionID)
 
@@ -422,6 +416,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
       workingDirectory: nil,
       profileOverride: nil,
       resumeDirectory: try existingSessionDirectory(for: sessionID))
+    if let cached = runtimes[sessionID] { return cached }
     return cache(boot)
   }
 

@@ -238,6 +238,7 @@ public actor FakeScribeSessionService: ScribeSessionService {
     guard var session = sessions[request.sessionID] else {
       throw ScribeSessionServiceError.notFound(sessionID: request.sessionID)
     }
+    try guardIdle(request.sessionID)
     guard let profile = profiles.first(where: { $0.name == request.profileName }) else {
       throw ScribeSessionServiceError.invalidRequest(
         "Unknown profile `\(request.profileName)`.")
@@ -257,6 +258,7 @@ public actor FakeScribeSessionService: ScribeSessionService {
     guard let parent = sessions[request.sessionID] else {
       throw ScribeSessionServiceError.notFound(sessionID: request.sessionID)
     }
+    try guardIdle(request.sessionID)
     guard request.cutAtMessageIndex >= 0, request.cutAtMessageIndex <= parent.messages.count
     else {
       throw ScribeSessionServiceError.invalidRequest(
@@ -287,6 +289,7 @@ public actor FakeScribeSessionService: ScribeSessionService {
     guard let parent = sessions[request.sessionID] else {
       throw ScribeSessionServiceError.notFound(sessionID: request.sessionID)
     }
+    try guardIdle(request.sessionID)
     let count = parent.messages.count
     guard request.startMessageIndex >= 0, request.endMessageIndex <= count,
       request.startMessageIndex < request.endMessageIndex
@@ -383,6 +386,12 @@ public actor FakeScribeSessionService: ScribeSessionService {
   }
 
   // MARK: - Helpers
+
+  private func guardIdle(_ sessionID: UUID) throws {
+    guard !activeSubmissions.contains(sessionID) else {
+      throw ScribeSessionServiceError.busy(sessionID: sessionID)
+    }
+  }
 
   private func resolveProfile(
     named name: String?

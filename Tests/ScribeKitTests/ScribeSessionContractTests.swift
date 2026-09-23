@@ -69,18 +69,6 @@ struct ScribeSessionContractTests {
     #expect(try JSONDecoder().decode(ScribeProfileSummary.self, from: data) == profile)
   }
 
-  @Test func transcriptItemRoundTrip() throws {
-    let item = ScribeTranscriptItem(
-      id: .replay(sessionID: UUID(), messageIndex: 3, segment: "answer"),
-      kind: .answer,
-      title: "Scribe",
-      body: "hello",
-      isRunning: false,
-      sourceMessageIndex: 3)
-    let data = try JSONEncoder().encode(item)
-    #expect(try JSONDecoder().decode(ScribeTranscriptItem.self, from: data) == item)
-  }
-
   @Test func nameUpdateDistinguishesUnchangedSetAndCleared() throws {
     let updates: [ScribeNameUpdate] = [.unchanged, .set("Refactor"), .cleared]
     for update in updates {

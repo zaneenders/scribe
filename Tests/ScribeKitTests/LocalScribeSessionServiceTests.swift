@@ -65,6 +65,34 @@ struct LocalScribeSessionServiceTests {
     }
   }
 
+  @Test func concurrentFirstSubmissionsReserveTheSessionBeforeLoading() async throws {
+    try await withLocalServiceFixture { fixture in
+      let creator = try await fixture.makeService()
+      let created = try await creator.createSession(
+        ScribeCreateSessionRequest(workingDirectory: "/tmp"))
+      let service = try await fixture.makeService()
+      let sessionID = created.summary.id
+      let first = Task {
+        try await service.submit(ScribeSubmitRequest(sessionID: sessionID, prompt: "first"))
+      }
+      let second = Task {
+        try await service.submit(ScribeSubmitRequest(sessionID: sessionID, prompt: "second"))
+      }
+      let results = await [first.result, second.result]
+      let streams = results.compactMap { try? $0.get() }
+      #expect(streams.count == 1)
+      #expect(results.contains { result in
+        if case .failure(ScribeSessionServiceError.busy(sessionID: sessionID)) = result {
+          return true
+        }
+        return false
+      })
+      if let stream = streams.first {
+        _ = try await ScribeServiceContractScenarios.collectEvents(from: stream)
+      }
+    }
+  }
+
   @Test func forkAtUnsafeBoundaryIsRejected() async throws {
     try await withLocalServiceFixture { fixture in
       let service = try await fixture.makeService()

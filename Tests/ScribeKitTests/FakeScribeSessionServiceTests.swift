@@ -137,6 +137,37 @@ struct FakeScribeSessionServiceTests {
     #expect(second.filter(\.isTerminal).count == 1)
   }
 
+  @Test func editsDuringActiveSubmissionAreBusy() async throws {
+    let service = FakeScribeSessionService()
+    let session = try await service.createSession(
+      ScribeCreateSessionRequest(workingDirectory: "/tmp"))
+    let id = session.summary.id
+    await service.setSubmitBehavior(.hangUntilInterrupted(events: []), for: id)
+    let stream = try await service.submit(ScribeSubmitRequest(sessionID: id, prompt: "held"))
+    do {
+      _ = try await service.fork(ScribeForkSessionRequest(sessionID: id, cutAtMessageIndex: 1))
+      Issue.record("Expected busy")
+    } catch let error as ScribeSessionServiceError {
+      #expect(error == .busy(sessionID: id))
+    }
+    do {
+      _ = try await service.reconfigure(
+        ScribeReconfigureSessionRequest(sessionID: id, profileName: "default"))
+      Issue.record("Expected busy")
+    } catch let error as ScribeSessionServiceError {
+      #expect(error == .busy(sessionID: id))
+    }
+    do {
+      _ = try await service.summarize(
+        ScribeSummarizeSessionRequest(sessionID: id, startMessageIndex: 0, endMessageIndex: 1))
+      Issue.record("Expected busy")
+    } catch let error as ScribeSessionServiceError {
+      #expect(error == .busy(sessionID: id))
+    }
+    try await service.interrupt(sessionID: id)
+    _ = try await collectEvents(from: stream)
+  }
+
   @Test func differentSessionsSubmitConcurrently() async throws {
     let service = FakeScribeSessionService()
     let a = try await service.createSession(ScribeCreateSessionRequest(workingDirectory: "/tmp/a"))
