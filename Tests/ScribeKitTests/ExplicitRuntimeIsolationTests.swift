@@ -152,7 +152,8 @@ struct ExplicitRuntimeIsolationTests {
     try await withTwoHomes { homeA, homeB in
       // An explicit configuration file wins even when a manifest exists.
       let customConfig = homeA.root.appendingPathComponent("custom.json")
-      try #"{"profiles":[{"name":"custom","api":{"baseUrl":"http://x","apiKey":""},"agent":{"model":"custom-model","contextWindow":1000,"contextWindowThreshold":0.5},"logging":{"level":"trace"}}}]}"#
+      try
+        #"{"profiles":[{"name":"custom","api":{"baseUrl":"http://x","apiKey":""},"agent":{"model":"custom-model","contextWindow":1000,"contextWindowThreshold":0.5},"logging":{"level":"trace"}}}]}"#
         .write(toFile: customConfig.string, atomically: true, encoding: .utf8)
       let resolved = try ConfigLoader.resolvePaths(
         paths: homeB.paths, configurationFile: customConfig)

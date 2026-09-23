@@ -42,7 +42,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   /// Resumed when the active submission for a session releases its slot, so
   /// `interrupt` can return only once the turn has fully ended.
-  private var submissionCompletionWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+  private var submissionCompletionWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
 
   private let capabilitiesValue = ScribeSessionCapabilities()
 
@@ -167,7 +167,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
       // already accepts the next submission (e.g. fork/reconfigure) after await.
       guard self.activeSubmissions.contains(sessionID) else { return }
       await withCheckedContinuation { (waiter: CheckedContinuation<Void, Never>) in
-        self.submissionCompletionWaiters[sessionID] = waiter
+        self.submissionCompletionWaiters[sessionID, default: []].append(waiter)
       }
     }
   }
@@ -176,9 +176,12 @@ public actor LocalScribeSessionService: ScribeSessionService {
     _ request: ScribePresentationUpdate
   ) async throws -> ScribeSessionSummary {
     try await perform {
-      let directory =
-        self.runtimes[request.sessionID]?.boot.sessionDirectory
-        ?? self.context.paths.sessionDirectory(sessionId: request.sessionID)
+      let directory: FilePath
+      if let loaded = self.runtimes[request.sessionID] {
+        directory = await loaded.boot.harness.sessionDirectory
+      } else {
+        directory = self.context.paths.sessionDirectory(sessionId: request.sessionID)
+      }
       guard FileStat.stat(directory.appendingPathComponent("metadata.json")).exists else {
         throw ScribeSessionServiceError.notFound(sessionID: request.sessionID)
       }
@@ -332,7 +335,8 @@ public actor LocalScribeSessionService: ScribeSessionService {
   /// unaffected and can be reopened later. Active submissions are kept.
   public func discardRuntime(sessionID: UUID) {
     guard !activeSubmissions.contains(sessionID), !activeEdits.contains(sessionID),
-      !loadingSessions.contains(sessionID) else { return }
+      !loadingSessions.contains(sessionID)
+    else { return }
     runtimes[sessionID] = nil
   }
 
@@ -364,7 +368,9 @@ public actor LocalScribeSessionService: ScribeSessionService {
       endSubmission(sessionID: sessionID)
       // A stream that ends without any assistant text is an unexpected
       // disconnection, not a completed turn.
-      if case .completed = outcome, Self.assistantText(in: Array(document.messages.dropFirst(previousMessageCount))).isEmpty {
+      if case .completed = outcome,
+        Self.assistantText(in: Array(document.messages.dropFirst(previousMessageCount))).isEmpty
+      {
         continuation.yield(.turnFailed("No assistant response."))
       } else {
         continuation.yield(
@@ -385,7 +391,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   private func endSubmission(sessionID: UUID) {
     activeSubmissions.remove(sessionID)
-    submissionCompletionWaiters.removeValue(forKey: sessionID)?.resume()
+    submissionCompletionWaiters.removeValue(forKey: sessionID)?.forEach { $0.resume() }
   }
 
   // MARK: - Bootstrap and cache

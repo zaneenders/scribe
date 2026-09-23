@@ -81,15 +81,65 @@ struct LocalScribeSessionServiceTests {
       let results = await [first.result, second.result]
       let streams = results.compactMap { try? $0.get() }
       #expect(streams.count == 1)
-      #expect(results.contains { result in
-        if case .failure(ScribeSessionServiceError.busy(sessionID: sessionID)) = result {
-          return true
-        }
-        return false
-      })
+      #expect(
+        results.contains { result in
+          if case .failure(ScribeSessionServiceError.busy(sessionID: sessionID)) = result {
+            return true
+          }
+          return false
+        })
       if let stream = streams.first {
         _ = try await ScribeServiceContractScenarios.collectEvents(from: stream)
       }
+    }
+  }
+
+  @Test func presentationUpdatesAfterForkApplyToTheFork() async throws {
+    try await withLocalServiceFixture { fixture in
+      let service = try await fixture.makeService()
+      let session = try await service.createSession(
+        ScribeCreateSessionRequest(workingDirectory: "/tmp"))
+      _ = try await ScribeServiceContractScenarios.collectEvents(
+        from: try await service.submit(
+          ScribeSubmitRequest(sessionID: session.summary.id, prompt: "hello")))
+      let opened = try await service.openSession(id: session.summary.id)
+      let forked = try await service.fork(
+        ScribeForkSessionRequest(
+          sessionID: session.summary.id,
+          cutAtMessageIndex: opened.messages.count))
+
+      let updated = try await service.updatePresentation(
+        ScribePresentationUpdate(sessionID: forked.summary.id, name: .set("Forked"), isPinned: true))
+
+      #expect(updated.name == "Forked")
+      #expect(updated.isPinned)
+      let sessions = try await service.listSessions()
+      #expect(sessions.first(where: { $0.id == session.summary.id })?.name == nil)
+      #expect(sessions.first(where: { $0.id == session.summary.id })?.isPinned == false)
+      #expect(sessions.first(where: { $0.id == forked.summary.id })?.name == "Forked")
+      #expect(sessions.first(where: { $0.id == forked.summary.id })?.isPinned == true)
+    }
+  }
+
+  @Test func concurrentInterruptsBothWaitForTurnCompletion() async throws {
+    try await withLocalServiceFixture { fixture in
+      let service = try await fixture.makeService()
+      let session = try await service.createSession(
+        ScribeCreateSessionRequest(workingDirectory: "/tmp"))
+      let sessionID = session.summary.id
+      let stream = try await fixture.startBlockedTurn(service, sessionID: sessionID, prompt: "held")
+
+      async let firstInterrupt: Void = service.interrupt(sessionID: sessionID)
+      async let secondInterrupt: Void = service.interrupt(sessionID: sessionID)
+      try await firstInterrupt
+      try await secondInterrupt
+
+      let events = try await ScribeServiceContractScenarios.collectEvents(from: stream)
+      #expect(events.filter(\.isTerminal).count == 1)
+      let next = try await ScribeServiceContractScenarios.collectEvents(
+        from: try await service.submit(
+          ScribeSubmitRequest(sessionID: sessionID, prompt: "next")))
+      #expect(next.filter(\.isTerminal).count == 1)
     }
   }
 
@@ -295,11 +345,12 @@ struct LocalScribeSessionServiceTests {
         from: try await service.submit(.init(sessionID: id, prompt: "first")))
       let events = try await ScribeServiceContractScenarios.collectEvents(
         from: try await service.submit(.init(sessionID: id, prompt: "second")))
-      #expect(events.contains { event in
-        if case .turnCompleted(.completed, _) = event { return false }
-        if case .turnFailed = event { return true }
-        return false
-      })
+      #expect(
+        events.contains { event in
+          if case .turnCompleted(.completed, _) = event { return false }
+          if case .turnFailed = event { return true }
+          return false
+        })
     }
   }
 
