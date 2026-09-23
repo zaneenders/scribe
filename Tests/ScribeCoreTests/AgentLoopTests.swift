@@ -1216,7 +1216,7 @@ struct AgentLoopTests {
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
-    let (_, termination) = try await runAgentLoop(
+    let (messages, termination) = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
       config: config,
@@ -1228,6 +1228,8 @@ struct AgentLoopTests {
       #expect(Bool(false), "Expected error termination, got \(termination)")
       return
     }
+    #expect(messages.map(\.role) == [.user, .assistant])
+    #expect(stringContent(messages.last!) == "partial")
     #expect(transport.capturedRequests.count == 1)
     let retryEvents = events.withLock { $0 }.contains { event in
       if case .lifecycle(.retrying) = event { return true }
