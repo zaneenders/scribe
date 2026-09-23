@@ -1,6 +1,6 @@
-import Testing
 import Chroma
 import HeadlessBackend
+import Testing
 
 @testable import ScribeBlocks
 
@@ -14,7 +14,10 @@ struct ComposerTextLayoutTests {
     renderer.content = GrowingTextField(
       "", fontScale: 1,
       text: { text }, layoutCache: cache, revision: { revision },
-      onChange: { text = $0; revision &+= 1 }, onNewline: {})
+      onChange: {
+        text = $0
+        revision &+= 1
+      }, onNewline: {})
     defer { renderer.close() }
     for _ in 0..<20 {
       let frame = renderer.render()

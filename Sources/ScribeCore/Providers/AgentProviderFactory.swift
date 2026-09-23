@@ -37,9 +37,10 @@ enum AgentProviderFactory {
     switch configuration.apiType {
     case "responses":
       return CodexProvider(
-        source: .configured(OpenAICodexClient.makeResponses(
-          serverURL: serverURL,
-          apiKey: configuration.apiKey)),
+        source: .configured(
+          OpenAICodexClient.makeResponses(
+            serverURL: serverURL,
+            apiKey: configuration.apiKey)),
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEffort: configuration.reasoningEffort,

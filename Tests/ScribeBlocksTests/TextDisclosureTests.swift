@@ -1,5 +1,6 @@
-@testable import Chroma
 import Testing
+
+@testable import Chroma
 @testable import ScribeBlocks
 
 struct TextDisclosureTests {
@@ -16,7 +17,8 @@ struct TextDisclosureTests {
         let size = BlockEngine.measure(
           block, proposal: Size(width: width, height: 10_000), context: context)
         var list = DrawList()
-        BlockEngine.draw(block, into: &list,
+        BlockEngine.draw(
+          block, into: &list,
           in: Rect(x: 0, y: 0, width: width, height: size.height), context: context)
         let label = expanded ? "Hide text" : "Show full text"
         var buttons = 0
@@ -54,10 +56,15 @@ struct TextDisclosureTests {
   }
 
   @Test func thresholdsAndRoles() {
-    #expect(!SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "x", count: 1000)).isCollapsible)
-    #expect(SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "x", count: 1001)).isCollapsible)
-    #expect(!SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "\n", count: 9)).isCollapsible)
-    #expect(SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "\n", count: 10)).isCollapsible)
+    #expect(
+      !SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "x", count: 1000)).isCollapsible
+    )
+    #expect(
+      SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "x", count: 1001)).isCollapsible)
+    #expect(
+      !SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "\n", count: 9)).isCollapsible)
+    #expect(
+      SessionController.TranscriptItem(kind: .user, title: "", text: String(repeating: "\n", count: 10)).isCollapsible)
     for kind in [SessionController.ItemKind.answer, .reasoning, .tool] {
       var item = SessionController.TranscriptItem(kind: kind, title: "", text: String(repeating: "x", count: 2000))
       item.toggleTextDisclosure()

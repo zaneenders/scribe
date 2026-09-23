@@ -33,8 +33,7 @@ struct ScribeErrorTests {
   @Test func responsesHTTPErrorNamesTheEndpoint() {
     let error = ScribeError.responsesHTTPError(
       statusCode: 401, detail: #"{"error":{"message":"Invalid credential"}}"#)
-    #expect(error.errorDescription ==
-      #"responses returned HTTP 401 — {"error":{"message":"Invalid credential"}}"#)
+    #expect(error.errorDescription == #"responses returned HTTP 401 — {"error":{"message":"Invalid credential"}}"#)
   }
 
   @Test func sessionCorruptedDescription() {

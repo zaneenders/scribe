@@ -72,7 +72,8 @@ struct ScribeMacRoot: Block {
           let text = SelectionManager.shared.copyText(
             isTranscriptVisible: store.active != nil)
           if ProcessInfo.processInfo.environment["SCRIBE_DEBUG_CLIPBOARD"] == "1" {
-            let message = "[scribe.clipboard] transcriptVisible=\(store.active != nil) selectedCharacters=\(text?.count ?? 0)\n"
+            let message =
+              "[scribe.clipboard] transcriptVisible=\(store.active != nil) selectedCharacters=\(text?.count ?? 0)\n"
             try? FileHandle.standardError.write(contentsOf: Data(message.utf8))
           }
           return text

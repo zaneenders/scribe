@@ -77,13 +77,14 @@ struct AgentProviderFactoryTests {
 
   @Test("responses apiType uses a configured Responses client")
   func responsesApiTypeReturnsConfiguredProvider() throws {
-    let provider = try AgentProviderFactory.make(configuration: configuration(
-      model: "gpt-6-sol",
-      serverURL: "https://opencode.ai/zen/v1",
-      apiType: "responses",
-      reasoningEnabled: true,
-      reasoningEffort: "medium"
-    ))
+    let provider = try AgentProviderFactory.make(
+      configuration: configuration(
+        model: "gpt-6-sol",
+        serverURL: "https://opencode.ai/zen/v1",
+        apiType: "responses",
+        reasoningEnabled: true,
+        reasoningEffort: "medium"
+      ))
     let responsesProvider = try #require(provider as? CodexProvider)
     guard case .configured = responsesProvider.source else {
       Issue.record("Expected a bearer-key configured client")

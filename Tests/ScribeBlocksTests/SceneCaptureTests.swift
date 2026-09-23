@@ -32,7 +32,7 @@ struct SceneCaptureTests {
       if capture.status == expected { redraws += 1 }
     }
     let deadline = ContinuousClock.now + .seconds(5)
-    while (capture.status != expected || redraws == 0), ContinuousClock.now < deadline {
+    while capture.status != expected || redraws == 0, ContinuousClock.now < deadline {
       try await Task.sleep(for: .milliseconds(10))
     }
     #expect(capture.status == expected)

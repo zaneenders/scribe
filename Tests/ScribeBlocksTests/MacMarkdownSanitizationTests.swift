@@ -10,7 +10,8 @@ struct MacMarkdownSanitizationTests {
     let metrics = FontMetrics()
     let lines = block.lines(forWidth: Float(columns) * metrics.cellAdvance, metrics: metrics)
     let layout = MarkdownLayout(lines: lines, lineHeight: 10, cellWidth: 5, scale: 1)
-    return layout.textInRange(from: (line: 0, column: 0), to: (line: max(0, lines.count - 1), column: lines.last?.columnCount ?? 0))
+    return layout.textInRange(
+      from: (line: 0, column: 0), to: (line: max(0, lines.count - 1), column: lines.last?.columnCount ?? 0))
   }
 
   @Test func preservesTreeDiagramsInCodeBlocks() {
