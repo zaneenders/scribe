@@ -1,10 +1,23 @@
 import Chroma
 
+@MainActor
+public final class ScribeWorkspace {
+  let store: ScribeMacStore
+
+  public init() {
+    store = ScribeMacStore(startProfiling: false)
+  }
+}
+
 public struct ScribeBlock: Block {
-  public init() {}
+  private let workspace: ScribeWorkspace?
+
+  public init() { workspace = nil }
+
+  public init(workspace: ScribeWorkspace) { self.workspace = workspace }
 
   @MainActor public var body: some Block {
-    let store = ScribeMacStore.shared
+    let store = workspace?.store ?? ScribeMacStore.shared
     store.start()
     return ScribeMacRoot(store: store)
   }

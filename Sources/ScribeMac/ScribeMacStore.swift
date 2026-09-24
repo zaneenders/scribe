@@ -115,12 +115,16 @@ final class ScribeMacStore {
   private var renameFocusPending = false
   private var directoryBaseCWD = FilePath.currentDirectory.string
 
-  private init() {}
+  private let startProfiling: Bool
+
+  init(startProfiling: Bool = true) {
+    self.startProfiling = startProfiling
+  }
 
   func start() {
     guard !didStart else { return }
     didStart = true
-    startProfileRecorder()
+    if startProfiling { startProfileRecorder() }
     let launchCWD = FilePath.currentDirectory.string
     directoryBaseCWD = launchCWD == "/" ? NSHomeDirectory() : launchCWD
 
