@@ -64,7 +64,9 @@ struct ScribeSessionContractTests {
   }
 
   @Test func profileSummaryRoundTrip() throws {
-    let profile = ScribeProfileSummary(name: "local", model: "gemma4:e2b", baseURL: "http://localhost:11434")
+    let profile = ScribeProfileSummary(
+      name: "local", model: "gemma4:e2b", baseURL: "http://localhost:11434",
+      reasoningEfforts: ["low", "medium", "high"], reasoningEffort: "medium")
     let data = try JSONEncoder().encode(profile)
     #expect(try JSONDecoder().decode(ScribeProfileSummary.self, from: data) == profile)
   }

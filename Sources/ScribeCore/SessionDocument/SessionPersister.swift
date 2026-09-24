@@ -24,6 +24,10 @@ public protocol SessionPersister: Sendable {
 
   func reconfigure(model: String, profileName: String?, baseURL: String?) async throws
 
+  func reconfigure(
+    model: String, profileName: String?, baseURL: String?, reasoningEffort: String?
+  ) async throws
+
   func directory(for newSessionId: UUID) -> FilePath
 
   func openSession(
@@ -38,6 +42,10 @@ public final class InMemorySessionPersister: SessionPersister {
   public func append(_ messages: [ScribeMessage]) async throws {}
 
   public func reconfigure(model: String, profileName: String?, baseURL: String?) async throws {}
+
+  public func reconfigure(
+    model: String, profileName: String?, baseURL: String?, reasoningEffort: String?
+  ) async throws {}
 
   public func directory(for newSessionId: UUID) -> FilePath {
     FilePath("/in-memory/\(newSessionId.uuidString)")

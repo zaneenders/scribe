@@ -11,6 +11,7 @@ public struct BootstrappedSession: Sendable {
   public let sessionDirectory: FilePath
   public let profile: ScribeProfileSummary
   public let profileCatalog: [ScribeProfileSummary]
+  public let reasoningEffort: String?
   public let workingDirectory: String
 
   public init(
@@ -21,6 +22,7 @@ public struct BootstrappedSession: Sendable {
     sessionDirectory: FilePath,
     profile: ScribeProfileSummary,
     profileCatalog: [ScribeProfileSummary],
+    reasoningEffort: String? = nil,
     workingDirectory: String
   ) {
     self.harness = harness
@@ -30,6 +32,7 @@ public struct BootstrappedSession: Sendable {
     self.sessionDirectory = sessionDirectory
     self.profile = profile
     self.profileCatalog = profileCatalog
+    self.reasoningEffort = reasoningEffort
     self.workingDirectory = workingDirectory
   }
 }
@@ -124,7 +127,17 @@ public enum ScribeSessionBootstrap {
         profileOverride: profileName)
     }
     let tools = ScribeSystemPrompt.defaultTools()
-    let base = loaded.scribeConfig
+    let savedEffort =
+      profileOverride == nil
+      ? try? ChatSessionStore.loadMetadata(from: directory).reasoningEffort
+      : nil
+    let availableEfforts =
+      loaded.profiles.first { $0.name == loaded.activeProfileName }?.reasoningEfforts ?? []
+    let effectiveSavedEffort = savedEffort.flatMap { effort in
+      availableEfforts.isEmpty || availableEfforts.contains(effort) ? effort : nil
+    }
+    let base = loaded.scribeConfig.withReasoningEffort(
+      effectiveSavedEffort ?? loaded.scribeConfig.reasoningEffort)
     let configuration = ScribeConfig(
       agentModel: base.agentModel,
       contextWindow: base.contextWindow,
@@ -167,6 +180,7 @@ public enum ScribeSessionBootstrap {
       sessionCreatedAt: Date(),
       isNewSession: isNew,
       model: configuration.agentModel,
+      reasoningEffort: configuration.reasoningEffort,
       profileName: loaded.activeProfileName,
       cwd: workingDirectory,
       baseURL: configuration.serverURL,
@@ -208,6 +222,7 @@ public enum ScribeSessionBootstrap {
       sessionDirectory: directory,
       profile: profile,
       profileCatalog: loaded.profiles,
+      reasoningEffort: configuration.reasoningEffort,
       workingDirectory: workingDirectory
     )
   }

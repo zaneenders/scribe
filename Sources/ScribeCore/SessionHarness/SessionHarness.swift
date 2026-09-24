@@ -97,7 +97,8 @@ public actor SessionHarness {
     try await persister.reconfigure(
       model: configuration.agentModel,
       profileName: profileName,
-      baseURL: configuration.serverURL)
+      baseURL: configuration.serverURL,
+      reasoningEffort: configuration.reasoningEffort)
     self.configuration = configuration
     self.agent = agent
     self.tokenTracker = tokenTracker

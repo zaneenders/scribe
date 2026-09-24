@@ -293,12 +293,18 @@ private func makeChatCompletionRequest(
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
     reasoning: config.reasoningEncoding == .openRouter
-      ? config.reasoningEnabled.map { Components.Schemas.ChatCompletionReasoning(enabled: $0) } : nil,
+      ? config.reasoningEnabled.map {
+        Components.Schemas.ChatCompletionReasoning(
+          effort: $0
+            ? config.reasoningEffort.flatMap(Components.Schemas.ChatCompletionReasoning.EffortPayload.init(rawValue:))
+            : Components.Schemas.ChatCompletionReasoning.EffortPayload.none,
+          enabled: $0 && config.reasoningEffort != "none")
+      } : nil,
     thinking: config.reasoningEncoding == .deepSeek
       ? config.reasoningEnabled.map {
         Components.Schemas.ChatCompletionThinking(_type: $0 ? .enabled : .disabled)
       } : nil,
     reasoningEffort: config.reasoningEncoding == .deepSeek && config.reasoningEnabled != false
-      ? config.reasoningEffort : nil
+      ? config.reasoningEffort == "none" ? nil : config.reasoningEffort : nil
   )
 }

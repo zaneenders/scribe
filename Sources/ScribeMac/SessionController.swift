@@ -141,6 +141,9 @@ final class SessionController {
 
   var profileName: String
   var modelName: String
+  var profileCatalog: [ProfileSummary]
+  var reasoningEffort: String?
+  var isReasoningEffortPickerOpen = false
   var tldrModel: String
   var isTLDRModelPickerOpen = false
   private(set) var sessionName: String?
@@ -173,6 +176,8 @@ final class SessionController {
     self.boot = boot
     self.profileName = boot.profile.name
     self.modelName = boot.profile.model
+    self.profileCatalog = boot.profileCatalog
+    self.reasoningEffort = boot.reasoningEffort
     self.tldrModel = boot.profileCatalog.first?.model ?? boot.profile.model
     let metadata = try? ChatSessionStore.loadMetadata(from: boot.sessionDirectory)
     self.sessionName = metadata?.name
@@ -529,11 +534,23 @@ final class SessionController {
     runTask = nil
   }
 
+  func selectReasoningEffort(_ effort: String) {
+    guard
+      !isRunning,
+      profileCatalog.first(where: { $0.name == profileName })?.reasoningEfforts.contains(effort) == true
+    else { return }
+    isReasoningEffortPickerOpen = false
+    Task { await applyModelProfile(profileName, reasoningEffort: effort) }
+  }
+
   @discardableResult
-  func applyModelProfile(_ name: String) async -> [ProfileSummary]? {
+  func applyModelProfile(_ name: String, reasoningEffort selectedEffort: String? = nil) async -> [ProfileSummary]? {
     let previousName = profileName
     do {
       let loaded = try await ConfigLoader.load(profileOverride: name)
+      let reasoningEffort =
+        selectedEffort
+        ?? (name == profileName ? self.reasoningEffort : loaded.scribeConfig.reasoningEffort)
       let newConfig = ScribeConfig(
         agentModel: loaded.scribeConfig.agentModel,
         contextWindow: loaded.scribeConfig.contextWindow,
@@ -544,7 +561,7 @@ final class SessionController {
         tools: ScribeSystemPrompt.defaultTools(),
         workingDirectory: workingDirectory,
         reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
-        reasoningEffort: loaded.scribeConfig.reasoningEffort,
+        reasoningEffort: reasoningEffort,
         serviceTier: loaded.scribeConfig.serviceTier,
         maxTokens: loaded.scribeConfig.maxTokens,
         sendsOpenCodeHeader: loaded.scribeConfig.sendsOpenCodeHeader,
@@ -554,6 +571,8 @@ final class SessionController {
       try await boot.harness.reconfigure(configuration: newConfig, profileName: loaded.activeProfileName)
       profileName = loaded.activeProfileName
       modelName = loaded.scribeConfig.agentModel
+      profileCatalog = loaded.profiles
+      self.reasoningEffort = reasoningEffort
       let message: String
       if name == previousName {
         message = "Model reloaded: \(name) (\(modelName))"

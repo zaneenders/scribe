@@ -99,7 +99,7 @@ components:
       properties:
         effort:
           type: string
-          enum: [high, medium, low, none]
+          enum: [max, xhigh, high, medium, low, minimal, none]
           description: Reasoning depth; none disables streamed reasoning deltas.
         enabled:
           type: boolean

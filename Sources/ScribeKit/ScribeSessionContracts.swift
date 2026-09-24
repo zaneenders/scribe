@@ -1,7 +1,6 @@
 import Foundation
 import ScribeCore
 
-
 public struct ScribeSessionSummary: Codable, Sendable, Equatable, Identifiable {
 
   public var id: UUID
@@ -53,17 +52,20 @@ public struct ScribeSessionSnapshot: Codable, Sendable, Equatable {
 
   public var profileCatalog: [ScribeProfileSummary]
 
+  public var reasoningEffort: String?
+
   public init(
     summary: ScribeSessionSummary,
     messages: [ScribeMessage],
-    profileCatalog: [ScribeProfileSummary] = []
+    profileCatalog: [ScribeProfileSummary] = [],
+    reasoningEffort: String? = nil
   ) {
     self.summary = summary
     self.messages = messages
     self.profileCatalog = profileCatalog
+    self.reasoningEffort = reasoningEffort
   }
 }
-
 
 public struct ScribeCreateSessionRequest: Sendable, Equatable {
 
@@ -123,9 +125,12 @@ public struct ScribeReconfigureSessionRequest: Sendable, Equatable {
 
   public var profileName: String
 
-  public init(sessionID: UUID, profileName: String) {
+  public var reasoningEffort: String?
+
+  public init(sessionID: UUID, profileName: String, reasoningEffort: String? = nil) {
     self.sessionID = sessionID
     self.profileName = profileName
+    self.reasoningEffort = reasoningEffort
   }
 }
 
@@ -164,7 +169,6 @@ public struct ScribeSummarizeSessionRequest: Sendable, Equatable {
   }
 }
 
-
 public struct ScribeSessionCapabilities: Codable, Sendable, Equatable {
 
   public var supportsProfileSwitching: Bool
@@ -187,7 +191,6 @@ public struct ScribeSessionCapabilities: Codable, Sendable, Equatable {
     self.supportsDirectorySelection = supportsDirectorySelection
   }
 }
-
 
 public enum ScribeSessionServiceError: Error, Sendable, Equatable, LocalizedError {
 
@@ -216,7 +219,6 @@ public enum ScribeSessionServiceError: Error, Sendable, Equatable, LocalizedErro
     }
   }
 }
-
 
 public protocol ScribeSessionService: Sendable {
 

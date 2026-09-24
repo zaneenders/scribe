@@ -414,6 +414,13 @@ private final class TrackingPersister: SessionPersister, Sendable {
   }
 
   func reconfigure(model: String, profileName: String?, baseURL: String?) async throws {
+    try await reconfigure(
+      model: model, profileName: profileName, baseURL: baseURL, reasoningEffort: nil)
+  }
+
+  func reconfigure(
+    model: String, profileName: String?, baseURL: String?, reasoningEffort: String?
+  ) async throws {
     if failsReconfiguration { throw ScribeError.generic("persistence failed") }
     lock.withLock { $0.configuration = (model, profileName, baseURL) }
   }

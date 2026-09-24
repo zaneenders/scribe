@@ -139,6 +139,33 @@ struct AgentLoopTests {
     #expect(stringContent(messages[1]) == "reply")
   }
 
+  @Test func sendsOpenRouterReasoningEffort() async throws {
+    let transport = ScriptedTransport(chunks: [
+      sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
+      doneChunk(),
+    ])
+    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let registry = ToolRegistry(tools: [], logger: testLogger)
+    let config = AgentLoopConfig(
+      model: "test-model",
+      client: client,
+      toolExecutor: registry,
+      chatTools: registry.chatTools,
+      temperature: 0,
+      maxToolRounds: .max,
+      workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: true,
+      reasoningEffort: "xhigh",
+      hooks: .default)
+
+    _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
+    let body = try #require(transport.requestBodies.first)
+    let request = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+    let reasoning = try #require(request?["reasoning"] as? [String: Any])
+    #expect(reasoning["enabled"] as? Bool == true)
+    #expect(reasoning["effort"] as? String == "xhigh")
+  }
+
   @Test func sendsOpenCodeHeaderWhenEnabled() async throws {
     let sessionId = UUID()
     let transport = ScriptedTransport(chunks: [

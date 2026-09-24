@@ -29,10 +29,35 @@ public struct ProfileSummary: Codable, Sendable, Equatable {
 
   public var baseURL: String
 
-  public init(name: String, model: String, baseURL: String) {
+  public var reasoningEfforts: [String]
+
+  public var reasoningEffort: String?
+
+  public init(
+    name: String,
+    model: String,
+    baseURL: String,
+    reasoningEfforts: [String] = [],
+    reasoningEffort: String? = nil
+  ) {
     self.name = name
     self.model = model
     self.baseURL = baseURL
+    self.reasoningEfforts = reasoningEfforts
+    self.reasoningEffort = reasoningEffort
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case name, model, baseURL, reasoningEfforts, reasoningEffort
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    name = try container.decode(String.self, forKey: .name)
+    model = try container.decode(String.self, forKey: .model)
+    baseURL = try container.decode(String.self, forKey: .baseURL)
+    reasoningEfforts = try container.decodeIfPresent([String].self, forKey: .reasoningEfforts) ?? []
+    reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
   }
 }
 
@@ -49,6 +74,7 @@ private struct ConfigManifest: Codable {
     var contextWindowThreshold: Double
     var reasoning: Bool?
     var reasoningEffort: String?
+    var reasoningEfforts: [String]? = nil
     var serviceTier: String? = nil
     var maxTokens: Int?
     var temperature: Double?
@@ -253,7 +279,14 @@ public enum ConfigLoader {
       ProfileSummary(
         name: entry.name.trimmingCharacters(in: .whitespacesAndNewlines),
         model: entry.agent.model,
-        baseURL: entry.api.baseUrl)
+        baseURL: entry.api.baseUrl,
+        reasoningEfforts: entry.agent.reasoning == false ? [] : (entry.agent.reasoningEfforts ?? []),
+        reasoningEffort: entry.agent.reasoning == false
+          ? nil
+          : (entry.agent.reasoningEffort
+            ?? ((entry.agent.reasoningEfforts ?? []).contains("medium")
+              ? "medium" : entry.agent.reasoningEfforts?.first))
+      )
     }
 
     let activeName = try resolveActiveProfileName(
@@ -304,6 +337,41 @@ public enum ConfigLoader {
       )
     }
 
+    let reasoningEfforts = profile.agent.reasoningEfforts ?? []
+    let supportedReasoningEfforts: Set<String> = [
+      "none", "minimal", "low", "medium", "high", "xhigh", "max",
+    ]
+    if let effort = profile.agent.reasoningEffort,
+      !supportedReasoningEfforts.contains(effort)
+    {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.reasoningEffort,
+        reason:
+          "`agent.reasoningEffort` must be a supported effort value for profile `\(profileName)`."
+      )
+    }
+    guard reasoningEfforts.allSatisfy({ supportedReasoningEfforts.contains($0) }),
+      Set(reasoningEfforts).count == reasoningEfforts.count
+    else {
+      throw ScribeError.configuration(
+        key: "agent.reasoningEfforts",
+        reason:
+          "`agent.reasoningEfforts` must contain unique supported effort values for profile `\(profileName)`."
+      )
+    }
+    if let selectedEffort = profile.agent.reasoningEffort,
+      !reasoningEfforts.isEmpty,
+      !reasoningEfforts.contains(selectedEffort)
+    {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.reasoningEffort,
+        reason:
+          "`agent.reasoningEffort` must be included in `agent.reasoningEfforts` for profile `\(profileName)`."
+      )
+    }
+    let configuredEffort =
+      profile.agent.reasoningEffort
+      ?? (reasoningEfforts.contains("medium") ? "medium" : reasoningEfforts.first)
     let contextWindow = profile.agent.contextWindow
     guard contextWindow > 0 else {
       throw ScribeError.configuration(
@@ -371,8 +439,8 @@ public enum ConfigLoader {
       apiKey: resolvedAPIKey,
       apiType: resolvedAPIType,
       workingDirectory: ".",
-      reasoningEnabled: profile.agent.reasoning,
-      reasoningEffort: profile.agent.reasoningEffort,
+      reasoningEnabled: profile.agent.reasoning ?? (!reasoningEfforts.isEmpty ? true : nil),
+      reasoningEffort: configuredEffort,
       serviceTier: profile.agent.serviceTier,
       maxTokens: profile.agent.maxTokens,
       sendsOpenCodeHeader: profile.api.opencodeHeader ?? false,

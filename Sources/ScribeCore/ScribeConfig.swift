@@ -49,4 +49,24 @@ public struct ScribeConfig: Sendable {
     self.temperature = temperature
     self.maxRetries = maxRetries
   }
+
+  public func withReasoningEffort(_ reasoningEffort: String?) -> ScribeConfig {
+    ScribeConfig(
+      agentModel: agentModel,
+      contextWindow: contextWindow,
+      contextWindowThreshold: contextWindowThreshold,
+      serverURL: serverURL,
+      apiKey: apiKey,
+      apiType: apiType,
+      tools: tools,
+      workingDirectory: workingDirectory,
+      reasoningEnabled: reasoningEnabled,
+      reasoningEffort: reasoningEffort,
+      serviceTier: serviceTier,
+      maxTokens: maxTokens,
+      sendsOpenCodeHeader: sendsOpenCodeHeader,
+      temperature: temperature,
+      maxRetries: maxRetries
+    )
+  }
 }
