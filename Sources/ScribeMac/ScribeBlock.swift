@@ -38,6 +38,8 @@ enum ScribeCommandPickerCommand {
 }
 
 extension ScribeBlock {
+  public static var submitCommand: Command { ScribeComposerCommand.submit }
+
   public static var keyBindings: KeyBindings {
     #if os(macOS)
     let shortcutModifier = KeyModifiers.command
