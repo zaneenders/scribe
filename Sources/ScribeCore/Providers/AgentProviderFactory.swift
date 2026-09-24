@@ -9,6 +9,7 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
     reasoningEnabled: Bool?,
     reasoningEncoding: ReasoningEncoding = .openRouter,
     reasoningEffort: String? = nil,
+    serviceTier: String? = nil,
     contextWindow: Int = 0,
     sendsOpenCodeHeader: Bool = false
   ) -> Self {
@@ -18,6 +19,7 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
       reasoningEnabled: reasoningEnabled,
       reasoningEncoding: reasoningEncoding,
       reasoningEffort: reasoningEffort,
+      serviceTier: serviceTier,
       contextWindow: contextWindow,
       sendsOpenCodeHeader: sendsOpenCodeHeader)
   }
@@ -68,6 +70,7 @@ enum AgentProviderFactory {
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEncoding: configuration.apiType == "deepseek" ? .deepSeek : .openRouter,
         reasoningEffort: configuration.reasoningEffort,
+        serviceTier: configuration.serviceTier,
         contextWindow: configuration.contextWindow,
         sendsOpenCodeHeader: configuration.sendsOpenCodeHeader,
         defaultTemperature: configuration.temperature ?? 0,

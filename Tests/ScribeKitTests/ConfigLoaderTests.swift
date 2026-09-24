@@ -35,7 +35,8 @@ struct ConfigLoaderTests {
                 "model": "big-model",
                 "contextWindow": 256000,
                 "contextWindowThreshold": 0.9,
-                "serviceTier": "priority"
+                "serviceTier": "priority",
+                "serviceTiers": ["default", "priority"]
               },
               "logging": { "level": "trace" }
             }
@@ -50,7 +51,100 @@ struct ConfigLoaderTests {
       #expect(loaded.scribeConfig.serverURL == "https://api.example.com")
       #expect(loaded.scribeConfig.serviceTier == "priority")
       #expect(loaded.profiles.map(\.name) == ["local", "cloud"])
+      #expect(loaded.profiles[1].serviceTiers == ["default", "priority"])
+      #expect(loaded.profiles[1].serviceTier == "priority")
       #expect(loaded.resolvedConfigurationPath == paths.profileManifestPath.string)
+    }
+  }
+
+  @Test func reasoningEffortOptionsLoadWithMediumDefault() async throws {
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
+
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        { "profiles": [
+          {
+            "name": "codex",
+            "api": { "baseUrl": "https://example.com", "apiKey": "" },
+            "agent": {
+              "model": "gpt-5.6-sol",
+              "contextWindow": 128000,
+              "contextWindowThreshold": 0.8,
+              "reasoningEfforts": ["low", "medium", "high", "xhigh"]
+            },
+            "logging": { "level": "trace" }
+          }
+        ] }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+
+      let loaded = try await ConfigLoader.load()
+      #expect(loaded.profiles[0].reasoningEfforts == ["low", "medium", "high", "xhigh"])
+      #expect(loaded.profiles[0].reasoningEffort == "medium")
+      #expect(loaded.scribeConfig.reasoningEnabled == true)
+      #expect(loaded.scribeConfig.reasoningEffort == "medium")
+    }
+  }
+
+  @Test func rejectsReasoningEffortNotListedAsSupported() async throws {
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
+
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        { "profiles": [
+          {
+            "name": "codex",
+            "api": { "baseUrl": "https://example.com", "apiKey": "" },
+            "agent": {
+              "model": "gpt-5.6-sol",
+              "contextWindow": 128000,
+              "contextWindowThreshold": 0.8,
+              "reasoningEfforts": ["low", "high", "high"]
+            },
+            "logging": { "level": "trace" }
+          }
+        ] }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+
+      await #expect(throws: ScribeError.self) { try await ConfigLoader.load() }
+    }
+  }
+
+  @Test func rejectsUnsupportedServiceTier() async throws {
+    try await withTemporaryDirectory { root in
+      setenv("SCRIBE_HOME", root.path, 1)
+      defer { unsetenv("SCRIBE_HOME") }
+
+      let paths = ScribePaths(dataHome: FilePath(root.path))
+      try createDirectoryWithIntermediates(paths.dataHome)
+      let configJSON = """
+        { "profiles": [
+          {
+            "name": "openai",
+            "api": { "baseUrl": "https://example.com", "apiKey": "" },
+            "agent": {
+              "model": "gpt-model",
+              "contextWindow": 128000,
+              "contextWindowThreshold": 0.8,
+              "serviceTier": "fast"
+            },
+            "logging": { "level": "trace" }
+          }
+        ] }
+        """
+      try configJSON.write(
+        toFile: paths.profileManifestPath.string, atomically: true, encoding: .utf8)
+
+      await #expect(throws: ScribeError.self) { try await ConfigLoader.load() }
     }
   }
 

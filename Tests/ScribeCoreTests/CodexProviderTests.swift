@@ -159,7 +159,7 @@ struct CodexProviderTests {
         chunks: sseChunks(
           #"{"type":"response.output_text.delta","delta":"Partial answer"}"#
         ),
-        streamError: URLError(.networkConnectionLost)),
+        streamError: URLError(.networkConnectionLost))
     ])
     let client = ScribeLLMCodex.Client(
       serverURL: URL(string: "https://codex.example.com")!,

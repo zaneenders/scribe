@@ -61,7 +61,9 @@ Set `api.type` to `"codex"` for ChatGPT/Codex, `"deepseek"` for DeepSeek-style
 reasoning, or `"responses"` for a bearer-key Responses API; omit it for other
 OpenAI-compatible chat completions APIs.
 Optional agent settings: `contextWindowThreshold` (default `0.8`), `reasoning`
-(`false`), `reasoningEffort` (`low`/`medium`/`high`), and `maxRetries` (`3`).
+(`false`), `reasoningEffort`, `reasoningEfforts` (provider-supported values),
+`serviceTier`, `serviceTiers` (supported values: `auto`, `default`, `flex`, `priority`),
+and `maxRetries` (`3`).
 Set `logging.level` to control verbosity (default `trace`).
 
 Set `api.opencodeHeader` to `true` for OpenCode Go to send `x-opencode-session`
@@ -81,7 +83,10 @@ Built-in tools: `shell`, `read_file`, `write_file`, and `edit_file`.
 | `agent.contextWindow` | *(required)* | Token context window size |
 | `agent.contextWindowThreshold` | `0.8` | Fraction (0–1) that triggers context compaction |
 | `agent.reasoning` | `false` | Enable reasoning/thinking tokens for models that support it |
-| `agent.reasoningEffort` | *(omitted)* | Reasoning effort: `"low"`, `"medium"`, or `"high"` |
+| `agent.reasoningEffort` | first listed, preferring `medium` | Initial reasoning effort |
+| `agent.reasoningEfforts` | `[]` | Available levels shown in the model switcher, e.g. `["low", "medium", "high", "xhigh"]` |
+| `agent.serviceTier` | first listed, preferring `default` | Initial API service tier |
+| `agent.serviceTiers` | `[]` | Available service tiers shown in the model switcher, e.g. `["default", "priority"]` |
 | `agent.maxTokens` | *(omitted)* | Reserved for provider-specific token limits |
 | `agent.maxRetries` | `3` | Retries with exponential backoff on transient network failures (HTTP 429/5xx, dropped connections, timeouts); `0` disables |
 | `logging.level` | `"trace"` | One of `trace`, `debug`, `info`, `notice`, `warning`, `error` |

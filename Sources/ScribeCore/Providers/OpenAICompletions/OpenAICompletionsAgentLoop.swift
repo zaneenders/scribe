@@ -27,6 +27,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let reasoningEnabled: Bool?
   let reasoningEncoding: ReasoningEncoding
   let reasoningEffort: String?
+  let serviceTier: String?
   let hooks: AgentLoopHooks
   let contextWindow: Int
   let retryPolicy: RetryPolicy
@@ -42,6 +43,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     reasoningEnabled: Bool?,
     reasoningEncoding: ReasoningEncoding = .openRouter,
     reasoningEffort: String? = nil,
+    serviceTier: String? = nil,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0,
     retryPolicy: RetryPolicy = .default,
@@ -60,6 +62,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEncoding = reasoningEncoding
     self.reasoningEffort = reasoningEffort
+    self.serviceTier = serviceTier
     self.hooks = hooks
     self.contextWindow = contextWindow
     self.retryPolicy = retryPolicy
@@ -293,12 +296,21 @@ private func makeChatCompletionRequest(
     toolChoice: nil,
     streamOptions: .init(includeUsage: true),
     reasoning: config.reasoningEncoding == .openRouter
-      ? config.reasoningEnabled.map { Components.Schemas.ChatCompletionReasoning(enabled: $0) } : nil,
+      ? config.reasoningEnabled.map {
+        Components.Schemas.ChatCompletionReasoning(
+          effort: $0
+            ? config.reasoningEffort.flatMap(Components.Schemas.ChatCompletionReasoning.EffortPayload.init(rawValue:))
+            : Components.Schemas.ChatCompletionReasoning.EffortPayload.none,
+          enabled: $0 && config.reasoningEffort != "none")
+      } : nil,
     thinking: config.reasoningEncoding == .deepSeek
       ? config.reasoningEnabled.map {
-        Components.Schemas.ChatCompletionThinking(_type: $0 ? .enabled : .disabled)
+        Components.Schemas.ChatCompletionThinking(
+          _type: $0 && config.reasoningEffort != "none" ? .enabled : .disabled)
       } : nil,
     reasoningEffort: config.reasoningEncoding == .deepSeek && config.reasoningEnabled != false
-      ? config.reasoningEffort : nil
+      ? config.reasoningEffort == "none" ? nil : config.reasoningEffort : nil,
+    serviceTier: config.serviceTier.flatMap(
+      Components.Schemas.CreateChatCompletionRequest.ServiceTierPayload.init(rawValue:))
   )
 }

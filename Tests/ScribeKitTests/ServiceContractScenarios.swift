@@ -192,15 +192,22 @@ enum ScribeServiceContractScenarios {
     #expect(session.summary.model == "model-alpha")
 
     let reconfigured = try await service.reconfigure(
-      ScribeReconfigureSessionRequest(sessionID: sessionID, profileName: "beta"))
+      ScribeReconfigureSessionRequest(
+        sessionID: sessionID, profileName: "beta", reasoningEffort: "xhigh",
+        serviceTier: "priority"))
     #expect(reconfigured.summary.profileName == "beta")
     #expect(reconfigured.summary.model == "model-beta")
+    #expect(reconfigured.reasoningEffort == "xhigh")
+    #expect(reconfigured.serviceTier == "priority")
     #expect(reconfigured.profileCatalog.map(\.name).contains("alpha"))
     #expect(reconfigured.profileCatalog.map(\.name).contains("beta"))
     #expect(reconfigured.messages.first?.role == .system)
 
     let listed = try await service.listSessions()
     #expect(listed.first(where: { $0.id == sessionID })?.model == "model-beta")
+    let reopened = try await service.openSession(id: sessionID)
+    #expect(reopened.reasoningEffort == "xhigh")
+    #expect(reopened.serviceTier == "priority")
 
     do {
       _ = try await service.reconfigure(

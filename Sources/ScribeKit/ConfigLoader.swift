@@ -14,6 +14,7 @@ public enum ScribeConfigBinding {
   public static let reasoningEnabled = "agent.reasoning"
   public static let reasoningEffort = "agent.reasoningEffort"
   public static let serviceTier = "agent.serviceTier"
+  public static let serviceTiers = "agent.serviceTiers"
   public static let temperature = "agent.temperature"
   public static let maxRetries = "agent.maxRetries"
   public static let loggingLevel = "logging.level"
@@ -29,10 +30,45 @@ public struct ProfileSummary: Codable, Sendable, Equatable {
 
   public var baseURL: String
 
-  public init(name: String, model: String, baseURL: String) {
+  public var reasoningEfforts: [String]
+
+  public var reasoningEffort: String?
+
+  public var serviceTiers: [String]
+
+  public var serviceTier: String?
+
+  public init(
+    name: String,
+    model: String,
+    baseURL: String,
+    reasoningEfforts: [String] = [],
+    reasoningEffort: String? = nil,
+    serviceTiers: [String] = [],
+    serviceTier: String? = nil
+  ) {
     self.name = name
     self.model = model
     self.baseURL = baseURL
+    self.reasoningEfforts = reasoningEfforts
+    self.reasoningEffort = reasoningEffort
+    self.serviceTiers = serviceTiers
+    self.serviceTier = serviceTier
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case name, model, baseURL, reasoningEfforts, reasoningEffort, serviceTiers, serviceTier
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    name = try container.decode(String.self, forKey: .name)
+    model = try container.decode(String.self, forKey: .model)
+    baseURL = try container.decode(String.self, forKey: .baseURL)
+    reasoningEfforts = try container.decodeIfPresent([String].self, forKey: .reasoningEfforts) ?? []
+    reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
+    serviceTiers = try container.decodeIfPresent([String].self, forKey: .serviceTiers) ?? []
+    serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
   }
 }
 
@@ -49,7 +85,9 @@ private struct ConfigManifest: Codable {
     var contextWindowThreshold: Double
     var reasoning: Bool?
     var reasoningEffort: String?
+    var reasoningEfforts: [String]? = nil
     var serviceTier: String? = nil
+    var serviceTiers: [String]? = nil
     var maxTokens: Int?
     var temperature: Double?
     var maxRetries: Int?
@@ -253,7 +291,18 @@ public enum ConfigLoader {
       ProfileSummary(
         name: entry.name.trimmingCharacters(in: .whitespacesAndNewlines),
         model: entry.agent.model,
-        baseURL: entry.api.baseUrl)
+        baseURL: entry.api.baseUrl,
+        reasoningEfforts: entry.agent.reasoning == false ? [] : (entry.agent.reasoningEfforts ?? []),
+        reasoningEffort: entry.agent.reasoning == false
+          ? nil
+          : (entry.agent.reasoningEffort
+            ?? ((entry.agent.reasoningEfforts ?? []).contains("medium")
+              ? "medium" : entry.agent.reasoningEfforts?.first)),
+        serviceTiers: entry.agent.serviceTiers ?? [],
+        serviceTier: entry.agent.serviceTier
+          ?? ((entry.agent.serviceTiers ?? []).contains("default")
+            ? "default" : entry.agent.serviceTiers?.first)
+      )
     }
 
     let activeName = try resolveActiveProfileName(
@@ -304,6 +353,74 @@ public enum ConfigLoader {
       )
     }
 
+    let reasoningEfforts = profile.agent.reasoningEfforts ?? []
+    let supportedReasoningEfforts: Set<String> = [
+      "none", "minimal", "low", "medium", "high", "xhigh", "max",
+    ]
+    if let effort = profile.agent.reasoningEffort,
+      !supportedReasoningEfforts.contains(effort)
+    {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.reasoningEffort,
+        reason:
+          "`agent.reasoningEffort` must be a supported effort value for profile `\(profileName)`."
+      )
+    }
+    guard reasoningEfforts.allSatisfy({ supportedReasoningEfforts.contains($0) }),
+      Set(reasoningEfforts).count == reasoningEfforts.count
+    else {
+      throw ScribeError.configuration(
+        key: "agent.reasoningEfforts",
+        reason:
+          "`agent.reasoningEfforts` must contain unique supported effort values for profile `\(profileName)`."
+      )
+    }
+    if let selectedEffort = profile.agent.reasoningEffort,
+      !reasoningEfforts.isEmpty,
+      !reasoningEfforts.contains(selectedEffort)
+    {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.reasoningEffort,
+        reason:
+          "`agent.reasoningEffort` must be included in `agent.reasoningEfforts` for profile `\(profileName)`."
+      )
+    }
+    let configuredEffort =
+      profile.agent.reasoningEffort
+      ?? (reasoningEfforts.contains("medium") ? "medium" : reasoningEfforts.first)
+    let serviceTiers = profile.agent.serviceTiers ?? []
+    let supportedServiceTiers: Set<String> = ["auto", "default", "flex", "priority"]
+    guard serviceTiers.allSatisfy({ supportedServiceTiers.contains($0) }),
+      Set(serviceTiers).count == serviceTiers.count
+    else {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.serviceTiers,
+        reason:
+          "`agent.serviceTiers` must contain unique supported service tiers for profile `\(profileName)`."
+      )
+    }
+    if let selectedTier = profile.agent.serviceTier,
+      !supportedServiceTiers.contains(selectedTier)
+    {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.serviceTier,
+        reason:
+          "`agent.serviceTier` must be a supported service tier for profile `\(profileName)`."
+      )
+    }
+    if let selectedTier = profile.agent.serviceTier,
+      !serviceTiers.isEmpty,
+      !serviceTiers.contains(selectedTier)
+    {
+      throw ScribeError.configuration(
+        key: ScribeConfigBinding.serviceTier,
+        reason:
+          "`agent.serviceTier` must be included in `agent.serviceTiers` for profile `\(profileName)`."
+      )
+    }
+    let configuredServiceTier =
+      profile.agent.serviceTier
+      ?? (serviceTiers.contains("default") ? "default" : serviceTiers.first)
     let contextWindow = profile.agent.contextWindow
     guard contextWindow > 0 else {
       throw ScribeError.configuration(
@@ -371,9 +488,9 @@ public enum ConfigLoader {
       apiKey: resolvedAPIKey,
       apiType: resolvedAPIType,
       workingDirectory: ".",
-      reasoningEnabled: profile.agent.reasoning,
-      reasoningEffort: profile.agent.reasoningEffort,
-      serviceTier: profile.agent.serviceTier,
+      reasoningEnabled: profile.agent.reasoning ?? (!reasoningEfforts.isEmpty ? true : nil),
+      reasoningEffort: configuredEffort,
+      serviceTier: configuredServiceTier,
       maxTokens: profile.agent.maxTokens,
       sendsOpenCodeHeader: profile.api.opencodeHeader ?? false,
       temperature: profile.agent.temperature,

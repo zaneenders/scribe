@@ -42,7 +42,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
     self.agentFactory = agentFactory
   }
 
-
   public func capabilities() async -> ScribeSessionCapabilities {
     capabilitiesValue
   }
@@ -76,7 +75,9 @@ public actor LocalScribeSessionService: ScribeSessionService {
       let snapshot = ScribeSessionSnapshot(
         summary: self.summary(for: metadata, directory: boot.sessionDirectory),
         messages: boot.initialMessages,
-        profileCatalog: boot.profileCatalog)
+        profileCatalog: boot.profileCatalog,
+        reasoningEffort: boot.reasoningEffort,
+        serviceTier: boot.serviceTier)
       self.runtimes[boot.sessionId] = LoadedSession(boot: boot, profileCatalog: boot.profileCatalog)
       return snapshot
     }
@@ -87,7 +88,8 @@ public actor LocalScribeSessionService: ScribeSessionService {
       guard !self.activeEdits.contains(id) else {
         throw ScribeSessionServiceError.busy(sessionID: id)
       }
-      return try await self.snapshot(of: self.loadedSession(for: id))
+      let loaded = try await self.loadedSession(for: id)
+      return try await self.snapshot(of: loaded)
     }
   }
 
@@ -189,7 +191,23 @@ public actor LocalScribeSessionService: ScribeSessionService {
       }
 
       let loadedConfig = try await self.loadConfiguration(profileOverride: request.profileName)
+      let supportedEfforts =
+        loadedConfig.profiles.first { $0.name == request.profileName }?.reasoningEfforts ?? []
+      if let effort = request.reasoningEffort, !supportedEfforts.contains(effort) {
+        throw ScribeSessionServiceError.invalidRequest(
+          "Unsupported reasoning effort `\(effort)` for profile `\(request.profileName)`."
+        )
+      }
+      let supportedTiers =
+        loadedConfig.profiles.first { $0.name == request.profileName }?.serviceTiers ?? []
+      if let tier = request.serviceTier, !supportedTiers.contains(tier) {
+        throw ScribeSessionServiceError.invalidRequest(
+          "Unsupported service tier `\(tier)` for profile `\(request.profileName)`."
+        )
+      }
       let base = loadedConfig.scribeConfig
+        .withReasoningEffort(request.reasoningEffort ?? loadedConfig.scribeConfig.reasoningEffort)
+        .withServiceTier(request.serviceTier ?? loadedConfig.scribeConfig.serviceTier)
       let harness = loaded.boot.harness
       let workingDirectory = loaded.boot.workingDirectory
       let newConfig = ScribeConfig(
@@ -212,8 +230,20 @@ public actor LocalScribeSessionService: ScribeSessionService {
       try await harness.reconfigure(
         configuration: newConfig, profileName: loadedConfig.activeProfileName,
         agentFactory: self.agentFactory)
-      var updated = loaded
-      updated.profileCatalog = loadedConfig.profiles
+      let updatedBoot = BootstrappedSession(
+        harness: loaded.boot.harness,
+        messageQueue: loaded.boot.messageQueue,
+        initialMessages: loaded.boot.initialMessages,
+        sessionId: loaded.boot.sessionId,
+        sessionDirectory: loaded.boot.sessionDirectory,
+        profile:
+          loadedConfig.profiles.first { $0.name == loadedConfig.activeProfileName }
+          ?? loaded.boot.profile,
+        profileCatalog: loadedConfig.profiles,
+        reasoningEffort: base.reasoningEffort,
+        serviceTier: base.serviceTier,
+        workingDirectory: loaded.boot.workingDirectory)
+      let updated = LoadedSession(boot: updatedBoot, profileCatalog: loadedConfig.profiles)
       self.runtimes[request.sessionID] = updated
       return try await self.snapshot(of: updated)
     }
@@ -303,14 +333,12 @@ public actor LocalScribeSessionService: ScribeSessionService {
     }
   }
 
-
   public func discardRuntime(sessionID: UUID) {
     guard !activeSubmissions.contains(sessionID), !activeEdits.contains(sessionID),
       !loadingSessions.contains(sessionID)
     else { return }
     runtimes[sessionID] = nil
   }
-
 
   private func runTurn(
     sessionID: UUID,
@@ -355,9 +383,10 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   private func endSubmission(sessionID: UUID) {
     activeSubmissions.remove(sessionID)
-    submissionCompletionWaiters.removeValue(forKey: sessionID)?.forEach { $0.resume() }
+    if let waiters = submissionCompletionWaiters.removeValue(forKey: sessionID) {
+      for waiter in waiters { waiter.resume() }
+    }
   }
-
 
   private func bootstrap(
     workingDirectory: String?,
@@ -429,7 +458,6 @@ public actor LocalScribeSessionService: ScribeSessionService {
     }
   }
 
-
   private func snapshot(of loaded: LoadedSession) async throws -> ScribeSessionSnapshot {
     let harness = loaded.boot.harness
     let document = await harness.snapshot()
@@ -438,7 +466,9 @@ public actor LocalScribeSessionService: ScribeSessionService {
     return ScribeSessionSnapshot(
       summary: summary(for: metadata, directory: directory),
       messages: document.messages,
-      profileCatalog: loaded.profileCatalog)
+      profileCatalog: loaded.profileCatalog,
+      reasoningEffort: metadata.reasoningEffort ?? loaded.boot.reasoningEffort,
+      serviceTier: metadata.serviceTier ?? loaded.boot.serviceTier)
   }
 
   private func summary(

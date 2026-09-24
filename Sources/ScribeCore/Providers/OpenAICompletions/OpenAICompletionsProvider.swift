@@ -10,6 +10,7 @@ struct OpenAICompletionsProvider: AgentProvider {
   let reasoningEnabled: Bool?
   var reasoningEncoding: ReasoningEncoding = .openRouter
   var reasoningEffort: String? = nil
+  var serviceTier: String? = nil
   let contextWindow: Int
   var sendsOpenCodeHeader: Bool = false
   var defaultTemperature: Double = 0
@@ -37,6 +38,7 @@ struct OpenAICompletionsProvider: AgentProvider {
       reasoningEnabled: reasoningEnabled,
       reasoningEncoding: reasoningEncoding,
       reasoningEffort: reasoningEffort,
+      serviceTier: serviceTier,
       hooks: .default,
       contextWindow: contextWindow,
       retryPolicy: retryPolicy,

@@ -94,13 +94,13 @@ struct LocalServiceFixture: ScribeServiceContractFixture {
           {
             "name": "alpha",
             "api": { "baseUrl": "http://test", "apiKey": "" },
-            "agent": { "model": "model-alpha", "contextWindow": 4000, "contextWindowThreshold": 0.75 },
+            "agent": { "model": "model-alpha", "contextWindow": 4000, "contextWindowThreshold": 0.75, "reasoningEfforts": ["low", "medium", "high"], "serviceTiers": ["default", "priority"] },
             "logging": { "level": "trace" }
           },
           {
             "name": "beta",
             "api": { "baseUrl": "http://test", "apiKey": "" },
-            "agent": { "model": "model-beta", "contextWindow": 4000, "contextWindowThreshold": 0.75 },
+            "agent": { "model": "model-beta", "contextWindow": 4000, "contextWindowThreshold": 0.75, "reasoningEfforts": ["minimal", "medium", "xhigh"], "serviceTiers": ["default", "priority"] },
             "logging": { "level": "trace" }
           }
         ]

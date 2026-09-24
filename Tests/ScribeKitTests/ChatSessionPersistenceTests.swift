@@ -130,10 +130,12 @@ struct ChatSessionPersistenceTests {
         to: path)
 
       let updated = try await ChatSessionStore.updateConfiguration(
-        in: path, model: "new", profileName: "economy", baseURL: "https://new.example")
+        in: path, model: "new", profileName: "economy", baseURL: "https://new.example",
+        reasoningEffort: "xhigh")
       #expect(updated.model == "new")
       #expect(updated.profileName == "economy")
       #expect(updated.baseURL == "https://new.example")
+      #expect(updated.reasoningEffort == "xhigh")
     }
   }
 

@@ -49,4 +49,32 @@ public struct ScribeConfig: Sendable {
     self.temperature = temperature
     self.maxRetries = maxRetries
   }
+
+  public func withReasoningEffort(_ reasoningEffort: String?) -> ScribeConfig {
+    withOverrides(reasoningEffort: reasoningEffort, serviceTier: serviceTier)
+  }
+
+  public func withServiceTier(_ serviceTier: String?) -> ScribeConfig {
+    withOverrides(reasoningEffort: reasoningEffort, serviceTier: serviceTier)
+  }
+
+  private func withOverrides(reasoningEffort: String?, serviceTier: String?) -> ScribeConfig {
+    ScribeConfig(
+      agentModel: agentModel,
+      contextWindow: contextWindow,
+      contextWindowThreshold: contextWindowThreshold,
+      serverURL: serverURL,
+      apiKey: apiKey,
+      apiType: apiType,
+      tools: tools,
+      workingDirectory: workingDirectory,
+      reasoningEnabled: reasoningEnabled,
+      reasoningEffort: reasoningEffort,
+      serviceTier: serviceTier,
+      maxTokens: maxTokens,
+      sendsOpenCodeHeader: sendsOpenCodeHeader,
+      temperature: temperature,
+      maxRetries: maxRetries
+    )
+  }
 }

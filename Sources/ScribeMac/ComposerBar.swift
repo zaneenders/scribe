@@ -22,6 +22,12 @@ struct BottomChrome: Block {
         if store.showModelPicker {
           BottomModelPicker(store: store, session: session, theme: theme)
         }
+        if session.isReasoningEffortPickerOpen {
+          BottomReasoningEffortPicker(session: session, theme: theme)
+        }
+        if session.isServiceTierPickerOpen {
+          BottomServiceTierPicker(session: session, theme: theme)
+        }
         ComposerBar(store: store, session: session, theme: theme)
         StatusBar(store: store, session: session, theme: theme)
       }
@@ -83,7 +89,13 @@ struct ComposerBar: Block {
 
       HStack(spacing: 6) {
         if !session.isRunning {
-          Interactive(action: { store.toggleModelPicker() }) { phase in
+          Interactive(action: {
+            store.toggleModelPicker()
+            if store.showModelPicker {
+              session.isReasoningEffortPickerOpen = false
+              session.isServiceTierPickerOpen = false
+            }
+          }) { phase in
             HStack(spacing: 5) {
               Text(sanitizeASCII(session.profileName))
                 .fontScale(theme.smallScale)
@@ -95,6 +107,52 @@ struct ComposerBar: Block {
             .padding(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10))
             .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
             .border(theme.border)
+          }
+          if let profile = session.profileCatalog.first(where: { $0.name == session.profileName }),
+            !profile.reasoningEfforts.isEmpty
+          {
+            Interactive(action: {
+              session.isReasoningEffortPickerOpen.toggle()
+              if session.isReasoningEffortPickerOpen {
+                store.showModelPicker = false
+                session.isServiceTierPickerOpen = false
+              }
+            }) { phase in
+              HStack(spacing: 5) {
+                Text(session.reasoningEffort ?? "Reasoning")
+                  .fontScale(theme.smallScale)
+                  .foregroundColor(phase == .hovered ? theme.accent : theme.textPrimary)
+                Text(session.isReasoningEffortPickerOpen ? "▼" : "▲")
+                  .fontScale(theme.smallScale)
+                  .foregroundColor(theme.textSecondary)
+              }
+              .padding(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+              .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
+              .border(theme.border)
+            }
+          }
+          if let profile = session.profileCatalog.first(where: { $0.name == session.profileName }),
+            !profile.serviceTiers.isEmpty
+          {
+            Interactive(action: {
+              session.isServiceTierPickerOpen.toggle()
+              if session.isServiceTierPickerOpen {
+                store.showModelPicker = false
+                session.isReasoningEffortPickerOpen = false
+              }
+            }) { phase in
+              HStack(spacing: 5) {
+                Text(session.serviceTier ?? "Priority")
+                  .fontScale(theme.smallScale)
+                  .foregroundColor(phase == .hovered ? theme.accent : theme.textPrimary)
+                Text(session.isServiceTierPickerOpen ? "▼" : "▲")
+                  .fontScale(theme.smallScale)
+                  .foregroundColor(theme.textSecondary)
+              }
+              .padding(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+              .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
+              .border(theme.border)
+            }
           }
           Button(
             "TLDR", fontScale: theme.smallScale,
@@ -116,6 +174,78 @@ struct ComposerBar: Block {
     .padding(theme.margin)
     .sizing(x: .grow)
     .background(theme.composerBackground)
+    .border(theme.border)
+  }
+}
+
+struct BottomReasoningEffortPicker: Block {
+  let session: SessionController
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
+    let efforts = session.profileCatalog.first(where: { $0.name == session.profileName })?.reasoningEfforts ?? []
+    return VStack(spacing: 0) {
+      ForEach(efforts, id: \.self) { effort in
+        let isActive = effort == session.reasoningEffort
+        Interactive(action: { session.selectReasoningEffort(effort) }) { phase in
+          HStack(spacing: 6) {
+            Text(isActive ? "●" : " ")
+              .fontScale(theme.smallScale)
+              .foregroundColor(isActive ? theme.accent : .clear)
+            Text(effort)
+              .fontScale(theme.smallScale)
+              .foregroundColor(
+                isActive ? theme.accent : phase == .hovered ? theme.textPrimary : theme.textSecondary)
+            Spacer()
+          }
+          .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
+          .sizing(y: .fixed(34))
+          .sizing(x: .grow)
+          .background(
+            phase == .hovered
+              ? theme.buttonHover
+              : isActive ? theme.buttonIdle : theme.panelBackground)
+        }
+      }
+    }
+    .sizing(x: .grow)
+    .background(theme.headerBackground)
+    .border(theme.border)
+  }
+}
+
+struct BottomServiceTierPicker: Block {
+  let session: SessionController
+  let theme: MacTheme
+
+  @MainActor var body: some Block {
+    let tiers = session.profileCatalog.first(where: { $0.name == session.profileName })?.serviceTiers ?? []
+    return VStack(spacing: 0) {
+      ForEach(tiers, id: \.self) { tier in
+        let isActive = tier == session.serviceTier
+        Interactive(action: { session.selectServiceTier(tier) }) { phase in
+          HStack(spacing: 6) {
+            Text(isActive ? "●" : " ")
+              .fontScale(theme.smallScale)
+              .foregroundColor(isActive ? theme.accent : .clear)
+            Text(tier)
+              .fontScale(theme.smallScale)
+              .foregroundColor(
+                isActive ? theme.accent : phase == .hovered ? theme.textPrimary : theme.textSecondary)
+            Spacer()
+          }
+          .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
+          .sizing(y: .fixed(34))
+          .sizing(x: .grow)
+          .background(
+            phase == .hovered
+              ? theme.buttonHover
+              : isActive ? theme.buttonIdle : theme.panelBackground)
+        }
+      }
+    }
+    .sizing(x: .grow)
+    .background(theme.headerBackground)
     .border(theme.border)
   }
 }
