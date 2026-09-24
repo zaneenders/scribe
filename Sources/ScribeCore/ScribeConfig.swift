@@ -51,6 +51,14 @@ public struct ScribeConfig: Sendable {
   }
 
   public func withReasoningEffort(_ reasoningEffort: String?) -> ScribeConfig {
+    withOverrides(reasoningEffort: reasoningEffort, serviceTier: serviceTier)
+  }
+
+  public func withServiceTier(_ serviceTier: String?) -> ScribeConfig {
+    withOverrides(reasoningEffort: reasoningEffort, serviceTier: serviceTier)
+  }
+
+  private func withOverrides(reasoningEffort: String?, serviceTier: String?) -> ScribeConfig {
     ScribeConfig(
       agentModel: agentModel,
       contextWindow: contextWindow,

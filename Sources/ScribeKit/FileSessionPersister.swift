@@ -16,6 +16,7 @@ public final class FileSessionPersister: SessionPersister {
   private struct Settings {
     var model: String
     var reasoningEffort: String?
+    var serviceTier: String?
     var profileName: String?
     var baseURL: String?
   }
@@ -33,6 +34,7 @@ public final class FileSessionPersister: SessionPersister {
     isNewSession: Bool,
     model: String,
     reasoningEffort: String? = nil,
+    serviceTier: String? = nil,
     profileName: String?,
     cwd: String,
     baseURL: String?,
@@ -40,13 +42,15 @@ public final class FileSessionPersister: SessionPersister {
     logger: Logger
   ) async throws -> FileSessionPersister {
     let settings = Settings(
-      model: model, reasoningEffort: reasoningEffort, profileName: profileName, baseURL: baseURL)
+      model: model, reasoningEffort: reasoningEffort, serviceTier: serviceTier,
+      profileName: profileName, baseURL: baseURL)
     if isNewSession {
       let meta = ChatSessionMetadata(
         id: sessionId,
         createdAt: sessionCreatedAt,
         model: settings.model,
         reasoningEffort: settings.reasoningEffort,
+        serviceTier: settings.serviceTier,
         profileName: settings.profileName,
         cwd: cwd,
         baseURL: settings.baseURL,
@@ -92,22 +96,26 @@ public final class FileSessionPersister: SessionPersister {
 
   public func reconfigure(model: String, profileName: String?, baseURL: String?) async throws {
     try await reconfigure(
-      model: model, profileName: profileName, baseURL: baseURL, reasoningEffort: nil)
+      model: model, profileName: profileName, baseURL: baseURL,
+      reasoningEffort: nil, serviceTier: nil)
   }
 
   public func reconfigure(
     model: String,
     profileName: String?,
     baseURL: String?,
-    reasoningEffort: String?
+    reasoningEffort: String?,
+    serviceTier: String?
   ) async throws {
     let directory = state.withLock { $0.directory }
     try await ChatSessionStore.updateConfiguration(
       in: directory, model: model, profileName: profileName, baseURL: baseURL,
-      reasoningEffort: reasoningEffort)
+      reasoningEffort: reasoningEffort,
+      serviceTier: serviceTier)
     settings.withLock {
       $0 = Settings(
-        model: model, reasoningEffort: reasoningEffort, profileName: profileName, baseURL: baseURL)
+        model: model, reasoningEffort: reasoningEffort, serviceTier: serviceTier,
+        profileName: profileName, baseURL: baseURL)
     }
   }
 
@@ -133,6 +141,7 @@ public final class FileSessionPersister: SessionPersister {
       createdAt: Date(),
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
+      serviceTier: settings.serviceTier,
       profileName: settings.profileName,
       cwd: cwd,
       baseURL: settings.baseURL,

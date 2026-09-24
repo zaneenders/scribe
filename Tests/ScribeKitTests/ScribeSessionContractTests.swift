@@ -27,7 +27,8 @@ struct ScribeSessionContractTests {
       profileCatalog: [
         ScribeProfileSummary(name: "codex", model: "gpt-5.6-sol", baseURL: "https://chatgpt.com/backend-api"),
         ScribeProfileSummary(name: "local", model: "gemma4:e2b", baseURL: "http://localhost:11434"),
-      ])
+      ],
+      serviceTier: "priority")
 
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
@@ -66,7 +67,8 @@ struct ScribeSessionContractTests {
   @Test func profileSummaryRoundTrip() throws {
     let profile = ScribeProfileSummary(
       name: "local", model: "gemma4:e2b", baseURL: "http://localhost:11434",
-      reasoningEfforts: ["low", "medium", "high"], reasoningEffort: "medium")
+      reasoningEfforts: ["low", "medium", "high"], reasoningEffort: "medium",
+      serviceTiers: ["default", "priority"], serviceTier: "priority")
     let data = try JSONEncoder().encode(profile)
     #expect(try JSONDecoder().decode(ScribeProfileSummary.self, from: data) == profile)
   }

@@ -54,16 +54,20 @@ public struct ScribeSessionSnapshot: Codable, Sendable, Equatable {
 
   public var reasoningEffort: String?
 
+  public var serviceTier: String?
+
   public init(
     summary: ScribeSessionSummary,
     messages: [ScribeMessage],
     profileCatalog: [ScribeProfileSummary] = [],
-    reasoningEffort: String? = nil
+    reasoningEffort: String? = nil,
+    serviceTier: String? = nil
   ) {
     self.summary = summary
     self.messages = messages
     self.profileCatalog = profileCatalog
     self.reasoningEffort = reasoningEffort
+    self.serviceTier = serviceTier
   }
 }
 
@@ -127,10 +131,16 @@ public struct ScribeReconfigureSessionRequest: Sendable, Equatable {
 
   public var reasoningEffort: String?
 
-  public init(sessionID: UUID, profileName: String, reasoningEffort: String? = nil) {
+  public var serviceTier: String?
+
+  public init(
+    sessionID: UUID, profileName: String, reasoningEffort: String? = nil,
+    serviceTier: String? = nil
+  ) {
     self.sessionID = sessionID
     self.profileName = profileName
     self.reasoningEffort = reasoningEffort
+    self.serviceTier = serviceTier
   }
 }
 

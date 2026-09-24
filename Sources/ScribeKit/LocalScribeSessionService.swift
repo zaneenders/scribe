@@ -76,7 +76,8 @@ public actor LocalScribeSessionService: ScribeSessionService {
         summary: self.summary(for: metadata, directory: boot.sessionDirectory),
         messages: boot.initialMessages,
         profileCatalog: boot.profileCatalog,
-        reasoningEffort: boot.reasoningEffort)
+        reasoningEffort: boot.reasoningEffort,
+        serviceTier: boot.serviceTier)
       self.runtimes[boot.sessionId] = LoadedSession(boot: boot, profileCatalog: boot.profileCatalog)
       return snapshot
     }
@@ -197,8 +198,16 @@ public actor LocalScribeSessionService: ScribeSessionService {
           "Unsupported reasoning effort `\(effort)` for profile `\(request.profileName)`."
         )
       }
-      let base = loadedConfig.scribeConfig.withReasoningEffort(
-        request.reasoningEffort ?? loadedConfig.scribeConfig.reasoningEffort)
+      let supportedTiers =
+        loadedConfig.profiles.first { $0.name == request.profileName }?.serviceTiers ?? []
+      if let tier = request.serviceTier, !supportedTiers.contains(tier) {
+        throw ScribeSessionServiceError.invalidRequest(
+          "Unsupported service tier `\(tier)` for profile `\(request.profileName)`."
+        )
+      }
+      let base = loadedConfig.scribeConfig
+        .withReasoningEffort(request.reasoningEffort ?? loadedConfig.scribeConfig.reasoningEffort)
+        .withServiceTier(request.serviceTier ?? loadedConfig.scribeConfig.serviceTier)
       let harness = loaded.boot.harness
       let workingDirectory = loaded.boot.workingDirectory
       let newConfig = ScribeConfig(
@@ -232,6 +241,7 @@ public actor LocalScribeSessionService: ScribeSessionService {
           ?? loaded.boot.profile,
         profileCatalog: loadedConfig.profiles,
         reasoningEffort: base.reasoningEffort,
+        serviceTier: base.serviceTier,
         workingDirectory: loaded.boot.workingDirectory)
       let updated = LoadedSession(boot: updatedBoot, profileCatalog: loadedConfig.profiles)
       self.runtimes[request.sessionID] = updated
@@ -373,7 +383,9 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   private func endSubmission(sessionID: UUID) {
     activeSubmissions.remove(sessionID)
-    submissionCompletionWaiters.removeValue(forKey: sessionID)?.forEach { $0.resume() }
+    if let waiters = submissionCompletionWaiters.removeValue(forKey: sessionID) {
+      for waiter in waiters { waiter.resume() }
+    }
   }
 
   private func bootstrap(
@@ -455,7 +467,8 @@ public actor LocalScribeSessionService: ScribeSessionService {
       summary: summary(for: metadata, directory: directory),
       messages: document.messages,
       profileCatalog: loaded.profileCatalog,
-      reasoningEffort: metadata.reasoningEffort ?? loaded.boot.reasoningEffort)
+      reasoningEffort: metadata.reasoningEffort ?? loaded.boot.reasoningEffort,
+      serviceTier: metadata.serviceTier ?? loaded.boot.serviceTier)
   }
 
   private func summary(

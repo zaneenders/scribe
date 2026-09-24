@@ -143,7 +143,9 @@ final class SessionController {
   var modelName: String
   var profileCatalog: [ProfileSummary]
   var reasoningEffort: String?
+  var serviceTier: String?
   var isReasoningEffortPickerOpen = false
+  var isServiceTierPickerOpen = false
   var tldrModel: String
   var isTLDRModelPickerOpen = false
   private(set) var sessionName: String?
@@ -178,6 +180,7 @@ final class SessionController {
     self.modelName = boot.profile.model
     self.profileCatalog = boot.profileCatalog
     self.reasoningEffort = boot.reasoningEffort
+    self.serviceTier = boot.serviceTier
     self.tldrModel = boot.profileCatalog.first?.model ?? boot.profile.model
     let metadata = try? ChatSessionStore.loadMetadata(from: boot.sessionDirectory)
     self.sessionName = metadata?.name
@@ -534,6 +537,15 @@ final class SessionController {
     runTask = nil
   }
 
+  func selectServiceTier(_ tier: String) {
+    guard
+      !isRunning,
+      profileCatalog.first(where: { $0.name == profileName })?.serviceTiers.contains(tier) == true
+    else { return }
+    isServiceTierPickerOpen = false
+    Task { await applyModelProfile(profileName, serviceTier: tier) }
+  }
+
   func selectReasoningEffort(_ effort: String) {
     guard
       !isRunning,
@@ -544,13 +556,20 @@ final class SessionController {
   }
 
   @discardableResult
-  func applyModelProfile(_ name: String, reasoningEffort selectedEffort: String? = nil) async -> [ProfileSummary]? {
+  func applyModelProfile(
+    _ name: String,
+    reasoningEffort selectedEffort: String? = nil,
+    serviceTier selectedTier: String? = nil
+  ) async -> [ProfileSummary]? {
     let previousName = profileName
     do {
       let loaded = try await ConfigLoader.load(profileOverride: name)
       let reasoningEffort =
         selectedEffort
         ?? (name == profileName ? self.reasoningEffort : loaded.scribeConfig.reasoningEffort)
+      let serviceTier =
+        selectedTier
+        ?? (name == profileName ? self.serviceTier : loaded.scribeConfig.serviceTier)
       let newConfig = ScribeConfig(
         agentModel: loaded.scribeConfig.agentModel,
         contextWindow: loaded.scribeConfig.contextWindow,
@@ -562,7 +581,7 @@ final class SessionController {
         workingDirectory: workingDirectory,
         reasoningEnabled: loaded.scribeConfig.reasoningEnabled,
         reasoningEffort: reasoningEffort,
-        serviceTier: loaded.scribeConfig.serviceTier,
+        serviceTier: serviceTier,
         maxTokens: loaded.scribeConfig.maxTokens,
         sendsOpenCodeHeader: loaded.scribeConfig.sendsOpenCodeHeader,
         temperature: loaded.scribeConfig.temperature,
@@ -573,6 +592,7 @@ final class SessionController {
       modelName = loaded.scribeConfig.agentModel
       profileCatalog = loaded.profiles
       self.reasoningEffort = reasoningEffort
+      self.serviceTier = serviceTier
       let message: String
       if name == previousName {
         message = "Model reloaded: \(name) (\(modelName))"

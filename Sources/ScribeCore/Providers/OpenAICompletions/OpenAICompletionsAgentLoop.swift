@@ -27,6 +27,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
   let reasoningEnabled: Bool?
   let reasoningEncoding: ReasoningEncoding
   let reasoningEffort: String?
+  let serviceTier: String?
   let hooks: AgentLoopHooks
   let contextWindow: Int
   let retryPolicy: RetryPolicy
@@ -42,6 +43,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     reasoningEnabled: Bool?,
     reasoningEncoding: ReasoningEncoding = .openRouter,
     reasoningEffort: String? = nil,
+    serviceTier: String? = nil,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0,
     retryPolicy: RetryPolicy = .default,
@@ -60,6 +62,7 @@ struct AgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEncoding = reasoningEncoding
     self.reasoningEffort = reasoningEffort
+    self.serviceTier = serviceTier
     self.hooks = hooks
     self.contextWindow = contextWindow
     self.retryPolicy = retryPolicy
@@ -305,6 +308,8 @@ private func makeChatCompletionRequest(
         Components.Schemas.ChatCompletionThinking(_type: $0 ? .enabled : .disabled)
       } : nil,
     reasoningEffort: config.reasoningEncoding == .deepSeek && config.reasoningEnabled != false
-      ? config.reasoningEffort == "none" ? nil : config.reasoningEffort : nil
+      ? config.reasoningEffort == "none" ? nil : config.reasoningEffort : nil,
+    serviceTier: config.serviceTier.flatMap(
+      Components.Schemas.CreateChatCompletionRequest.ServiceTierPayload.init(rawValue:))
   )
 }

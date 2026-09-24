@@ -98,7 +98,8 @@ public actor SessionHarness {
       model: configuration.agentModel,
       profileName: profileName,
       baseURL: configuration.serverURL,
-      reasoningEffort: configuration.reasoningEffort)
+      reasoningEffort: configuration.reasoningEffort,
+      serviceTier: configuration.serviceTier)
     self.configuration = configuration
     self.agent = agent
     self.tokenTracker = tokenTracker

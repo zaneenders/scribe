@@ -80,6 +80,10 @@ components:
           description: >-
             Reasoning effort hint for providers that take a top-level string (e.g. DeepSeek:
             `low` / `high` / `max`).
+        service_tier:
+          type: string
+          enum: [auto, default, flex, priority]
+          description: Processing tier for supported OpenAI models.
     ChatCompletionStreamOptions:
       type: object
       description: OpenAI-style streaming options

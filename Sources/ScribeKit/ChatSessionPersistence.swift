@@ -9,6 +9,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
   public var createdAt: Date
   public var model: String
   public var reasoningEffort: String?
+  public var serviceTier: String?
   public var profileName: String?
   public var cwd: String
   public var baseURL: String?
@@ -30,6 +31,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     createdAt: Date,
     model: String,
     reasoningEffort: String? = nil,
+    serviceTier: String? = nil,
     profileName: String? = nil,
     cwd: String,
     baseURL: String?,
@@ -45,6 +47,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     self.createdAt = createdAt
     self.model = model
     self.reasoningEffort = reasoningEffort
+    self.serviceTier = serviceTier
     self.profileName = profileName
     self.cwd = cwd
     self.baseURL = baseURL
@@ -57,7 +60,8 @@ public struct ChatSessionMetadata: Codable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case schemaVersion, id, createdAt, model, reasoningEffort, profileName, cwd, baseURL, scribeVersion, lastMessageAt
+    case schemaVersion, id, createdAt, model, reasoningEffort, serviceTier, profileName, cwd, baseURL, scribeVersion,
+      lastMessageAt
     case name, isPinned, parentSessionId, forkedAtIndex
   }
 
@@ -68,6 +72,7 @@ public struct ChatSessionMetadata: Codable, Sendable {
     createdAt = try container.decode(Date.self, forKey: .createdAt)
     model = try container.decode(String.self, forKey: .model)
     reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
+    serviceTier = try container.decodeIfPresent(String.self, forKey: .serviceTier)
     profileName = try container.decodeIfPresent(String.self, forKey: .profileName)
     cwd = try container.decode(String.self, forKey: .cwd)
     baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL)
@@ -113,7 +118,12 @@ public enum ChatSessionStore {
     case imageReference(path: String, mimeType: String, detail: String?)
 
     private enum CodingKeys: String, CodingKey {
-      case type, text, imageUrl = "image_url", path, mimeType = "mime_type", detail
+      case type
+      case text
+      case imageUrl = "image_url"
+      case path
+      case mimeType = "mime_type"
+      case detail
     }
 
     private struct ImageURLPayload: Codable {
@@ -344,11 +354,13 @@ public enum ChatSessionStore {
     model: String,
     profileName: String?,
     baseURL: String?,
-    reasoningEffort: String? = nil
+    reasoningEffort: String? = nil,
+    serviceTier: String? = nil
   ) async throws -> ChatSessionMetadata {
     var metadata = try loadMetadata(from: directory)
     metadata.model = model
     metadata.reasoningEffort = reasoningEffort
+    metadata.serviceTier = serviceTier
     metadata.profileName = profileName
     metadata.baseURL = baseURL
     try await saveMetadata(metadata, to: directory)
