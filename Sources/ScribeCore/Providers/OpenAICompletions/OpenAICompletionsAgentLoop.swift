@@ -305,7 +305,8 @@ private func makeChatCompletionRequest(
       } : nil,
     thinking: config.reasoningEncoding == .deepSeek
       ? config.reasoningEnabled.map {
-        Components.Schemas.ChatCompletionThinking(_type: $0 ? .enabled : .disabled)
+        Components.Schemas.ChatCompletionThinking(
+          _type: $0 && config.reasoningEffort != "none" ? .enabled : .disabled)
       } : nil,
     reasoningEffort: config.reasoningEncoding == .deepSeek && config.reasoningEnabled != false
       ? config.reasoningEffort == "none" ? nil : config.reasoningEffort : nil,
