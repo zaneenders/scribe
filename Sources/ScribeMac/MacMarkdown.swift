@@ -268,7 +268,7 @@ func layoutMarkdown(
       wrapRuns(
         inlineRuns(text),
         colorFor: { run in
-          run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+          run.code ? theme.inlineCodeText : run.bold ? theme.textPrimary : baseColor
         }, kind: .plain)
     case .heading(let level, let text):
       let prefix = String(repeating: "#", count: level) + " "
@@ -283,7 +283,7 @@ func layoutMarkdown(
         runs,
         colorFor: { run in
           if run.text == indentation + marker + " " { return theme.orange }
-          return run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+          return run.code ? theme.inlineCodeText : run.bold ? theme.textPrimary : baseColor
         }, kind: .plain)
     case .quote(let text):
       var runs = [MDRun(text: "| ")]
@@ -291,7 +291,7 @@ func layoutMarkdown(
       wrapRuns(
         runs,
         colorFor: { run in
-          run.text == "| " ? theme.green : run.code ? theme.inlineCodeText : run.bold ? .white : baseColor
+          run.text == "| " ? theme.green : run.code ? theme.inlineCodeText : run.bold ? theme.textPrimary : baseColor
         }, kind: .plain)
     case .code(_, let code):
       let codeLines = code.split(separator: "\n", omittingEmptySubsequences: false)
