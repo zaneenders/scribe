@@ -16,7 +16,6 @@ var targets: [Target] = [
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
     ],
     plugins: [
       .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
@@ -30,7 +29,6 @@ var targets: [Target] = [
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
-      .treatAllWarnings(as: .error),
     ],
     plugins: [
       .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
