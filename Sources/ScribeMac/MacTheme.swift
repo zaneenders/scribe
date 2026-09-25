@@ -7,14 +7,14 @@ struct MacTheme: Sendable {
     background = chromaTheme.background
     panelBackground = chromaTheme.surface
     headerBackground = chromaTheme.elevatedSurface
-    statusBackground = chromaTheme.background
-    composerBackground = chromaTheme.surface
+    statusBackground = chromaTheme.elevatedSurface
+    composerBackground = chromaTheme.background
     border = chromaTheme.border
     buttonIdle = chromaTheme.button.idleBackground
     buttonHover = chromaTheme.button.hoveredBackground
     buttonPressed = chromaTheme.button.pressedBackground
     sidebarBackground = chromaTheme.elevatedSurface
-    sidebarSelection = chromaTheme.button.hoveredBackground
+    sidebarSelection = chromaTheme.button.pressedBackground
     sidebarHover = chromaTheme.button.hoveredBackground
     accent = chromaTheme.accent
     green = chromaTheme.positive
@@ -24,7 +24,7 @@ struct MacTheme: Sendable {
     purple = chromaTheme.accent
     textPrimary = chromaTheme.foreground
     textSecondary = chromaTheme.secondaryForeground
-    userBubbleBackground = chromaTheme.button.hoveredBackground
+    userBubbleBackground = chromaTheme.textField.idleBackground
     reasoningText = chromaTheme.accent
     codeBackground = chromaTheme.background
     codeText = chromaTheme.positive
