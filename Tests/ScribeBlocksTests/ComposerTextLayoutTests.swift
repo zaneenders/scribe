@@ -11,7 +11,7 @@ struct ComposerTextLayoutTests {
     var revision: UInt64 = 1
     let cache = ComposerTextLayoutCache()
     let renderer = HeadlessRenderer(size: Size(width: 500, height: 140))
-    renderer.content = GrowingTextField(
+    renderer.content = ScribeChatInput(
       "", fontScale: 1,
       text: { text }, layoutCache: cache, revision: { revision },
       onChange: {

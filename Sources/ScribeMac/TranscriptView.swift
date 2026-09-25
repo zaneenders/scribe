@@ -47,7 +47,7 @@ struct TranscriptView: Block {
       revealRow: activeBoundaryRow(in: rows)
     )
     .sizing(x: .grow, y: .grow)
-    .background(theme.appearance == .compact ? theme.background : theme.panelBackground)
+    .background(theme.transcriptBackground ?? theme.panelBackground)
     .id(session.sessionId)
   }
 
@@ -252,13 +252,16 @@ struct TranscriptItemBlock: Block {
   var toggleText: () -> Void = {}
 
   @MainActor var body: some Block {
-    VStack(spacing: 7) {
-      HStack(spacing: 6) {
+    ScribeTranscriptPanel(
+      style: ScribeTranscriptPanelStyle(
+        background: backgroundColor, border: selection == .none ? theme.border : selectionColor,
+        padding: theme.panelPadding, cornerRadius: theme.cornerRadius),
+      header: HStack(spacing: 6) {
         MarkdownText(
           markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
           scale: theme.smallScale, itemID: item.headerSelectionID)
         Spacer()
-      }
+      }, content: VStack(spacing: 7) {
       if item.isCollapsible {
         HStack {
           Button(
@@ -281,12 +284,7 @@ struct TranscriptItemBlock: Block {
           text: item.displayText, theme: theme, color: bodyColor,
           scale: theme.textScale, itemID: item.selectionID)
       }
-
-    }
-    .padding(theme.panelPadding)
-    .sizing(x: .grow)
-    .background(backgroundColor)
-    .border(selection == .none ? theme.border : selectionColor)
+    })
   }
 
   private var label: String {
@@ -307,7 +305,7 @@ struct TranscriptItemBlock: Block {
 
   private var labelColor: Color {
     switch item.kind {
-    case .user: theme.accent
+    case .user: theme.userLabelColor ?? theme.accent
     case .answer: theme.green
     case .reasoning: theme.purple
     case .tool: theme.toolHeaderText
@@ -339,6 +337,7 @@ struct TranscriptItemBlock: Block {
   private var backgroundColor: Color {
     if selection != .none { return theme.statusBackground }
     return switch item.kind {
+    case .reasoning: theme.reasoningBackground ?? theme.panelBackground
     case .user: theme.userBubbleBackground
     case .tool: theme.codeBackground
     default: theme.panelBackground

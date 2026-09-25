@@ -19,23 +19,6 @@ struct ThemeTests {
     #expect(hasFill(theme.surface, in: frame.commands))
   }
 
-  @Test func compactAppearanceDoesNotChangeStandaloneView() {
-    let theme = ChromaTheme.dark
-    let workspace = ScribeWorkspace()
-    let renderer = HeadlessRenderer(size: Size(width: 800, height: 600))
-    defer { renderer.close() }
-
-    renderer.content = ScribeBlock(workspace: workspace).chromaTheme(theme)
-    let standard = renderer.render()
-    #expect(hasText("SCRIBE", color: theme.accent, in: standard.commands))
-    #expect(!hasText("NEW SESSION", color: theme.positive, in: standard.commands))
-
-    renderer.content = ScribeBlock(workspace: workspace, appearance: .compact).chromaTheme(theme)
-    let compact = renderer.render()
-    #expect(hasText("Scribe", color: theme.foreground, in: compact.commands))
-    #expect(hasText("NEW SESSION", color: theme.positive, in: compact.commands))
-  }
-
   @Test func localChromeUsesInheritedPalette() {
     var theme = ChromaTheme.dark
     theme.background = Color(r: 0.11, g: 0.12, b: 0.13, a: 1)
@@ -49,22 +32,6 @@ struct ThemeTests {
     #expect(local.userBubbleBackground == theme.textField.idleBackground)
   }
 
-  @Test func compactAppearanceDoesNotChangeStandaloneDefaults() {
-    var theme = ChromaTheme.dark
-    theme.textField.editingBorder = Color(r: 0.5, g: 0.7, b: 0.9, a: 1)
-    let standard = MacTheme(chromaTheme: theme, appearance: .standard)
-    let compact = MacTheme(chromaTheme: theme, appearance: .compact)
-    #expect(standard.sidebarWidth == 320)
-    #expect(standard.smallScale == 0.75)
-    #expect(standard.composerBackground == theme.background)
-    #expect(standard.buttonStyle().cornerRadius == 0)
-    #expect(compact.sidebarWidth == 260)
-    #expect(compact.smallScale == 0.55)
-    #expect(compact.composerBackground == theme.elevatedSurface)
-    #expect(compact.blue == theme.textField.editingBorder)
-    #expect(compact.buttonStyle(tint: compact.blue).foreground == compact.blue)
-  }
-
   @Test func composerUsesInheritedTextFieldColors() {
     var theme = ChromaTheme.dark
     theme.textField = TextFieldStyle(
@@ -76,7 +43,7 @@ struct ThemeTests {
       caret: theme.accent, border: theme.border, editingBorder: theme.accent)
     let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
     defer { renderer.close() }
-    renderer.content = GrowingTextField(
+    renderer.content = ScribeChatInput(
       "Message Scribe", fontScale: 0.85, text: { "" },
       onChange: { _ in }, onNewline: {}
     ).chromaTheme(theme)

@@ -4,35 +4,29 @@ import Chroma
 public final class ScribeWorkspace {
   let store: ScribeMacStore
 
+  init(store: ScribeMacStore) { self.store = store }
+
   public init() {
     store = ScribeMacStore(startProfiling: false)
   }
 }
 
-public enum ScribeAppearance: Sendable {
-  case standard
-  case compact
-}
-
 public struct ScribeBlock: Block {
   private let workspace: ScribeWorkspace?
-  private let appearance: ScribeAppearance
 
   public init() {
     workspace = nil
-    appearance = .standard
   }
 
-  public init(workspace: ScribeWorkspace, appearance: ScribeAppearance = .standard) {
+  public init(workspace: ScribeWorkspace) {
     self.workspace = workspace
-    self.appearance = appearance
   }
 
   @MainActor public var body: some Block {
     let store = workspace?.store ?? ScribeMacStore.shared
     store.start()
     return ThemeReader { chromaTheme in
-      ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: chromaTheme, appearance: appearance))
+      ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: chromaTheme))
         .chromaTheme(chromaTheme)
     }
   }

@@ -10,12 +10,12 @@ struct SessionSidebar: Block {
       HStack(spacing: 6) {
         Button(
           "Folder", fontScale: theme.smallScale,
-          style: theme.appearance == .compact ? theme.buttonStyle(tint: theme.peach) : nil,
+          style: theme.buttonStyle(tint: theme.peach),
           padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
         ) { store.toggleDirectoryPicker() }
         Button(
           "Resume", fontScale: theme.smallScale,
-          style: theme.appearance == .compact ? theme.buttonStyle(tint: theme.green) : nil,
+          style: theme.buttonStyle(tint: theme.green),
           padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
         ) { store.resumeLatest() }
         Spacer()
@@ -23,17 +23,17 @@ struct SessionSidebar: Block {
       .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
       .sizing(y: .fixed(44))
       .sizing(x: .grow)
-      .border(theme.appearance == .compact ? .clear : theme.border)
+      .border(theme.chromeBorder ?? theme.border)
 
       HStack(spacing: 6) {
         Text("SESSIONS")
           .fontScale(theme.smallScale)
-          .foregroundColor(theme.appearance == .compact ? theme.red : theme.textSecondary)
+          .foregroundColor(theme.sidebarHeading ?? theme.textSecondary)
         Spacer()
         Interactive(action: { store.refreshSavedSessions() }) { phase in
           Text("↻")
             .fontScale(theme.smallScale)
-            .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.blue : theme.textSecondary) : theme.textPrimary)
+            .foregroundColor(phase == .idle ? (theme.refreshColor ?? theme.textSecondary) : theme.textPrimary)
             .padding(EdgeInsets(top: 5, leading: 6.5, bottom: 5, trailing: 6.5))
             .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
@@ -41,7 +41,7 @@ struct SessionSidebar: Block {
         Interactive(action: { store.closeSessionSidebar() }) { phase in
           Text("×")
             .fontScale(theme.textScale)
-            .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.red : theme.textSecondary) : theme.textPrimary)
+            .foregroundColor(phase == .idle ? (theme.closeColor ?? theme.textSecondary) : theme.textPrimary)
             .padding(EdgeInsets(top: 5, leading: 6.5, bottom: 5, trailing: 6.5))
             .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
@@ -50,7 +50,7 @@ struct SessionSidebar: Block {
       .padding(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 6))
       .sizing(y: .fixed(36))
       .sizing(x: .grow)
-      .border(theme.appearance == .compact ? .clear : theme.border)
+      .border(theme.chromeBorder ?? theme.border)
 
       ScrollView(
         showsIndicator: true,
@@ -104,11 +104,11 @@ struct SessionSidebar: Block {
         .sizing(x: .grow)
       }
     }
-    .padding(theme.appearance == .compact ? 8 : 0)
+    .padding(theme.sidebarPadding)
     .sizing(x: .fixed(theme.sidebarWidth))
     .sizing(y: .grow)
     .background(theme.sidebarBackground)
-    .border(theme.appearance == .compact ? .clear : theme.border)
+    .border(theme.chromeBorder ?? theme.border)
   }
 }
 
@@ -119,51 +119,18 @@ struct SessionGroupHeader: Block {
   let isCollapsed: Bool
 
   @MainActor var body: some Block {
-    HStack(spacing: 4) {
-      Interactive(
-        action: { store.toggleGroup(group.cwd) }
-      ) { phase in
-        HStack(spacing: 5) {
-          Text(isCollapsed ? ">" : "v")
-            .fontScale(theme.smallScale)
-            .foregroundColor(theme.appearance == .compact ? theme.peach : theme.textSecondary)
-          MarqueeText(
-            sanitizeASCII(group.title),
-            id: "group-name:\(group.cwd)",
-            color: group.open.contains(where: \.isRunning)
-              ? theme.purple : theme.appearance == .compact ? theme.peach : phase == .hovered ? theme.accent : theme.textPrimary,
-            scale: theme.smallScale,
-            isScrolling: phase == .hovered
-          )
-          Text("\(group.open.count + group.totalSavedCount)")
-            .fontScale(theme.smallScale)
-            .foregroundColor(theme.appearance == .compact ? theme.yellow : theme.textSecondary)
-        }
-        .padding(EdgeInsets(top: 7, leading: 8, bottom: 5, trailing: 4))
-        .sizing(x: .grow)
-        .background(phase == .hovered ? theme.sidebarHover : .clear)
-      }
-      Interactive(
-        action: { store.newSession(in: group.cwd) }
-      ) { phase in
-        VStack(spacing: 0) {
-          Spacer()
-          HStack(spacing: 0) {
-            Spacer()
-            Text("+")
-              .fontScale(theme.textScale)
-              .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.green : theme.textSecondary) : theme.textPrimary)
-            Spacer()
-          }
-          .sizing(x: .grow)
-          Spacer()
-        }
-        .sizing(x: .fixed(28), y: .fixed(28))
-        .background(phase == .idle ? .clear : theme.sidebarHover)
-      }
-      .padding(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 4))
-    }
-    .sizing(x: .grow)
+    ScribeSessionGroup(
+      id: "group-name:\(group.cwd)", title: sanitizeASCII(group.title),
+      count: group.open.count + group.totalSavedCount, isCollapsed: isCollapsed,
+      style: theme.sessionGroupStyle ?? ScribeSessionGroupStyle(
+        foreground: group.open.contains(where: \.isRunning)
+          ? theme.purple : theme.textPrimary,
+        hoveredForeground: theme.accent,
+        count: theme.textSecondary,
+        newSession: theme.textSecondary,
+        hoverBackground: theme.sidebarHover, fontScale: theme.smallScale),
+      onToggle: { store.toggleGroup(group.cwd) },
+      onNewSession: { store.newSession(in: group.cwd) })
   }
 }
 
@@ -174,40 +141,24 @@ struct SessionRow: Block {
   let isActive: Bool
 
   @MainActor var body: some Block {
-    Interactive(
-      action: { store.switchTo(session.sessionId) },
-      content: { phase in
-        HStack(spacing: 5) {
-          if session.isRunning {
-            ActivitySpinner(color: theme.purple)
-          }
-          MarqueeText(
-            sanitizeASCII(session.displayName),
-            id: "session-name:\(session.sessionId.uuidString)",
-            color: session.isRunning
-              ? theme.purple
-              : isActive || phase == .hovered ? theme.textPrimary : theme.textSecondary,
-            scale: theme.smallScale,
-            isScrolling: phase == .hovered
-          )
-          if phase != .hovered {
-            if session.hasUnreadActivity && !isActive {
-              Text("●").fontScale(theme.smallScale).foregroundColor(theme.accent)
-            }
-            Text(sanitizeASCII(session.modelName))
-              .fontScale(theme.smallScale)
-              .foregroundColor(theme.appearance == .compact ? theme.blue : theme.textSecondary)
-          }
-          sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
-        }
-        .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 6))
-        .sizing(y: .fixed(30))
-        .sizing(x: .grow)
-        .background(isActive ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
-        .border(isActive ? theme.accent : .clear, width: isActive ? 1 : 0)
-      }
-    )
+    HStack(spacing: 5) {
+      ScribeSessionRow(
+        id: "session-name:\(session.sessionId)", title: sanitizeASCII(session.displayName),
+        subtitle: sanitizeASCII(session.modelName), isSelected: isActive,
+        isRunning: session.isRunning, isUnread: session.hasUnreadActivity,
+        style: sessionRowStyle(theme), onSelect: { store.switchTo(session.sessionId) })
+      sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
+    }.sizing(x: .grow)
   }
+}
+
+private func sessionRowStyle(_ theme: MacTheme) -> ScribeSessionRowStyle {
+  theme.sessionRowStyle ?? ScribeSessionRowStyle(
+    foreground: theme.textSecondary,
+    secondaryForeground: theme.textSecondary,
+    selectedForeground: theme.textPrimary, activity: theme.purple,
+    selection: theme.sidebarSelection, hover: theme.sidebarHover, border: theme.accent,
+    fontScale: theme.smallScale)
 }
 
 struct SavedSessionRow: Block {
@@ -217,35 +168,13 @@ struct SavedSessionRow: Block {
 
   @MainActor var body: some Block {
     let isSelected = store.selectedSavedSession?.id == saved.id
-    return Interactive(
-      action: { store.openSavedSession(saved) },
-      content: { phase in
-        HStack(spacing: 5) {
-          Text("-")
-            .fontScale(theme.smallScale)
-            .foregroundColor(theme.appearance == .compact ? theme.red : theme.textSecondary)
-          MarqueeText(
-            sanitizeASCII(saved.metadata.displayName),
-            id: "saved-session-name:\(saved.id.uuidString)",
-            color: phase == .hovered ? theme.textPrimary : theme.textSecondary,
-            scale: theme.smallScale,
-            isScrolling: phase == .hovered
-          )
-          if phase != .hovered {
-            Text(sanitizeASCII(saved.metadata.model))
-              .fontScale(theme.smallScale)
-              .foregroundColor(theme.appearance == .compact ? theme.blue : theme.textSecondary)
-          }
-          sessionActions(
-            store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
-        }
-        .padding(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 8))
-        .sizing(y: .fixed(30))
-        .sizing(x: .grow)
-        .background(isSelected ? theme.sidebarSelection : phase == .hovered ? theme.sidebarHover : .clear)
-        .border(isSelected ? theme.accent : .clear, width: isSelected ? 1 : 0)
-      }
-    )
+    return HStack(spacing: 5) {
+      ScribeSessionRow(
+        id: "saved-session-name:\(saved.id)", title: sanitizeASCII(saved.metadata.displayName),
+        subtitle: sanitizeASCII(saved.metadata.model), isSelected: isSelected,
+        style: sessionRowStyle(theme), onSelect: { store.openSavedSession(saved) })
+      sessionActions(store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
+    }.sizing(x: .grow)
   }
 }
 
@@ -265,7 +194,7 @@ private final class MarqueeAnimationState {
   }
 }
 
-private struct MarqueeText: PrimitiveBlock {
+struct MarqueeText: PrimitiveBlock {
   let text: String
   let id: String
   let color: Color
@@ -334,7 +263,7 @@ private func sessionActions(
     ) { phase in
       Text(pinned ? "◆" : "◇")
         .fontScale(theme.smallScale)
-        .foregroundColor(theme.appearance == .compact ? theme.yellow : pinned ? theme.yellow : theme.orange)
+        .foregroundColor(pinned ? theme.yellow : theme.orange)
         .sizing(x: .fixed(24), y: .fixed(24))
         .background(phase == .idle ? .clear : theme.sidebarHover)
     }
@@ -343,7 +272,7 @@ private func sessionActions(
     ) { phase in
       Text("✎")
         .fontScale(theme.smallScale)
-        .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.red : theme.green) : theme.textPrimary)
+        .foregroundColor(phase == .idle ? (theme.renameColor ?? theme.green) : theme.textPrimary)
         .sizing(x: .fixed(24), y: .fixed(24))
         .background(phase == .idle ? .clear : theme.sidebarHover)
     }

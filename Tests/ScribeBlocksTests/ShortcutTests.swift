@@ -25,7 +25,7 @@ private struct ShortcutSurface: PrimitiveBlock {
         state.submitted += 1
       }
     }
-    let field = GrowingTextField(
+    let field = ScribeChatInput(
       "", fontScale: 1,
       text: { state.text }, onChange: { state.text = $0 }, onNewline: { state.text += "\n" },
       onEndEditing: {
