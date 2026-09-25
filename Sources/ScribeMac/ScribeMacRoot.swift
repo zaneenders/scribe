@@ -55,6 +55,8 @@ struct ScribeMacRoot: Block {
                 ReadyLayout(store: store, session: active, theme: theme)
               } else if let selected = store.selectedSavedSession {
                 sessionLoadingState(selected)
+              } else if theme.appearance == .compact {
+                compactEmptyState
               } else {
                 emptyState
               }
@@ -122,7 +124,7 @@ struct ScribeMacRoot: Block {
     .sizing(x: .grow, y: .grow)
   }
 
-  @MainActor private var emptyState: some Block {
+  @MainActor private var compactEmptyState: some Block {
     VStack(spacing: 0) {
       VStack(spacing: 6) {
         HStack(spacing: 6) {
@@ -152,14 +154,64 @@ struct ScribeMacRoot: Block {
     .background(theme.background)
   }
 
+  @MainActor private var emptyState: some Block {
+    VStack(spacing: 0) {
+      Spacer()
+      HStack(spacing: 0) {
+        Spacer()
+        VStack(spacing: 14) {
+          HStack(spacing: 8) {
+            Text("◆").fontScale(theme.smallScale).foregroundColor(theme.accent)
+            Text("START A WORKSPACE")
+              .fontScale(theme.smallScale)
+              .foregroundColor(theme.accent)
+            Spacer()
+          }
+          HStack(spacing: 0) {
+            Text("No session open")
+              .fontScale(theme.textScale)
+              .foregroundColor(theme.textPrimary)
+            Spacer()
+          }
+          WrappedText(
+            text: "Choose a project folder to start a new session, or continue your most recent conversation.",
+            theme: theme, color: theme.textSecondary, scale: theme.smallScale)
+          HStack(spacing: 8) {
+            Button(
+              "Choose project", fontScale: theme.textScale,
+              style: theme.buttonStyle(pressedColor: theme.accent),
+              padding: EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+            ) { store.newSession() }
+            Button(
+              "Resume latest", fontScale: theme.textScale,
+              padding: EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+            ) { store.resumeLatest() }
+            Spacer()
+          }
+          WrappedText(
+            text: "Tip: select any saved session in the sidebar to open it directly.",
+            theme: theme, color: theme.textSecondary, scale: theme.smallScale)
+        }
+        .padding(EdgeInsets(top: 22, leading: 24, bottom: 22, trailing: 24))
+        .sizing(x: .fixed(560))
+        .background(theme.panelBackground)
+        .border(theme.border)
+        Spacer()
+      }
+      Spacer()
+    }
+    .sizing(x: .grow, y: .grow)
+    .background(theme.background)
+  }
+
   @MainActor private var header: some Block {
     HStack(spacing: 8) {
-      Text("Scribe")
+      Text(theme.appearance == .compact ? "Scribe" : "SCRIBE")
         .fontScale(theme.titleScale)
-        .foregroundColor(theme.textPrimary)
+        .foregroundColor(theme.appearance == .compact ? theme.textPrimary : theme.accent)
       Button(
         store.isSessionSidebarVisible ? "Sessions ◀" : "Sessions ▶", fontScale: theme.smallScale,
-        style: theme.buttonStyle(tint: theme.red),
+        style: theme.appearance == .compact ? theme.buttonStyle(tint: theme.red) : nil,
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
@@ -175,6 +227,7 @@ struct ScribeMacRoot: Block {
     .sizing(y: .fixed(theme.headerHeight))
     .sizing(x: .grow)
     .background(theme.headerBackground)
+    .border(theme.appearance == .compact ? .clear : theme.border)
   }
 
   @MainActor private func errorBanner(_ message: String) -> some Block {

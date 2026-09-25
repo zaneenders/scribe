@@ -9,11 +9,13 @@ struct SessionSidebar: Block {
     VStack(spacing: 0) {
       HStack(spacing: 6) {
         Button(
-          "Folder", fontScale: theme.smallScale, style: theme.buttonStyle(tint: theme.peach),
+          "Folder", fontScale: theme.smallScale,
+          style: theme.appearance == .compact ? theme.buttonStyle(tint: theme.peach) : nil,
           padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
         ) { store.toggleDirectoryPicker() }
         Button(
-          "Resume", fontScale: theme.smallScale, style: theme.buttonStyle(tint: theme.green),
+          "Resume", fontScale: theme.smallScale,
+          style: theme.appearance == .compact ? theme.buttonStyle(tint: theme.green) : nil,
           padding: EdgeInsets(top: 6, leading: 9, bottom: 6, trailing: 9)
         ) { store.resumeLatest() }
         Spacer()
@@ -21,16 +23,17 @@ struct SessionSidebar: Block {
       .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
       .sizing(y: .fixed(44))
       .sizing(x: .grow)
+      .border(theme.appearance == .compact ? .clear : theme.border)
 
       HStack(spacing: 6) {
         Text("SESSIONS")
           .fontScale(theme.smallScale)
-          .foregroundColor(theme.red)
+          .foregroundColor(theme.appearance == .compact ? theme.red : theme.textSecondary)
         Spacer()
         Interactive(action: { store.refreshSavedSessions() }) { phase in
           Text("↻")
             .fontScale(theme.smallScale)
-            .foregroundColor(phase == .idle ? theme.blue : theme.textPrimary)
+            .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.blue : theme.textSecondary) : theme.textPrimary)
             .padding(EdgeInsets(top: 5, leading: 6.5, bottom: 5, trailing: 6.5))
             .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
@@ -38,7 +41,7 @@ struct SessionSidebar: Block {
         Interactive(action: { store.closeSessionSidebar() }) { phase in
           Text("×")
             .fontScale(theme.textScale)
-            .foregroundColor(phase == .idle ? theme.red : theme.textPrimary)
+            .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.red : theme.textSecondary) : theme.textPrimary)
             .padding(EdgeInsets(top: 5, leading: 6.5, bottom: 5, trailing: 6.5))
             .sizing(x: .fixed(24), y: .fixed(24))
             .background(phase == .idle ? .clear : theme.sidebarHover)
@@ -47,6 +50,7 @@ struct SessionSidebar: Block {
       .padding(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 6))
       .sizing(y: .fixed(36))
       .sizing(x: .grow)
+      .border(theme.appearance == .compact ? .clear : theme.border)
 
       ScrollView(
         showsIndicator: true,
@@ -100,10 +104,11 @@ struct SessionSidebar: Block {
         .sizing(x: .grow)
       }
     }
-    .padding(8)
+    .padding(theme.appearance == .compact ? 8 : 0)
     .sizing(x: .fixed(theme.sidebarWidth))
     .sizing(y: .grow)
     .background(theme.sidebarBackground)
+    .border(theme.appearance == .compact ? .clear : theme.border)
   }
 }
 
@@ -121,18 +126,18 @@ struct SessionGroupHeader: Block {
         HStack(spacing: 5) {
           Text(isCollapsed ? ">" : "v")
             .fontScale(theme.smallScale)
-            .foregroundColor(theme.peach)
+            .foregroundColor(theme.appearance == .compact ? theme.peach : theme.textSecondary)
           MarqueeText(
             sanitizeASCII(group.title),
             id: "group-name:\(group.cwd)",
             color: group.open.contains(where: \.isRunning)
-              ? theme.purple : theme.peach,
+              ? theme.purple : theme.appearance == .compact ? theme.peach : phase == .hovered ? theme.accent : theme.textPrimary,
             scale: theme.smallScale,
             isScrolling: phase == .hovered
           )
           Text("\(group.open.count + group.totalSavedCount)")
             .fontScale(theme.smallScale)
-            .foregroundColor(theme.yellow)
+            .foregroundColor(theme.appearance == .compact ? theme.yellow : theme.textSecondary)
         }
         .padding(EdgeInsets(top: 7, leading: 8, bottom: 5, trailing: 4))
         .sizing(x: .grow)
@@ -147,7 +152,7 @@ struct SessionGroupHeader: Block {
             Spacer()
             Text("+")
               .fontScale(theme.textScale)
-              .foregroundColor(phase == .idle ? theme.green : theme.textPrimary)
+              .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.green : theme.textSecondary) : theme.textPrimary)
             Spacer()
           }
           .sizing(x: .grow)
@@ -191,7 +196,7 @@ struct SessionRow: Block {
             }
             Text(sanitizeASCII(session.modelName))
               .fontScale(theme.smallScale)
-              .foregroundColor(theme.blue)
+              .foregroundColor(theme.appearance == .compact ? theme.blue : theme.textSecondary)
           }
           sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
         }
@@ -218,7 +223,7 @@ struct SavedSessionRow: Block {
         HStack(spacing: 5) {
           Text("-")
             .fontScale(theme.smallScale)
-            .foregroundColor(theme.red)
+            .foregroundColor(theme.appearance == .compact ? theme.red : theme.textSecondary)
           MarqueeText(
             sanitizeASCII(saved.metadata.displayName),
             id: "saved-session-name:\(saved.id.uuidString)",
@@ -229,7 +234,7 @@ struct SavedSessionRow: Block {
           if phase != .hovered {
             Text(sanitizeASCII(saved.metadata.model))
               .fontScale(theme.smallScale)
-              .foregroundColor(theme.blue)
+              .foregroundColor(theme.appearance == .compact ? theme.blue : theme.textSecondary)
           }
           sessionActions(
             store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
@@ -329,7 +334,7 @@ private func sessionActions(
     ) { phase in
       Text(pinned ? "◆" : "◇")
         .fontScale(theme.smallScale)
-        .foregroundColor(theme.yellow)
+        .foregroundColor(theme.appearance == .compact ? theme.yellow : pinned ? theme.yellow : theme.orange)
         .sizing(x: .fixed(24), y: .fixed(24))
         .background(phase == .idle ? .clear : theme.sidebarHover)
     }
@@ -338,7 +343,7 @@ private func sessionActions(
     ) { phase in
       Text("✎")
         .fontScale(theme.smallScale)
-        .foregroundColor(phase == .idle ? theme.red : theme.textPrimary)
+        .foregroundColor(phase == .idle ? (theme.appearance == .compact ? theme.red : theme.green) : theme.textPrimary)
         .sizing(x: .fixed(24), y: .fixed(24))
         .background(phase == .idle ? .clear : theme.sidebarHover)
     }

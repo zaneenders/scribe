@@ -47,7 +47,7 @@ struct TranscriptView: Block {
       revealRow: activeBoundaryRow(in: rows)
     )
     .sizing(x: .grow, y: .grow)
-    .background(theme.background)
+    .background(theme.appearance == .compact ? theme.background : theme.panelBackground)
     .id(session.sessionId)
   }
 

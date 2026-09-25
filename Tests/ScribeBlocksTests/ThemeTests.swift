@@ -15,8 +15,25 @@ struct ThemeTests {
     let frame = renderer.render()
     #expect(
       frame.commands.contains(.fillRect(rect: Rect(x: 0, y: 0, width: 800, height: 600), color: theme.background)))
-    #expect(hasText("Scribe", color: theme.foreground, in: frame.commands))
+    #expect(hasText("SCRIBE", color: theme.accent, in: frame.commands))
     #expect(hasFill(theme.surface, in: frame.commands))
+  }
+
+  @Test func compactAppearanceDoesNotChangeStandaloneView() {
+    let theme = ChromaTheme.dark
+    let workspace = ScribeWorkspace()
+    let renderer = HeadlessRenderer(size: Size(width: 800, height: 600))
+    defer { renderer.close() }
+
+    renderer.content = ScribeBlock(workspace: workspace).chromaTheme(theme)
+    let standard = renderer.render()
+    #expect(hasText("SCRIBE", color: theme.accent, in: standard.commands))
+    #expect(!hasText("NEW SESSION", color: theme.positive, in: standard.commands))
+
+    renderer.content = ScribeBlock(workspace: workspace, appearance: .compact).chromaTheme(theme)
+    let compact = renderer.render()
+    #expect(hasText("Scribe", color: theme.foreground, in: compact.commands))
+    #expect(hasText("NEW SESSION", color: theme.positive, in: compact.commands))
   }
 
   @Test func localChromeUsesInheritedPalette() {
@@ -26,25 +43,26 @@ struct ThemeTests {
     theme.textField.idleBackground = Color(r: 0.31, g: 0.32, b: 0.33, a: 1)
 
     let local = MacTheme(chromaTheme: theme)
-    #expect(local.composerBackground == theme.elevatedSurface)
+    #expect(local.composerBackground == theme.background)
     #expect(local.statusBackground == theme.elevatedSurface)
     #expect(local.sidebarBackground == theme.elevatedSurface)
     #expect(local.userBubbleBackground == theme.textField.idleBackground)
   }
 
-  @Test func localWorkspaceUsesCompactColorfulChrome() {
+  @Test func compactAppearanceDoesNotChangeStandaloneDefaults() {
     var theme = ChromaTheme.dark
-    theme.elevatedSurface = Color(r: 0.1, g: 0.07, b: 0.12, a: 1)
-    theme.positive = Color(r: 0.6, g: 0.85, b: 0.75, a: 1)
-    theme.negative = Color(r: 0.9, g: 0.65, b: 0.75, a: 1)
-    theme.textField.editingBorder = Color(r: 0.55, g: 0.75, b: 0.9, a: 1)
-    let local = MacTheme(chromaTheme: theme)
-    #expect(local.sidebarWidth == 260)
-    #expect(local.smallScale == 0.55)
-    #expect(local.green == theme.positive)
-    #expect(local.red == theme.negative)
-    #expect(local.blue == theme.textField.editingBorder)
-    #expect(local.composerBackground == theme.elevatedSurface)
+    theme.textField.editingBorder = Color(r: 0.5, g: 0.7, b: 0.9, a: 1)
+    let standard = MacTheme(chromaTheme: theme, appearance: .standard)
+    let compact = MacTheme(chromaTheme: theme, appearance: .compact)
+    #expect(standard.sidebarWidth == 320)
+    #expect(standard.smallScale == 0.75)
+    #expect(standard.composerBackground == theme.background)
+    #expect(standard.buttonStyle().cornerRadius == 0)
+    #expect(compact.sidebarWidth == 260)
+    #expect(compact.smallScale == 0.55)
+    #expect(compact.composerBackground == theme.elevatedSurface)
+    #expect(compact.blue == theme.textField.editingBorder)
+    #expect(compact.buttonStyle(tint: compact.blue).foreground == compact.blue)
   }
 
   @Test func composerUsesInheritedTextFieldColors() {

@@ -8,7 +8,7 @@ struct MacTheme: Sendable {
     panelBackground = chromaTheme.surface
     headerBackground = chromaTheme.elevatedSurface
     statusBackground = chromaTheme.elevatedSurface
-    composerBackground = chromaTheme.elevatedSurface
+    composerBackground = chromaTheme.background
     border = chromaTheme.border
     buttonIdle = chromaTheme.button.idleBackground
     buttonHover = chromaTheme.button.hoveredBackground
@@ -22,8 +22,6 @@ struct MacTheme: Sendable {
     yellow = chromaTheme.warning
     orange = chromaTheme.warning
     purple = chromaTheme.accent
-    blue = chromaTheme.textField.editingBorder
-    peach = chromaTheme.textField.caret
     textPrimary = chromaTheme.foreground
     textSecondary = chromaTheme.secondaryForeground
     userBubbleBackground = chromaTheme.textField.idleBackground
@@ -37,17 +35,34 @@ struct MacTheme: Sendable {
     warningText = chromaTheme.warning
   }
 
+  init(chromaTheme: ChromaTheme, appearance: ScribeAppearance) {
+    self.init(chromaTheme: chromaTheme)
+    self.appearance = appearance
+    guard appearance == .compact else { return }
+    sidebarWidth = 260
+    titleScale = 0.72
+    textScale = 0.65
+    smallScale = 0.55
+    composerBackground = chromaTheme.elevatedSurface
+    blue = chromaTheme.textField.editingBorder
+    peach = chromaTheme.textField.caret
+  }
+
+  var appearance: ScribeAppearance = .standard
+  var blue = Color(r: 0.58, g: 0.765, b: 0.89, a: 1)
+  var peach = Color(r: 0.91, g: 0.694, b: 0.569, a: 1)
+
   var margin: Float = 16
   var spacing: Float = 10
   var panelPadding: Float = 14
   var headerHeight: Float = 40
   var statusHeight: Float = 44
   var itemHeight: Float = 48
-  var sidebarWidth: Float = 260
+  var sidebarWidth: Float = 320
 
-  var titleScale: Float = 0.72
-  var textScale: Float = 0.65
-  var smallScale: Float = 0.55
+  var titleScale: Float = 0.7
+  var textScale: Float = 0.85
+  var smallScale: Float = 0.75
 
   var background = Color(r: 0.055, g: 0.063, b: 0.085, a: 1)
   var panelBackground = Color(r: 0.070, g: 0.080, b: 0.105, a: 1)
@@ -69,8 +84,6 @@ struct MacTheme: Sendable {
   var orange = Color(r: 1, g: 0.55, b: 0.15, a: 1)
   var purple = Color(r: 0.7, g: 0.3, b: 0.9, a: 1)
 
-  var blue = Color(r: 0.58, g: 0.765, b: 0.89, a: 1)
-  var peach = Color(r: 0.91, g: 0.694, b: 0.569, a: 1)
   var textPrimary = Color(r: 0.90, g: 0.91, b: 0.94, a: 1)
   var textSecondary = Color(r: 0.63, g: 0.66, b: 0.73, a: 1)
   var userBubbleBackground = Color(r: 0.105, g: 0.15, b: 0.22, a: 1)
@@ -92,17 +105,17 @@ struct MacTheme: Sendable {
   }
 
   func buttonStyle(pressedColor: Color? = nil, tint: Color? = nil) -> ButtonStyle {
-    let color = tint ?? textPrimary
+    let color = appearance == .compact ? (tint ?? textPrimary) : textPrimary
     return ButtonStyle(
       idleBackground: buttonIdle,
       hoveredBackground: buttonHover,
       pressedBackground: pressedColor ?? buttonPressed,
       foreground: color,
-      border: tint == nil ? border : Color(
+      border: appearance == .compact && tint != nil ? Color(
         r: border.r + (color.r - border.r) * 0.3,
         g: border.g + (color.g - border.g) * 0.3,
-        b: border.b + (color.b - border.b) * 0.3, a: 1),
-      cornerRadius: 7, borderWidth: 1
+        b: border.b + (color.b - border.b) * 0.3, a: 1) : border,
+      cornerRadius: appearance == .compact ? 7 : 0
     )
   }
 }

@@ -9,18 +9,30 @@ public final class ScribeWorkspace {
   }
 }
 
+public enum ScribeAppearance: Sendable {
+  case standard
+  case compact
+}
+
 public struct ScribeBlock: Block {
   private let workspace: ScribeWorkspace?
+  private let appearance: ScribeAppearance
 
-  public init() { workspace = nil }
+  public init() {
+    workspace = nil
+    appearance = .standard
+  }
 
-  public init(workspace: ScribeWorkspace) { self.workspace = workspace }
+  public init(workspace: ScribeWorkspace, appearance: ScribeAppearance = .standard) {
+    self.workspace = workspace
+    self.appearance = appearance
+  }
 
   @MainActor public var body: some Block {
     let store = workspace?.store ?? ScribeMacStore.shared
     store.start()
     return ThemeReader { chromaTheme in
-      ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: chromaTheme))
+      ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: chromaTheme, appearance: appearance))
         .chromaTheme(chromaTheme)
     }
   }
