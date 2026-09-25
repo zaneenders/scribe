@@ -19,7 +19,10 @@ public struct ScribeBlock: Block {
   @MainActor public var body: some Block {
     let store = workspace?.store ?? ScribeMacStore.shared
     store.start()
-    return ScribeMacRoot(store: store)
+    return ThemeReader { chromaTheme in
+      ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: chromaTheme))
+        .chromaTheme(chromaTheme)
+    }
   }
 }
 

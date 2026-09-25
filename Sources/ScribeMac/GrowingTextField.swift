@@ -15,15 +15,6 @@ struct GrowingTextField: PrimitiveBlock {
   let onNewline: @MainActor () -> Void
   let onEndEditing: @MainActor () -> CommandResult
   let onTextEvent: @MainActor (TextEditEvent, String) -> String?
-  let textColor: Color
-  let placeholderColor: Color
-  let caretColor: Color
-  let idleColor: Color
-  let hoveredColor: Color
-  let editingColor: Color
-  let borderColor: Color
-  let editingBorderColor: Color
-
   @MainActor init(
     _ placeholder: String,
     fontScale: Float,
@@ -50,14 +41,6 @@ struct GrowingTextField: PrimitiveBlock {
     self.onNewline = onNewline
     self.onEndEditing = onEndEditing
     self.onTextEvent = onTextEvent
-    self.textColor = .white
-    self.placeholderColor = Color(r: 0.45, g: 0.45, b: 0.55, a: 1)
-    self.caretColor = .white
-    self.idleColor = Color(r: 0.14, g: 0.15, b: 0.22, a: 1)
-    self.hoveredColor = Color(r: 0.17, g: 0.19, b: 0.28, a: 1)
-    self.editingColor = Color(r: 0.10, g: 0.12, b: 0.20, a: 1)
-    self.borderColor = Color(r: 0.22, g: 0.22, b: 0.32, a: 1)
-    self.editingBorderColor = Color(r: 0.3, g: 0.6, b: 1.0, a: 1)
   }
 
   @MainActor var expandsHorizontally: Bool { true }
@@ -109,10 +92,11 @@ struct GrowingTextField: PrimitiveBlock {
         return target.start + min(column, target.count)
       })
 
+    let style = context.theme.textField
     drawList.fillRect(
       rect,
-      color: state.editing ? editingColor : state.hovered ? hoveredColor : idleColor)
-    drawList.strokeRect(rect, width: 1, color: state.editing ? editingBorderColor : borderColor)
+      color: state.editing ? style.editingBackground : state.hovered ? style.hoveredBackground : style.idleBackground)
+    drawList.strokeRect(rect, width: style.borderWidth, color: state.editing ? style.editingBorder : style.border)
 
     let inner = Rect(
       x: rect.minX + padding,
@@ -125,7 +109,7 @@ struct GrowingTextField: PrimitiveBlock {
 
     drawList.pushClip(inner)
     if getText().isEmpty && !state.editing {
-      drawList.text(placeholder, at: inner.origin, color: placeholderColor, scale: fontScale)
+      drawList.text(placeholder, at: inner.origin, color: style.placeholder, scale: fontScale)
     } else {
       for (visibleIndex, row) in visibleRows.enumerated() {
         let rowText = layout.text(for: row)
@@ -142,7 +126,7 @@ struct GrowingTextField: PrimitiveBlock {
               width: Float(localEnd - localStart) * cellWidth,
               height: lineAdvance)
             drawList.fillRect(selectionRect, color: context.theme.focus.selectionBackground)
-            drawList.text(rowText, at: origin, color: textColor, scale: fontScale)
+            drawList.text(rowText, at: origin, color: style.foreground, scale: fontScale)
             let selected = String(Array(rowText)[localStart..<localEnd])
             drawList.pushClip(selectionRect)
             drawList.text(
@@ -154,7 +138,7 @@ struct GrowingTextField: PrimitiveBlock {
             continue
           }
         }
-        drawList.text(rowText, at: origin, color: textColor, scale: fontScale)
+        drawList.text(rowText, at: origin, color: style.foreground, scale: fontScale)
       }
     }
     if let caret = state.caretOffset, state.selectionRange == nil, context.caretVisible,
@@ -168,7 +152,7 @@ struct GrowingTextField: PrimitiveBlock {
           y: inner.minY + Float(caretRow - firstVisible) * lineAdvance - 1,
           width: max(1, fontScale),
           height: metrics.glyphHeight * fontScale + 2),
-        color: caretColor)
+        color: style.caret)
     }
     drawList.popClip()
   }

@@ -3,7 +3,7 @@ import Foundation
 
 struct ScribeMacRoot: Block {
   let store: ScribeMacStore
-  let theme = MacTheme()
+  let theme: MacTheme
 
   @MainActor var body: some Block {
     RenderContextBridge(

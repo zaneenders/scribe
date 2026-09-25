@@ -1,6 +1,40 @@
 import Chroma
 
 struct MacTheme: Sendable {
+  init() {}
+
+  init(chromaTheme: ChromaTheme) {
+    background = chromaTheme.background
+    panelBackground = chromaTheme.surface
+    headerBackground = chromaTheme.elevatedSurface
+    statusBackground = chromaTheme.background
+    composerBackground = chromaTheme.surface
+    border = chromaTheme.border
+    buttonIdle = chromaTheme.button.idleBackground
+    buttonHover = chromaTheme.button.hoveredBackground
+    buttonPressed = chromaTheme.button.pressedBackground
+    sidebarBackground = chromaTheme.elevatedSurface
+    sidebarSelection = chromaTheme.button.hoveredBackground
+    sidebarHover = chromaTheme.button.hoveredBackground
+    accent = chromaTheme.accent
+    green = chromaTheme.positive
+    red = chromaTheme.negative
+    yellow = chromaTheme.warning
+    orange = chromaTheme.warning
+    purple = chromaTheme.accent
+    textPrimary = chromaTheme.foreground
+    textSecondary = chromaTheme.secondaryForeground
+    userBubbleBackground = chromaTheme.button.hoveredBackground
+    reasoningText = chromaTheme.accent
+    codeBackground = chromaTheme.background
+    codeText = chromaTheme.positive
+    inlineCodeText = chromaTheme.warning
+    toolHeaderText = chromaTheme.accent
+    toolOutputText = chromaTheme.secondaryForeground
+    errorText = chromaTheme.negative
+    warningText = chromaTheme.warning
+  }
+
   var margin: Float = 16
   var spacing: Float = 10
   var panelPadding: Float = 14
