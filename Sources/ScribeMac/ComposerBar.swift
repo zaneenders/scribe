@@ -156,12 +156,12 @@ struct ComposerBar: Block {
           }
           Button(
             "TLDR", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.purple),
+            style: theme.buttonStyle(pressedColor: theme.purple, tint: theme.yellow),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.tldr) }
           Button(
             "Fork", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.orange),
+            style: theme.buttonStyle(pressedColor: theme.orange, tint: theme.peach),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.fork) }
         }
@@ -174,7 +174,6 @@ struct ComposerBar: Block {
     .padding(theme.margin)
     .sizing(x: .grow)
     .background(theme.composerBackground)
-    .border(theme.border)
   }
 }
 
