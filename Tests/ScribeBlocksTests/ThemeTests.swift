@@ -19,6 +19,19 @@ struct ThemeTests {
     #expect(hasFill(theme.surface, in: frame.commands))
   }
 
+  @Test func localChromeUsesInheritedPalette() {
+    var theme = ChromaTheme.dark
+    theme.background = Color(r: 0.11, g: 0.12, b: 0.13, a: 1)
+    theme.elevatedSurface = Color(r: 0.21, g: 0.22, b: 0.23, a: 1)
+    theme.textField.idleBackground = Color(r: 0.31, g: 0.32, b: 0.33, a: 1)
+
+    let local = MacTheme(chromaTheme: theme)
+    #expect(local.composerBackground == theme.background)
+    #expect(local.statusBackground == theme.elevatedSurface)
+    #expect(local.sidebarBackground == theme.elevatedSurface)
+    #expect(local.userBubbleBackground == theme.textField.idleBackground)
+  }
+
   @Test func composerUsesInheritedTextFieldColors() {
     var theme = ChromaTheme.dark
     theme.textField = TextFieldStyle(
@@ -30,7 +43,7 @@ struct ThemeTests {
       caret: theme.accent, border: theme.border, editingBorder: theme.accent)
     let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
     defer { renderer.close() }
-    renderer.content = GrowingTextField(
+    renderer.content = ScribeChatInput(
       "Message Scribe", fontScale: 0.85, text: { "" },
       onChange: { _ in }, onNewline: {}
     ).chromaTheme(theme)

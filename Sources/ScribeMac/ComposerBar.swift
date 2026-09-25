@@ -44,7 +44,7 @@ struct ComposerBar: Block {
   @MainActor var body: some Block {
     VStack(spacing: 6) {
       TrailingControlsRow(spacing: 8) {
-        GrowingTextField(
+        ScribeChatInput(
           session.isRunning ? "Queue a message..." : "Message Scribe",
           fontScale: theme.textScale,
           text: { session.draft },
@@ -72,7 +72,7 @@ struct ComposerBar: Block {
           HStack(spacing: 6) {
             Button(
               "Queue ↵", fontScale: theme.textScale,
-              style: theme.buttonStyle(pressedColor: theme.accent)
+              style: theme.submitButtonStyle ?? theme.buttonStyle(pressedColor: theme.accent)
             ) { session.submit() }
             Button(
               "Stop ■", fontScale: theme.textScale,
@@ -82,7 +82,7 @@ struct ComposerBar: Block {
         } else {
           Button(
             "Send ↵", fontScale: theme.textScale,
-            style: theme.buttonStyle(pressedColor: theme.accent)
+            style: theme.submitButtonStyle ?? theme.buttonStyle(pressedColor: theme.accent)
           ) { session.submit() }
         }
       }
@@ -105,8 +105,8 @@ struct ComposerBar: Block {
                 .foregroundColor(theme.textSecondary)
             }
             .padding(EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10))
-            .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
-            .border(theme.border)
+            .roundedBackground(phase == .hovered ? theme.buttonHover : theme.buttonIdle, radius: theme.cornerRadius)
+            .roundedBorder(theme.border, radius: theme.cornerRadius)
           }
           if let profile = session.profileCatalog.first(where: { $0.name == session.profileName }),
             !profile.reasoningEfforts.isEmpty
@@ -127,8 +127,8 @@ struct ComposerBar: Block {
                   .foregroundColor(theme.textSecondary)
               }
               .padding(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
-              .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
-              .border(theme.border)
+              .roundedBackground(phase == .hovered ? theme.buttonHover : theme.buttonIdle, radius: theme.cornerRadius)
+              .roundedBorder(theme.border, radius: theme.cornerRadius)
             }
           }
           if let profile = session.profileCatalog.first(where: { $0.name == session.profileName }),
@@ -150,18 +150,20 @@ struct ComposerBar: Block {
                   .foregroundColor(theme.textSecondary)
               }
               .padding(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
-              .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
-              .border(theme.border)
+              .roundedBackground(phase == .hovered ? theme.buttonHover : theme.buttonIdle, radius: theme.cornerRadius)
+              .roundedBorder(theme.border, radius: theme.cornerRadius)
             }
           }
           Button(
             "TLDR", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.purple),
+            style: theme.buttonStyle(pressedColor: theme.purple,
+              tint: theme.yellow),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.tldr) }
           Button(
             "Fork", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.orange),
+            style: theme.buttonStyle(pressedColor: theme.orange,
+              tint: theme.peach),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.fork) }
         }
@@ -174,7 +176,7 @@ struct ComposerBar: Block {
     .padding(theme.margin)
     .sizing(x: .grow)
     .background(theme.composerBackground)
-    .border(theme.border)
+    .border(theme.chromeBorder ?? theme.border)
   }
 }
 
@@ -210,7 +212,7 @@ struct BottomReasoningEffortPicker: Block {
     }
     .sizing(x: .grow)
     .background(theme.headerBackground)
-    .border(theme.border)
+    .roundedBorder(theme.border, radius: theme.cornerRadius)
   }
 }
 
@@ -246,7 +248,7 @@ struct BottomServiceTierPicker: Block {
     }
     .sizing(x: .grow)
     .background(theme.headerBackground)
-    .border(theme.border)
+    .roundedBorder(theme.border, radius: theme.cornerRadius)
   }
 }
 
@@ -289,7 +291,7 @@ struct BottomModelPicker: Block {
     }
     .sizing(x: .grow)
     .background(theme.headerBackground)
-    .border(theme.border)
+    .roundedBorder(theme.border, radius: theme.cornerRadius)
   }
 }
 
@@ -378,8 +380,8 @@ struct CommandPickerBar: Block {
                   .fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
               }
               .padding(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
-              .background(phase == .hovered ? theme.buttonHover : theme.buttonIdle)
-              .border(theme.border)
+              .roundedBackground(phase == .hovered ? theme.buttonHover : theme.buttonIdle, radius: theme.cornerRadius)
+              .roundedBorder(theme.border, radius: theme.cornerRadius)
             }
             Spacer()
           }
@@ -401,7 +403,7 @@ struct CommandPickerBar: Block {
       }
     }
     .padding(EdgeInsets(top: 7, leading: theme.margin, bottom: 7, trailing: theme.margin))
-    .sizing(x: .grow).background(theme.statusBackground).border(theme.border)
+    .sizing(x: .grow).background(theme.statusBackground).roundedBorder(theme.border, radius: theme.cornerRadius)
   }
 
   @MainActor private func boundaryLabel(_ label: String, value: Int, active: Bool) -> some Block {
@@ -432,7 +434,7 @@ struct QueuedTray: Block {
         Spacer()
         Button(
           "Send next", fontScale: theme.smallScale,
-          style: theme.buttonStyle(pressedColor: theme.accent),
+          style: theme.submitButtonStyle ?? theme.buttonStyle(pressedColor: theme.accent),
           padding: EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8)
         ) { session.forceSendNext() }
         Button(
@@ -449,7 +451,7 @@ struct QueuedTray: Block {
     .padding(EdgeInsets(top: 6, leading: theme.margin, bottom: 6, trailing: theme.margin))
     .sizing(x: .grow)
     .background(theme.statusBackground)
-    .border(theme.border)
+    .roundedBorder(theme.border, radius: theme.cornerRadius)
   }
 
   private func queuePreview(_ text: String, limit: Int = 100) -> String {

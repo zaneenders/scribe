@@ -6,7 +6,7 @@ struct ScribeMacRoot: Block {
   let theme: MacTheme
 
   @MainActor var body: some Block {
-    RenderContextBridge(
+    ScribeWorkspaceScope(
       content: ZStack {
         VStack(spacing: 0) {
           header
@@ -67,44 +67,7 @@ struct ScribeMacRoot: Block {
           RenameSessionDialog(store: store, sessionID: sessionID, theme: theme)
         }
       },
-      prepare: { context in
-        context.setCopyTextProvider {
-          let text = SelectionManager.shared.copyText(
-            isTranscriptVisible: store.active != nil)
-          if ProcessInfo.processInfo.environment["SCRIBE_DEBUG_CLIPBOARD"] == "1" {
-            let message =
-              "[scribe.clipboard] transcriptVisible=\(store.active != nil) selectedCharacters=\(text?.count ?? 0)\n"
-            try? FileHandle.standardError.write(contentsOf: Data(message.utf8))
-          }
-          return text
-        }
-        context.setSelectAllHandler {
-          SelectionManager.shared.selectAll(
-            isTranscriptVisible: store.active != nil)
-        }
-        if context.input.pointerPressed {
-          SelectionManager.shared.clear()
-        }
-        SelectionManager.shared.updateFromDrag(context: context)
-        MarkdownLayoutRegistry.clear()
-        store.applyPendingFocus()
-        if store.showDirectoryPicker, store.renamingSessionID == nil {
-          if context.input.commands.contains(ScribeCommandPickerCommand.toggle) {
-            store.tabCompleteDirectory()
-          }
-        }
-        for command in context.input.commands {
-          if !store.showDirectoryPicker, store.renamingSessionID == nil,
-            store.active?.commandPicker == nil,
-            ScribeComposerCommand.shouldSubmit(command, composerFocus: ScribeMacStore.composerFocus)
-          {
-            store.active?.submit()
-          }
-        }
-      },
-      finish: { context in
-        store.finishDirectoryPaletteInput(context)
-      })
+      workspace: ScribeWorkspace(store: store))
   }
 
   @MainActor private func sessionLoadingState(_ saved: ScribeMacStore.SavedSession) -> some Block {
@@ -179,6 +142,7 @@ struct ScribeMacRoot: Block {
         .foregroundColor(theme.accent)
       Button(
         store.isSessionSidebarVisible ? "Sessions ◀" : "Sessions ▶", fontScale: theme.smallScale,
+        style: theme.buttonStyle(tint: theme.red),
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
@@ -194,7 +158,7 @@ struct ScribeMacRoot: Block {
     .sizing(y: .fixed(theme.headerHeight))
     .sizing(x: .grow)
     .background(theme.headerBackground)
-    .border(theme.border)
+    .border(theme.chromeBorder ?? theme.border)
   }
 
   @MainActor private func errorBanner(_ message: String) -> some Block {

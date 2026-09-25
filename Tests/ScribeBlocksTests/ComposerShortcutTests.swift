@@ -32,7 +32,7 @@ struct ComposerShortcutTests {
     let directory = FocusTarget()
     let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
     renderer.content = VStack {
-      GrowingTextField("", fontScale: 1, text: { "" }, onChange: { _ in }, onNewline: {})
+      ScribeChatInput("", fontScale: 1, text: { "" }, onChange: { _ in }, onNewline: {})
         .focusTarget(composer)
       TextField(text: { "" }, onChange: { _ in })
         .focusTarget(directory)

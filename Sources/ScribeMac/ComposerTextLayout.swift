@@ -57,7 +57,9 @@ struct ComposerTextLayout {
 }
 
 @MainActor
-final class ComposerTextLayoutCache {
+public final class ComposerTextLayoutCache {
+  public init() {}
+
   private var revision: UInt64?
   private var columns: Int?
   private var cached: ComposerTextLayout?

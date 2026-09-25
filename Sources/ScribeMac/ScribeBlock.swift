@@ -4,6 +4,8 @@ import Chroma
 public final class ScribeWorkspace {
   let store: ScribeMacStore
 
+  init(store: ScribeMacStore) { self.store = store }
+
   public init() {
     store = ScribeMacStore(startProfiling: false)
   }
@@ -12,9 +14,13 @@ public final class ScribeWorkspace {
 public struct ScribeBlock: Block {
   private let workspace: ScribeWorkspace?
 
-  public init() { workspace = nil }
+  public init() {
+    workspace = nil
+  }
 
-  public init(workspace: ScribeWorkspace) { self.workspace = workspace }
+  public init(workspace: ScribeWorkspace) {
+    self.workspace = workspace
+  }
 
   @MainActor public var body: some Block {
     let store = workspace?.store ?? ScribeMacStore.shared

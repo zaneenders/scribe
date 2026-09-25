@@ -1,7 +1,7 @@
 import Chroma
 import Foundation
 
-struct GrowingTextField: PrimitiveBlock {
+public struct ScribeChatInput: PrimitiveBlock {
 
   let placeholder: String
   let fontScale: Float
@@ -15,7 +15,7 @@ struct GrowingTextField: PrimitiveBlock {
   let onNewline: @MainActor () -> Void
   let onEndEditing: @MainActor () -> CommandResult
   let onTextEvent: @MainActor (TextEditEvent, String) -> String?
-  @MainActor init(
+  @MainActor public init(
     _ placeholder: String,
     fontScale: Float,
     minLines: Int = 1,
@@ -43,9 +43,9 @@ struct GrowingTextField: PrimitiveBlock {
     self.onTextEvent = onTextEvent
   }
 
-  @MainActor var expandsHorizontally: Bool { true }
+  @MainActor public var expandsHorizontally: Bool { true }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor public func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
     let metrics = context.fontMetrics
     let count = layoutCache.lineCount(
       text: getText(), revision: revision(), columns: columns(width: proposal.width, metrics: metrics),
@@ -56,7 +56,7 @@ struct GrowingTextField: PrimitiveBlock {
       height: Float(lineCount) * metrics.lineAdvance * fontScale + 2 * padding + 2)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor public func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
     let metrics = context.fontMetrics
     let layout = layoutCache.layout(
       text: getText(), revision: revision(), columns: columns(width: rect.size.width, metrics: metrics))
