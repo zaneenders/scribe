@@ -123,6 +123,22 @@ struct ExplicitRuntimeIsolationTests {
     }
   }
 
+  @Test func resumesSessionWithRemovedProfileUsingCurrentDefault() async throws {
+    try await withTwoHomes { homeA, _ in
+      let created = try await ScribeSessionBootstrap.open(context: homeA.context)
+      var metadata = try ChatSessionStore.loadMetadata(from: created.sessionDirectory)
+      metadata.profileName = "removed-profile"
+      try await ChatSessionStore.saveMetadata(metadata, to: created.sessionDirectory)
+
+      let resumed = try await ScribeSessionBootstrap.open(
+        context: homeA.context, resumeDirectory: created.sessionDirectory)
+
+      #expect(resumed.sessionId == created.sessionId)
+      #expect(resumed.profile.name == "primary")
+      #expect(resumed.initialMessages.first?.role == .system)
+    }
+  }
+
   @Test func resumeLatestUsesContextWorkingDirectory() async throws {
     try await withTwoHomes { homeA, _ in
       _ = try await ScribeSessionBootstrap.open(context: homeA.context)
