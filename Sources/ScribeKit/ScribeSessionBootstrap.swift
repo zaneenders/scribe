@@ -124,10 +124,12 @@ public enum ScribeSessionBootstrap {
       let profileName = (try? ChatSessionStore.loadMetadata(from: directory))?.profileName,
       profileName != loaded.activeProfileName
     {
-      loaded = try await ConfigLoader.load(
-        paths: context.paths,
-        configurationFile: context.configurationFile,
-        profileOverride: profileName)
+      if loaded.profiles.contains(where: { $0.name == profileName }) {
+        loaded = try await ConfigLoader.load(
+          paths: context.paths,
+          configurationFile: context.configurationFile,
+          profileOverride: profileName)
+      }
     }
     let tools = ScribeSystemPrompt.defaultTools()
     let savedEffort =
