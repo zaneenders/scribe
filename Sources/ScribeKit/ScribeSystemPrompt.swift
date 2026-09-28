@@ -30,15 +30,33 @@ public enum ScribeSystemPrompt {
 
   public static func load(tools: [any ScribeTool], cwd: String, paths: ScribePaths) throws -> String {
     let url = URL(fileURLWithPath: paths.systemPromptPath.string)
-    let instructions: String
+    let instructions = try readInstructions(at: url)
+    let directory = URL(fileURLWithPath: cwd, isDirectory: true).standardizedFileURL
+    var directories: [URL] = []
+    var current = directory
+    while true {
+      directories.append(current)
+      let parent = current.deletingLastPathComponent()
+      if parent.path == current.path { break }
+      current = parent
+    }
+    let projectInstructions = try directories.reversed().compactMap { directory -> String? in
+      let file = directory.appendingPathComponent("AGENTS.md")
+      return try readInstructions(at: file).map { "# \(file.path)\n\n\($0)" }
+    }
+    let base = make(tools: tools, cwd: cwd, additionalInstructions: instructions ?? "")
+    guard !projectInstructions.isEmpty else { return base }
+    return base + "\n\n# Project instructions\n\n" + projectInstructions.joined(separator: "\n\n")
+  }
+
+  private static func readInstructions(at url: URL) throws -> String? {
     do {
-      instructions = try String(contentsOf: url, encoding: .utf8)
+      return try String(contentsOf: url, encoding: .utf8)
     } catch CocoaError.fileReadNoSuchFile {
-      return make(tools: tools, cwd: cwd)
+      return nil
     } catch {
       throw PromptFileError(path: url.path, reason: String(describing: error))
     }
-    return make(tools: tools, cwd: cwd, additionalInstructions: instructions)
   }
 
   private struct PromptFileError: LocalizedError, CustomStringConvertible {

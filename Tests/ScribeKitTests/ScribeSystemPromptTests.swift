@@ -35,6 +35,38 @@ struct ScribeSystemPromptTests {
     }
   }
 
+  @Test func loadsProjectInstructionsFromAncestorsInOrder() throws {
+    try withPaths { paths in
+      let root = URL(fileURLWithPath: paths.dataHome.string).appendingPathComponent("project")
+      let child = root.appendingPathComponent("Sources")
+      try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+      try "Root rules".write(to: root.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+      try "Source rules".write(to: child.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+      try "Personal rules".write(toFile: paths.systemPromptPath.string, atomically: true, encoding: .utf8)
+
+      let prompt = try ScribeSystemPrompt.load(tools: [], cwd: child.path, paths: paths)
+      #expect(prompt.contains("# Additional user-configured instructions\n\nPersonal rules"))
+      #expect(prompt.contains("# \(root.path)/AGENTS.md\n\nRoot rules"))
+      #expect(prompt.contains("# \(child.path)/AGENTS.md\n\nSource rules"))
+      #expect(prompt.range(of: "Root rules")!.lowerBound < prompt.range(of: "Source rules")!.lowerBound)
+    }
+  }
+
+  @Test func invalidProjectInstructionsReportPath() throws {
+    try withPaths { paths in
+      let project = URL(fileURLWithPath: paths.dataHome.string).appendingPathComponent("project")
+      try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+      let file = project.appendingPathComponent("AGENTS.md")
+      try Data([0xff]).write(to: file)
+      do {
+        _ = try ScribeSystemPrompt.load(tools: [], cwd: project.path, paths: paths)
+        Issue.record("Expected project instructions error")
+      } catch {
+        #expect(error.localizedDescription.contains(file.path))
+      }
+    }
+  }
+
   @Test func invalidUTF8AndDirectoryReportPath() throws {
     try withPaths { paths in
       let url = URL(fileURLWithPath: paths.systemPromptPath.string)
