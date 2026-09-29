@@ -69,6 +69,7 @@ struct DirectoryPaletteEscapeTests {
     store.requiresDirectoryBeforeStart = required
     let state = PaletteEscapeState()
     let renderer = HeadlessHost(size: Size(width: 640, height: 400))
+    defer { renderer.close() }
     renderer.content = PaletteEscapeSurface(store: store, state: state)
     renderer.render()
     _ = try #require(state.context)
