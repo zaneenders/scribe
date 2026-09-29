@@ -60,16 +60,21 @@ struct ShortcutTests {
     #expect(state.submitted == 1)
     #expect(state.text.isEmpty)
     key(.upArrow)
-    #expect(state.text == "previous prompt")
+    #expect(state.text.isEmpty)
+    for arrow: Key in [.upArrow, .downArrow, .leftArrow, .rightArrow] {
+      for isEditing in [false, true] {
+        #expect(ScribeBlock.keyBindings.command(for: KeyChord(arrow), isTextEditing: isEditing) == .some(nil))
+      }
+    }
     key(.escape)
     #expect(state.stopped == 1)
     #expect(state.focus.isEditing)
     key(.enter)
-    #expect(state.text == "previous prompt\n")
+    #expect(state.text == "\n")
     key(.character("f"), text: "f")
     #expect(state.text.contains("f"))
     key(.space, text: " ")
-    #expect(state.text == "previous prompt\nf ")
+    #expect(state.text == "\nf ")
     context.endEditing()
     key(.character("f"), text: "f")
     key(.character("j"), text: "j")
@@ -93,10 +98,16 @@ struct ShortcutTests {
     #expect(
       ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: false) ==
         .some(ScribeCommandPickerCommand.toggle))
+    #expect(
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: true) ==
+        .some(ScribeCommandPickerCommand.toggle))
+    #expect(
+      ScribeBlock.keyBindings.command(for: KeyChord(.escape), isTextEditing: false) ==
+        .some(.action(.cancel)))
     key(.enter, modifiers: modifier)
     #expect(state.submitted == 1)
     key(.space, text: " ")
     #expect(state.commands.contains(.action(.activate)))
-    #expect(state.text == "previous prompt\nf ")
+    #expect(state.text == "\nf ")
   }
 }

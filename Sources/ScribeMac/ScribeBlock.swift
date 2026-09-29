@@ -48,7 +48,7 @@ enum ScribeCommandPickerCommand {
   static let keyBindings = KeyBindings {
     bind("f", to: previous)
     bind("j", to: next)
-    bind(.tab, to: toggle)
+    bind(.tab, in: .shared, to: toggle)
   }
 }
 
@@ -65,6 +65,14 @@ extension ScribeBlock {
     #endif
 
     return KeyBindings.desktopNavigation.overlay(.modalNavigation).overlay {
+      disable(.upArrow, in: .movement)
+      disable(.downArrow, in: .movement)
+      disable(.leftArrow, in: .movement)
+      disable(.rightArrow, in: .movement)
+      disable(.upArrow, in: .editing)
+      disable(.downArrow, in: .editing)
+      disable(.leftArrow, in: .editing)
+      disable(.rightArrow, in: .editing)
       bind("d", modifiers: .control, to: .navigation(.sectionLeft))
       bind("f", modifiers: .control, to: .navigation(.sectionUp))
       bind("j", modifiers: .control, to: .navigation(.sectionDown))

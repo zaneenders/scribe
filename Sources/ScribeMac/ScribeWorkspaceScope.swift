@@ -61,9 +61,29 @@ public struct ScribeWorkspaceScope<Content: Block>: Block {
         if ScribeMacStore.composerFocus.isEditing { ScribeBlockContext.current?.endEditing() }
         return .ignored
       }
+      .onCommand(ScribeCommandPickerCommand.previous) {
+        guard !store.showDirectoryPicker, store.renamingSessionID == nil,
+          let session = store.active, session.commandPicker != nil
+        else { return .ignored }
+        session.moveCommandCursor(by: -1)
+        return .handled
+      }
+      .onCommand(ScribeCommandPickerCommand.next) {
+        guard !store.showDirectoryPicker, store.renamingSessionID == nil,
+          let session = store.active, session.commandPicker != nil
+        else { return .ignored }
+        session.moveCommandCursor(by: 1)
+        return .handled
+      }
       .onCommand(ScribeCommandPickerCommand.toggle) {
-        guard store.showDirectoryPicker, store.renamingSessionID == nil else { return .ignored }
-        store.tabCompleteDirectory()
+        if store.showDirectoryPicker, store.renamingSessionID == nil {
+          store.tabCompleteDirectory()
+          return .handled
+        }
+        guard store.renamingSessionID == nil, let session = store.active,
+          session.commandPicker != nil
+        else { return .ignored }
+        session.toggleCommandBoundary()
         return .handled
       }
       .onCommand(ScribeComposerCommand.submit) {

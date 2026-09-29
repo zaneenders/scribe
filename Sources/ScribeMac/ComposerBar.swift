@@ -316,14 +316,10 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
     if !store.showDirectoryPicker, store.renamingSessionID == nil {
       for command in context.input.commands {
         switch command {
-        case ScribeCommandPickerCommand.previous:
-          session.moveCommandCursor(by: -1)
-        case ScribeCommandPickerCommand.next:
-          session.moveCommandCursor(by: 1)
-        case ScribeCommandPickerCommand.toggle:
-          session.toggleCommandBoundary()
         case .action(.activate):
           session.confirmCommandPicker()
+        case .action(.cancel):
+          session.cancelCommandPicker()
         default:
           break
         }

@@ -42,6 +42,63 @@ struct SessionNavigationTests {
     #expect(composer.isFocused)
   }
 
+  @Test func pickerKeysMoveStartThenEndWhileSidebarHasFocus() {
+    let sidebar = FocusTarget()
+    var picker = SessionController.CommandPickerState(
+      command: .tldr, boundaries: [10, 20, 30, 40], startCursor: 2,
+      endCursor: 3, activeIsEnd: false, messageCount: 40)
+    let content = HStack {
+      Group("Sessions") {
+        Button("Session") {}.focusTarget(sidebar)
+      }
+      Group("Conversation") {
+        Text("Transcript")
+          .keyBindings(ScribeCommandPickerCommand.keyBindings)
+        Text("Picker")
+          .keyBindings(ScribeCommandPickerCommand.keyBindings)
+      }
+    }
+    .keyBindings(ScribeCommandPickerCommand.keyBindings)
+    .onCommand(ScribeCommandPickerCommand.previous) {
+      picker.move(by: -1)
+      return .handled
+    }
+    .onCommand(ScribeCommandPickerCommand.toggle) {
+      picker.activeIsEnd.toggle()
+      return .handled
+    }
+    let ui = NavigationTestHost(content: content, keyBindings: ScribeBlock.keyBindings)
+    defer { ui.host.close() }
+    sidebar.focus()
+    ui.host.render()
+    ui.press("f", "f")
+    #expect(picker.startBoundary == 10)
+    ui.press(KeyboardInput(chord: KeyChord(.tab)))
+    #expect(picker.activeIsEnd)
+    ui.press("f", "f")
+    #expect(picker.startBoundary == 10)
+    #expect(picker.endBoundary == 20)
+  }
+
+  @Test func movingTLDRStartThenEndKeepsStartFixed() {
+    var picker = SessionController.CommandPickerState(
+      command: .tldr, boundaries: [10, 20, 30, 40], startCursor: 2,
+      endCursor: 3, activeIsEnd: false, messageCount: 40)
+    picker.move(by: -2)
+    #expect(picker.startBoundary == 10)
+    #expect(picker.endBoundary == 40)
+    picker.activeIsEnd = true
+    picker.move(by: -1)
+    #expect(picker.startBoundary == 10)
+    #expect(picker.endBoundary == 30)
+    picker.move(by: -1)
+    #expect(picker.startBoundary == 10)
+    #expect(picker.endBoundary == 20)
+    picker.move(by: -1)
+    #expect(picker.startBoundary == 10)
+    #expect(picker.endBoundary == 20)
+  }
+
   @Test func controlSectionUpLeavesEditingComposerForHistory() {
     let composer = FocusTarget()
     var context: BlockContext?

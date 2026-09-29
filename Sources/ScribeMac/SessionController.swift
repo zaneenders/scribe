@@ -120,6 +120,16 @@ final class SessionController {
     var startBoundary: Int { boundaries[startCursor] }
     var endBoundary: Int { endCursor.map { boundaries[$0] } ?? startBoundary }
     var activeBoundary: Int { activeIsEnd ? endBoundary : startBoundary }
+
+    mutating func move(by delta: Int) {
+      if activeIsEnd, let endCursor {
+        self.endCursor = max(startCursor + 1, min(boundaries.count - 1, endCursor + delta))
+      } else {
+        let upper = command == .tldr ? (endCursor ?? 1) - 1 : boundaries.count - 1
+        startCursor = max(0, min(upper, startCursor + delta))
+      }
+      needsReveal = true
+    }
   }
 
   let boot: BootstrappedSession
@@ -301,18 +311,7 @@ final class SessionController {
 
   func moveCommandCursor(by delta: Int) {
     guard !isRunningCommand, var picker = commandPicker else { return }
-    if picker.activeIsEnd, let end = picker.endCursor {
-      picker.endCursor = max(
-        picker.startCursor + 1,
-        min(picker.boundaries.count - 1, end + delta))
-    } else {
-      let upper =
-        picker.command == .tldr
-        ? (picker.endCursor ?? 1) - 1
-        : picker.boundaries.count - 1
-      picker.startCursor = max(0, min(upper, picker.startCursor + delta))
-    }
-    picker.needsReveal = true
+    picker.move(by: delta)
     commandPicker = picker
   }
 
