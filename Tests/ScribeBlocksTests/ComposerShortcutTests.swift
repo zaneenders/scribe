@@ -61,7 +61,7 @@ struct ComposerShortcutTests {
     renderer.content = VStack {
       TextEditor("", fontScale: 1, text: { "" }, onChange: { _ in })
         .focusTarget(composer)
-      TextField(text: { "" }, onChange: { _ in })
+      TextEditor(singleLine: true, text: { "" }, onChange: { _ in })
         .focusTarget(directory)
     }
     renderer.render()

@@ -24,7 +24,7 @@ public struct ScribeStyle: Equatable, Sendable {
     purple = chromaTheme.accent
     textPrimary = chromaTheme.foreground
     textSecondary = chromaTheme.secondaryForeground
-    userBubbleBackground = chromaTheme.textField.idleBackground
+    userBubbleBackground = chromaTheme.textEditor.idleBackground
     reasoningText = chromaTheme.accent
     codeBackground = chromaTheme.background
     codeText = chromaTheme.positive

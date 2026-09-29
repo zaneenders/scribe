@@ -67,7 +67,7 @@ struct MacSelectionTests {
     let focus = FocusTarget()
     focus.focus(editing: true)
     BlockEngine.draw(
-      TextField(text: { "draft" }, onChange: { _ in }).focusTarget(focus),
+      TextEditor(singleLine: true, text: { "draft" }, onChange: { _ in }).focusTarget(focus),
       into: &drawList, in: Rect(x: 0, y: 100, width: 300, height: 40), context: context)
     interaction.endFrame()
     interaction.caretOffset = 5

@@ -23,7 +23,7 @@ struct SessionNavigationTests {
       .sizing(x: .fixed(250), y: .grow)
       Group("Conversation") {
         Group("Composer") {
-          TextField(text: { "" }, onChange: { _ in }).focusTarget(composer)
+          TextEditor(singleLine: true, text: { "" }, onChange: { _ in }).focusTarget(composer)
         }
       }
       .sizing(x: .grow, y: .grow)
@@ -54,7 +54,7 @@ struct SessionNavigationTests {
           }
           Group("Conversation") {
             Group("Composer") {
-              TextField(text: { "" }, onChange: { _ in }).focusTarget(composer)
+              TextEditor(singleLine: true, text: { "" }, onChange: { _ in }).focusTarget(composer)
             }
           }
         }, prepare: { _ in
@@ -160,7 +160,7 @@ struct SessionNavigationTests {
               return row
             })
           Group("Composer") {
-            TextField(text: { "" }, onChange: { _ in }).focusTarget(composer)
+            TextEditor(singleLine: true, text: { "" }, onChange: { _ in }).focusTarget(composer)
           }
         }
       }, prepare: { context = $0 }, finish: { context in

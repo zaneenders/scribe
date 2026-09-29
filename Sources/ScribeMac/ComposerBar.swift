@@ -44,7 +44,7 @@ struct ComposerBar: Block {
 
   @MainActor var body: some Block {
     VStack(spacing: 6) {
-      TrailingControlsRow(spacing: 8) {
+      HStack(spacing: 8, alignment: .bottom) {
         TextEditor(
           session.isRunning ? "Queue a message..." : "Message Scribe",
           fontScale: theme.textScale,
@@ -65,7 +65,7 @@ struct ComposerBar: Block {
           }
         )
         .focusTarget(ScribeMacStore.composerFocus)
-      } controls: {
+        .sizing(x: .grow)
         if session.isRunning {
           HStack(spacing: 6) {
             Button(

@@ -36,9 +36,9 @@ struct RenameSessionDialog: Block {
             WrappedText(
               text: "Enter a custom name. Leave it blank to restore the session hash.",
               theme: theme, color: theme.textSecondary, scale: theme.smallScale)
-            TextField(
+            TextEditor(
               String(sessionID.uuidString.prefix(8)).uppercased(),
-              fontScale: theme.textScale,
+              fontScale: theme.textScale, singleLine: true,
               text: { store.renameSessionDraft },
               onChange: { store.updateRenameSessionDraft($0) },
               onSubmit: { _ in store.submitSessionRename() }

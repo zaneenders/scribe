@@ -23,18 +23,18 @@ struct ThemeTests {
     var theme = ChromaTheme.dark
     theme.background = Color(r: 0.11, g: 0.12, b: 0.13, a: 1)
     theme.elevatedSurface = Color(r: 0.21, g: 0.22, b: 0.23, a: 1)
-    theme.textField.idleBackground = Color(r: 0.31, g: 0.32, b: 0.33, a: 1)
+    theme.textEditor.idleBackground = Color(r: 0.31, g: 0.32, b: 0.33, a: 1)
 
     let local = MacTheme(chromaTheme: theme)
     #expect(local.composerBackground == theme.background)
     #expect(local.statusBackground == theme.elevatedSurface)
     #expect(local.sidebarBackground == theme.elevatedSurface)
-    #expect(local.userBubbleBackground == theme.textField.idleBackground)
+    #expect(local.userBubbleBackground == theme.textEditor.idleBackground)
   }
 
-  @Test func composerUsesInheritedTextFieldColors() {
+  @Test func composerUsesInheritedTextEditorColors() {
     var theme = ChromaTheme.dark
-    theme.textField = TextFieldStyle(
+    theme.textEditor = TextEditorStyle(
       idleBackground: Color(r: 0.2, g: 0.1, b: 0.3, a: 1),
       editingBackground: Color(r: 0.3, g: 0.2, b: 0.4, a: 1),
       foreground: theme.foreground,
@@ -48,8 +48,8 @@ struct ThemeTests {
     ).chromaTheme(theme)
 
     let frame = renderer.render()
-    #expect(hasFill(theme.textField.idleBackground, in: frame.commands))
-    #expect(hasText("Message Scribe", color: theme.textField.placeholder, in: frame.commands))
+    #expect(hasFill(theme.textEditor.idleBackground, in: frame.commands))
+    #expect(hasText("Message Scribe", color: theme.textEditor.placeholder, in: frame.commands))
   }
 
   private func hasText(_ text: String, color: Color, in commands: [DrawCommand]) -> Bool {
