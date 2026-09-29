@@ -110,7 +110,7 @@ final class ScribeMacStore {
   private var didStart = false
   private var profileRecorderTask: Task<Void, Never>?
   private var didSetupShellCapture = false
-  private var composerFocusPending = false
+  private var composerFocusPending: Bool?
   private var directoryFocusPending = false
   private var renameFocusPending = false
   private var directoryBaseCWD = FilePath.currentDirectory.string
@@ -313,11 +313,12 @@ final class ScribeMacStore {
 
   func openSavedSession(_ saved: SavedSession) {
     if let existing = sessions.first(where: { $0.sessionId == saved.id }) {
-      switchTo(existing.sessionId)
+      switchTo(existing.sessionId, editComposer: false)
       return
     }
     let previousID = activeSessionID
     selectedSavedSession = saved
+    composerFocusPending = nil
     activeSessionID = nil
     active = nil
     for session in sessions { session.isActive = false }
@@ -334,7 +335,7 @@ final class ScribeMacStore {
         try ensureShellCapture()
         let opened = try await Self.loadSavedSession(saved, version: GitVersion.hash)
         let shouldActivate = selectedSavedSession?.id == saved.id
-        install(opened, refreshHistory: false, activate: shouldActivate)
+        install(opened, refreshHistory: false, activate: shouldActivate, editComposer: false)
       } catch {
         if selectedSavedSession?.id == saved.id { selectedSavedSession = nil }
         reportError("Could not open session \(saved.id.uuidString.prefix(8)): \(error.localizedDescription)")
@@ -370,7 +371,7 @@ final class ScribeMacStore {
     }
   }
 
-  func switchTo(_ id: UUID) {
+  func switchTo(_ id: UUID, editComposer: Bool = true) {
     guard let target = sessions.first(where: { $0.sessionId == id }) else { return }
     let previousID = activeSessionID
     selectedSavedSession = nil
@@ -384,7 +385,7 @@ final class ScribeMacStore {
     if let previousID, previousID != id {
       unloadIfIdle(previousID)
     }
-    composerFocusPending = true
+    composerFocusPending = editComposer
   }
 
   private func unloadIfIdle(_ id: UUID) {
@@ -414,7 +415,8 @@ final class ScribeMacStore {
   private func install(
     _ opened: BootstrappedSession,
     refreshHistory: Bool = true,
-    activate: Bool = true
+    activate: Bool = true,
+    editComposer: Bool = true
   ) {
     let controller = SessionController(boot: opened)
     controller.onIdentityChange = { [weak self, weak controller] previous, successor in
@@ -434,7 +436,7 @@ final class ScribeMacStore {
     requiresDirectoryBeforeStart = false
     lastError = nil
     phase = .ready
-    if activate { switchTo(controller.sessionId) }
+    if activate { switchTo(controller.sessionId, editComposer: editComposer) }
     if refreshHistory { refreshSavedSessions() }
   }
 
@@ -503,10 +505,10 @@ final class ScribeMacStore {
       active.wantsComposerFocus = false
       composerFocusPending = true
     }
-    guard composerFocusPending else { return }
-    Self.composerFocus.focus(editing: true)
+    guard let editComposer = composerFocusPending else { return }
+    Self.composerFocus.focus(editing: editComposer)
     if ScribeBlockContext.current != nil {
-      composerFocusPending = false
+      composerFocusPending = nil
     }
   }
 

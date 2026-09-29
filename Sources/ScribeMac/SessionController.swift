@@ -144,6 +144,8 @@ final class SessionController {
   var hasUnreadActivity = false
   var wantsComposerFocus = false
   let scroll = ScrollViewController()
+  let lastTranscriptFocus = FocusTarget()
+  var lastFocusedTranscriptID: UUID?
   var cachedTranscriptRows: [String: ScrollView.Row] = [:]
   var cachedTranscriptTheme: MacTheme?
   var cachedTranscriptPicker: CommandPickerState?

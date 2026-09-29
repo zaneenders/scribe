@@ -34,6 +34,10 @@ struct TranscriptView: Block {
       session.cachedTranscriptTheme = theme
       session.cachedTranscriptPicker = picker
     }
+    if session.lastFocusedTranscriptID != session.transcript.last?.id {
+      session.lastFocusedTranscriptID = session.transcript.last?.id
+      session.cachedTranscriptRows.removeAll()
+    }
     let rows: [ScrollView.Row]
     if session.transcript.isEmpty {
       rows = [
@@ -141,18 +145,20 @@ struct TranscriptView: Block {
   ) -> ScrollView.Row {
     let id = item.layoutID
     if let cached = session.cachedTranscriptRows[id] { return cached }
-    let row = ScrollView.Row(
-      id: id,
-      content: NavigableTranscriptItem(
-        content: TranscriptItemBlock(
-          item: item, theme: theme, selection: selection,
-          toggleText: { session.toggleTextDisclosure(id: item.id) }))
+    let content = NavigableTranscriptItem(
+      content: TranscriptItemBlock(
+        item: item, theme: theme, selection: selection,
+        toggleText: { session.toggleTextDisclosure(id: item.id) }))
       .padding(
         EdgeInsets(
           top: theme.spacing / 2, leading: theme.margin,
           bottom: theme.spacing / 2, trailing: theme.margin)
       )
       .sizing(x: .grow)
+    let row = ScrollView.Row(
+      id: id,
+      content: item.id == session.transcript.last?.id
+        ? content.focusTarget(session.lastTranscriptFocus) : content
     )
     session.cachedTranscriptRows[id] = row
     return row

@@ -42,6 +42,38 @@ struct SessionNavigationTests {
     #expect(composer.isFocused)
   }
 
+  @Test func selectingSessionFocusesComposerWithoutEditing() {
+    let session = FocusTarget()
+    let composer = FocusTarget()
+    var pendingFocus = false
+    let content = DeferredBlock {
+      BlockContextBridge(
+        content: HStack {
+          Group("Sessions") {
+            Button("Session") { pendingFocus = true }.focusTarget(session)
+          }
+          Group("Conversation") {
+            Group("Composer") {
+              TextField(text: { "" }, onChange: { _ in }).focusTarget(composer)
+            }
+          }
+        }, prepare: { _ in
+          if pendingFocus {
+            composer.focus(editing: false)
+            pendingFocus = false
+          }
+        })
+    }
+    let ui = NavigationTestHost(content: content, keyBindings: ScribeBlock.keyBindings)
+    defer { ui.host.close() }
+    session.focus()
+    ui.host.render()
+    ui.press(.enter)
+    ui.host.render()
+    #expect(composer.isFocused)
+    #expect(!composer.isEditing)
+  }
+
   @Test func pickerKeysMoveStartThenEndWhileSidebarHasFocus() {
     let sidebar = FocusTarget()
     var picker = SessionController.CommandPickerState(
@@ -141,6 +173,15 @@ struct SessionNavigationTests {
         if composer.isEditing { context?.endEditing() }
         return .ignored
       }
+      .onCommand(.navigation(.stepIn)) {
+        if context?.navigationBreadcrumb.last == "Transcript",
+          context?.navigationSelectionIsGroup == true
+        {
+          controller.scrollToBottom()
+          messages[11].focus()
+        }
+        return .ignored
+      }
     }
     let ui = NavigationTestHost(content: content, size: Size(width: 600, height: 300), keyBindings: ScribeBlock.keyBindings)
     defer { ui.host.close() }
@@ -153,7 +194,7 @@ struct SessionNavigationTests {
     #expect(context?.navigationBreadcrumb == ["Window", "Conversation", "Transcript"])
     ui.press("l")
     #expect(context?.navigationSelectionIsGroup == false)
-    #expect(messages.filter { $0.isFocused }.count == 1)
+    #expect(messages[11].isFocused)
     let initialOffset = controller.offset
     ui.press("f", "f", "f", "f", "f")
     #expect(context?.navigationSelectionIsGroup == false)

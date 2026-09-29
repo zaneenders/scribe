@@ -146,7 +146,7 @@ struct SessionRow: Block {
         id: "session-name:\(session.sessionId)", title: sanitizeASCII(session.displayName),
         subtitle: sanitizeASCII(session.modelName), isSelected: isActive,
         isRunning: session.isRunning, isUnread: session.hasUnreadActivity,
-        style: sessionRowStyle(theme), onSelect: { store.switchTo(session.sessionId) })
+        style: sessionRowStyle(theme), onSelect: { store.switchTo(session.sessionId, editComposer: false) })
       sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
     }.sizing(x: .grow)
   }

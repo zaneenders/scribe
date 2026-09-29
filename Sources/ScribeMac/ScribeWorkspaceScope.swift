@@ -45,6 +45,18 @@ public struct ScribeWorkspaceScope<Content: Block>: Block {
           context.requestRedraw()
         }
       })
+      .onCommand(.navigation(.stepIn)) {
+        if let context = ScribeBlockContext.current,
+          context.navigationBreadcrumb.last == "Transcript",
+          context.navigationSelectionIsGroup,
+          let session = store.active,
+          !session.transcript.isEmpty
+        {
+          session.scroll.scrollToBottom()
+          session.lastTranscriptFocus.focus()
+        }
+        return .ignored
+      }
       .onCommand(.navigation(.sectionLeft)) {
         if ScribeMacStore.composerFocus.isEditing { ScribeBlockContext.current?.endEditing() }
         return .ignored
