@@ -1,10 +1,112 @@
 import Chroma
-import HeadlessBackend
-import ScribeBlocks
+import ChromaTesting
 import Testing
+
+@testable import ScribeBlocks
 
 @MainActor
 struct SessionNavigationTests {
+  @Test func keyboardCanMoveBetweenNamedRegionsAndActivateSession() {
+    let session = FocusTarget()
+    let composer = FocusTarget()
+    var selections = 0
+    let content = HStack {
+      Group("Sessions") {
+        ScribeSessionRow(
+          id: "session", title: "Planning", subtitle: "model", isSelected: false,
+          style: ScribeSessionRowStyle(
+            foreground: .white, secondaryForeground: .white, selectedForeground: .white,
+            activity: .white, selection: .clear, hover: .clear, border: .white, fontScale: 1),
+          onSelect: { selections += 1 })
+        .focusTarget(session)
+      }
+      .sizing(x: .fixed(250), y: .grow)
+      Group("Conversation") {
+        Group("Composer") {
+          TextField(text: { "" }, onChange: { _ in }).focusTarget(composer)
+        }
+      }
+      .sizing(x: .grow, y: .grow)
+    }
+    let ui = NavigationTestHost(content: content, size: Size(width: 600, height: 200), keyBindings: ScribeBlock.keyBindings)
+    defer { ui.host.close() }
+    composer.focus()
+    ui.host.render()
+    ui.press(KeyboardInput(chord: KeyChord("d", modifiers: .control)))
+    #expect(!session.isFocused)
+    ui.press("l")
+    #expect(session.isFocused)
+    ui.press(.enter)
+    #expect(selections == 1)
+    ui.press(KeyboardInput(chord: KeyChord(.tab)))
+    #expect(composer.isFocused)
+  }
+
+  @Test func controlSectionUpLeavesEditingComposerForHistory() {
+    let composer = FocusTarget()
+    var context: BlockContext?
+    let controller = ScrollViewController()
+    let messages = (0..<12).map { _ in FocusTarget() }
+    var cachedRows: [Int: ScrollView.Row] = [:]
+    let content = DeferredBlock {
+      BlockContextBridge(
+        content: Group("Conversation") {
+        VStack {
+          ScrollView(
+            "Transcript", sticksToBottom: true, controller: controller,
+            rows: (0..<12).map { index in
+              if let row = cachedRows[index] { return row }
+              let row = ScrollView.Row(
+                id: index,
+                content: NavigableTranscriptItem(
+                  content: TranscriptItemBlock(
+                    item: SessionController.TranscriptItem(
+                      kind: .answer, title: "Message \(index)",
+                      text: String(repeating: "long message line\n", count: 20)),
+                    theme: MacTheme()))
+                  .focusTarget(messages[index])
+                  .padding(EdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10))
+                  .sizing(x: .grow))
+              cachedRows[index] = row
+              return row
+            })
+          Group("Composer") {
+            TextField(text: { "" }, onChange: { _ in }).focusTarget(composer)
+          }
+        }
+      }, prepare: { context = $0 }, finish: { context in
+        if context.input.commands.contains(where: {
+          if case .navigation = $0 { return true }
+          return false
+        }) { context.requestRedraw() }
+      })
+      .onCommand(.navigation(.sectionUp)) {
+        if composer.isEditing { context?.endEditing() }
+        return .ignored
+      }
+    }
+    let ui = NavigationTestHost(content: content, size: Size(width: 600, height: 300), keyBindings: ScribeBlock.keyBindings)
+    defer { ui.host.close() }
+    #expect(controller.offset > 0)
+    composer.focus(editing: true)
+    ui.host.render()
+    #expect(composer.isEditing)
+    ui.press(KeyboardInput(chord: KeyChord("f", modifiers: .control)))
+    #expect(!composer.isFocused)
+    #expect(context?.navigationBreadcrumb == ["Window", "Conversation", "Transcript"])
+    ui.press("l")
+    #expect(context?.navigationSelectionIsGroup == false)
+    #expect(messages.filter { $0.isFocused }.count == 1)
+    let initialOffset = controller.offset
+    ui.press("f", "f", "f", "f", "f")
+    #expect(context?.navigationSelectionIsGroup == false)
+    #expect(context?.navigationBreadcrumb == ["Window", "Conversation", "Transcript"])
+    #expect(controller.offset < initialOffset)
+    for _ in 0..<30 { ui.press("f") }
+    #expect(messages[0].isFocused)
+    #expect(controller.offset < initialOffset)
+  }
+
   @Test func groupActionsAreIndependent() {
     var toggles = 0
     var creations = 0

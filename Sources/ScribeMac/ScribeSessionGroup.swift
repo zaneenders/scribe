@@ -1,6 +1,6 @@
 import Chroma
 
-public struct ScribeSessionGroupStyle: Sendable {
+public struct ScribeSessionGroupStyle: Equatable, Sendable {
   public var foreground: Color
   public var hoveredForeground: Color
   public var count: Color

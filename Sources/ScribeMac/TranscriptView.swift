@@ -9,7 +9,9 @@ struct ReadyLayout: Block {
   @MainActor var body: some Block {
     VStack(spacing: 0) {
       TranscriptView(session: session, theme: theme)
-      BottomChrome(store: store, session: session, theme: theme)
+      Group("Composer") {
+        BottomChrome(store: store, session: session, theme: theme)
+      }
     }
     .sizing(x: .grow, y: .grow)
   }
@@ -21,6 +23,17 @@ struct TranscriptView: Block {
 
   @MainActor var body: some Block {
     updateSelectionDocument()
+    let picker = session.commandPicker
+    if session.cachedTranscriptTheme != theme
+      || session.cachedTranscriptPicker?.startBoundary != picker?.startBoundary
+      || session.cachedTranscriptPicker?.endBoundary != picker?.endBoundary
+      || session.cachedTranscriptPicker?.activeIsEnd != picker?.activeIsEnd
+      || session.cachedTranscriptPicker?.command != picker?.command
+    {
+      session.cachedTranscriptRows.removeAll()
+      session.cachedTranscriptTheme = theme
+      session.cachedTranscriptPicker = picker
+    }
     let rows: [ScrollView.Row]
     if session.transcript.isEmpty {
       rows = [
@@ -42,12 +55,15 @@ struct TranscriptView: Block {
     } else {
       rows = transcriptRows()
     }
+    let rowIDs = Set(rows.map { $0.id })
+    session.cachedTranscriptRows = session.cachedTranscriptRows.filter { rowIDs.contains($0.value.id) }
     return CommandRevealTranscript(
       session: session, controller: session.scroll, rows: rows,
       revealRow: activeBoundaryRow(in: rows)
     )
     .sizing(x: .grow, y: .grow)
     .background(theme.transcriptBackground ?? theme.panelBackground)
+    .keyBindings(session.commandPicker == nil ? KeyBindings() : ScribeCommandPickerCommand.keyBindings)
     .id(session.sessionId)
   }
 
@@ -123,12 +139,14 @@ struct TranscriptView: Block {
   @MainActor private func transcriptRow(
     _ item: SessionController.TranscriptItem, selection: TranscriptSelection
   ) -> ScrollView.Row {
-    ScrollView.Row(
-      id: item.layoutID,
-      content: TranscriptItemBlock(
-        item: item, theme: theme, selection: selection,
-        toggleText: { session.toggleTextDisclosure(id: item.id) }
-      )
+    let id = item.layoutID
+    if let cached = session.cachedTranscriptRows[id] { return cached }
+    let row = ScrollView.Row(
+      id: id,
+      content: NavigableTranscriptItem(
+        content: TranscriptItemBlock(
+          item: item, theme: theme, selection: selection,
+          toggleText: { session.toggleTextDisclosure(id: item.id) }))
       .padding(
         EdgeInsets(
           top: theme.spacing / 2, leading: theme.margin,
@@ -136,6 +154,8 @@ struct TranscriptView: Block {
       )
       .sizing(x: .grow)
     )
+    session.cachedTranscriptRows[id] = row
+    return row
   }
 
   private func selection(
@@ -175,6 +195,22 @@ struct TranscriptView: Block {
       .padding(EdgeInsets(top: 5, leading: theme.margin, bottom: 5, trailing: theme.margin))
       .sizing(x: .grow)
     )
+  }
+}
+
+struct NavigableTranscriptItem<Content: Block>: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
+  let content: Content
+
+  @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
+
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
+    BlockEngine.measure(content, proposal: proposal, context: context)
+  }
+
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
+    context.focusable(in: rect, into: &drawList)
+    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
   }
 }
 
@@ -238,7 +274,7 @@ private struct CommandRevealTranscript: PrimitiveBlock {
       }
       controller.scroll(to: offset)
     }
-    let stack = ScrollView(sticksToBottom: true, controller: controller, rows: rows)
+    let stack = ScrollView("Transcript", sticksToBottom: true, controller: controller, rows: rows)
     TranscriptViewportRegistry.current = rect
     TranscriptViewportRegistry.lastDrawn = rect
     TranscriptViewportRegistry.scrollController = controller

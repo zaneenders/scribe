@@ -1,6 +1,6 @@
 import Chroma
 import Dispatch
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks

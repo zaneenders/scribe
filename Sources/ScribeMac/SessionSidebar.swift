@@ -53,7 +53,7 @@ struct SessionSidebar: Block {
       .border(theme.chromeBorder ?? theme.border)
 
       ScrollView(
-        showsIndicator: true,
+        "Saved sessions", showsIndicator: true,
         controller: store.sidebarScroll
       ) {
         VStack(spacing: 1) {

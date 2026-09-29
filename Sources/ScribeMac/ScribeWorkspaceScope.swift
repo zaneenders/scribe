@@ -38,7 +38,29 @@ public struct ScribeWorkspaceScope<Content: Block>: Block {
       },
       finish: { context in
         store.finishDirectoryPaletteInput(context)
+        if context.input.commands.contains(where: {
+          if case .navigation = $0 { return true }
+          return false
+        }) {
+          context.requestRedraw()
+        }
       })
+      .onCommand(.navigation(.sectionLeft)) {
+        if ScribeMacStore.composerFocus.isEditing { ScribeBlockContext.current?.endEditing() }
+        return .ignored
+      }
+      .onCommand(.navigation(.sectionUp)) {
+        if ScribeMacStore.composerFocus.isEditing { ScribeBlockContext.current?.endEditing() }
+        return .ignored
+      }
+      .onCommand(.navigation(.sectionDown)) {
+        if ScribeMacStore.composerFocus.isEditing { ScribeBlockContext.current?.endEditing() }
+        return .ignored
+      }
+      .onCommand(.navigation(.sectionRight)) {
+        if ScribeMacStore.composerFocus.isEditing { ScribeBlockContext.current?.endEditing() }
+        return .ignored
+      }
       .onCommand(ScribeCommandPickerCommand.toggle) {
         guard store.showDirectoryPicker, store.renamingSessionID == nil else { return .ignored }
         store.tabCompleteDirectory()

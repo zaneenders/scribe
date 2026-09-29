@@ -70,5 +70,8 @@ struct DirectoryPalette: Block {
     )
     .background(theme.headerBackground)
     .border(theme.border)
+    .keyBindings {
+      bind(.tab, in: .shared, to: ScribeCommandPickerCommand.toggle)
+    }
   }
 }

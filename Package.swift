@@ -105,7 +105,7 @@ var targets: [Target] = [
     name: "ScribeBlocksTests",
     dependencies: [
       "ScribeBlocks",
-      .product(name: "HeadlessBackend", package: "chroma"),
+      .product(name: "ChromaTesting", package: "chroma"),
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
@@ -203,7 +203,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "8013af6"
+      revision: "058a824"
     ),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),

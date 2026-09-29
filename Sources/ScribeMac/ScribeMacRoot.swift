@@ -47,12 +47,16 @@ struct ScribeMacRoot: Block {
           case .ready:
             HStack(spacing: 0) {
               if store.isSessionSidebarVisible {
-                SessionSidebar(store: store, theme: theme)
+                Group("Sessions") {
+                  SessionSidebar(store: store, theme: theme)
+                }
               }
               if store.requiresDirectoryBeforeStart && store.showDirectoryPicker {
                 DirectoryPalette(store: store, theme: theme, required: true)
               } else if let active = store.active {
-                ReadyLayout(store: store, session: active, theme: theme)
+                Group("Conversation") {
+                  ReadyLayout(store: store, session: active, theme: theme)
+                }
               } else if let selected = store.selectedSavedSession {
                 sessionLoadingState(selected)
               } else {

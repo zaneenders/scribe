@@ -18,6 +18,7 @@ struct BottomChrome: Block {
             StatusBar(store: store, session: session, theme: theme)
           }
         }
+        .keyBindings(ScribeCommandPickerCommand.keyBindings)
       } else {
         if store.showModelPicker {
           BottomModelPicker(store: store, session: session, theme: theme)

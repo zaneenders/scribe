@@ -1,6 +1,6 @@
 import Chroma
 
-public struct ScribeSessionRowStyle: Sendable {
+public struct ScribeSessionRowStyle: Equatable, Sendable {
   public var foreground: Color
   public var secondaryForeground: Color
   public var selectedForeground: Color

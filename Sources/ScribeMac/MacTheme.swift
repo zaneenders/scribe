@@ -1,6 +1,6 @@
 import Chroma
 
-public struct ScribeStyle: Sendable {
+public struct ScribeStyle: Equatable, Sendable {
   public init() {}
 
   public init(chromaTheme: ChromaTheme) {
