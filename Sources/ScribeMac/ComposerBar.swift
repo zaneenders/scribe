@@ -44,14 +44,11 @@ struct ComposerBar: Block {
   @MainActor var body: some Block {
     VStack(spacing: 6) {
       TrailingControlsRow(spacing: 8) {
-        ScribeChatInput(
+        TextEditor(
           session.isRunning ? "Queue a message..." : "Message Scribe",
           fontScale: theme.textScale,
           text: { session.draft },
-          layoutCache: session.composerLayoutCache,
-          revision: { session.draftRevision },
           onChange: { if session.draft != $0 { session.updateDraft($0) } },
-          onNewline: { session.insertComposerNewline() },
           onEndEditing: {
             guard session.isRunning else { return .ignored }
             session.stop()
@@ -296,6 +293,7 @@ struct BottomModelPicker: Block {
 }
 
 private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let store: ScribeMacStore
   let session: SessionController
   let content: Content
@@ -309,11 +307,11 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
   @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
   @MainActor var expandsVertically: Bool { BlockEngine.expandsVertically(content) }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     if !store.showDirectoryPicker, store.renamingSessionID == nil {
       for command in context.input.commands {
         switch command {

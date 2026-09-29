@@ -146,13 +146,6 @@ struct ScribeMacRoot: Block {
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
-      if ScribeSceneCapture.shared.isEnabled {
-        Button(
-          ScribeSceneCapture.shared.status,
-          fontScale: theme.smallScale,
-          padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
-        ) { ScribeSceneCapture.shared.request() }
-      }
     }
     .padding(EdgeInsets(top: 2, leading: theme.margin, bottom: 2, trailing: theme.margin))
     .sizing(y: .fixed(theme.headerHeight))

@@ -487,14 +487,14 @@ final class ScribeMacStore {
   func applyPendingFocus() {
     if renameFocusPending {
       Self.renameSessionFieldFocus.focus(editing: true)
-      if ScribeRenderContext.current != nil {
+      if ScribeBlockContext.current != nil {
         renameFocusPending = false
       }
       return
     }
     if directoryFocusPending {
       Self.directoryPaletteFocus.focus(editing: true)
-      if ScribeRenderContext.current != nil {
+      if ScribeBlockContext.current != nil {
         directoryFocusPending = false
       }
       return
@@ -505,7 +505,7 @@ final class ScribeMacStore {
     }
     guard composerFocusPending else { return }
     Self.composerFocus.focus(editing: true)
-    if ScribeRenderContext.current != nil {
+    if ScribeBlockContext.current != nil {
       composerFocusPending = false
     }
   }
@@ -527,7 +527,7 @@ final class ScribeMacStore {
     directoryFocusPending = true
   }
 
-  func finishDirectoryPaletteInput(_ context: RenderContext) {
+  func finishDirectoryPaletteInput(_ context: BlockContext) {
     guard showDirectoryPicker, renamingSessionID == nil,
       context.input.textEvents.contains(.endEditing)
     else { return }

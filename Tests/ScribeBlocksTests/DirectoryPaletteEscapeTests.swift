@@ -6,18 +6,19 @@ import Testing
 
 @MainActor
 private final class PaletteEscapeState {
-  var context: RenderContext?
+  var context: BlockContext?
   var underlyingPickerCancelled = false
 }
 
 private struct PaletteEscapeSurface: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let store: ScribeMacStore
   let state: PaletteEscapeState
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size { proposal }
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
 
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: RenderContext) {
-    let bridge = RenderContextBridge(
+  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
+    let bridge = BlockContextBridge(
       content: PaletteEscapeContent(store: store, state: state),
       prepare: { state.context = $0 },
       finish: { store.finishDirectoryPaletteInput($0) })
@@ -26,12 +27,13 @@ private struct PaletteEscapeSurface: PrimitiveBlock {
 }
 
 private struct PaletteEscapeContent: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let store: ScribeMacStore
   let state: PaletteEscapeState
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size { proposal }
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
 
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
     if store.showDirectoryPicker {
       BlockEngine.draw(
         DirectoryPalette(store: store, theme: MacTheme(), required: store.requiresDirectoryBeforeStart),
@@ -66,7 +68,7 @@ struct DirectoryPaletteEscapeTests {
     store.showDirectoryPicker = true
     store.requiresDirectoryBeforeStart = required
     let state = PaletteEscapeState()
-    let renderer = HeadlessRenderer(size: Size(width: 640, height: 400))
+    let renderer = HeadlessHost(size: Size(width: 640, height: 400))
     renderer.content = PaletteEscapeSurface(store: store, state: state)
     renderer.render()
     _ = try #require(state.context)

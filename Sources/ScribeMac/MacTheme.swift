@@ -11,11 +11,11 @@ public struct ScribeStyle: Sendable {
     composerBackground = chromaTheme.background
     border = chromaTheme.border
     buttonIdle = chromaTheme.button.idleBackground
-    buttonHover = chromaTheme.button.hoveredBackground
+    buttonHover = chromaTheme.button.pressedBackground
     buttonPressed = chromaTheme.button.pressedBackground
     sidebarBackground = chromaTheme.elevatedSurface
     sidebarSelection = chromaTheme.button.pressedBackground
-    sidebarHover = chromaTheme.button.hoveredBackground
+    sidebarHover = chromaTheme.button.pressedBackground
     accent = chromaTheme.accent
     green = chromaTheme.positive
     red = chromaTheme.negative
@@ -105,7 +105,7 @@ public struct ScribeStyle: Sendable {
 
   func buttonStyle(pressedColor: Color? = nil, tint: Color? = nil) -> ButtonStyle {
     ButtonStyle(
-      idleBackground: buttonIdle, hoveredBackground: buttonHover,
+      idleBackground: buttonIdle,
       pressedBackground: pressedColor ?? buttonPressed, foreground: tint ?? textPrimary,
       border: border, cornerRadius: cornerRadius)
   }

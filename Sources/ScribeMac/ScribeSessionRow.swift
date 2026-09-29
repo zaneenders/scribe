@@ -56,12 +56,12 @@ public struct ScribeSessionRow: Block {
   @MainActor public var body: some Block {
     Interactive(action: onSelect) { phase in
       HStack(spacing: 5) {
-        if isRunning { ActivitySpinner(color: style.activity) }
+        if isRunning { ProgressIndicator(color: style.activity) }
         MarqueeText(
-          title, id: id,
+          title,
           color: isRunning ? style.activity
             : isSelected ? style.selectedForeground : style.foreground,
-          scale: style.fontScale, isScrolling: phase == .hovered)
+          fontScale: style.fontScale, isActive: phase == .hovered)
         if phase != .hovered {
           if isUnread && !isSelected {
             Text("●").fontScale(style.fontScale).foregroundColor(style.activity)

@@ -58,7 +58,7 @@ struct MacSelectionTests {
     let cleanup = installSelectionFixture(text: "selected transcript")
     defer { cleanup() }
     let interaction = Interaction()
-    let context = RenderContext(interaction: interaction)
+    let context = BlockContext(interaction: interaction)
     context.setCopyTextProvider {
       SelectionManager.shared.copyText(isTranscriptVisible: true)
     }
@@ -94,7 +94,7 @@ struct MacSelectionTests {
     let cleanup = installSelectionFixture(text: "selected transcript")
     defer { cleanup() }
     let interaction = Interaction()
-    let context = RenderContext(interaction: interaction)
+    let context = BlockContext(interaction: interaction)
     let left = Point(x: 10, y: 11)
     let right = Point(x: 74, y: 11)
     let origin = backward ? right : left

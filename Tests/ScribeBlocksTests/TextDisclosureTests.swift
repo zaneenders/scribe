@@ -13,7 +13,7 @@ struct TextDisclosureTests {
         let block = TranscriptItemBlock(item: item, theme: MacTheme())
         let interaction = Interaction()
         interaction.beginFrame(input: InputState())
-        let context = RenderContext(interaction: interaction)
+        let context = BlockContext(interaction: interaction)
         let size = BlockEngine.measure(
           block, proposal: Size(width: width, height: 10_000), context: context)
         var list = DrawList()

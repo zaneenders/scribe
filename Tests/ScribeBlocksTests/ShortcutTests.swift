@@ -7,7 +7,7 @@ import Testing
 @MainActor
 private final class ShortcutState {
   let focus = FocusTarget()
-  var context: RenderContext?
+  var context: BlockContext?
   var text = ""
   var submitted = 0
   var stopped = 0
@@ -15,19 +15,15 @@ private final class ShortcutState {
 }
 
 private struct ShortcutSurface: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let state: ShortcutState
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size { proposal }
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
+  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
     state.context = context
     state.commands += context.input.commands
-    for command in context.input.commands {
-      if ScribeComposerCommand.shouldSubmit(command, composerFocus: state.focus) {
-        state.submitted += 1
-      }
-    }
-    let field = ScribeChatInput(
+    let field = TextEditor(
       "", fontScale: 1,
-      text: { state.text }, onChange: { state.text = $0 }, onNewline: { state.text += "\n" },
+      text: { state.text }, onChange: { state.text = $0 },
       onEndEditing: {
         state.stopped += 1
         return .handled
@@ -41,8 +37,13 @@ private struct ShortcutSurface: PrimitiveBlock {
 struct ShortcutTests {
   @Test func portableKeysReachComposerAndPickerCommands() throws {
     let state = ShortcutState()
-    let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
+    let renderer = HeadlessHost(size: Size(width: 400, height: 100))
     renderer.content = ShortcutSurface(state: state)
+      .onCommand(ScribeComposerCommand.submit) {
+        guard state.focus.isEditing else { return .ignored }
+        state.submitted += 1
+        return .handled
+      }
     renderer.render()
     let context = try #require(state.context)
     state.focus.focus(editing: true)
@@ -51,14 +52,10 @@ struct ShortcutTests {
       let chord = KeyChord(key, modifiers: modifiers)
       let bindings = ScribeBlock.keyBindings
       var input = InputState()
-      if bindings.prefersTextInsertion(chord: chord, text: text, isTextEditing: context.interactionMode == .editing) {
-        if let text { input.textEvents.append(.insert(text)) }
-      } else if let resolution = bindings.command(for: chord), let command = resolution {
-        if case .editing(let event) = command {
-          input.textEvents.append(event)
-        } else {
-          input.commands.append(command)
-        }
+      switch bindings.resolve(KeyboardInput(chord: chord, text: text), isTextEditing: context.interactionMode == .editing) {
+      case .text(let event): input.textEvents.append(event)
+      case .command(let command): input.commands.append(command)
+      case nil: break
       }
       renderer.render(input: input)
     }
@@ -79,6 +76,8 @@ struct ShortcutTests {
     #expect(state.text == "previous prompt\n")
     key(.character("f"), text: "f")
     #expect(state.text.contains("f"))
+    key(.space, text: " ")
+    #expect(state.text == "previous prompt\nf ")
     context.endEditing()
     key(.character("f"), text: "f")
     key(.character("j"), text: "j")
@@ -88,5 +87,8 @@ struct ShortcutTests {
     #expect(state.commands.contains(ScribeCommandPickerCommand.toggle))
     key(.enter, modifiers: modifier)
     #expect(state.submitted == 1)
+    key(.space, text: " ")
+    #expect(state.commands.contains(.action(.activate)))
+    #expect(state.text == "previous prompt\nf ")
   }
 }

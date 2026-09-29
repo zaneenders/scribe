@@ -9,7 +9,7 @@ struct StatusBar: Block {
     HStack(spacing: 10) {
       if session.isRunning {
         HStack(spacing: 5) {
-          ActivitySpinner(color: theme.purple)
+          ProgressIndicator(color: theme.purple)
           Text("WORKING").fontScale(theme.smallScale).foregroundColor(theme.purple)
         }
       } else {

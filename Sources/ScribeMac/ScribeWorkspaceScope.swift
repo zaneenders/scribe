@@ -13,7 +13,7 @@ public struct ScribeWorkspaceScope<Content: Block>: Block {
   @MainActor public var body: some Block {
     let store = workspace.store
     store.start()
-    return RenderContextBridge(content: content,
+    return BlockContextBridge(content: content,
       prepare: { context in
         context.setCopyTextProvider {
           let text = SelectionManager.shared.copyText(
@@ -35,23 +35,22 @@ public struct ScribeWorkspaceScope<Content: Block>: Block {
         SelectionManager.shared.updateFromDrag(context: context)
         MarkdownLayoutRegistry.clear()
         store.applyPendingFocus()
-        if store.showDirectoryPicker, store.renamingSessionID == nil {
-          if context.input.commands.contains(ScribeCommandPickerCommand.toggle) {
-            store.tabCompleteDirectory()
-          }
-        }
-        for command in context.input.commands {
-          if !store.showDirectoryPicker, store.renamingSessionID == nil,
-            store.active?.commandPicker == nil,
-            ScribeComposerCommand.shouldSubmit(command, composerFocus: ScribeMacStore.composerFocus)
-          {
-            store.active?.submit()
-          }
-        }
       },
       finish: { context in
         store.finishDirectoryPaletteInput(context)
       })
+      .onCommand(ScribeCommandPickerCommand.toggle) {
+        guard store.showDirectoryPicker, store.renamingSessionID == nil else { return .ignored }
+        store.tabCompleteDirectory()
+        return .handled
+      }
+      .onCommand(ScribeComposerCommand.submit) {
+        guard !store.showDirectoryPicker, store.renamingSessionID == nil,
+          store.active?.commandPicker == nil, ScribeMacStore.composerFocus.isEditing
+        else { return .ignored }
+        store.active?.submit()
+        return .handled
+      }
   }
 
 }

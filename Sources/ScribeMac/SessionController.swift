@@ -126,11 +126,7 @@ final class SessionController {
 
   var transcript: [TranscriptItem]
   private(set) var isLoadingTranscript = false
-  var draft = "" {
-    didSet { draftRevision &+= 1 }
-  }
-  @ObservationIgnored private(set) var draftRevision: UInt64 = 0
-  @ObservationIgnored let composerLayoutCache = ComposerTextLayoutCache()
+  var draft = ""
   var isRunning = false
   private(set) var lastMessageAt: Date
   var usageText = ""
@@ -230,13 +226,6 @@ final class SessionController {
     draftBeforeHistory = ""
   }
 
-  func insertComposerNewline() {
-    draft.append("\n")
-    historyIndex = nil
-    draftBeforeHistory = ""
-    ScribeMacStore.composerFocus.focus(editing: true)
-  }
-
   @discardableResult
   func recallPreviousPrompt() -> Bool {
     guard !promptHistory.isEmpty, draft.isEmpty || historyIndex != nil else { return false }
@@ -302,7 +291,7 @@ final class SessionController {
         command: command, boundaries: boundaries, startCursor: startCursor,
         endCursor: command == .tldr ? endCursor : nil, activeIsEnd: false,
         messageCount: snapshot.count)
-      ScribeRenderContext.current?.endEditing()
+      ScribeBlockContext.current?.endEditing()
       transcript = Self.replay(snapshot.messages)
     }
   }

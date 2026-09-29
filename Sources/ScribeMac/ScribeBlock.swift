@@ -83,9 +83,9 @@ extension ScribeBlock {
       bind(.enter, to: .editing(.submit))
       bind(.enter, modifiers: .shift, to: .editing(.submit))
       bind(.escape, to: .editing(.endEditing))
-      bind(.space, to: .action(.activate))
-      bind("f", to: ScribeCommandPickerCommand.previous)
-      bind("j", to: ScribeCommandPickerCommand.next)
+      bind(.space, in: .movement, to: .action(.activate))
+      bind("f", in: .movement, to: ScribeCommandPickerCommand.previous)
+      bind("j", in: .movement, to: ScribeCommandPickerCommand.next)
       bind(.tab, to: ScribeCommandPickerCommand.toggle)
     }
   }
