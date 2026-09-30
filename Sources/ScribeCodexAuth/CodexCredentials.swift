@@ -1,6 +1,7 @@
 import Foundation
+import Synchronization
 
-public struct CodexCredential: Sendable, Codable {
+public struct CodexCredential: Sendable, Codable, Equatable {
   public let type: String
   public let access: String
   public let refresh: String
@@ -22,6 +23,7 @@ public struct CodexCredential: Sendable, Codable {
 }
 
 public enum CodexCredentialStore {
+  private static let persistenceLock = Mutex(())
   private static let credentialsFileName = "codex-credentials.json"
 
   public static func resolveBaseDirectory() -> URL {
@@ -57,6 +59,27 @@ public enum CodexCredentialStore {
   }
 
   public static func write(_ credential: CodexCredential, baseDirectory: URL? = nil) throws {
+    try persistenceLock.withLock { _ in
+      try writeUnlocked(credential, baseDirectory: baseDirectory)
+    }
+  }
+
+  static func replace(
+    _ original: CodexCredential,
+    with refreshed: CodexCredential,
+    baseDirectory: URL? = nil
+  ) throws -> CodexCredential {
+    try persistenceLock.withLock { _ in
+      guard let current = try read(baseDirectory: baseDirectory) else {
+        throw CodexOAuthError.noCredentials
+      }
+      guard current == original else { return current }
+      try writeUnlocked(refreshed, baseDirectory: baseDirectory)
+      return refreshed
+    }
+  }
+
+  private static func writeUnlocked(_ credential: CodexCredential, baseDirectory: URL?) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(credential)
@@ -66,9 +89,11 @@ public enum CodexCredentialStore {
   }
 
   public static func delete(baseDirectory: URL? = nil) throws {
-    let path = credentialsPath(baseDirectory: baseDirectory)
-    if FileManager.default.fileExists(atPath: path.path) {
-      try FileManager.default.removeItem(at: path)
+    try persistenceLock.withLock { _ in
+      let path = credentialsPath(baseDirectory: baseDirectory)
+      if FileManager.default.fileExists(atPath: path.path) {
+        try FileManager.default.removeItem(at: path)
+      }
     }
   }
 
