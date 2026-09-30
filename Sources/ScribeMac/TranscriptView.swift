@@ -296,7 +296,7 @@ struct TranscriptItemBlock: Block {
   var toggleText: () -> Void = {}
 
   @MainActor var body: some Block {
-    TranscriptRowFocus(content: ScribeTranscriptPanel(
+    ScribeTranscriptPanel(
       style: ScribeTranscriptPanelStyle(
         background: backgroundColor, border: selection == .none ? theme.border : selectionColor,
         padding: theme.panelPadding, cornerRadius: theme.cornerRadius),
@@ -328,7 +328,7 @@ struct TranscriptItemBlock: Block {
           text: item.displayText, theme: theme, color: bodyColor,
           scale: theme.textScale, itemID: item.selectionID)
       }
-    }))
+    })
   }
 
   private var label: String {
@@ -385,27 +385,6 @@ struct TranscriptItemBlock: Block {
     case .user: theme.userBubbleBackground
     case .tool: theme.codeBackground
     default: theme.panelBackground
-    }
-  }
-}
-
-private struct TranscriptRowFocus<Content: Block>: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
-  let content: Content
-
-  @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
-
-  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
-    BlockEngine.measure(content, proposal: proposal, context: context)
-  }
-
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
-    // Revealing an oversized row on pointer focus would move the drag's anchor.
-    if let viewport = TranscriptViewportRegistry.current,
-      let visible = rect.intersection(viewport)
-    {
-      context.focusable(in: visible, into: &drawList)
     }
   }
 }
