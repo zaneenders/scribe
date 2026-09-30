@@ -41,7 +41,7 @@ public struct CodexBrokerClient: Sendable {
       request.headers.add(name: "Cache-Control", value: "no-store")
       if let body {
         request.headers.add(name: "Content-Type", value: "application/json")
-        request.body = .bytes(ByteBuffer(data: body))
+        request.body = .bytes(ByteBuffer(bytes: body))
       }
       let response = try await Self.http.execute(request, timeout: .seconds(30))
       guard (200..<300).contains(response.status.code) else { throw CodexAuthorityError.denied }
