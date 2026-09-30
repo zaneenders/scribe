@@ -1,20 +1,20 @@
 import Foundation
 import ScribeLLM
-import ScribeLLMCodex
+import ScribeLLMResponses
 import SystemPackage
 import Testing
 
 @testable import ScribeCore
 
 @Test
-func codexUserMessageWithTextOnly() {
+func responsesUserMessageWithTextOnly() {
   let text = "Hello, how are you?"
   let msg = ScribeLLM.Components.Schemas.ChatMessage(
     role: .user,
     content: .case1(text)
   )
 
-  let result = convertChatMessagesToCodexInput([msg])
+  let result = convertChatMessagesToResponsesInput([msg])
 
   #expect(result?.count == 1)
   guard let items = result, let first = items.first else {
@@ -33,7 +33,7 @@ func codexUserMessageWithTextOnly() {
 }
 
 @Test
-func codexUserMessageWithImageAndTextParts() {
+func responsesUserMessageWithImageAndTextParts() {
   let imageURL =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
   let textContent = "What do you see in this image?"
@@ -60,7 +60,7 @@ func codexUserMessageWithImageAndTextParts() {
     content: .case2([textPart, imagePart])
   )
 
-  let result = convertChatMessagesToCodexInput([msg])
+  let result = convertChatMessagesToResponsesInput([msg])
 
   #expect(result?.count == 1)
   guard let items = result, let first = items.first else {
@@ -77,22 +77,22 @@ func codexUserMessageWithImageAndTextParts() {
   }
   #expect(parts.count == 2)
 
-  guard case .inputText(let codexText) = parts[0] else {
+  guard case .inputText(let responsesText) = parts[0] else {
     Issue.record("Expected first part to be inputText")
     return
   }
-  #expect(codexText.text == textContent)
+  #expect(responsesText.text == textContent)
 
-  guard case .inputImage(let codexImage) = parts[1] else {
+  guard case .inputImage(let responsesImage) = parts[1] else {
     Issue.record("Expected second part to be inputImage")
     return
   }
-  #expect(codexImage.imageUrl == imageURL)
-  #expect(codexImage.detail == .auto)
+  #expect(responsesImage.imageUrl == imageURL)
+  #expect(responsesImage.detail == .auto)
 }
 
 @Test
-func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
+func responsesReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
   let pngBase64 =
     "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAFUlEQVR4nGP4z8DwH4QZGBgYGBgAAEKFCf6R29pAAAAAAElFTkSuQmCC"
   let png = try #require(Data(base64Encoded: pngBase64))
@@ -124,14 +124,14 @@ func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
     }
     #expect(chatImage.imageUrl.url == "data:image/png;base64,\(pngBase64)")
 
-    let items = try #require(convertChatMessagesToCodexInput([message]))
-    guard case .user(let user) = items[0], case .case2(let codexParts) = user.content else {
-      Issue.record("Expected a Codex user message with an input content array")
+    let items = try #require(convertChatMessagesToResponsesInput([message]))
+    guard case .user(let user) = items[0], case .case2(let responsesParts) = user.content else {
+      Issue.record("Expected a Responses user message with an input content array")
       return
     }
-    #expect(codexParts.count == 2)
-    guard case .inputImage(let image) = codexParts[1] else {
-      Issue.record("Expected Codex input_image content")
+    #expect(responsesParts.count == 2)
+    guard case .inputImage(let image) = responsesParts[1] else {
+      Issue.record("Expected Responses input_image content")
       return
     }
     #expect(image.imageUrl == "data:image/png;base64,\(pngBase64)")
@@ -139,7 +139,7 @@ func codexReadFileAttachmentUsesSixPixelBase64ImageContentArray() async throws {
 }
 
 @Test
-func codexUserMessageWithImageOnly() {
+func responsesUserMessageWithImageOnly() {
   let imageURL =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
@@ -159,7 +159,7 @@ func codexUserMessageWithImageOnly() {
     content: .case2([imagePart])
   )
 
-  let result = convertChatMessagesToCodexInput([msg])
+  let result = convertChatMessagesToResponsesInput([msg])
 
   #expect(result?.count == 1)
   guard let items = result, let first = items.first else {
@@ -175,16 +175,16 @@ func codexUserMessageWithImageOnly() {
     return
   }
   #expect(parts.count == 1)
-  guard case .inputImage(let codexImage) = parts[0] else {
+  guard case .inputImage(let responsesImage) = parts[0] else {
     Issue.record("Expected inputImage")
     return
   }
-  #expect(codexImage.imageUrl == imageURL)
-  #expect(codexImage.detail == .high)
+  #expect(responsesImage.imageUrl == imageURL)
+  #expect(responsesImage.detail == .high)
 }
 
 @Test
-func codexMessageConversionSanitizesForeignToolCallIDs() {
+func responsesMessageConversionSanitizesForeignToolCallIDs() {
   let foreignID = "tool_3AXlpi3mBRnQCMzIr7HgDba0"
   let assistantMsg = ScribeLLM.Components.Schemas.ChatMessage(
     role: .assistant,
@@ -206,7 +206,7 @@ func codexMessageConversionSanitizesForeignToolCallIDs() {
     toolCallId: foreignID
   )
 
-  let items = convertChatMessagesToCodexInput([assistantMsg, toolMsg])
+  let items = convertChatMessagesToResponsesInput([assistantMsg, toolMsg])
 
   guard let items, items.count == 3,
     case .functionCall(let call) = items[1],
@@ -221,7 +221,7 @@ func codexMessageConversionSanitizesForeignToolCallIDs() {
 }
 
 @Test
-func codexMessageConversionPreservesSystemAndToolMessages() {
+func responsesMessageConversionPreservesSystemAndToolMessages() {
   let systemMsg = ScribeLLM.Components.Schemas.ChatMessage(
     role: .system,
     content: .case1("You are a helpful assistant.")
@@ -251,7 +251,7 @@ func codexMessageConversionPreservesSystemAndToolMessages() {
   )
 
   guard
-    let items = convertChatMessagesToCodexInput(
+    let items = convertChatMessagesToResponsesInput(
       [systemMsg, userMsg, assistantMsg, toolMsg]
     )
   else {

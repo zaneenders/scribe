@@ -2,12 +2,12 @@ import Foundation
 import Logging
 import ScribeCodexAuth
 import ScribeLLM
-import ScribeLLMCodex
+import ScribeLLMResponses
 import SystemPackage
 
-struct CodexProvider: AgentProvider {
+struct ResponsesProvider: AgentProvider {
   enum ClientSource: Sendable {
-    case configured(ScribeLLMCodex.Client)
+    case configured(ScribeLLMResponses.Client)
     case credentials(serverURL: URL)
   }
 
@@ -18,7 +18,7 @@ struct CodexProvider: AgentProvider {
   var serviceTier: String? = nil
   var defaultTemperature: Double? = nil
   let contextWindow: Int
-  var responsesAPI = false
+  var usesCodexBackend = true
   var retryPolicy: RetryPolicy = .default
 
   func run(
@@ -35,15 +35,15 @@ struct CodexProvider: AgentProvider {
     let task = Task<TurnResult, Error> {
       defer { continuation.finish() }
 
-      let client: ScribeLLMCodex.Client
+      let client: ScribeLLMResponses.Client
       switch source {
       case .configured(let configuredClient):
         client = configuredClient
       case .credentials(let serverURL):
-        client = OpenAICodexClient.makeAuthenticated(serverURL: serverURL)
+        client = ResponsesClient.makeAuthenticated(serverURL: serverURL)
       }
 
-      let config = CodexAgentLoopConfig(
+      let config = ResponsesAgentLoopConfig(
         model: model,
         client: client,
         toolExecutor: toolExecutor,
@@ -53,7 +53,7 @@ struct CodexProvider: AgentProvider {
         reasoningEnabled: reasoningEnabled,
         reasoningEffort: reasoningEffort,
         serviceTier: serviceTier,
-        responsesAPI: responsesAPI,
+        usesCodexBackend: usesCodexBackend,
         temperature: options.temperature ?? defaultTemperature,
         hooks: .default,
         contextWindow: contextWindow,
@@ -61,7 +61,7 @@ struct CodexProvider: AgentProvider {
       )
 
       do {
-        let result = try await runCodexAgentLoop(
+        let result = try await runResponsesAgentLoop(
           promptMessages: promptMessages,
           context: AgentContext(messages: history),
           config: config,

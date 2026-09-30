@@ -1,6 +1,6 @@
 import Foundation
 import ScribeLLM
-import ScribeLLMCodex
+import ScribeLLMResponses
 
 extension AgentProvider where Self == OpenAICompletionsProvider {
   static func openAICompletions(
@@ -38,9 +38,9 @@ enum AgentProviderFactory {
 
     switch configuration.apiType {
     case "responses":
-      return CodexProvider(
+      return ResponsesProvider(
         source: .configured(
-          OpenAICodexClient.makeResponses(
+          ResponsesClient.makeResponses(
             serverURL: serverURL,
             apiKey: configuration.apiKey)),
         model: configuration.agentModel,
@@ -48,10 +48,10 @@ enum AgentProviderFactory {
         reasoningEffort: configuration.reasoningEffort,
         defaultTemperature: configuration.temperature,
         contextWindow: configuration.contextWindow,
-        responsesAPI: true,
+        usesCodexBackend: false,
         retryPolicy: retryPolicy)
     case "codex":
-      return CodexProvider(
+      return ResponsesProvider(
         source: .credentials(serverURL: serverURL),
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,

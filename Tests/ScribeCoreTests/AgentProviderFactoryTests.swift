@@ -54,8 +54,8 @@ struct AgentProviderFactoryTests {
     #expect(provider is OpenAICompletionsProvider)
   }
 
-  @Test("codex apiType returns CodexProvider with credentials source")
-  func codexApiTypeReturnsCodexProvider() throws {
+  @Test("codex apiType returns ResponsesProvider with credentials source")
+  func responsesApiTypeReturnsResponsesProvider() throws {
     let config = configuration(
       model: "codex-model",
       serverURL: "https://codex.example.com",
@@ -66,13 +66,13 @@ struct AgentProviderFactoryTests {
     )
 
     let provider = try AgentProviderFactory.make(configuration: config)
-    #expect(provider is CodexProvider)
+    #expect(provider is ResponsesProvider)
 
-    let codexProvider = try #require(provider as? CodexProvider)
-    #expect(codexProvider.model == "codex-model")
-    #expect(codexProvider.reasoningEnabled == true)
-    #expect(codexProvider.reasoningEffort == "high")
-    #expect(codexProvider.contextWindow == 128_000)
+    let responsesProvider = try #require(provider as? ResponsesProvider)
+    #expect(responsesProvider.model == "codex-model")
+    #expect(responsesProvider.reasoningEnabled == true)
+    #expect(responsesProvider.reasoningEffort == "high")
+    #expect(responsesProvider.contextWindow == 128_000)
   }
 
   @Test("responses apiType uses a configured Responses client")
@@ -85,14 +85,14 @@ struct AgentProviderFactoryTests {
         reasoningEnabled: true,
         reasoningEffort: "medium"
       ))
-    let responsesProvider = try #require(provider as? CodexProvider)
+    let responsesProvider = try #require(provider as? ResponsesProvider)
     guard case .configured = responsesProvider.source else {
       Issue.record("Expected a bearer-key configured client")
       return
     }
     #expect(responsesProvider.model == "gpt-6-sol")
     #expect(responsesProvider.reasoningEffort == "medium")
-    #expect(responsesProvider.responsesAPI)
+    #expect(!responsesProvider.usesCodexBackend)
   }
 
   // MARK: - Configuration passthrough
@@ -112,7 +112,7 @@ struct AgentProviderFactoryTests {
 
     let codex = try AgentProviderFactory.make(
       configuration: configuration(apiType: "codex", temperature: 0.4))
-    let codexProvider = try #require(codex as? CodexProvider)
-    #expect(codexProvider.defaultTemperature == 0.4)
+    let responsesProvider = try #require(codex as? ResponsesProvider)
+    #expect(responsesProvider.defaultTemperature == 0.4)
   }
 }
