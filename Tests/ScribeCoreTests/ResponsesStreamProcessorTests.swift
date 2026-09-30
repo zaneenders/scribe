@@ -7,23 +7,23 @@ import Testing
 
 private func driveProcessor(
   sse: String
-) async throws -> (events: [AgentEvent], turn: CodexAssistantTurn, processor: CodexStreamProcessor<NoOpAbortObserver>) {
+) async throws -> (events: [AgentEvent], turn: ResponsesAssistantTurn, processor: ResponsesStreamProcessor<NoOpAbortObserver>) {
   let body = HTTPBody(sse)
   var events: [AgentEvent] = []
   let logger = Logger(label: "test")
-  var processor = CodexStreamProcessor(
+  var processor = ResponsesStreamProcessor(
     onEvent: { events.append($0) },
     logger: logger,
     abortObserver: NoOpAbortObserver(),
     streamWallStart: .now
   )
-  var turn = CodexAssistantTurn()
+  var turn = ResponsesAssistantTurn()
   try await processor.process(httpBody: body, httpStart: .now, turn: &turn)
   return (events, turn, processor)
 }
 
 @Test
-func codexStreamEmitsFinalizedOnResponseCompletedWithTextDelta() async throws {
+func responsesStreamEmitsFinalizedOnResponseCompletedWithTextDelta() async throws {
   let sse = makeSSE(
     #"{"type":"response.output_text.delta","delta":"Hello"}"#,
     #"{"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}"#
@@ -40,7 +40,7 @@ func codexStreamEmitsFinalizedOnResponseCompletedWithTextDelta() async throws {
 }
 
 @Test
-func codexStreamEmitsFinalizedOnResponseCompletedWithReasoningDelta() async throws {
+func responsesStreamEmitsFinalizedOnResponseCompletedWithReasoningDelta() async throws {
   let sse = makeSSE(
     #"{"type":"response.reasoning_text.delta","delta":"Let me think..."}"#,
     #"{"type":"response.completed","response":{"id":"resp_456"}}"#
@@ -54,7 +54,7 @@ func codexStreamEmitsFinalizedOnResponseCompletedWithReasoningDelta() async thro
 }
 
 @Test
-func codexStreamSeparatesAdjacentReasoningSummaryParts() async throws {
+func responsesStreamSeparatesAdjacentReasoningSummaryParts() async throws {
   let sse = makeSSE(
     #"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"**Planning font catalog redesign**"}"#,
     #"{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":1,"delta":"**Designing custom glyph**"}"#,
@@ -75,7 +75,7 @@ func codexStreamSeparatesAdjacentReasoningSummaryParts() async throws {
 }
 
 @Test
-func codexStreamEmitsFinalizedOnResponseCompletedWithToolCallDeltas() async throws {
+func responsesStreamEmitsFinalizedOnResponseCompletedWithToolCallDeltas() async throws {
   let sse = makeSSE(
     #"{"type":"response.function_call_arguments.delta","delta":"{\"com","output_index":0}"#,
     #"{"type":"response.function_call_arguments.delta","delta":"mand\":\"ls\"}","output_index":0}"#,
@@ -92,7 +92,7 @@ func codexStreamEmitsFinalizedOnResponseCompletedWithToolCallDeltas() async thro
 }
 
 @Test
-func codexStreamEmitsFinalizedOnResponseIncomplete() async throws {
+func responsesStreamEmitsFinalizedOnResponseIncomplete() async throws {
   let sse = makeSSE(
     #"{"type":"response.output_text.delta","delta":"Partial..."}"#,
     #"{"type":"response.incomplete","response":{"id":"resp_incomplete"}}"#
@@ -105,7 +105,7 @@ func codexStreamEmitsFinalizedOnResponseIncomplete() async throws {
 }
 
 @Test
-func codexStreamEmitsEmptyWhenNoContentBeforeResponseCompleted() async throws {
+func responsesStreamEmitsEmptyWhenNoContentBeforeResponseCompleted() async throws {
   let sse = makeSSE(
     #"{"type":"response.completed","response":{"id":"resp_empty"}}"#
   )
@@ -119,7 +119,7 @@ func codexStreamEmitsEmptyWhenNoContentBeforeResponseCompleted() async throws {
 }
 
 @Test
-func codexStreamWithDoneSentinelStillFinalizes() async throws {
+func responsesStreamWithDoneSentinelStillFinalizes() async throws {
   let sse =
     makeSSE(
       #"{"type":"response.output_text.delta","delta":"Hi"}"#
@@ -133,14 +133,14 @@ func codexStreamWithDoneSentinelStillFinalizes() async throws {
 }
 
 @Test
-func codexStreamSurfacesTopLevelErrorDetails() async throws {
+func responsesStreamSurfacesTopLevelErrorDetails() async throws {
   let sse = makeSSE(
     #"{"type":"error","code":"input_too_large","message":"Request payload exceeds the limit"}"#
   )
 
   do {
     _ = try await driveProcessor(sse: sse)
-    Issue.record("Expected the Codex error event to throw")
+    Issue.record("Expected the Responses error event to throw")
   } catch let error as ScribeError {
     #expect(
       error.errorDescription
@@ -149,14 +149,14 @@ func codexStreamSurfacesTopLevelErrorDetails() async throws {
 }
 
 @Test
-func codexStreamSurfacesNestedResponseErrorDetails() async throws {
+func responsesStreamSurfacesNestedResponseErrorDetails() async throws {
   let sse = makeSSE(
     #"{"type":"response.failed","response":{"id":"resp_failed","error":{"code":"invalid_image","type":"invalid_request_error","message":"Image could not be processed"}}}"#
   )
 
   do {
     _ = try await driveProcessor(sse: sse)
-    Issue.record("Expected the failed Codex response to throw")
+    Issue.record("Expected the failed Responses response to throw")
   } catch let error as ScribeError {
     #expect(
       error.errorDescription
@@ -165,23 +165,23 @@ func codexStreamSurfacesNestedResponseErrorDetails() async throws {
 }
 
 @Test
-func codexStreamIncludesRawEventWhenErrorHasNoMessage() async throws {
+func responsesStreamIncludesRawEventWhenErrorHasNoMessage() async throws {
   let sse = makeSSE(
     #"{"type":"error","code":"unknown","param":"input"}"#
   )
 
   do {
     _ = try await driveProcessor(sse: sse)
-    Issue.record("Expected the Codex error event to throw")
+    Issue.record("Expected the Responses error event to throw")
   } catch let error as ScribeError {
     #expect(
       error.errorDescription
-        == #"Codex stream error (code: unknown) — event: {"code":"unknown","param":"input","type":"error"}"#)
+        == #"Responses stream error (code: unknown) — event: {"code":"unknown","param":"input","type":"error"}"#)
   }
 }
 
 @Test
-func codexStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent() async throws {
+func responsesStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent() async throws {
   let sse =
     makeSSE(
       #"{"type":"response.output_text.delta","delta":"One and only one"}"#,

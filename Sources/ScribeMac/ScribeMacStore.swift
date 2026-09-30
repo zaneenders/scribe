@@ -3,6 +3,7 @@ import Foundation
 import Logging
 import Observation
 import ProfileRecorderServer
+import ScribeCodexAuth
 import ScribeCore
 import ScribeKit
 import SystemPackage
@@ -94,6 +95,11 @@ final class ScribeMacStore {
   private(set) var isSessionSidebarVisible = true
   var lastError: String?
 
+  private(set) var isSigningInToCodex = false
+  private(set) var codexSignInStatus: String?
+  private var codexSignInTask: Task<Void, Never>?
+  private let codexSignIn: @Sendable () async throws -> [ProfileSummary]
+
   var profileCatalog: [ProfileSummary] = []
 
   var showModelPicker = false
@@ -117,8 +123,43 @@ final class ScribeMacStore {
 
   private let startProfiling: Bool
 
-  init(startProfiling: Bool = true) {
+  init(
+    startProfiling: Bool = true,
+    codexSignIn: @escaping @Sendable () async throws -> [ProfileSummary] = {
+      _ = try await CodexOAuth.login()
+      let resolved = try ConfigLoader.resolvePaths()
+      try ConfigLoader.upsertCodexProfile(at: resolved.configPath)
+      return try await ConfigLoader.load().profiles
+    }
+  ) {
     self.startProfiling = startProfiling
+    self.codexSignIn = codexSignIn
+  }
+
+  func signInToCodex() {
+    guard !isSigningInToCodex else { return }
+    isSigningInToCodex = true
+    codexSignInStatus = "Complete sign-in in your browser"
+    lastError = nil
+    codexSignInTask = Task {
+      defer {
+        isSigningInToCodex = false
+        codexSignInTask = nil
+      }
+      do {
+        profileCatalog = try await codexSignIn()
+        codexSignInStatus = "Codex signed in"
+      } catch {
+        codexSignInStatus = nil
+        if !Task.isCancelled {
+          lastError = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        }
+      }
+    }
+  }
+
+  func cancelCodexSignIn() {
+    codexSignInTask?.cancel()
   }
 
   func start() {

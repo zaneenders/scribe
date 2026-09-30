@@ -57,6 +57,12 @@ Set `SCRIBE_HOME` to change the data directory.
 ```
 
 The first profile is the default.
+Click **Sign in to Codex** in the app header and complete the browser login to
+use ChatGPT/Codex. Signing in saves Scribe's credentials and adds a `codex`
+profile to the config; choose it in the model picker. If authentication expires
+or is revoked, sign in again and resend your message in the same session.
+Scribe refreshes credentials during use and retries a rejected token once.
+
 Set `api.type` to `"codex"` for ChatGPT/Codex, `"deepseek"` for DeepSeek-style
 reasoning, or `"responses"` for a bearer-key Responses API; omit it for other
 OpenAI-compatible chat completions APIs.

@@ -3,14 +3,14 @@ import HTTPTypes
 import Logging
 import OpenAPIRuntime
 import ScribeLLM
-import ScribeLLMCodex
+import ScribeLLMResponses
 import Synchronization
 import SystemPackage
 import Testing
 
 @testable import ScribeCore
 
-private final class CodexOverflowTransport: ClientTransport, Sendable {
+private final class ResponsesOverflowTransport: ClientTransport, Sendable {
   private let responseBodies: [String]
   private let state = Mutex(State())
 
@@ -44,7 +44,7 @@ private final class CodexOverflowTransport: ClientTransport, Sendable {
   }
 }
 
-private struct CodexAttachingExecutor: ToolExecutor {
+private struct ResponsesAttachingExecutor: ToolExecutor {
   func execute(
     _ invocation: ToolInvocation,
     workingDirectory: FilePath,
@@ -60,35 +60,35 @@ private struct CodexAttachingExecutor: ToolExecutor {
   }
 }
 
-private let codexOverflowLogger = Logger(label: "test.codex-context-overflow")
+private let responsesOverflowLogger = Logger(label: "test.responses-context-overflow")
 
-private func codexSSE(_ events: String...) -> String {
+private func responsesSSE(_ events: String...) -> String {
   events.map { "data: \($0)\n\n" }.joined()
 }
 
-private var codexToolCallResponse: String {
-  codexSSE(
+private var responsesToolCallResponse: String {
+  responsesSSE(
     #"{"type":"response.output_item.done","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"attaching_tool","arguments":"{}"},"output_index":0}"#,
     #"{"type":"response.completed","response":{"id":"resp_tools"}}"#)
 }
 
-private var codexContextErrorResponse: String {
-  codexSSE(
+private var responsesContextErrorResponse: String {
+  responsesSSE(
     #"{"type":"error","error":{"code":"context_length_exceeded","message":"Your input exceeds the context window of this model.","type":"invalid_request_error"}}"#
   )
 }
 
-private var codexCompletedResponse: String {
-  codexSSE(
+private var responsesCompletedResponse: String {
+  responsesSSE(
     #"{"type":"response.output_text.delta","delta":"done"}"#,
     #"{"type":"response.completed","response":{"id":"resp_done"}}"#)
 }
 
-private func codexOverflowConfig(transport: CodexOverflowTransport) -> CodexAgentLoopConfig {
-  CodexAgentLoopConfig(
+private func responsesOverflowConfig(transport: ResponsesOverflowTransport) -> ResponsesAgentLoopConfig {
+  ResponsesAgentLoopConfig(
     model: "test-codex",
-    client: ScribeLLMCodex.Client(serverURL: URL(string: "http://test")!, transport: transport),
-    toolExecutor: CodexAttachingExecutor(),
+    client: ScribeLLMResponses.Client(serverURL: URL(string: "http://test")!, transport: transport),
+    toolExecutor: ResponsesAttachingExecutor(),
     chatTools: [],
     maxToolRounds: .max,
     workingDirectory: FilePath("/tmp"),
@@ -97,21 +97,21 @@ private func codexOverflowConfig(transport: CodexOverflowTransport) -> CodexAgen
 }
 
 @Test
-func codexContextOverflowDropsToolAttachmentAndRetries() async throws {
-  let transport = CodexOverflowTransport(responseBodies: [
-    codexToolCallResponse,
-    codexContextErrorResponse,
-    codexCompletedResponse,
+func responsesContextOverflowDropsToolAttachmentAndRetries() async throws {
+  let transport = ResponsesOverflowTransport(responseBodies: [
+    responsesToolCallResponse,
+    responsesContextErrorResponse,
+    responsesCompletedResponse,
   ])
   let events = Mutex<[AgentEvent]>([])
   let user = ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
 
-  let (messages, termination) = try await runCodexAgentLoop(
+  let (messages, termination) = try await runResponsesAgentLoop(
     promptMessages: [user],
     context: AgentContext(messages: []),
-    config: codexOverflowConfig(transport: transport),
+    config: responsesOverflowConfig(transport: transport),
     emit: { event in events.withLock { $0.append(event) } },
-    logger: codexOverflowLogger,
+    logger: responsesOverflowLogger,
     abortObserver: AbortNotifier())
 
   #expect(termination == .completed)
@@ -148,20 +148,20 @@ func codexContextOverflowDropsToolAttachmentAndRetries() async throws {
 }
 
 @Test
-func codexContextOverflowRecoveryRunsOnlyOnce() async throws {
-  let transport = CodexOverflowTransport(responseBodies: [
-    codexToolCallResponse,
-    codexContextErrorResponse,
-    codexContextErrorResponse,
+func responsesContextOverflowRecoveryRunsOnlyOnce() async throws {
+  let transport = ResponsesOverflowTransport(responseBodies: [
+    responsesToolCallResponse,
+    responsesContextErrorResponse,
+    responsesContextErrorResponse,
   ])
   let user = ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
 
-  let (_, termination) = try await runCodexAgentLoop(
+  let (_, termination) = try await runResponsesAgentLoop(
     promptMessages: [user],
     context: AgentContext(messages: []),
-    config: codexOverflowConfig(transport: transport),
+    config: responsesOverflowConfig(transport: transport),
     emit: { _ in },
-    logger: codexOverflowLogger,
+    logger: responsesOverflowLogger,
     abortObserver: AbortNotifier())
 
   #expect(transport.requests().count == 3)
@@ -173,7 +173,7 @@ func codexContextOverflowRecoveryRunsOnlyOnce() async throws {
 }
 
 @Test
-func contextLengthRecognitionIncludesCodexStreamErrors() {
+func contextLengthRecognitionIncludesResponsesStreamErrors() {
   #expect(
     isContextLengthError(
       .generic(

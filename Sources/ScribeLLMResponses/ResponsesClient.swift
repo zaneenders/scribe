@@ -1,8 +1,22 @@
 import Foundation
 import OpenAPIAsyncHTTPClient
 import OpenAPIRuntime
+import ScribeCodexAuth
 
-public enum OpenAICodexClient {
+public enum ResponsesClient {
+  /// Reads the current login for every request and refreshes once if the server rejects it.
+  public static func makeAuthenticated(serverURL: URL, baseDirectory: URL? = nil) -> Client {
+    Client(
+      serverURL: serverURL,
+      transport: AsyncHTTPClientTransport(),
+      middlewares: [
+        CodexAuthMiddleware { rejectedToken in
+          try await CodexOAuth.getValidCredentials(
+            baseDirectory: baseDirectory, rejectingAccessToken: rejectedToken)
+        }
+      ])
+  }
+
   public static func make(
     serverURL: URL,
     accessToken: String?,

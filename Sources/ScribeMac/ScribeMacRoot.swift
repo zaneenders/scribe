@@ -151,6 +151,20 @@ struct ScribeMacRoot: Block {
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
+      if let status = store.codexSignInStatus {
+        Text(status).fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
+      }
+      Button(
+        store.isSigningInToCodex ? "Cancel sign-in" : "Sign in to Codex",
+        fontScale: theme.smallScale,
+        padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+      ) {
+        if store.isSigningInToCodex {
+          store.cancelCodexSignIn()
+        } else {
+          store.signInToCodex()
+        }
+      }
     }
     .padding(EdgeInsets(top: 2, leading: theme.margin, bottom: 2, trailing: theme.margin))
     .sizing(y: .fixed(theme.headerHeight))

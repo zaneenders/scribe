@@ -22,8 +22,9 @@ var targets: [Target] = [
     ]
   ),
   .target(
-    name: "ScribeLLMCodex",
+    name: "ScribeLLMResponses",
     dependencies: [
+      "ScribeCodexAuth",
       .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
       .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
     ],
@@ -65,7 +66,7 @@ var targets: [Target] = [
     name: "ScribeCore",
     dependencies: [
       "ScribeLLM",
-      "ScribeLLMCodex",
+      "ScribeLLMResponses",
       "ScribeCodexAuth",
       .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
       .product(name: "SystemPackage", package: "swift-system"),
@@ -86,6 +87,7 @@ var targets: [Target] = [
     dependencies: [
       "ScribeCore",
       "ScribeKit",
+      "ScribeCodexAuth",
       .product(name: "Chroma", package: "chroma"),
       .product(name: "Logging", package: "swift-log"),
       .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
@@ -117,7 +119,7 @@ var targets: [Target] = [
     dependencies: [
       "ScribeCore",
       "ScribeLLM",
-      "ScribeLLMCodex",
+      "ScribeLLMResponses",
       "ScribeCodexAuth",
     ],
     swiftSettings: [

@@ -1,15 +1,15 @@
 import Foundation
 import Logging
 import OpenAPIRuntime
-import ScribeLLMCodex
+import ScribeLLMResponses
 
-struct CodexStreamProcessor<AO: AbortObserver> {
+struct ResponsesStreamProcessor<AO: AbortObserver> {
   private let onEvent: (AgentEvent) -> Void
   private let logger: Logger
   private let abortObserver: AO
   private let clock = ContinuousClock()
 
-  private(set) var lastUsage: ScribeLLMCodex.Components.Schemas.CodexUsage?
+  private(set) var lastUsage: ScribeLLMResponses.Components.Schemas.ResponsesUsage?
   private(set) var streamStarted = false
   private(set) var streamSection: AssistantStreamSection?
   private(set) var decodedChunkCount = 0
@@ -34,7 +34,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   mutating func process(
     httpBody: HTTPBody,
     httpStart: ContinuousClock.Instant,
-    turn: inout CodexAssistantTurn
+    turn: inout ResponsesAssistantTurn
   ) async throws {
     let sseStream = httpBody.asDecodedServerSentEvents(
       while: { $0 != HTTPBody.ByteChunk("[DONE]".utf8) }
@@ -45,7 +45,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
     do {
       for try await sse in sseStream {
         if abortObserver.isAborted() {
-          logger.notice("agent.stream.abort", metadata: ["where": "mid-stream-codex"])
+          logger.notice("agent.stream.abort", metadata: ["where": "mid-stream-responses"])
           if streamStarted {
             onEvent(.output(.finalized))
           }
@@ -59,7 +59,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let eventType = json["type"] as? String
         else {
-          logger.warning("agent.stream.unreadable-codex-chunk", metadata: ["raw_prefix": "\(raw.prefix(120))"])
+          logger.warning("agent.stream.unreadable-responses-chunk", metadata: ["raw_prefix": "\(raw.prefix(120))"])
           continue
         }
 
@@ -67,7 +67,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
         if !loggedFirstChunk {
           loggedFirstChunk = true
           logger.debug(
-            "agent.stream.first-chunk-codex", metadata: ["ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"])
+            "agent.stream.first-chunk-responses", metadata: ["ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"])
         }
 
         switch eventType {
@@ -76,7 +76,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           if let response = json["response"] as? [String: Any] {
             turn.responseId = response["id"] as? String
             if let usage = response["usage"] as? [String: Any] {
-              lastUsage = parseCodexUsage(usage)
+              lastUsage = parseResponsesUsage(usage)
             }
           }
           if streamStarted || !turn.text.isEmpty || !turn.resolvedToolCalls().isEmpty {
@@ -91,7 +91,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
           if let response = json["response"] as? [String: Any] {
             turn.responseId = response["id"] as? String
             if let usage = response["usage"] as? [String: Any] {
-              lastUsage = parseCodexUsage(usage)
+              lastUsage = parseResponsesUsage(usage)
             }
             if let incompleteDetails = response["incomplete_details"] as? [String: Any] {
               incompleteReason = incompleteDetails["reason"] as? String
@@ -107,11 +107,11 @@ struct CodexStreamProcessor<AO: AbortObserver> {
 
         case "response.failed":
           receivedTerminalEvent = true
-          throw codexStreamError(from: json, fallback: "Codex response failed")
+          throw responsesStreamError(from: json, fallback: "Responses request failed")
 
         case "error":
           receivedTerminalEvent = true
-          throw codexStreamError(from: json, fallback: "Codex stream error")
+          throw responsesStreamError(from: json, fallback: "Responses stream error")
 
         case "response.output_text.delta":
           if let delta = json["delta"] as? String {
@@ -194,7 +194,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
     } catch is AgentTurnInterruptedError {
       throw AgentTurnInterruptedError()
     } catch {
-      logger.error("agent.stream.error.codex", metadata: ["err": "\(String(describing: error))"])
+      logger.error("agent.stream.error.responses", metadata: ["err": "\(String(describing: error))"])
       throw error
     }
 
@@ -209,7 +209,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
     }
   }
 
-  private func codexStreamError(
+  private func responsesStreamError(
     from event: [String: Any],
     fallback: String
   ) -> ScribeError {
@@ -253,7 +253,7 @@ struct CodexStreamProcessor<AO: AbortObserver> {
     }
 
     logger.error(
-      "agent.stream.provider-error.codex",
+      "agent.stream.provider-error.responses",
       metadata: [
         "event_type": "\(event["type"] as? String ?? "unknown")",
         "message": "\(message ?? "missing")",
@@ -324,19 +324,19 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   private mutating func emitToolCallDelta(outputIndex: Int, delta: String) {
   }
 
-  private func parseCodexUsage(_ raw: [String: Any]) -> ScribeLLMCodex.Components.Schemas.CodexUsage {
-    var usage = Components.Schemas.CodexUsage()
+  private func parseResponsesUsage(_ raw: [String: Any]) -> ScribeLLMResponses.Components.Schemas.ResponsesUsage {
+    var usage = Components.Schemas.ResponsesUsage()
     usage.inputTokens = raw["input_tokens"] as? Int
     usage.outputTokens = raw["output_tokens"] as? Int
     usage.totalTokens = raw["total_tokens"] as? Int
     if let details = raw["input_tokens_details"] as? [String: Any] {
-      var inputDetails = Components.Schemas.CodexUsage.InputTokensDetailsPayload()
+      var inputDetails = Components.Schemas.ResponsesUsage.InputTokensDetailsPayload()
       inputDetails.cachedTokens = details["cached_tokens"] as? Int
       inputDetails.cacheWriteTokens = details["cache_write_tokens"] as? Int
       usage.inputTokensDetails = inputDetails
     }
     if let details = raw["output_tokens_details"] as? [String: Any] {
-      var outputDetails = Components.Schemas.CodexUsage.OutputTokensDetailsPayload()
+      var outputDetails = Components.Schemas.ResponsesUsage.OutputTokensDetailsPayload()
       outputDetails.reasoningTokens = details["reasoning_tokens"] as? Int
       usage.outputTokensDetails = outputDetails
     }
@@ -344,13 +344,13 @@ struct CodexStreamProcessor<AO: AbortObserver> {
   }
 }
 
-struct CodexAssistantTurn {
+struct ResponsesAssistantTurn {
   var text = ""
   var reasoningText = ""
   var responseId: String?
-  private var toolCallsByIndex: [Int: PartialCodexToolCall] = [:]
+  private var toolCallsByIndex: [Int: PartialResponsesToolCall] = [:]
 
-  struct PartialCodexToolCall {
+  struct PartialResponsesToolCall {
     var callID: String?
     var itemID: String?
     var name: String?
@@ -370,7 +370,7 @@ struct CodexAssistantTurn {
   }
 
   mutating func applyToolCallDelta(outputIndex: Int, delta: String) {
-    var acc = toolCallsByIndex[outputIndex] ?? PartialCodexToolCall()
+    var acc = toolCallsByIndex[outputIndex] ?? PartialResponsesToolCall()
     acc.arguments += delta
     toolCallsByIndex[outputIndex] = acc
   }
@@ -382,7 +382,7 @@ struct CodexAssistantTurn {
     name: String,
     arguments: String
   ) {
-    var acc = toolCallsByIndex[outputIndex] ?? PartialCodexToolCall()
+    var acc = toolCallsByIndex[outputIndex] ?? PartialResponsesToolCall()
     acc.callID = callID
     acc.itemID = itemID
     acc.name = name
@@ -399,7 +399,7 @@ struct CodexAssistantTurn {
         let itemID = t.itemID,
         let name = t.name
       else { return nil }
-      let identifiers = CodexToolCallIdentifiers(callID: callID, itemID: itemID)
+      let identifiers = ResponsesToolCallIdentifiers(callID: callID, itemID: itemID)
       return ToolInvocation(id: identifiers.encoded, name: name, arguments: t.arguments)
     }
   }
