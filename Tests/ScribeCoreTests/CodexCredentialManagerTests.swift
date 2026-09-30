@@ -35,6 +35,51 @@ struct CodexCredentialManagerTests {
     #expect(try CodexCredentialStore.read(baseDirectory: directory)?.refresh == updated.refresh)
   }
 
+  @Test("a browser login saved during refresh remains authoritative")
+  func preservesLoginDuringRefresh() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let original = credential("original", expired: true)
+    let refreshed = credential("refreshed")
+    let browserLogin = credential("browser-login")
+    try CodexCredentialStore.write(original, baseDirectory: directory)
+    let started = AsyncStream<Void>.makeStream()
+    let resume = AsyncStream<Void>.makeStream()
+    let manager = CodexCredentialManager { credential, directory in
+      started.continuation.yield(())
+      started.continuation.finish()
+      for await _ in resume.stream { break }
+      return try CodexCredentialStore.replace(credential, with: refreshed, baseDirectory: directory)
+    }
+    let refresh = Task { try await manager.credentials(baseDirectory: directory) }
+    for await _ in started.stream { break }
+    try CodexCredentialStore.write(browserLogin, baseDirectory: directory)
+    resume.continuation.yield(())
+    resume.continuation.finish()
+
+    #expect(try await refresh.value == browserLogin)
+    #expect(try CodexCredentialStore.read(baseDirectory: directory) == browserLogin)
+  }
+
+  @Test("refresh persists only while the original login is still saved", arguments: [false, true])
+  func conditionallyPersistsRefresh(loggedOut: Bool) throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let original = credential("original", expired: true)
+    let refreshed = credential("refreshed")
+    try CodexCredentialStore.write(original, baseDirectory: directory)
+    if loggedOut {
+      try CodexCredentialStore.delete(baseDirectory: directory)
+      #expect(throws: CodexOAuthError.self) {
+        try CodexCredentialStore.replace(original, with: refreshed, baseDirectory: directory)
+      }
+      #expect(try CodexCredentialStore.read(baseDirectory: directory) == nil)
+    } else {
+      #expect(try CodexCredentialStore.replace(original, with: refreshed, baseDirectory: directory) == refreshed)
+      #expect(try CodexCredentialStore.read(baseDirectory: directory) == refreshed)
+    }
+  }
+
   @Test("a stale 401 uses a newer saved browser login without refreshing it")
   func usesReplacementLogin() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

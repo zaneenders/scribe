@@ -122,8 +122,8 @@ public enum CodexOAuth {
       accountId: accountId
     )
 
-    try CodexCredentialStore.write(newCredential, baseDirectory: baseDirectory)
-    return newCredential
+    return try CodexCredentialStore.replace(
+      credential, with: newCredential, baseDirectory: baseDirectory)
   }
 
   public static func getValidCredentials(
