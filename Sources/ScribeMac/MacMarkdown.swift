@@ -614,6 +614,7 @@ enum MarkdownLayoutRegistry {
 }
 
 struct MarkdownText: PrimitiveBlock {
+  var focusRule: FocusRule { .standard }
   var markdown: String
   var theme: MacTheme
   var baseColor: Color
@@ -634,14 +635,14 @@ struct MarkdownText: PrimitiveBlock {
       baseColor: baseColor)
   }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     let metrics = context.fontMetrics
     let lineHeight = metrics.lineAdvance * scale + lineSpacing
     let laidOut = lines(forWidth: proposal.width, metrics: metrics)
     return Size(width: proposal.width, height: max(1, Float(laidOut.count)) * lineHeight)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     let metrics = context.fontMetrics
     let cellWidth = metrics.cellAdvance * scale
     let lineHeight = metrics.lineAdvance * scale + lineSpacing
@@ -697,7 +698,7 @@ final class SelectionManager {
 
   private init() {}
 
-  func updateFromDrag(context: RenderContext) {
+  func updateFromDrag(context: BlockContext) {
     let isReleaseFrame = context.input.pointerReleased && context.pointerDragOrigin != nil
     guard
       shouldProcessSelectionDrag(
@@ -864,7 +865,7 @@ final class SelectionManager {
     if let layoutID = originLayoutID, let layout = MarkdownLayoutRegistry.layout(for: layoutID) {
       anchor = (layoutID, layout)
     } else if let pointed = MarkdownLayoutRegistry.entry(
-      at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
+      at: ScribeBlockContext.current?.input.pointerPosition ?? .zero)
     {
       anchor = pointed
     } else {

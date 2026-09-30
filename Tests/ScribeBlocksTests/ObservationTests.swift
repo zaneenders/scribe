@@ -1,6 +1,6 @@
 import Chroma
 import Dispatch
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -19,7 +19,7 @@ struct ObservationTests {
     defer { store.lastError = previousError }
     store.lastError = "Before"
 
-    let renderer = HeadlessRenderer()
+    let renderer = HeadlessHost()
     renderer.content = DeferredBlock { Text(store.lastError ?? "") }
     var redraws = 0
     renderer.onRedrawRequested = { redraws += 1 }

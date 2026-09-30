@@ -21,9 +21,9 @@ struct DirectoryPalette: Block {
       }
       HStack(spacing: 6) {
         Text("$ cd").fontScale(theme.textScale).foregroundColor(theme.green)
-        TextField(
+        TextEditor(
           required ? "/path/to/project" : "path",
-          fontScale: theme.textScale,
+          fontScale: theme.textScale, singleLine: true,
           text: { store.directoryDraft },
           onChange: { store.updateDirectoryDraft($0) },
           onSubmit: { _ in store.submitDirectory() }
@@ -70,5 +70,8 @@ struct DirectoryPalette: Block {
     )
     .background(theme.headerBackground)
     .border(theme.border)
+    .keyBindings {
+      bind(.tab, in: .shared, to: ScribeCommandPickerCommand.toggle)
+    }
   }
 }

@@ -1,5 +1,5 @@
 import Chroma
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -7,7 +7,7 @@ import Testing
 @MainActor
 private final class ShortcutState {
   let focus = FocusTarget()
-  var context: RenderContext?
+  var context: BlockContext?
   var text = ""
   var submitted = 0
   var stopped = 0
@@ -15,19 +15,15 @@ private final class ShortcutState {
 }
 
 private struct ShortcutSurface: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let state: ShortcutState
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size { proposal }
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
+  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
     state.context = context
     state.commands += context.input.commands
-    for command in context.input.commands {
-      if ScribeComposerCommand.shouldSubmit(command, composerFocus: state.focus) {
-        state.submitted += 1
-      }
-    }
-    let field = ScribeChatInput(
+    let field = TextEditor(
       "", fontScale: 1,
-      text: { state.text }, onChange: { state.text = $0 }, onNewline: { state.text += "\n" },
+      text: { state.text }, onChange: { state.text = $0 },
       onEndEditing: {
         state.stopped += 1
         return .handled
@@ -41,26 +37,19 @@ private struct ShortcutSurface: PrimitiveBlock {
 struct ShortcutTests {
   @Test func portableKeysReachComposerAndPickerCommands() throws {
     let state = ShortcutState()
-    let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
-    renderer.content = ShortcutSurface(state: state)
-    renderer.render()
+    let content = ShortcutSurface(state: state)
+      .onCommand(ScribeComposerCommand.submit) {
+        guard state.focus.isEditing else { return .ignored }
+        state.submitted += 1
+        return .handled
+      }
+    let ui = NavigationTestHost(content: content, size: Size(width: 400, height: 100), keyBindings: ScribeBlock.keyBindings)
+    defer { ui.host.close() }
     let context = try #require(state.context)
     state.focus.focus(editing: true)
-    renderer.render()
+    ui.host.render()
     func key(_ key: Key, modifiers: KeyModifiers = [], text: String? = nil) {
-      let chord = KeyChord(key, modifiers: modifiers)
-      let bindings = ScribeBlock.keyBindings
-      var input = InputState()
-      if bindings.prefersTextInsertion(chord: chord, text: text, isTextEditing: context.interactionMode == .editing) {
-        if let text { input.textEvents.append(.insert(text)) }
-      } else if let resolution = bindings.command(for: chord), let command = resolution {
-        if case .editing(let event) = command {
-          input.textEvents.append(event)
-        } else {
-          input.commands.append(command)
-        }
-      }
-      renderer.render(input: input)
+      ui.press(KeyboardInput(chord: KeyChord(key, modifiers: modifiers), text: text))
     }
     #if os(macOS)
     let modifier = KeyModifiers.command
@@ -71,22 +60,54 @@ struct ShortcutTests {
     #expect(state.submitted == 1)
     #expect(state.text.isEmpty)
     key(.upArrow)
-    #expect(state.text == "previous prompt")
+    #expect(state.text.isEmpty)
+    for arrow: Key in [.upArrow, .downArrow, .leftArrow, .rightArrow] {
+      for isEditing in [false, true] {
+        #expect(ScribeBlock.keyBindings.command(for: KeyChord(arrow), isTextEditing: isEditing) == .some(nil))
+      }
+    }
     key(.escape)
     #expect(state.stopped == 1)
     #expect(state.focus.isEditing)
     key(.enter)
-    #expect(state.text == "previous prompt\n")
+    #expect(state.text == "\n")
     key(.character("f"), text: "f")
     #expect(state.text.contains("f"))
+    key(.space, text: " ")
+    #expect(state.text == "\nf ")
     context.endEditing()
     key(.character("f"), text: "f")
     key(.character("j"), text: "j")
     key(.tab)
-    #expect(state.commands.contains(ScribeCommandPickerCommand.previous))
-    #expect(state.commands.contains(ScribeCommandPickerCommand.next))
-    #expect(state.commands.contains(ScribeCommandPickerCommand.toggle))
+    #expect(state.commands.contains(.navigation(.up)))
+    #expect(state.commands.contains(.navigation(.down)))
+    #expect(state.commands.contains(.navigation(.nextFocus)))
+    for (key, command) in [
+      ("d", NavigationCommand.sectionLeft), ("f", .sectionUp),
+      ("j", .sectionDown), ("k", .sectionRight),
+    ] {
+      #expect(ScribeBlock.keyBindings.command(for: KeyChord(Character(key), modifiers: .control), isTextEditing: false) == .some(.navigation(command)))
+      #expect(ScribeBlock.keyBindings.command(for: KeyChord(Character(key), modifiers: .control), isTextEditing: true) == .some(.navigation(command)))
+    }
+    #expect(
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord("f"), isTextEditing: false) ==
+        .some(ScribeCommandPickerCommand.previous))
+    #expect(
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord("j"), isTextEditing: false) ==
+        .some(ScribeCommandPickerCommand.next))
+    #expect(
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: false) ==
+        .some(ScribeCommandPickerCommand.toggle))
+    #expect(
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: true) ==
+        .some(ScribeCommandPickerCommand.toggle))
+    #expect(
+      ScribeBlock.keyBindings.command(for: KeyChord(.escape), isTextEditing: false) ==
+        .some(.action(.cancel)))
     key(.enter, modifiers: modifier)
     #expect(state.submitted == 1)
+    key(.space, text: " ")
+    #expect(state.commands.contains(.action(.activate)))
+    #expect(state.text == "\nf ")
   }
 }

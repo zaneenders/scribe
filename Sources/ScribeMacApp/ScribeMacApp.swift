@@ -36,7 +36,6 @@ private struct ScribeMetalApp: MetalApp {
   var title: String { "Scribe" }
   var windowSize: Size { Size(width: 1100, height: 760) }
   var keyBindings: KeyBindings { ScribeBlock.keyBindings }
-  var frameObserver: FrameObserver? { ScribeSceneCapture.shared.enable() }
   var body: some Block { ScribeBlock() }
 }
 

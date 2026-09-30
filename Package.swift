@@ -107,7 +107,7 @@ var targets: [Target] = [
     name: "ScribeBlocksTests",
     dependencies: [
       "ScribeBlocks",
-      .product(name: "HeadlessBackend", package: "chroma"),
+      .product(name: "ChromaTesting", package: "chroma"),
     ],
     swiftSettings: [
       .swiftLanguageMode(.v6),
@@ -161,7 +161,7 @@ var targets: [Target] = [
 
 #if os(macOS)
 products.append(.executable(name: "scribe-mac", targets: ["ScribeMac"]))
-targets.append(.testTarget(name: "ScribeMacLaunchTests", dependencies: ["ScribeMac"]))
+targets.append(.testTarget(name: "ScribeMacLaunchTests", dependencies: ["ScribeMac", "ScribeBlocks"]))
 targets.append(
   .executableTarget(
     name: "ScribeMac",
@@ -205,7 +205,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "10a2952"
+      revision: "b7b7f01"
     ),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),

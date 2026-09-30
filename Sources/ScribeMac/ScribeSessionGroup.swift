@@ -1,6 +1,6 @@
 import Chroma
 
-public struct ScribeSessionGroupStyle: Sendable {
+public struct ScribeSessionGroupStyle: Equatable, Sendable {
   public var foreground: Color
   public var hoveredForeground: Color
   public var count: Color
@@ -54,9 +54,9 @@ public struct ScribeSessionGroup: Block {
           Text(isCollapsed ? ">" : "v")
             .fontScale(style.fontScale).foregroundColor(style.foreground)
           MarqueeText(
-            title, id: id,
+            title,
             color: phase == .hovered ? style.hoveredForeground : style.foreground,
-            scale: style.fontScale, isScrolling: phase == .hovered)
+            fontScale: style.fontScale, isActive: phase == .hovered)
           Text("\(count)").fontScale(style.fontScale).foregroundColor(style.count)
         }
         .padding(EdgeInsets(top: 7, leading: 8, bottom: 5, trailing: 4))

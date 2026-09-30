@@ -1,5 +1,5 @@
 import Chroma
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -8,7 +8,7 @@ import Testing
 struct WorkspaceComponentsTests {
   @Test func transcriptPanelAcceptsIndependentHeaderContentAndStyle() {
     let background = Color(r: 0.2, g: 0.3, b: 0.4, a: 1)
-    let renderer = HeadlessRenderer(size: Size(width: 400, height: 200))
+    let renderer = HeadlessHost(size: Size(width: 400, height: 200))
     defer { renderer.close() }
     renderer.content = ScribeTranscriptPanel(
       style: ScribeTranscriptPanelStyle(background: background, border: .clear, cornerRadius: 7),
@@ -41,7 +41,7 @@ struct WorkspaceComponentsTests {
   }
 
   @Test func workspaceScopeDoesNotAddApplicationChrome() {
-    let renderer = HeadlessRenderer(size: Size(width: 400, height: 200))
+    let renderer = HeadlessHost(size: Size(width: 400, height: 200))
     defer { renderer.close() }
     renderer.content = ScribeWorkspaceScope(content: Text("Host layout"), workspace: ScribeWorkspace())
     let texts = renderer.render().commands.compactMap { command -> String? in

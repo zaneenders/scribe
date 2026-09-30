@@ -18,6 +18,7 @@ struct BottomChrome: Block {
             StatusBar(store: store, session: session, theme: theme)
           }
         }
+        .keyBindings(ScribeCommandPickerCommand.keyBindings)
       } else {
         if store.showModelPicker {
           BottomModelPicker(store: store, session: session, theme: theme)
@@ -43,15 +44,12 @@ struct ComposerBar: Block {
 
   @MainActor var body: some Block {
     VStack(spacing: 6) {
-      TrailingControlsRow(spacing: 8) {
-        ScribeChatInput(
+      HStack(spacing: 8, alignment: .bottom) {
+        TextEditor(
           session.isRunning ? "Queue a message..." : "Message Scribe",
           fontScale: theme.textScale,
           text: { session.draft },
-          layoutCache: session.composerLayoutCache,
-          revision: { session.draftRevision },
           onChange: { if session.draft != $0 { session.updateDraft($0) } },
-          onNewline: { session.insertComposerNewline() },
           onEndEditing: {
             guard session.isRunning else { return .ignored }
             session.stop()
@@ -67,7 +65,7 @@ struct ComposerBar: Block {
           }
         )
         .focusTarget(ScribeMacStore.composerFocus)
-      } controls: {
+        .sizing(x: .grow)
         if session.isRunning {
           HStack(spacing: 6) {
             Button(
@@ -296,6 +294,7 @@ struct BottomModelPicker: Block {
 }
 
 private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let store: ScribeMacStore
   let session: SessionController
   let content: Content
@@ -309,22 +308,18 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
   @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
   @MainActor var expandsVertically: Bool { BlockEngine.expandsVertically(content) }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     if !store.showDirectoryPicker, store.renamingSessionID == nil {
       for command in context.input.commands {
         switch command {
-        case ScribeCommandPickerCommand.previous:
-          session.moveCommandCursor(by: -1)
-        case ScribeCommandPickerCommand.next:
-          session.moveCommandCursor(by: 1)
-        case ScribeCommandPickerCommand.toggle:
-          session.toggleCommandBoundary()
         case .action(.activate):
           session.confirmCommandPicker()
+        case .action(.cancel):
+          session.cancelCommandPicker()
         default:
           break
         }

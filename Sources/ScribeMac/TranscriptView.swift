@@ -9,7 +9,9 @@ struct ReadyLayout: Block {
   @MainActor var body: some Block {
     VStack(spacing: 0) {
       TranscriptView(session: session, theme: theme)
-      BottomChrome(store: store, session: session, theme: theme)
+      Group("Composer") {
+        BottomChrome(store: store, session: session, theme: theme)
+      }
     }
     .sizing(x: .grow, y: .grow)
   }
@@ -21,10 +23,25 @@ struct TranscriptView: Block {
 
   @MainActor var body: some Block {
     updateSelectionDocument()
-    let rows: [LazyVStack.Row]
+    let picker = session.commandPicker
+    if session.cachedTranscriptTheme != theme
+      || session.cachedTranscriptPicker?.startBoundary != picker?.startBoundary
+      || session.cachedTranscriptPicker?.endBoundary != picker?.endBoundary
+      || session.cachedTranscriptPicker?.activeIsEnd != picker?.activeIsEnd
+      || session.cachedTranscriptPicker?.command != picker?.command
+    {
+      session.cachedTranscriptRows.removeAll()
+      session.cachedTranscriptTheme = theme
+      session.cachedTranscriptPicker = picker
+    }
+    if session.lastFocusedTranscriptID != session.transcript.last?.id {
+      session.lastFocusedTranscriptID = session.transcript.last?.id
+      session.cachedTranscriptRows.removeAll()
+    }
+    let rows: [ScrollView.Row]
     if session.transcript.isEmpty {
       rows = [
-        LazyVStack.Row(
+        ScrollView.Row(
           id: "transcript-empty",
           content: VStack(spacing: 8) {
             Text(session.isLoadingTranscript ? "Loading transcript..." : "Ready")
@@ -42,16 +59,19 @@ struct TranscriptView: Block {
     } else {
       rows = transcriptRows()
     }
+    let rowIDs = Set(rows.map { $0.id })
+    session.cachedTranscriptRows = session.cachedTranscriptRows.filter { rowIDs.contains($0.value.id) }
     return CommandRevealTranscript(
       session: session, controller: session.scroll, rows: rows,
       revealRow: activeBoundaryRow(in: rows)
     )
     .sizing(x: .grow, y: .grow)
     .background(theme.transcriptBackground ?? theme.panelBackground)
+    .keyBindings(session.commandPicker == nil ? KeyBindings() : ScribeCommandPickerCommand.keyBindings)
     .id(session.sessionId)
   }
 
-  @MainActor private func activeBoundaryRow(in rows: [LazyVStack.Row]) -> Int? {
+  @MainActor private func activeBoundaryRow(in rows: [ScrollView.Row]) -> Int? {
     guard let picker = session.commandPicker else { return nil }
     let isStart = picker.command == .fork || !picker.activeIsEnd
     let id = "command-boundary:\(picker.command.rawValue):\(picker.activeBoundary):\(isStart)"
@@ -87,12 +107,12 @@ struct TranscriptView: Block {
       })
   }
 
-  @MainActor private func transcriptRows() -> [LazyVStack.Row] {
+  @MainActor private func transcriptRows() -> [ScrollView.Row] {
     guard let picker = session.commandPicker else {
       return session.transcript.map { transcriptRow($0, selection: .none) }
     }
 
-    var rows: [LazyVStack.Row] = []
+    var rows: [ScrollView.Row] = []
     var insertedBoundaries: Set<Int> = []
     for item in session.transcript {
       if let index = item.sourceMessageIndex {
@@ -122,20 +142,26 @@ struct TranscriptView: Block {
 
   @MainActor private func transcriptRow(
     _ item: SessionController.TranscriptItem, selection: TranscriptSelection
-  ) -> LazyVStack.Row {
-    LazyVStack.Row(
-      id: item.layoutID,
+  ) -> ScrollView.Row {
+    let id = item.layoutID
+    if let cached = session.cachedTranscriptRows[id] { return cached }
+    let content = NavigableTranscriptItem(
       content: TranscriptItemBlock(
         item: item, theme: theme, selection: selection,
-        toggleText: { session.toggleTextDisclosure(id: item.id) }
-      )
+        toggleText: { session.toggleTextDisclosure(id: item.id) }))
       .padding(
         EdgeInsets(
           top: theme.spacing / 2, leading: theme.margin,
           bottom: theme.spacing / 2, trailing: theme.margin)
       )
       .sizing(x: .grow)
+    let row = ScrollView.Row(
+      id: id,
+      content: item.id == session.transcript.last?.id
+        ? content.focusTarget(session.lastTranscriptFocus) : content
     )
+    session.cachedTranscriptRows[id] = row
+    return row
   }
 
   private func selection(
@@ -153,7 +179,7 @@ struct TranscriptView: Block {
 
   @MainActor private func boundaryRow(
     at boundary: Int, isStart: Bool, picker: SessionController.CommandPickerState
-  ) -> LazyVStack.Row {
+  ) -> ScrollView.Row {
     let active = picker.command == .fork || (isStart != picker.activeIsEnd)
     let label: String
     switch picker.command {
@@ -165,7 +191,7 @@ struct TranscriptView: Block {
         ? "TLDR START · SUMMARY BEGINS HERE"
         : "TLDR END · CONVERSATION BELOW IS PRESERVED"
     }
-    return LazyVStack.Row(
+    return ScrollView.Row(
       id: "command-boundary:\(picker.command.rawValue):\(boundary):\(isStart)",
       content: CommandBoundaryMarker(
         label: label, active: active,
@@ -178,6 +204,22 @@ struct TranscriptView: Block {
   }
 }
 
+struct NavigableTranscriptItem<Content: Block>: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
+  let content: Content
+
+  @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
+
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
+    BlockEngine.measure(content, proposal: proposal, context: context)
+  }
+
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
+    context.focusable(in: rect, into: &drawList)
+    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
+  }
+}
+
 enum TranscriptSelection {
   case none
   case collapsed
@@ -185,6 +227,7 @@ enum TranscriptSelection {
 }
 
 private struct CommandBoundaryMarker: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let label: String
   let active: Bool
   let color: Color
@@ -192,11 +235,11 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
 
   @MainActor var expandsHorizontally: Bool { true }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     Size(width: proposal.width, height: 30)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     let content = HStack(spacing: 8) {
       Text("────").fontScale(theme.smallScale).foregroundColor(active ? color : theme.textSecondary)
       Text(label)
@@ -213,17 +256,18 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
 }
 
 private struct CommandRevealTranscript: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let session: SessionController
   let controller: ScrollViewController
-  let rows: [LazyVStack.Row]
+  let rows: [ScrollView.Row]
   let revealRow: Int?
 
   @MainActor var expandsHorizontally: Bool { true }
   @MainActor var expandsVertically: Bool { true }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size { proposal }
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     if let revealRow, session.consumeCommandReveal() {
       var offset: Float = 0
       for index in 0..<revealRow {
@@ -236,7 +280,7 @@ private struct CommandRevealTranscript: PrimitiveBlock {
       }
       controller.scroll(to: offset)
     }
-    let stack = LazyVStack(sticksToBottom: true, controller: controller, rows: rows)
+    let stack = ScrollView("Transcript", sticksToBottom: true, controller: controller, rows: rows)
     TranscriptViewportRegistry.current = rect
     TranscriptViewportRegistry.lastDrawn = rect
     TranscriptViewportRegistry.scrollController = controller
