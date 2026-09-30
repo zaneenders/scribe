@@ -2,13 +2,13 @@ import Chroma
 import Foundation
 import ScribeCodexAuth
 
-struct CodexAccountMenu: Block {
+struct StatsMenu: Block {
   let store: ScribeMacStore
   let theme: MacTheme
 
   @MainActor var body: some Block {
     ZStack {
-      Interactive(action: { store.showCodexMenu = false }) { _ in
+      Interactive(action: { store.showStatsMenu = false }) { _ in
         Spacer().sizing(x: .grow, y: .grow)
       }
       VStack(spacing: 0) {
@@ -16,10 +16,11 @@ struct CodexAccountMenu: Block {
           Spacer()
           VStack(spacing: 12) {
             HStack(spacing: 8) {
-              Text("CODEX").fontScale(theme.smallScale).foregroundColor(theme.accent)
+              Text("STATS").fontScale(theme.smallScale).foregroundColor(theme.accent)
               Spacer()
-              Button("Close", fontScale: theme.smallScale) { store.showCodexMenu = false }
+              Button("Close", fontScale: theme.smallScale) { store.showStatsMenu = false }
             }
+            Text("Codex usage").fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
             if store.isSignedInToCodex {
               if let window = store.codexUsage?.rateLimit?.primaryWindow {
                 usageWindow(window, fallbackTitle: "Short-term")

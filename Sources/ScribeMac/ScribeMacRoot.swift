@@ -67,8 +67,8 @@ struct ScribeMacRoot: Block {
           }
         }
         .background(theme.background)
-        if store.showCodexMenu {
-          CodexAccountMenu(store: store, theme: theme)
+        if store.showStatsMenu {
+          StatsMenu(store: store, theme: theme)
         }
         if let sessionID = store.renamingSessionID {
           RenameSessionDialog(store: store, sessionID: sessionID, theme: theme)
@@ -155,9 +155,9 @@ struct ScribeMacRoot: Block {
       ) { store.toggleSessionSidebar() }
       Spacer()
       Button(
-        "☰", fontScale: theme.smallScale,
+        "Stats", fontScale: theme.smallScale,
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
-      ) { store.toggleCodexMenu() }
+      ) { store.toggleStatsMenu() }
     }
     .padding(EdgeInsets(top: 2, leading: theme.margin, bottom: 2, trailing: theme.margin))
     .sizing(y: .fixed(theme.headerHeight))

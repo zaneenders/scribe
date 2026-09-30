@@ -95,7 +95,7 @@ final class ScribeMacStore {
   private(set) var isSessionSidebarVisible = true
   var lastError: String?
 
-  var showCodexMenu = false
+  var showStatsMenu = false
   private(set) var isSignedInToCodex: Bool
   private(set) var codexUsage: CodexUsage?
   private(set) var isLoadingCodexUsage = false
@@ -147,9 +147,9 @@ final class ScribeMacStore {
     self.codexSignIn = codexSignIn
   }
 
-  func toggleCodexMenu() {
-    showCodexMenu.toggle()
-    if showCodexMenu && isSignedInToCodex { refreshCodexUsage() }
+  func toggleStatsMenu() {
+    showStatsMenu.toggle()
+    if showStatsMenu && isSignedInToCodex { refreshCodexUsage() }
   }
 
   func refreshCodexUsage() {

@@ -22,7 +22,7 @@ struct CodexSignInTests {
     defer { renderer.close() }
     renderer.content = ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: .dark))
     #expect(!hasText("Sign in to Codex", in: renderer))
-    store.toggleCodexMenu()
+    store.toggleStatsMenu()
     #expect(hasText("Sign in to Codex", in: renderer))
     store.signInToCodex()
     store.signInToCodex()
@@ -51,14 +51,16 @@ struct CodexSignInTests {
     let renderer = HeadlessHost(size: Size(width: 1100, height: 760))
     defer { renderer.close() }
     renderer.content = ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: .dark))
-    store.toggleCodexMenu()
+    store.toggleStatsMenu()
     try await waitForUsage(store)
     #expect(!hasText("Sign in to Codex", in: renderer))
+    #expect(hasText("STATS", in: renderer))
+    #expect(hasText("Codex usage", in: renderer))
     #expect(hasText("75% left", in: renderer))
     #expect(hasText("40% left", in: renderer))
-    store.toggleCodexMenu()
+    store.toggleStatsMenu()
     #expect(!hasText("75% left", in: renderer))
-    store.toggleCodexMenu()
+    store.toggleStatsMenu()
     #expect(store.isLoadingCodexUsage)
     try await waitForUsage(store)
   }
@@ -69,7 +71,7 @@ struct CodexSignInTests {
       loadCodexUsage: {
         throw SignInFailure()
       })
-    store.toggleCodexMenu()
+    store.toggleStatsMenu()
     try await waitForUsage(store)
     #expect(store.isSignedInToCodex)
     #expect(store.codexUsageStatus == "Usage unavailable")
@@ -79,7 +81,7 @@ struct CodexSignInTests {
       loadCodexUsage: {
         throw CodexOAuthError.loginRequired
       })
-    rejected.toggleCodexMenu()
+    rejected.toggleStatsMenu()
     try await waitForUsage(rejected)
     #expect(!rejected.isSignedInToCodex)
     #expect(rejected.codexSignInStatus == "Please sign in again")
