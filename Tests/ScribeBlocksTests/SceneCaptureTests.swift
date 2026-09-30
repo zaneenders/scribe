@@ -1,6 +1,6 @@
 import Chroma
+import ChromaTesting
 import Foundation
-import HeadlessBackend
 import Testing
 
 @testable import ScribeBlocks
@@ -17,7 +17,7 @@ struct SceneCaptureTests {
       try Data().write(to: directory)
     }
     let capture = ScribeSceneCapture(directory: directory)
-    let renderer = HeadlessRenderer()
+    let renderer = HeadlessHost()
     defer { renderer.close() }
     renderer.content = DeferredBlock { Text(capture.status) }
     renderer.frameObserver = capture.enable()

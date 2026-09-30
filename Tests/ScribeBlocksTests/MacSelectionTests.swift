@@ -58,7 +58,7 @@ struct MacSelectionTests {
     let cleanup = installSelectionFixture(text: "selected transcript")
     defer { cleanup() }
     let interaction = Interaction()
-    let context = RenderContext(interaction: interaction)
+    let context = BlockContext(interaction: interaction)
     context.setCopyTextProvider {
       SelectionManager.shared.copyText(isTranscriptVisible: true)
     }
@@ -67,7 +67,7 @@ struct MacSelectionTests {
     let focus = FocusTarget()
     focus.focus(editing: true)
     BlockEngine.draw(
-      TextField(text: { "draft" }, onChange: { _ in }).focusTarget(focus),
+      TextEditor(singleLine: true, text: { "draft" }, onChange: { _ in }).focusTarget(focus),
       into: &drawList, in: Rect(x: 0, y: 100, width: 300, height: 40), context: context)
     interaction.endFrame()
     interaction.caretOffset = 5
@@ -94,7 +94,7 @@ struct MacSelectionTests {
     let cleanup = installSelectionFixture(text: "selected transcript")
     defer { cleanup() }
     let interaction = Interaction()
-    let context = RenderContext(interaction: interaction)
+    let context = BlockContext(interaction: interaction)
     let left = Point(x: 10, y: 11)
     let right = Point(x: 74, y: 11)
     let origin = backward ? right : left

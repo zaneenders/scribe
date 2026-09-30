@@ -30,6 +30,11 @@ public final class ScribeSceneCapture {
     status = "Scene capture requested"
   }
 
+  private struct CaptureDocument: Encodable {
+    let version = 2
+    let frame: FrameObservation
+  }
+
   private func observe(_ frame: FrameObservation) {
     guard pending, !saving else { return }
     pending = false
@@ -42,7 +47,8 @@ public final class ScribeSceneCapture {
           try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
-          let data = try SceneCapture.encode(frame)
+          let data = try JSONEncoder().encode(CaptureDocument(frame: frame))
+          guard data.count <= 64 * 1024 * 1024 else { throw CocoaError(.fileWriteOutOfSpace) }
           let url = directory.appendingPathComponent("scene-\(UUID().uuidString).chromacapture")
           guard
             FileManager.default.createFile(

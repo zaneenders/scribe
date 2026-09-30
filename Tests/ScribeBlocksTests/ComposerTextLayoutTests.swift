@@ -1,5 +1,5 @@
 import Chroma
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -10,7 +10,7 @@ struct ComposerTextLayoutTests {
     var text = String(repeating: "log payload\n", count: 800)
     var revision: UInt64 = 1
     let cache = ComposerTextLayoutCache()
-    let renderer = HeadlessRenderer(size: Size(width: 500, height: 140))
+    let renderer = HeadlessHost(size: Size(width: 500, height: 140))
     renderer.content = ScribeChatInput(
       "", fontScale: 1,
       text: { text }, layoutCache: cache, revision: { revision },

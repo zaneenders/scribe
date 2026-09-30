@@ -74,9 +74,9 @@ final class ScribeMacStore {
   }
 
   static let shared = ScribeMacStore()
-  static let composerFocus = FocusTarget()
-  static let directoryPaletteFocus = FocusTarget()
-  static let renameSessionFieldFocus = FocusTarget()
+  let composerFocus = FocusTarget()
+  let directoryPaletteFocus = FocusTarget()
+  let renameSessionFieldFocus = FocusTarget()
 
   var phase: Phase = .starting
 
@@ -459,6 +459,7 @@ final class ScribeMacStore {
     let previousID = activeSessionID
     selectedSavedSession = nil
     activeSessionID = id
+    target.composerFocus = composerFocus
     active = target
     for session in sessions {
       let isActive = session.sessionId == id
@@ -505,6 +506,7 @@ final class ScribeMacStore {
       guard let self, let controller else { return }
       if self.activeSessionID == previous {
         self.activeSessionID = successor
+        controller.composerFocus = composerFocus
         self.active = controller
       }
       self.refreshSavedSessions()
@@ -570,14 +572,14 @@ final class ScribeMacStore {
 
   func applyPendingFocus() {
     if renameFocusPending {
-      Self.renameSessionFieldFocus.focus(editing: true)
+      renameSessionFieldFocus.focus(editing: true)
       if ScribeRenderContext.current != nil {
         renameFocusPending = false
       }
       return
     }
     if directoryFocusPending {
-      Self.directoryPaletteFocus.focus(editing: true)
+      directoryPaletteFocus.focus(editing: true)
       if ScribeRenderContext.current != nil {
         directoryFocusPending = false
       }
@@ -588,7 +590,7 @@ final class ScribeMacStore {
       composerFocusPending = true
     }
     guard composerFocusPending else { return }
-    Self.composerFocus.focus(editing: true)
+    composerFocus.focus(editing: true)
     if ScribeRenderContext.current != nil {
       composerFocusPending = false
     }
@@ -611,12 +613,12 @@ final class ScribeMacStore {
     directoryFocusPending = true
   }
 
-  func finishDirectoryPaletteInput(_ context: RenderContext) {
+  func finishDirectoryPaletteInput(_ context: BlockContext) {
     guard showDirectoryPicker, renamingSessionID == nil,
       context.input.textEvents.contains(.endEditing)
     else { return }
     if requiresDirectoryBeforeStart {
-      Self.directoryPaletteFocus.focus(editing: true)
+      directoryPaletteFocus.focus(editing: true)
     } else {
       closeDirectoryPicker()
     }

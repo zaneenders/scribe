@@ -1,5 +1,5 @@
 import Chroma
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -7,7 +7,7 @@ import Testing
 @MainActor
 private final class ShortcutState {
   let focus = FocusTarget()
-  var context: RenderContext?
+  var context: BlockContext?
   var text = ""
   var submitted = 0
   var stopped = 0
@@ -15,16 +15,12 @@ private final class ShortcutState {
 }
 
 private struct ShortcutSurface: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
   let state: ShortcutState
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size { proposal }
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
+  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
     state.context = context
     state.commands += context.input.commands
-    for command in context.input.commands {
-      if ScribeComposerCommand.shouldSubmit(command, composerFocus: state.focus) {
-        state.submitted += 1
-      }
-    }
     let field = ScribeChatInput(
       "", fontScale: 1,
       text: { state.text }, onChange: { state.text = $0 }, onNewline: { state.text += "\n" },
@@ -41,23 +37,24 @@ private struct ShortcutSurface: PrimitiveBlock {
 struct ShortcutTests {
   @Test func portableKeysReachComposerAndPickerCommands() throws {
     let state = ShortcutState()
-    let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
-    renderer.content = ShortcutSurface(state: state)
+    let renderer = HeadlessHost(size: Size(width: 400, height: 100))
+    renderer.keyBindings = ScribeBlock.keyBindings
+    renderer.content = ShortcutSurface(state: state).onCommand(ScribeComposerCommand.submit) {
+      guard state.focus.isEditing else { return .ignored }
+      state.submitted += 1
+      return .handled
+    }
     renderer.render()
     let context = try #require(state.context)
     state.focus.focus(editing: true)
     renderer.render()
     func key(_ key: Key, modifiers: KeyModifiers = [], text: String? = nil) {
       let chord = KeyChord(key, modifiers: modifiers)
-      let bindings = ScribeBlock.keyBindings
       var input = InputState()
-      if bindings.prefersTextInsertion(chord: chord, text: text, isTextEditing: context.interactionMode == .editing) {
-        if let text { input.textEvents.append(.insert(text)) }
-      } else if let resolution = bindings.command(for: chord), let command = resolution {
-        if case .editing(let event) = command {
-          input.textEvents.append(event)
-        } else {
-          input.commands.append(command)
+      if let resolved = renderer.resolve(KeyboardInput(chord: chord, text: text)) {
+        switch resolved {
+        case .command(let command): input.commands.append(command)
+        case .text(let event): input.textEvents.append(event)
         }
       }
       renderer.render(input: input)

@@ -10,6 +10,7 @@ import SystemPackage
 @Observable
 final class SessionController {
 
+  var composerFocus = FocusTarget()
   enum ItemKind: Sendable {
     case user
     case answer
@@ -234,7 +235,7 @@ final class SessionController {
     draft.append("\n")
     historyIndex = nil
     draftBeforeHistory = ""
-    ScribeMacStore.composerFocus.focus(editing: true)
+    composerFocus.focus(editing: true)
   }
 
   @discardableResult
@@ -247,7 +248,7 @@ final class SessionController {
       historyIndex = index - 1
     }
     if let historyIndex { draft = promptHistory[historyIndex] }
-    ScribeMacStore.composerFocus.focus(editing: true)
+    composerFocus.focus(editing: true)
     return true
   }
 
@@ -262,7 +263,7 @@ final class SessionController {
       draft = draftBeforeHistory
       draftBeforeHistory = ""
     }
-    ScribeMacStore.composerFocus.focus(editing: true)
+    composerFocus.focus(editing: true)
     return true
   }
 

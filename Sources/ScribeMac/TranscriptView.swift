@@ -21,10 +21,10 @@ struct TranscriptView: Block {
 
   @MainActor var body: some Block {
     updateSelectionDocument()
-    let rows: [LazyVStack.Row]
+    let rows: [ScrollView.Row]
     if session.transcript.isEmpty {
       rows = [
-        LazyVStack.Row(
+        ScrollView.Row(
           id: "transcript-empty",
           content: VStack(spacing: 8) {
             Text(session.isLoadingTranscript ? "Loading transcript..." : "Ready")
@@ -51,7 +51,7 @@ struct TranscriptView: Block {
     .id(session.sessionId)
   }
 
-  @MainActor private func activeBoundaryRow(in rows: [LazyVStack.Row]) -> Int? {
+  @MainActor private func activeBoundaryRow(in rows: [ScrollView.Row]) -> Int? {
     guard let picker = session.commandPicker else { return nil }
     let isStart = picker.command == .fork || !picker.activeIsEnd
     let id = "command-boundary:\(picker.command.rawValue):\(picker.activeBoundary):\(isStart)"
@@ -87,12 +87,12 @@ struct TranscriptView: Block {
       })
   }
 
-  @MainActor private func transcriptRows() -> [LazyVStack.Row] {
+  @MainActor private func transcriptRows() -> [ScrollView.Row] {
     guard let picker = session.commandPicker else {
       return session.transcript.map { transcriptRow($0, selection: .none) }
     }
 
-    var rows: [LazyVStack.Row] = []
+    var rows: [ScrollView.Row] = []
     var insertedBoundaries: Set<Int> = []
     for item in session.transcript {
       if let index = item.sourceMessageIndex {
@@ -122,8 +122,8 @@ struct TranscriptView: Block {
 
   @MainActor private func transcriptRow(
     _ item: SessionController.TranscriptItem, selection: TranscriptSelection
-  ) -> LazyVStack.Row {
-    LazyVStack.Row(
+  ) -> ScrollView.Row {
+    ScrollView.Row(
       id: item.layoutID,
       content: TranscriptItemBlock(
         item: item, theme: theme, selection: selection,
@@ -153,7 +153,7 @@ struct TranscriptView: Block {
 
   @MainActor private func boundaryRow(
     at boundary: Int, isStart: Bool, picker: SessionController.CommandPickerState
-  ) -> LazyVStack.Row {
+  ) -> ScrollView.Row {
     let active = picker.command == .fork || (isStart != picker.activeIsEnd)
     let label: String
     switch picker.command {
@@ -165,7 +165,7 @@ struct TranscriptView: Block {
         ? "TLDR START · SUMMARY BEGINS HERE"
         : "TLDR END · CONVERSATION BELOW IS PRESERVED"
     }
-    return LazyVStack.Row(
+    return ScrollView.Row(
       id: "command-boundary:\(picker.command.rawValue):\(boundary):\(isStart)",
       content: CommandBoundaryMarker(
         label: label, active: active,
@@ -185,6 +185,7 @@ enum TranscriptSelection {
 }
 
 private struct CommandBoundaryMarker: PrimitiveBlock {
+  var focusRule: FocusRule { .standard }
   let label: String
   let active: Bool
   let color: Color
@@ -192,11 +193,11 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
 
   @MainActor var expandsHorizontally: Bool { true }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     Size(width: proposal.width, height: 30)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     let content = HStack(spacing: 8) {
       Text("────").fontScale(theme.smallScale).foregroundColor(active ? color : theme.textSecondary)
       Text(label)
@@ -213,17 +214,18 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
 }
 
 private struct CommandRevealTranscript: PrimitiveBlock {
+  var focusRule: FocusRule { .standard }
   let session: SessionController
   let controller: ScrollViewController
-  let rows: [LazyVStack.Row]
+  let rows: [ScrollView.Row]
   let revealRow: Int?
 
   @MainActor var expandsHorizontally: Bool { true }
   @MainActor var expandsVertically: Bool { true }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size { proposal }
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     if let revealRow, session.consumeCommandReveal() {
       var offset: Float = 0
       for index in 0..<revealRow {
@@ -236,7 +238,7 @@ private struct CommandRevealTranscript: PrimitiveBlock {
       }
       controller.scroll(to: offset)
     }
-    let stack = LazyVStack(sticksToBottom: true, controller: controller, rows: rows)
+    let stack = ScrollView(sticksToBottom: true, controller: controller, rows: rows)
     TranscriptViewportRegistry.current = rect
     TranscriptViewportRegistry.lastDrawn = rect
     TranscriptViewportRegistry.scrollController = controller
@@ -261,30 +263,31 @@ struct TranscriptItemBlock: Block {
           markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
           scale: theme.smallScale, itemID: item.headerSelectionID)
         Spacer()
-      }, content: VStack(spacing: 7) {
-      if item.isCollapsible {
-        HStack {
-          Button(
-            item.isTextCollapsed ? "Show full text" : "Hide text",
-            fontScale: theme.smallScale
-          ) { toggleText() }
-          Spacer()
+      },
+      content: VStack(spacing: 7) {
+        if item.isCollapsible {
+          HStack {
+            Button(
+              item.isTextCollapsed ? "Show full text" : "Hide text",
+              fontScale: theme.smallScale
+            ) { toggleText() }
+            Spacer()
+          }
         }
-      }
-      if item.text.isEmpty {
-        MarkdownText(
-          markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
-          scale: theme.smallScale, itemID: item.selectionID)
-      } else if item.kind == .answer || item.kind == .reasoning {
-        MarkdownText(
-          markdown: item.text, theme: theme, baseColor: bodyColor,
-          scale: theme.textScale, itemID: item.selectionID)
-      } else {
-        WrappedText(
-          text: item.displayText, theme: theme, color: bodyColor,
-          scale: theme.textScale, itemID: item.selectionID)
-      }
-    })
+        if item.text.isEmpty {
+          MarkdownText(
+            markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
+            scale: theme.smallScale, itemID: item.selectionID)
+        } else if item.kind == .answer || item.kind == .reasoning {
+          MarkdownText(
+            markdown: item.text, theme: theme, baseColor: bodyColor,
+            scale: theme.textScale, itemID: item.selectionID)
+        } else {
+          WrappedText(
+            text: item.displayText, theme: theme, color: bodyColor,
+            scale: theme.textScale, itemID: item.selectionID)
+        }
+      })
   }
 
   private var label: String {

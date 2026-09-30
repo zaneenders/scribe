@@ -1,5 +1,5 @@
 import Chroma
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct ActivitySpinnerTests {
   @Test func requestsAnimationOnlyWhilePresent() {
-    let renderer = HeadlessRenderer()
+    let renderer = HeadlessHost()
     defer { renderer.close() }
     renderer.content = ActivitySpinner(color: .white)
     renderer.render()

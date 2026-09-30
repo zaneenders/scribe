@@ -1,5 +1,5 @@
 import Chroma
-import HeadlessBackend
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -30,11 +30,11 @@ struct ComposerShortcutTests {
   @Test func submitRequiresComposerEditing() {
     let composer = FocusTarget()
     let directory = FocusTarget()
-    let renderer = HeadlessRenderer(size: Size(width: 400, height: 100))
+    let renderer = HeadlessHost(size: Size(width: 400, height: 100))
     renderer.content = VStack {
       ScribeChatInput("", fontScale: 1, text: { "" }, onChange: { _ in }, onNewline: {})
         .focusTarget(composer)
-      TextField(text: { "" }, onChange: { _ in })
+      TextEditor(singleLine: true, text: { "" }, onChange: { _ in })
         .focusTarget(directory)
     }
     renderer.render()

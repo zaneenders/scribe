@@ -13,7 +13,8 @@ public struct ScribeWorkspaceScope<Content: Block>: Block {
   @MainActor public var body: some Block {
     let store = workspace.store
     store.start()
-    return RenderContextBridge(content: content,
+    return RenderContextBridge(
+      content: content,
       prepare: { context in
         context.setCopyTextProvider {
           let text = SelectionManager.shared.copyText(
@@ -40,18 +41,18 @@ public struct ScribeWorkspaceScope<Content: Block>: Block {
             store.tabCompleteDirectory()
           }
         }
-        for command in context.input.commands {
-          if !store.showDirectoryPicker, store.renamingSessionID == nil,
-            store.active?.commandPicker == nil,
-            ScribeComposerCommand.shouldSubmit(command, composerFocus: ScribeMacStore.composerFocus)
-          {
-            store.active?.submit()
-          }
-        }
       },
       finish: { context in
         store.finishDirectoryPaletteInput(context)
-      })
+      }
+    )
+    .onCommand(ScribeComposerCommand.submit) {
+      guard !store.showDirectoryPicker, store.renamingSessionID == nil,
+        store.active?.commandPicker == nil, store.composerFocus.isEditing
+      else { return .ignored }
+      store.active?.submit()
+      return .handled
+    }
   }
 
 }

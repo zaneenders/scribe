@@ -122,13 +122,14 @@ struct SessionGroupHeader: Block {
     ScribeSessionGroup(
       id: "group-name:\(group.cwd)", title: sanitizeASCII(group.title),
       count: group.open.count + group.totalSavedCount, isCollapsed: isCollapsed,
-      style: theme.sessionGroupStyle ?? ScribeSessionGroupStyle(
-        foreground: group.open.contains(where: \.isRunning)
-          ? theme.purple : theme.textPrimary,
-        hoveredForeground: theme.accent,
-        count: theme.textSecondary,
-        newSession: theme.textSecondary,
-        hoverBackground: theme.sidebarHover, fontScale: theme.smallScale),
+      style: theme.sessionGroupStyle
+        ?? ScribeSessionGroupStyle(
+          foreground: group.open.contains(where: \.isRunning)
+            ? theme.purple : theme.textPrimary,
+          hoveredForeground: theme.accent,
+          count: theme.textSecondary,
+          newSession: theme.textSecondary,
+          hoverBackground: theme.sidebarHover, fontScale: theme.smallScale),
       onToggle: { store.toggleGroup(group.cwd) },
       onNewSession: { store.newSession(in: group.cwd) })
   }
@@ -153,12 +154,13 @@ struct SessionRow: Block {
 }
 
 private func sessionRowStyle(_ theme: MacTheme) -> ScribeSessionRowStyle {
-  theme.sessionRowStyle ?? ScribeSessionRowStyle(
-    foreground: theme.textSecondary,
-    secondaryForeground: theme.textSecondary,
-    selectedForeground: theme.textPrimary, activity: theme.purple,
-    selection: theme.sidebarSelection, hover: theme.sidebarHover, border: theme.accent,
-    fontScale: theme.smallScale)
+  theme.sessionRowStyle
+    ?? ScribeSessionRowStyle(
+      foreground: theme.textSecondary,
+      secondaryForeground: theme.textSecondary,
+      selectedForeground: theme.textPrimary, activity: theme.purple,
+      selection: theme.sidebarSelection, hover: theme.sidebarHover, border: theme.accent,
+      fontScale: theme.smallScale)
 }
 
 struct SavedSessionRow: Block {
@@ -195,6 +197,7 @@ private final class MarqueeAnimationState {
 }
 
 struct MarqueeText: PrimitiveBlock {
+  var focusRule: FocusRule { .decorative }
   let text: String
   let id: String
   let color: Color
@@ -214,12 +217,12 @@ struct MarqueeText: PrimitiveBlock {
 
   @MainActor var expandsHorizontally: Bool { true }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     let measured = context.fontMetrics.measure(text, scale: scale * context.textScale)
     return Size(width: proposal.width, height: measured.height)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     let effectiveScale = scale * context.textScale
     let textWidth = context.fontMetrics.measure(text, scale: effectiveScale).width
     let shouldScroll = isScrolling && textWidth > rect.size.width

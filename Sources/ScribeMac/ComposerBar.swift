@@ -66,7 +66,7 @@ struct ComposerBar: Block {
             return recalled ? session.draft : nil
           }
         )
-        .focusTarget(ScribeMacStore.composerFocus)
+        .focusTarget(store.composerFocus)
       } controls: {
         if session.isRunning {
           HStack(spacing: 6) {
@@ -156,13 +156,15 @@ struct ComposerBar: Block {
           }
           Button(
             "TLDR", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.purple,
+            style: theme.buttonStyle(
+              pressedColor: theme.purple,
               tint: theme.yellow),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.tldr) }
           Button(
             "Fork", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.orange,
+            style: theme.buttonStyle(
+              pressedColor: theme.orange,
               tint: theme.peach),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.fork) }
@@ -296,6 +298,7 @@ struct BottomModelPicker: Block {
 }
 
 private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
+  var focusRule: FocusRule { .standard }
   let store: ScribeMacStore
   let session: SessionController
   let content: Content
@@ -309,11 +312,11 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
   @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
   @MainActor var expandsVertically: Bool { BlockEngine.expandsVertically(content) }
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     if !store.showDirectoryPicker, store.renamingSessionID == nil {
       for command in context.input.commands {
         switch command {

@@ -1,6 +1,6 @@
 import Chroma
+import ChromaTesting
 import Foundation
-import HeadlessBackend
 import ScribeCodexAuth
 import ScribeKit
 import Testing
@@ -18,7 +18,7 @@ struct CodexSignInTests {
         for await _ in completion.stream { break }
         return [profile]
       })
-    let renderer = HeadlessRenderer(size: Size(width: 1100, height: 760))
+    let renderer = HeadlessHost(size: Size(width: 1100, height: 760))
     defer { renderer.close() }
     renderer.content = ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: .dark))
     #expect(!hasText("Sign in to Codex", in: renderer))
@@ -48,7 +48,7 @@ struct CodexSignInTests {
         }}
         """.utf8))
     let store = ScribeMacStore(startProfiling: false, codexIsSignedIn: true, loadCodexUsage: { usage })
-    let renderer = HeadlessRenderer(size: Size(width: 1100, height: 760))
+    let renderer = HeadlessHost(size: Size(width: 1100, height: 760))
     defer { renderer.close() }
     renderer.content = ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: .dark))
     store.toggleCodexMenu()
@@ -131,7 +131,7 @@ struct CodexSignInTests {
     }
   }
 
-  private func hasText(_ text: String, in renderer: HeadlessRenderer) -> Bool {
+  private func hasText(_ text: String, in renderer: HeadlessHost) -> Bool {
     renderer.render().commands.contains {
       if case .text(_, let value, _, _) = $0 { return value == text }
       return false

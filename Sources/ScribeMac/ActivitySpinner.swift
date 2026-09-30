@@ -2,17 +2,18 @@ import Chroma
 import Foundation
 
 struct ActivitySpinner: PrimitiveBlock {
+  var focusRule: FocusRule { .decorative }
   let color: Color
 
   private let diameter: Float = 11
   private let dotDiameter: Float = 2.2
   private let dotCount = 8
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: RenderContext) -> Size {
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
     Size(width: diameter, height: diameter)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: RenderContext) {
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
     let center = Point(x: rect.minX + diameter / 2, y: rect.minY + rect.size.height / 2)
     let orbitRadius = (diameter - dotDiameter) / 2
     let head = Int(context.animationFrame().timestamp * 11) % dotCount
