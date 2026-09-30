@@ -95,6 +95,13 @@ final class ScribeMacStore {
   private(set) var isSessionSidebarVisible = true
   var lastError: String?
 
+  var showStatsMenu = false
+  private(set) var isSignedInToCodex: Bool
+  private(set) var codexUsage: CodexUsage?
+  private(set) var isLoadingCodexUsage = false
+  private(set) var codexUsageStatus: String?
+  private let loadCodexUsage: @Sendable () async throws -> CodexUsage
+
   private(set) var isSigningInToCodex = false
   private(set) var codexSignInStatus: String?
   private var codexSignInTask: Task<Void, Never>?
@@ -125,6 +132,8 @@ final class ScribeMacStore {
 
   init(
     startProfiling: Bool = true,
+    codexIsSignedIn: Bool = (try? CodexCredentialStore.read()) != nil,
+    loadCodexUsage: @escaping @Sendable () async throws -> CodexUsage = { try await CodexUsage.fetch() },
     codexSignIn: @escaping @Sendable () async throws -> [ProfileSummary] = {
       _ = try await CodexOAuth.login()
       let resolved = try ConfigLoader.resolvePaths()
@@ -132,12 +141,44 @@ final class ScribeMacStore {
       return try await ConfigLoader.load().profiles
     }
   ) {
+    self.isSignedInToCodex = codexIsSignedIn
+    self.loadCodexUsage = loadCodexUsage
     self.startProfiling = startProfiling
     self.codexSignIn = codexSignIn
   }
 
+  func toggleStatsMenu() {
+    showStatsMenu.toggle()
+    if showStatsMenu && isSignedInToCodex { refreshCodexUsage() }
+  }
+
+  func refreshCodexUsage() {
+    guard isSignedInToCodex && !isLoadingCodexUsage else { return }
+    isLoadingCodexUsage = true
+    codexUsageStatus = nil
+    Task {
+      defer { isLoadingCodexUsage = false }
+      do {
+        codexUsage = try await loadCodexUsage()
+        if codexUsage?.rateLimit?.primaryWindow == nil && codexUsage?.rateLimit?.secondaryWindow == nil {
+          codexUsageStatus = "Usage unavailable"
+        }
+      } catch CodexOAuthError.loginRequired {
+        isSignedInToCodex = false
+        codexUsage = nil
+        codexSignInStatus = "Please sign in again"
+      } catch CodexOAuthError.noCredentials {
+        isSignedInToCodex = false
+        codexUsage = nil
+      } catch {
+        codexUsage = nil
+        codexUsageStatus = "Usage unavailable"
+      }
+    }
+  }
+
   func signInToCodex() {
-    guard !isSigningInToCodex else { return }
+    guard !isSigningInToCodex && !isSignedInToCodex else { return }
     isSigningInToCodex = true
     codexSignInStatus = "Complete sign-in in your browser"
     lastError = nil
@@ -148,7 +189,9 @@ final class ScribeMacStore {
       }
       do {
         profileCatalog = try await codexSignIn()
+        isSignedInToCodex = true
         codexSignInStatus = "Codex signed in"
+        refreshCodexUsage()
       } catch {
         codexSignInStatus = nil
         if !Task.isCancelled {
