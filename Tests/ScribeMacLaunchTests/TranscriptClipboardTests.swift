@@ -51,7 +51,7 @@ struct TranscriptClipboardTests {
     pasteboard.setString("previous clipboard", forType: .string)
 
     let inputView = ChromaInputView(frame: view.frame, device: MTLCreateSystemDefaultDevice())
-    inputView.onKey = { renderer.handleKey($0) }
+    inputView.onKey = { renderer.handleKey($0, frameInput: InputState()) }
     let event = try #require(
       NSEvent.keyEvent(
         with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
