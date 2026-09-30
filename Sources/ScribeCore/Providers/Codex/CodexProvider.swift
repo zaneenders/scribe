@@ -40,18 +40,7 @@ struct CodexProvider: AgentProvider {
       case .configured(let configuredClient):
         client = configuredClient
       case .credentials(let serverURL):
-        let credential: CodexCredential
-        do {
-          credential = try await CodexOAuth.getValidCredentials()
-        } catch {
-          let message = "Codex credentials not found. Run `scribe --login codex` first."
-          continuation.yield(.lifecycle(.error(.generic(message))))
-          return TurnResult(newMessages: [], outcome: .error("Not logged in"))
-        }
-        client = OpenAICodexClient.make(
-          serverURL: serverURL,
-          accessToken: credential.access,
-          accountID: credential.accountId)
+        client = OpenAICodexClient.makeAuthenticated(serverURL: serverURL)
       }
 
       let config = CodexAgentLoopConfig(

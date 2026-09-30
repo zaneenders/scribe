@@ -15,12 +15,16 @@ extension ScribeWorkspace {
   public var showsDirectoryPicker: Bool { store.showDirectoryPicker }
   public var error: String? { store.lastError }
   public var isOpeningSession: Bool { store.selectedSavedSession != nil }
+  public var isSigningInToCodex: Bool { store.isSigningInToCodex }
+  public var codexSignInStatus: String? { store.codexSignInStatus }
 
   public func start() { store.start() }
   public func toggleSidebar() { store.toggleSessionSidebar() }
   public func newSession() { store.newSession() }
   public func resumeLatest() { store.resumeLatest() }
   public func dismissError() { store.dismissError() }
+  public func signInToCodex() { store.signInToCodex() }
+  public func cancelCodexSignIn() { store.cancelCodexSignIn() }
 
   public func sidebar(style: ScribeStyle) -> some Block {
     SessionSidebar(store: store, theme: style)

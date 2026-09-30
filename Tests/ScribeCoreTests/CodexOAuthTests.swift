@@ -1,4 +1,6 @@
+import AsyncHTTPClient
 import Foundation
+import NIOCore
 import ScribeCore
 import Testing
 
@@ -14,6 +16,36 @@ import Musl
 
 @Suite(.serialized)
 struct CodexOAuthTests {
+  @Test("token responses decode from the HTTP body's readable range", arguments: ["", "HTTP/1.1 200 OK\r\n\r\n"])
+  func parsesCollectedTokenResponse(prefix: String) async throws {
+    var buffer = ByteBuffer(string: prefix)
+    buffer.writeString(#"{"access_token":"test-access","refresh_token":"test-refresh","expires_in":3600}"#)
+    buffer.moveReaderIndex(forwardBy: prefix.utf8.count)
+    let response = HTTPClientResponse(body: .bytes(buffer))
+    let body = try await response.body.collect(upTo: 1_048_576)
+    #expect(body.readerIndex == prefix.utf8.count)
+    #expect(body.readableBytes > 0)
+
+    let tokens = try CodexOAuth.parseTokenResponse(body)
+    #expect(tokens.accessToken == "test-access")
+    #expect(tokens.refreshToken == "test-refresh")
+    #expect(tokens.expiresIn == 3600)
+  }
+
+  @Test("empty or malformed token responses retain HTTP 200 without exposing token contents", arguments: [
+    "", "[]", #"{"access_token":"private-test-token","refresh_token":"unfinished"#,
+  ])
+  func invalidTokenResponseReportsActualStatus(body: String) throws {
+    do {
+      _ = try CodexOAuth.parseTokenResponse(ByteBuffer(string: body))
+      Issue.record("Expected a token parsing error")
+    } catch let CodexOAuthError.tokenExchangeFailed(status, detail) {
+      #expect(status == 200)
+      #expect(!detail.contains("private-test-token"))
+      #expect(!detail.contains("redirect"))
+    }
+  }
+
   @Test("login fails promptly when the callback port is occupied", .timeLimit(.minutes(1)))
   func occupiedCallbackPortFailsPromptly() async throws {
     #if canImport(Glibc) || canImport(Musl)

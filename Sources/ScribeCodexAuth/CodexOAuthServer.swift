@@ -239,8 +239,8 @@ enum CodexOAuthCallbackServer {
     sendResponse(
       client, status: 200,
       body: htmlPage(
-        title: "Authenticated",
-        body: "OpenAI authentication completed. You can close this window."))
+        title: "Authorization received",
+        body: "Authorization received. Return to Scribe to finish signing in. You can close this window."))
     return code
   }
 
@@ -275,7 +275,7 @@ enum CodexOAuthCallbackServer {
   }
 }
 
-public enum CodexOAuthError: Error, CustomStringConvertible {
+public enum CodexOAuthError: Error, CustomStringConvertible, LocalizedError {
   case stateMismatch
   case missingAuthorizationCode
   case tokenExchangeFailed(status: Int, body: String)
@@ -283,9 +283,12 @@ public enum CodexOAuthError: Error, CustomStringConvertible {
   case invalidJWT
   case noAccountID
   case noCredentials
+  case loginRequired
   case loginTimeout
   case loginCancelled
   case serverError(String)
+
+  public var errorDescription: String? { description }
 
   public var description: String {
     switch self {
@@ -302,7 +305,9 @@ public enum CodexOAuthError: Error, CustomStringConvertible {
     case .noAccountID:
       return "No chatgpt_account_id found in JWT payload."
     case .noCredentials:
-      return "No stored Codex credentials. Run `scribe login` first."
+      return "No stored Codex credentials. Click Sign in to Codex in Scribe."
+    case .loginRequired:
+      return "Codex authentication expired or was revoked. Click Sign in to Codex in Scribe, then send your message again."
     case .loginTimeout:
       return "Login timed out. Please try again."
     case .loginCancelled:

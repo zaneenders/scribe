@@ -126,14 +126,13 @@ public enum CodexOAuth {
     return newCredential
   }
 
-  public static func getValidCredentials(baseDirectory: URL? = nil) async throws -> CodexCredential {
-    guard let credential = try CodexCredentialStore.read(baseDirectory: baseDirectory) else {
-      throw CodexOAuthError.noCredentials
-    }
-    if credential.isExpired {
-      return try await refresh(credential, baseDirectory: baseDirectory)
-    }
-    return credential
+  public static func getValidCredentials(
+    baseDirectory: URL? = nil,
+    rejectingAccessToken: String? = nil
+  ) async throws -> CodexCredential {
+    try await CodexCredentialManager.shared.credentials(
+      baseDirectory: baseDirectory ?? CodexCredentialStore.resolveBaseDirectory(),
+      rejectingAccessToken: rejectingAccessToken)
   }
 
   public static func logout(baseDirectory: URL? = nil) throws {
@@ -163,7 +162,7 @@ public enum CodexOAuth {
     #endif
   }
 
-  private struct TokenResponse {
+  struct TokenResponse {
     let accessToken: String
     let refreshToken: String
     let expiresIn: Int
@@ -225,13 +224,13 @@ public enum CodexOAuth {
     return try parseTokenResponse(body)
   }
 
-  private static func parseTokenResponse(_ body: ByteBuffer) throws -> TokenResponse {
-    let bytes = body.getBytes(at: 0, length: body.readableBytes) ?? []
-    let data = Data(bytes)
+  static func parseTokenResponse(_ body: ByteBuffer) throws -> TokenResponse {
+    // Network buffers can retain consumed HTTP headers before their readable body.
+    let data = Data(body.readableBytesView)
 
     guard !data.isEmpty else {
       throw CodexOAuthError.tokenExchangeFailed(
-        status: 0, body: "Empty response body — token endpoint may have redirected (try again).")
+        status: 200, body: "Token endpoint returned an empty response body.")
     }
 
     let json: [String: Any]
@@ -240,9 +239,7 @@ public enum CodexOAuth {
         let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
       else {
         throw CodexOAuthError.tokenExchangeFailed(
-          status: 0,
-          body:
-            "Response is not a JSON object: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "<non-utf8>")"
+          status: 200, body: "Token endpoint response is not a JSON object."
         )
       }
       json = parsed
@@ -250,9 +247,7 @@ public enum CodexOAuth {
       throw error
     } catch {
       throw CodexOAuthError.tokenExchangeFailed(
-        status: 0,
-        body:
-          "JSON parse error: \(error.localizedDescription) — body: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "<non-utf8>")"
+        status: 200, body: "Token endpoint returned invalid JSON."
       )
     }
 

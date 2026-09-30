@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import OpenAPIRuntime
+import ScribeCodexAuth
 import ScribeLLM
 import ScribeLLMCodex
 import SystemPackage
@@ -185,7 +186,12 @@ private func runSingleCodexRound(
       "tool_output_chars": "\(requestMetrics.toolOutputChars)",
     ])
 
-  let response = try await config.client.createCodexResponse(body: .json(requestBody))
+  let response: ScribeLLMCodex.Operations.CreateCodexResponse.Output
+  do {
+    response = try await config.client.createCodexResponse(body: .json(requestBody))
+  } catch let error as ClientError where error.underlyingError is CodexOAuthError {
+    throw ScribeError.generic(String(describing: error.underlyingError))
+  }
 
   let httpBody: HTTPBody
   switch response {
