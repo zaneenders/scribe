@@ -17,7 +17,7 @@ struct CodexAuthMiddlewareTests {
     ])
     let credentials = CredentialSource()
     let client = Client(
-      serverURL: URL(string: "https://codex.example.com")!, transport: transport,
+      serverURL: URL(string: "https://chatgpt.com/backend-api")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
 
     _ = try await client.createResponse(body: .json(.init(model: "test-model")))
@@ -27,7 +27,7 @@ struct CodexAuthMiddlewareTests {
     #expect(requests.allSatisfy { $0.path == "/codex/responses" })
     #expect(requests[0].headers[.authorization] == "Bearer original")
     #expect(requests[1].headers[.authorization] == "Bearer refreshed")
-    #expect(requests[1].headers[.init("chatgpt-account-id")!] == "refreshed-account")
+    #expect(requests[1].headers[.init("chatgpt-account-id")!] == "account")
     #expect(requests[0].body == requests[1].body)
     #expect(requests[0].body != nil)
     #expect(await credentials.rejections == [nil, "original"])
@@ -38,7 +38,7 @@ struct CodexAuthMiddlewareTests {
     let transport = ScriptedTransport(status: 401)
     let credentials = CredentialSource()
     let client = Client(
-      serverURL: URL(string: "https://codex.example.com")!, transport: transport,
+      serverURL: URL(string: "https://chatgpt.com/backend-api")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
     do {
       _ = try await client.createResponse(body: .json(.init(model: "test-model")))
@@ -60,7 +60,7 @@ struct CodexAuthMiddlewareTests {
       status: 200, chunks: sseChunks(#"{"type":"response.completed"}"#))
     let credentials = CredentialSource()
     let client = Client(
-      serverURL: URL(string: "https://codex.example.com")!, transport: transport,
+      serverURL: URL(string: "https://chatgpt.com/backend-api")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
     _ = try await client.createResponse(body: .json(.init(model: "test-model")))
     await credentials.replaceAccess("browser-login")
@@ -76,7 +76,7 @@ struct CodexAuthMiddlewareTests {
     let transport = ScriptedTransport(status: 429)
     let credentials = CredentialSource()
     let client = Client(
-      serverURL: URL(string: "https://codex.example.com")!, transport: transport,
+      serverURL: URL(string: "https://chatgpt.com/backend-api")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
     let response = try await client.createResponse(body: .json(.init(model: "test-model")))
     guard case .undocumented(statusCode: 429, _) = response else {
@@ -89,7 +89,7 @@ struct CodexAuthMiddlewareTests {
 
   @Test("injects Authorization and account-id when both provided")
   func injectsBothHeaders() async throws {
-    let request = try await interceptedRequest(
+    let request = try await codexInterceptedRequest(
       through: CodexAuthMiddleware(token: "tok", accountID: "acct-123")
     )
 
@@ -100,7 +100,7 @@ struct CodexAuthMiddlewareTests {
 
   @Test("injects only Authorization when accountID is nil")
   func injectsOnlyAuthorizationWhenAccountIDNil() async throws {
-    let request = try await interceptedRequest(
+    let request = try await codexInterceptedRequest(
       through: CodexAuthMiddleware(token: "tok", accountID: nil)
     )
 
@@ -111,7 +111,7 @@ struct CodexAuthMiddlewareTests {
 
   @Test("does not inject Authorization for absent tokens", arguments: [Optional<String>.none, ""])
   func noAuthWhenTokenNilOrEmpty(token: String?) async throws {
-    let request = try await interceptedRequest(
+    let request = try await codexInterceptedRequest(
       through: CodexAuthMiddleware(token: token, accountID: "acct-123")
     )
 
@@ -121,7 +121,7 @@ struct CodexAuthMiddlewareTests {
 
   @Test("does not inject account-id for absent values", arguments: [Optional<String>.none, ""])
   func noAccountIDWhenNilOrEmpty(accountID: String?) async throws {
-    let request = try await interceptedRequest(
+    let request = try await codexInterceptedRequest(
       through: CodexAuthMiddleware(token: "tok", accountID: accountID)
     )
 
@@ -130,7 +130,7 @@ struct CodexAuthMiddlewareTests {
 
   @Test("always sets originator header to pi")
   func setsOriginatorHeader() async throws {
-    let request = try await interceptedRequest(
+    let request = try await codexInterceptedRequest(
       through: CodexAuthMiddleware(token: nil, accountID: nil)
     )
 
@@ -139,10 +139,10 @@ struct CodexAuthMiddlewareTests {
 
   @Test("does not overwrite existing originator header")
   func preservesExistingOriginator() async throws {
-    var req = HTTPRequest(method: .get, scheme: "https", authority: "api.example.com", path: "/")
+    var req = HTTPRequest(method: .get, scheme: "https", authority: "chatgpt.com", path: "/responses")
     req.headerFields[.init("originator")!] = "custom"
 
-    let captured = try await interceptedRequest(
+    let captured = try await codexInterceptedRequest(
       through: CodexAuthMiddleware(token: nil, accountID: nil),
       request: req
     )
@@ -153,8 +153,8 @@ struct CodexAuthMiddlewareTests {
   @Test("passes through response unchanged")
   func passesThroughResponse() async throws {
     let middleware = CodexAuthMiddleware(token: "tok", accountID: "acct")
-    let request = HTTPRequest(method: .get, scheme: "https", authority: "api.example.com", path: "/")
-    let baseURL = URL(string: "https://api.example.com")!
+    let request = HTTPRequest(method: .get, scheme: "https", authority: "chatgpt.com", path: "/responses")
+    let baseURL = URL(string: "https://chatgpt.com/backend-api")!
 
     let expectedResponse = HTTPResponse(status: .init(code: 403))
     let (response, _) = try await middleware.intercept(
@@ -173,11 +173,20 @@ private actor CredentialSource {
 
   func replaceAccess(_ access: String) { self.access = access }
 
-  func load(rejecting: String?) throws -> CodexCredential {
+  func load(rejecting: String?) throws -> CodexAccessCredential {
     rejections.append(rejecting)
     if rejecting != nil { access = "refreshed" }
-    return CodexCredential(
-      access: access, refresh: "refresh", expires: 9_999_999_999_999,
-      accountId: access == "refreshed" ? "refreshed-account" : "account")
+    return CodexAccessCredential(access: access, accountId: "account", expires: 9_999_999_999_999, lease: access)
   }
+}
+
+private func codexInterceptedRequest(through middleware: CodexAuthMiddleware,
+  request: HTTPRequest = HTTPRequest(method: .post, scheme: "https", authority: "chatgpt.com", path: "/responses")
+) async throws -> HTTPRequest {
+  var captured = request
+  _ = try await middleware.intercept(request, body: nil, baseURL: URL(string: "https://chatgpt.com/backend-api")!, operationID: "test") { request, _, _ in
+    captured = request
+    return (HTTPResponse(status: .ok), nil)
+  }
+  return captured
 }

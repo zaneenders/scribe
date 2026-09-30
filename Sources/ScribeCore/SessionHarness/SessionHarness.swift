@@ -89,6 +89,8 @@ public actor SessionHarness {
       try ScribeAgent(configuration: $0, logger: $1)
     }
   ) async throws {
+    var configuration = configuration
+    configuration.codexCredentials = configuration.codexCredentials ?? self.configuration.codexCredentials
     let agent = try agentFactory(configuration, logger)
     let tokenTracker = TokenTracker(
       contextWindow: configuration.contextWindow,

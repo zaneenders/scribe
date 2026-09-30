@@ -192,3 +192,18 @@ func responsesStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent
 
   #expect(finalizedEvents(in: events).count == 1, "Must not double-emit .finalized")
 }
+
+@Test func codexStreamErrorsNeverExposeProviderBodies() async throws {
+  var processor = ResponsesStreamProcessor(onEvent: { _ in }, logger: Logger(label: "test.redaction"),
+    abortObserver: NoOpAbortObserver(), streamWallStart: .now, redactErrors: true)
+  var turn = ResponsesAssistantTurn()
+  do {
+    try await processor.process(httpBody: HTTPBody(makeSSE(
+      #"{"type":"error","message":"access-secret","error":{"message":"refresh-secret"}}"#)),
+      httpStart: .now, turn: &turn)
+    Issue.record("Expected a safe failure")
+  } catch {
+    #expect(!String(describing: error).contains("secret"))
+    #expect(!error.localizedDescription.contains("secret"))
+  }
+}

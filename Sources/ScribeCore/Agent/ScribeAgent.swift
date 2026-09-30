@@ -1,10 +1,12 @@
 import Logging
+import ScribeCodexAuth
 import ScribeLLM
 import ScribeLLMResponses
 import SystemPackage
 
 public struct ScribeAgent: Sendable {
   internal let chatTools: [ScribeLLM.Components.Schemas.ChatTool]
+  public var toolNames: [String] { chatTools.map { $0.function.name } }
   private let toolExecutor: any ToolExecutor
   private let provider: any AgentProvider
   private let workingDirectory: FilePath
@@ -56,11 +58,11 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
   }
 
-  public init(configuration: ScribeConfig, logger: Logger) throws {
+  public init(configuration: ScribeConfig, logger: Logger, codexCredentials: (any CodexAccessCredentialProvider)? = nil) throws {
     let registry = ToolRegistry(tools: configuration.tools, logger: logger)
     self.toolExecutor = registry
     self.chatTools = registry.chatTools
-    self.provider = try AgentProviderFactory.make(configuration: configuration)
+    self.provider = try AgentProviderFactory.make(configuration: configuration, codexCredentials: codexCredentials ?? configuration.codexCredentials)
     self.workingDirectory = FilePath(configuration.workingDirectory)
     self.logger = logger
   }

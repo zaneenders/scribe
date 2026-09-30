@@ -50,6 +50,7 @@ public enum CodexOAuth {
     timeout: TimeInterval = CodexOAuthCallbackServer.loginTimeout,
     baseDirectory: URL? = nil
   ) async throws -> CodexCredential {
+    try CodexAuthority.requireLocal(baseDirectory ?? CodexCredentialStore.resolveBaseDirectory())
     let pkce = PKCE.generate()
     let state = generateState()
 
@@ -89,7 +90,9 @@ public enum CodexOAuth {
 
     let code = try await codeTask
 
-    let tokenResponse = try await exchangeCode(code: code, verifier: pkce.verifier)
+    let tokenResponse: TokenResponse
+    do { tokenResponse = try await exchangeCode(code: code, verifier: pkce.verifier) }
+    catch { throw CodexAuthorityError.unavailable }
 
     let accountId = try extractAccountID(from: tokenResponse.accessToken)
 
@@ -99,7 +102,7 @@ public enum CodexOAuth {
     let credential = CodexCredential(
       access: tokenResponse.accessToken,
       refresh: tokenResponse.refreshToken,
-      expires: expiresMs,
+      expires: min(expiresMs, try accessExpiry(tokenResponse.accessToken)),
       accountId: accountId
     )
 
@@ -109,6 +112,13 @@ public enum CodexOAuth {
   }
 
   public static func refresh(_ credential: CodexCredential, baseDirectory: URL? = nil) async throws -> CodexCredential {
+    let current = try await getValidCredentials(baseDirectory: baseDirectory, rejectingAccessToken: credential.access)
+    guard current.accountId == credential.accountId else { throw CodexAuthorityError.conflict }
+    return current
+  }
+
+  // For a durably fenced refresh owner. Does not read or write a client credential store.
+  public static func rotateOwnedCredential(_ credential: CodexCredential) async throws -> CodexCredential {
     let tokenResponse = try await refreshAccessToken(refreshToken: credential.refresh)
     let accountId = try extractAccountID(from: tokenResponse.accessToken)
 
@@ -118,12 +128,12 @@ public enum CodexOAuth {
     let newCredential = CodexCredential(
       access: tokenResponse.accessToken,
       refresh: tokenResponse.refreshToken,
-      expires: expiresMs,
+      expires: min(expiresMs, try accessExpiry(tokenResponse.accessToken)),
       accountId: accountId
     )
 
-    return try CodexCredentialStore.replace(
-      credential, with: newCredential, baseDirectory: baseDirectory)
+    guard newCredential.accountId == credential.accountId else { throw CodexAuthorityError.conflict }
+    return newCredential
   }
 
   public static func getValidCredentials(
@@ -193,8 +203,10 @@ public enum CodexOAuth {
     let body = try await response.body.collect(upTo: 1_048_576)
 
     guard response.status == .ok else {
-      let bodyString = String(buffer: body)
-      throw CodexOAuthError.tokenExchangeFailed(status: Int(response.status.code), body: bodyString)
+      if response.status.code == 400 || response.status.code == 401 || response.status.code == 403 {
+        throw CodexOAuthError.loginRequired
+      }
+      throw CodexAuthorityError.unavailable
     }
 
     return try parseTokenResponse(body)
@@ -217,8 +229,10 @@ public enum CodexOAuth {
     let body = try await response.body.collect(upTo: 1_048_576)
 
     guard response.status == .ok else {
-      let bodyString = String(buffer: body)
-      throw CodexOAuthError.tokenExchangeFailed(status: Int(response.status.code), body: bodyString)
+      if response.status.code == 400 || response.status.code == 401 || response.status.code == 403 {
+        throw CodexOAuthError.loginRequired
+      }
+      throw CodexAuthorityError.unavailable
     }
 
     return try parseTokenResponse(body)
@@ -257,7 +271,7 @@ public enum CodexOAuth {
     guard let refreshToken = json["refresh_token"] as? String else {
       throw CodexOAuthError.missingToken("refresh_token")
     }
-    guard let expiresIn = json["expires_in"] as? Int else {
+    guard let expiresIn = json["expires_in"] as? Int, expiresIn > 0, expiresIn <= 31 * 24 * 60 * 60 else {
       throw CodexOAuthError.missingToken("expires_in")
     }
 
@@ -266,6 +280,15 @@ public enum CodexOAuth {
       refreshToken: refreshToken,
       expiresIn: expiresIn
     )
+  }
+
+  public static func accessExpiry(_ jwt: String) throws -> Int64 {
+    let segments = jwt.split(separator: ".")
+    guard segments.count == 3, let data = Data(base64Encoded: padBase64(String(segments[1]))),
+      let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let expiry = claims["exp"] as? Double, expiry.isFinite, expiry > 0, expiry < 10_000_000_000
+    else { throw CodexAuthorityError.conflict }
+    return Int64(expiry * 1000)
   }
 
   static func extractAccountID(from jwt: String) throws -> String {

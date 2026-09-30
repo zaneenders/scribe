@@ -95,11 +95,13 @@ final class ScribeMacStore {
   private(set) var isSessionSidebarVisible = true
   var lastError: String?
 
+  let codexConnection: CodexConnectionSettings
   var showStatsMenu = false
   private(set) var isSignedInToCodex: Bool
   private(set) var codexUsage: CodexUsage?
   private(set) var isLoadingCodexUsage = false
   private(set) var codexUsageStatus: String?
+  private let readsLiveCodexState: Bool
   private let loadCodexUsage: @Sendable () async throws -> CodexUsage
 
   private(set) var isSigningInToCodex = false
@@ -132,7 +134,8 @@ final class ScribeMacStore {
 
   init(
     startProfiling: Bool = true,
-    codexIsSignedIn: Bool = (try? CodexCredentialStore.read()) != nil,
+    codexConnection: CodexConnectionSettings? = nil,
+    codexIsSignedIn: Bool? = nil,
     loadCodexUsage: @escaping @Sendable () async throws -> CodexUsage = { try await CodexUsage.fetch() },
     codexSignIn: @escaping @Sendable () async throws -> [ProfileSummary] = {
       _ = try await CodexOAuth.login()
@@ -141,13 +144,16 @@ final class ScribeMacStore {
       return try await ConfigLoader.load().profiles
     }
   ) {
-    self.isSignedInToCodex = codexIsSignedIn
+    self.codexConnection = codexConnection ?? CodexConnectionSettings()
+    self.readsLiveCodexState = codexIsSignedIn == nil
+    self.isSignedInToCodex = codexIsSignedIn ?? CodexAuthority.hasLogin
     self.loadCodexUsage = loadCodexUsage
     self.startProfiling = startProfiling
     self.codexSignIn = codexSignIn
   }
 
   func toggleStatsMenu() {
+    if readsLiveCodexState { isSignedInToCodex = CodexAuthority.hasLogin }
     showStatsMenu.toggle()
     if showStatsMenu && isSignedInToCodex { refreshCodexUsage() }
   }

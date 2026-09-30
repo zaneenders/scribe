@@ -2,6 +2,7 @@
 import PackageDescription
 
 var products: [Product] = [
+  .library(name: "ScribeCodexAuth", targets: ["ScribeCodexAuth"]),
   .library(name: "ScribeCore", targets: ["ScribeCore"]),
   .library(name: "ScribeKit", targets: ["ScribeKit"]),
   .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
@@ -25,6 +26,7 @@ var targets: [Target] = [
     name: "ScribeLLMResponses",
     dependencies: [
       "ScribeCodexAuth",
+      .product(name: "AsyncHTTPClient", package: "async-http-client"),
       .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
       .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
     ],

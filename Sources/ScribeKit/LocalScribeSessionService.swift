@@ -1,4 +1,5 @@
 import Foundation
+import ScribeCodexAuth
 import Logging
 import ScribeCore
 import SystemPackage
@@ -26,15 +27,15 @@ public actor LocalScribeSessionService: ScribeSessionService {
 
   private let capabilitiesValue = ScribeSessionCapabilities()
 
-  public init(context: ScribeRuntimeContext) {
+  public init(context: ScribeRuntimeContext, codexCredentials: (any CodexAccessCredentialProvider)? = nil) {
     self.init(
       context: context,
       agentFactory: { configuration, logger in
-        try ScribeAgent(configuration: configuration, logger: logger)
+        try ScribeAgent(configuration: configuration, logger: logger, codexCredentials: codexCredentials)
       })
   }
 
-  package init(
+  public init(
     context: ScribeRuntimeContext,
     agentFactory: @Sendable @escaping (ScribeConfig, Logger) throws -> ScribeAgent
   ) {

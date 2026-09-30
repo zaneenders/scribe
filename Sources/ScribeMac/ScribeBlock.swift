@@ -6,8 +6,8 @@ public final class ScribeWorkspace {
 
   init(store: ScribeMacStore) { self.store = store }
 
-  public init() {
-    store = ScribeMacStore(startProfiling: false)
+  public init(codexConnection: CodexConnectionSettings? = nil) {
+    store = ScribeMacStore(startProfiling: false, codexConnection: codexConnection)
   }
 }
 

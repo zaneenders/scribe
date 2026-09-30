@@ -38,8 +38,9 @@ public struct CodexUsage: Decodable, Sendable {
     return HTTPClient(eventLoopGroupProvider: .singleton, configuration: configuration)
   }()
 
-  public static func fetch() async throws -> CodexUsage {
-    var credential = try await CodexOAuth.getValidCredentials()
+  public static func fetch(provider: any CodexAccessCredentialProvider = CodexDefaultAccessProvider()) async throws -> CodexUsage {
+    let provider = CodexAccountBoundProvider(provider)
+    var credential = try await provider.credential(rejectingAccessToken: nil)
     for attempt in 0..<2 {
       var request = HTTPClientRequest(url: "https://chatgpt.com/backend-api/wham/usage")
       request.headers.add(name: "Authorization", value: "Bearer \(credential.access)")
@@ -48,13 +49,30 @@ public struct CodexUsage: Decodable, Sendable {
       let body = try await response.body.collect(upTo: 1_048_576)
       if response.status == .unauthorized {
         guard attempt == 0 else { throw CodexOAuthError.loginRequired }
-        credential = try await CodexOAuth.getValidCredentials(rejectingAccessToken: credential.access)
+        credential = try await provider.credential(rejectingAccessToken: credential.access)
         continue
       }
       guard response.status == .ok else { throw UsageError.unavailable }
       return try JSONDecoder().decode(CodexUsage.self, from: Data(body.readableBytesView))
     }
     throw UsageError.unavailable
+  }
+
+  public static func validate(_ credential: CodexCredential) async throws {
+    guard try CodexOAuth.extractAccountID(from: credential.access) == credential.accountId else {
+      throw CodexAuthorityError.conflict
+    }
+    guard credential.expires <= (try CodexOAuth.accessExpiry(credential.access)) + 60_000 else {
+      throw CodexAuthorityError.conflict
+    }
+    var request = HTTPClientRequest(url: "https://chatgpt.com/backend-api/wham/usage")
+    request.headers.add(name: "Authorization", value: "Bearer \(credential.access)")
+    request.headers.add(name: "ChatGPT-Account-Id", value: credential.accountId)
+    do {
+      let response = try await client.execute(request, timeout: .seconds(20))
+      guard response.status == .ok else { throw CodexAuthorityError.unavailable }
+      _ = try await response.body.collect(upTo: 1_048_576)
+    } catch { throw CodexAuthorityError.unavailable }
   }
 
   private enum UsageError: Error { case unavailable }

@@ -20,6 +20,7 @@ struct StatsMenu: Block {
               Spacer()
               Button("Close", fontScale: theme.smallScale) { store.showStatsMenu = false }
             }
+            CodexConnectionBlock(settings: store.codexConnection)
             Text("Codex usage").fontScale(theme.smallScale).foregroundColor(theme.textPrimary)
             if store.isSignedInToCodex {
               if let window = store.codexUsage?.rateLimit?.primaryWindow {

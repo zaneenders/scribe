@@ -1,4 +1,5 @@
 import Foundation
+import ScribeCodexAuth
 import Logging
 import ScribeCore
 
@@ -79,7 +80,8 @@ public enum SessionSummarizer {
     configuration: ScribeConfig,
     model: String? = nil,
     sessionId: UUID,
-    logger: Logger
+    logger: Logger,
+    codexCredentials: (any CodexAccessCredentialProvider)? = nil
   ) async throws -> Result {
     try await summarize(
       slice: slice,
@@ -88,7 +90,7 @@ public enum SessionSummarizer {
       sessionId: sessionId,
       logger: logger,
       agentFactory: { summarizerConfig, summarizerLogger in
-        try ScribeAgent(configuration: summarizerConfig, logger: summarizerLogger)
+        try ScribeAgent(configuration: summarizerConfig, logger: summarizerLogger, codexCredentials: codexCredentials)
       })
   }
 
@@ -112,7 +114,8 @@ public enum SessionSummarizer {
       workingDirectory: configuration.workingDirectory,
       reasoningEnabled: configuration.reasoningEnabled,
       serviceTier: configuration.serviceTier,
-      sendsOpenCodeHeader: configuration.sendsOpenCodeHeader
+      sendsOpenCodeHeader: configuration.sendsOpenCodeHeader,
+      codexCredentials: configuration.codexCredentials
     )
     let agent = try agentFactory(summarizerConfig, logger)
     let rendered = renderSlice(slice)

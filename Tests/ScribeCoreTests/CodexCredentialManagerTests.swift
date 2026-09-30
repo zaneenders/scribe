@@ -1,126 +1,131 @@
 import Foundation
 import Testing
-
 @testable import ScribeCodexAuth
 
 struct CodexCredentialManagerTests {
-  @Test("concurrent sessions share one refresh for an expired or rejected token", arguments: [false, true])
-  func sharesRefresh(rejected: Bool) async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  @Test(arguments: [false, true])
+  func coordinatesIndependentManagers(rejected: Bool) async throws {
+    let directory = temporaryStore()
     defer { try? FileManager.default.removeItem(at: directory) }
     let original = credential("original", expired: !rejected)
-    let updated = credential("updated")
     try CodexCredentialStore.write(original, baseDirectory: directory)
     let probe = RefreshProbe()
-    let manager = CodexCredentialManager { _, directory in
+    let refresh: @Sendable (CodexCredential, URL) async throws -> CodexCredential = { _, _ in
       await probe.record()
-      try await Task.sleep(for: .milliseconds(50))
-      try CodexCredentialStore.write(updated, baseDirectory: directory)
-      return updated
+      try await Task.sleep(for: .milliseconds(40))
+      return credential("updated")
     }
-
-    let results = try await withThrowingTaskGroup(of: String.self) { group in
-      for _ in 0..<20 {
+    let managers = [CodexCredentialManager(refresh: refresh), CodexCredentialManager(refresh: refresh)]
+    try await withThrowingTaskGroup(of: String.self) { group in
+      for index in 0..<20 {
         group.addTask {
-          try await manager.credentials(
-            baseDirectory: directory, rejectingAccessToken: rejected ? "original" : nil).access
+          try await managers[index % 2].credentials(baseDirectory: directory,
+            rejectingAccessToken: rejected ? "original" : nil).access
         }
       }
-      var results: [String] = []
-      for try await result in group { results.append(result) }
-      return results
+      for try await result in group { #expect(result == "updated") }
     }
-    #expect(results == Array(repeating: "updated", count: 20))
     #expect(await probe.count == 1)
-    #expect(try CodexCredentialStore.read(baseDirectory: directory)?.refresh == updated.refresh)
+    #expect(try CodexCredentialStore.read(baseDirectory: directory)?.refresh == "refresh-updated")
   }
 
-  @Test("a browser login saved during refresh remains authoritative")
-  func preservesLoginDuringRefresh() async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  @Test func freezeWaitsForRefreshAndBlocksAllStoresAfterRestart() async throws {
+    let directory = temporaryStore()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let original = credential("original", expired: true)
-    let refreshed = credential("refreshed")
-    let browserLogin = credential("browser-login")
-    try CodexCredentialStore.write(original, baseDirectory: directory)
+    try CodexCredentialStore.write(credential("old", expired: true), baseDirectory: directory)
     let started = AsyncStream<Void>.makeStream()
-    let resume = AsyncStream<Void>.makeStream()
-    let manager = CodexCredentialManager { credential, directory in
+    let release = AsyncStream<Void>.makeStream()
+    let manager = CodexCredentialManager { _, _ in
       started.continuation.yield(())
-      started.continuation.finish()
-      for await _ in resume.stream { break }
-      return try CodexCredentialStore.replace(credential, with: refreshed, baseDirectory: directory)
+      for await _ in release.stream { break }
+      return credential("rotated")
     }
-    let refresh = Task { try await manager.credentials(baseDirectory: directory) }
+    let refreshing = Task { try await manager.credentials(baseDirectory: directory) }
     for await _ in started.stream { break }
-    try CodexCredentialStore.write(browserLogin, baseDirectory: directory)
-    resume.continuation.yield(())
-    resume.continuation.finish()
-
-    #expect(try await refresh.value == browserLogin)
-    #expect(try CodexCredentialStore.read(baseDirectory: directory) == browserLogin)
+    #expect(throws: CodexAuthorityError.self) {
+      try CodexCredentialStore.write(credential("other"), baseDirectory: directory)
+    }
+    let freezing = Task {
+      try await CodexAuthority.freeze(origin: "https://trusted.example", accountID: "account",
+        expectedGeneration: 0, baseDirectory: directory)
+    }
+    release.continuation.yield(())
+    _ = try await refreshing.value
+    let pending = try await freezing.value
+    #expect(try CodexAuthority.export(pending, baseDirectory: directory).refresh == "refresh-rotated")
+    #expect(try CodexAuthority.state(baseDirectory: directory) == .handoffPending(pending))
+    await #expect(throws: CodexAuthorityError.self) {
+      _ = try await CodexCredentialManager().credentials(baseDirectory: directory)
+    }
+    let receipt = CodexConnectionReceipt(handoffID: pending.id, connectionID: UUID(), accountID: "account", generation: 1)
+    try CodexAuthority.commit(pending, receipt: receipt, baseDirectory: directory)
+    try CodexAuthority.commit(pending, receipt: receipt, baseDirectory: directory)
+    #expect(!FileManager.default.fileExists(atPath: CodexCredentialStore.credentialsPath(baseDirectory: directory).path))
+    let authority: CodexServerAuthority
+    guard case .serverOwned(let committed) = try CodexAuthority.state(baseDirectory: directory) else {
+      Issue.record("Missing committed authority"); return
+    }
+    authority = committed
+    CodexServerProviders.register(OfflineProvider(), authority: authority)
+    await #expect(throws: CodexAuthorityError.self) {
+      _ = try await CodexDefaultAccessProvider(baseDirectory: directory).credential()
+    }
+    #expect(throws: CodexAuthorityError.self) { try CodexCredentialStore.write(credential("new"), baseDirectory: directory) }
   }
 
-  @Test("refresh persists only while the original login is still saved", arguments: [false, true])
-  func conditionallyPersistsRefresh(loggedOut: Bool) throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  @Test func restartCompletesDeletionAfterCommittedAuthorityWasPersisted() async throws {
+    let directory = temporaryStore()
     defer { try? FileManager.default.removeItem(at: directory) }
-    let original = credential("original", expired: true)
-    let refreshed = credential("refreshed")
-    try CodexCredentialStore.write(original, baseDirectory: directory)
-    if loggedOut {
-      try CodexCredentialStore.delete(baseDirectory: directory)
-      #expect(throws: CodexOAuthError.self) {
-        try CodexCredentialStore.replace(original, with: refreshed, baseDirectory: directory)
-      }
-      #expect(try CodexCredentialStore.read(baseDirectory: directory) == nil)
-    } else {
-      #expect(try CodexCredentialStore.replace(original, with: refreshed, baseDirectory: directory) == refreshed)
-      #expect(try CodexCredentialStore.read(baseDirectory: directory) == refreshed)
+    try CodexCredentialStore.write(credential("old"), baseDirectory: directory)
+    let authority = CodexServerAuthority(origin: "https://trusted.example", sshTunnel: false,
+      connectionID: UUID(), accountID: "account", generation: 1)
+    // Crash point between the durable ownership fence and local credential deletion.
+    try CodexSecureFile.write(CodexAuthorityState.serverOwned(authority), to: CodexAuthority.path(directory))
+    CodexServerProviders.register(OfflineProvider(), authority: authority)
+    await #expect(throws: CodexAuthorityError.self) {
+      _ = try await CodexDefaultAccessProvider(baseDirectory: directory).credential()
     }
+    #expect(!FileManager.default.fileExists(atPath: CodexCredentialStore.credentialsPath(baseDirectory: directory).path))
+    #expect(try CodexAuthority.state(baseDirectory: directory) == .serverOwned(authority))
   }
 
-  @Test("a stale 401 uses a newer saved browser login without refreshing it")
-  func usesReplacementLogin() async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  @Test func ambiguousRefreshStaysFencedAcrossRestart() async throws {
+    let directory = temporaryStore()
     defer { try? FileManager.default.removeItem(at: directory) }
-    try CodexCredentialStore.write(credential("browser-login"), baseDirectory: directory)
-    let manager = CodexCredentialManager { _, _ in
-      Issue.record("Replacement login should not be refreshed")
-      throw CodexOAuthError.loginRequired
-    }
-    let result = try await manager.credentials(baseDirectory: directory, rejectingAccessToken: "old-token")
-    #expect(result.access == "browser-login")
+    try CodexCredentialStore.write(credential("old", expired: true), baseDirectory: directory)
+    let manager = CodexCredentialManager { _, _ in throw CodexAuthorityError.unavailable }
+    await #expect(throws: CodexAuthorityError.self) { _ = try await manager.credentials(baseDirectory: directory) }
+    #expect(try CodexAuthority.state(baseDirectory: directory) == .recoveryRequired)
+    let restarted = CodexCredentialManager { _, _ in Issue.record("Must not replay refresh"); return credential("bad") }
+    await #expect(throws: CodexAuthorityError.self) { _ = try await restarted.credentials(baseDirectory: directory) }
   }
 
-  @Test("revoked refresh tokens require sign-in while server failures retain their cause", arguments: [401, 503])
-  func reportsRefreshFailure(status: Int) async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  @Test func pendingHandoffCannotChangeOriginAccountOrGeneration() async throws {
+    let directory = temporaryStore()
     defer { try? FileManager.default.removeItem(at: directory) }
-    try CodexCredentialStore.write(credential("original", expired: true), baseDirectory: directory)
-    let manager = CodexCredentialManager { _, _ in
-      throw CodexOAuthError.tokenExchangeFailed(status: status, body: "refresh failed")
+    try CodexCredentialStore.write(credential("old"), baseDirectory: directory)
+    let pending = try await CodexAuthority.freeze(origin: "https://trusted.example", accountID: "account", expectedGeneration: 0, baseDirectory: directory)
+    #expect(try await CodexAuthority.freeze(origin: "https://trusted.example", accountID: "account", expectedGeneration: 0, baseDirectory: directory) == pending)
+    await #expect(throws: CodexAuthorityError.self) {
+      _ = try await CodexAuthority.freeze(origin: "https://evil.example", accountID: "account", expectedGeneration: 0, baseDirectory: directory)
     }
-    do {
-      _ = try await manager.credentials(baseDirectory: directory)
-      Issue.record("Expected a refresh failure")
-    } catch let error as CodexOAuthError {
-      switch (status, error) {
-      case (401, .loginRequired), (503, .tokenExchangeFailed(status: 503, body: _)): break
-      default: Issue.record("Unexpected refresh error: \(error)")
-      }
+    #expect(throws: CodexAuthorityError.self) {
+      try CodexAuthority.commit(pending, receipt: .init(handoffID: pending.id, connectionID: UUID(), accountID: "other", generation: 1), baseDirectory: directory)
     }
-    #expect(try CodexCredentialStore.read(baseDirectory: directory)?.access == "original")
-  }
-
-  private func credential(_ access: String, expired: Bool = false) -> CodexCredential {
-    CodexCredential(
-      access: access, refresh: "refresh-\(access)", expires: expired ? 0 : 9_999_999_999_999,
-      accountId: "account")
+    #expect(throws: CodexAuthorityError.self) { try CodexCredentialStore.delete(baseDirectory: directory) }
+    #expect(try CodexAuthority.state(baseDirectory: directory) == .handoffPending(pending))
   }
 }
 
+private func temporaryStore() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
+private func credential(_ token: String, expired: Bool = false) -> CodexCredential {
+  .init(access: token, refresh: "refresh-\(token)", expires: expired ? 0 : Int64(Date().timeIntervalSince1970 * 1000) + 3_600_000, accountId: "account")
+}
 private actor RefreshProbe {
   private(set) var count = 0
   func record() { count += 1 }
+}
+
+private struct OfflineProvider: CodexAccessCredentialProvider {
+  func credential(rejectingAccessToken: String?) async throws -> CodexAccessCredential { throw CodexAuthorityError.unavailable }
 }
