@@ -205,7 +205,7 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/zaneenders/chroma",
-      revision: "b8d4b5cc9a2f9472e027daf8c61ab9a73009e6f3"
+      revision: "22e85af08e2913f2b9653b99dda1d6832bf4cdcb"
     ),
     .package(url: "https://github.com/apple/swift-openapi-generator", from: "1.6.0"),
     .package(url: "https://github.com/apple/swift-openapi-runtime", from: "1.7.0"),
