@@ -865,7 +865,7 @@ final class SelectionManager {
     if let layoutID = originLayoutID, let layout = MarkdownLayoutRegistry.layout(for: layoutID) {
       anchor = (layoutID, layout)
     } else if let pointed = MarkdownLayoutRegistry.entry(
-      at: ScribeRenderContext.current?.input.pointerPosition ?? .zero)
+      at: ScribeBlockContext.current?.input.pointerPosition ?? .zero)
     {
       anchor = pointed
     } else {

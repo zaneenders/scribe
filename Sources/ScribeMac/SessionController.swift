@@ -10,7 +10,6 @@ import SystemPackage
 @Observable
 final class SessionController {
 
-  var composerFocus = FocusTarget()
   enum ItemKind: Sendable {
     case user
     case answer
@@ -121,17 +120,23 @@ final class SessionController {
     var startBoundary: Int { boundaries[startCursor] }
     var endBoundary: Int { endCursor.map { boundaries[$0] } ?? startBoundary }
     var activeBoundary: Int { activeIsEnd ? endBoundary : startBoundary }
+
+    mutating func move(by delta: Int) {
+      if activeIsEnd, let endCursor {
+        self.endCursor = max(startCursor + 1, min(boundaries.count - 1, endCursor + delta))
+      } else {
+        let upper = command == .tldr ? (endCursor ?? 1) - 1 : boundaries.count - 1
+        startCursor = max(0, min(upper, startCursor + delta))
+      }
+      needsReveal = true
+    }
   }
 
   let boot: BootstrappedSession
 
   var transcript: [TranscriptItem]
   private(set) var isLoadingTranscript = false
-  var draft = "" {
-    didSet { draftRevision &+= 1 }
-  }
-  @ObservationIgnored private(set) var draftRevision: UInt64 = 0
-  @ObservationIgnored let composerLayoutCache = ComposerTextLayoutCache()
+  var draft = ""
   var isRunning = false
   private(set) var lastMessageAt: Date
   var usageText = ""
@@ -139,6 +144,11 @@ final class SessionController {
   var hasUnreadActivity = false
   var wantsComposerFocus = false
   let scroll = ScrollViewController()
+  let lastTranscriptFocus = FocusTarget()
+  var lastFocusedTranscriptID: UUID?
+  var cachedTranscriptRows: [String: ScrollView.Row] = [:]
+  var cachedTranscriptTheme: MacTheme?
+  var cachedTranscriptPicker: CommandPickerState?
 
   var profileName: String
   var modelName: String
@@ -231,13 +241,6 @@ final class SessionController {
     draftBeforeHistory = ""
   }
 
-  func insertComposerNewline() {
-    draft.append("\n")
-    historyIndex = nil
-    draftBeforeHistory = ""
-    composerFocus.focus(editing: true)
-  }
-
   @discardableResult
   func recallPreviousPrompt() -> Bool {
     guard !promptHistory.isEmpty, draft.isEmpty || historyIndex != nil else { return false }
@@ -248,7 +251,7 @@ final class SessionController {
       historyIndex = index - 1
     }
     if let historyIndex { draft = promptHistory[historyIndex] }
-    composerFocus.focus(editing: true)
+    ScribeMacStore.composerFocus.focus(editing: true)
     return true
   }
 
@@ -263,7 +266,7 @@ final class SessionController {
       draft = draftBeforeHistory
       draftBeforeHistory = ""
     }
-    composerFocus.focus(editing: true)
+    ScribeMacStore.composerFocus.focus(editing: true)
     return true
   }
 
@@ -303,25 +306,14 @@ final class SessionController {
         command: command, boundaries: boundaries, startCursor: startCursor,
         endCursor: command == .tldr ? endCursor : nil, activeIsEnd: false,
         messageCount: snapshot.count)
-      ScribeRenderContext.current?.endEditing()
+      ScribeBlockContext.current?.endEditing()
       transcript = Self.replay(snapshot.messages)
     }
   }
 
   func moveCommandCursor(by delta: Int) {
     guard !isRunningCommand, var picker = commandPicker else { return }
-    if picker.activeIsEnd, let end = picker.endCursor {
-      picker.endCursor = max(
-        picker.startCursor + 1,
-        min(picker.boundaries.count - 1, end + delta))
-    } else {
-      let upper =
-        picker.command == .tldr
-        ? (picker.endCursor ?? 1) - 1
-        : picker.boundaries.count - 1
-      picker.startCursor = max(0, min(upper, picker.startCursor + delta))
-    }
-    picker.needsReveal = true
+    picker.move(by: delta)
     commandPicker = picker
   }
 

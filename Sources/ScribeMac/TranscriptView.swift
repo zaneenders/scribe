@@ -9,7 +9,9 @@ struct ReadyLayout: Block {
   @MainActor var body: some Block {
     VStack(spacing: 0) {
       TranscriptView(session: session, theme: theme)
-      BottomChrome(store: store, session: session, theme: theme)
+      Group("Composer") {
+        BottomChrome(store: store, session: session, theme: theme)
+      }
     }
     .sizing(x: .grow, y: .grow)
   }
@@ -21,6 +23,21 @@ struct TranscriptView: Block {
 
   @MainActor var body: some Block {
     updateSelectionDocument()
+    let picker = session.commandPicker
+    if session.cachedTranscriptTheme != theme
+      || session.cachedTranscriptPicker?.startBoundary != picker?.startBoundary
+      || session.cachedTranscriptPicker?.endBoundary != picker?.endBoundary
+      || session.cachedTranscriptPicker?.activeIsEnd != picker?.activeIsEnd
+      || session.cachedTranscriptPicker?.command != picker?.command
+    {
+      session.cachedTranscriptRows.removeAll()
+      session.cachedTranscriptTheme = theme
+      session.cachedTranscriptPicker = picker
+    }
+    if session.lastFocusedTranscriptID != session.transcript.last?.id {
+      session.lastFocusedTranscriptID = session.transcript.last?.id
+      session.cachedTranscriptRows.removeAll()
+    }
     let rows: [ScrollView.Row]
     if session.transcript.isEmpty {
       rows = [
@@ -42,12 +59,15 @@ struct TranscriptView: Block {
     } else {
       rows = transcriptRows()
     }
+    let rowIDs = Set(rows.map { $0.id })
+    session.cachedTranscriptRows = session.cachedTranscriptRows.filter { rowIDs.contains($0.value.id) }
     return CommandRevealTranscript(
       session: session, controller: session.scroll, rows: rows,
       revealRow: activeBoundaryRow(in: rows)
     )
     .sizing(x: .grow, y: .grow)
     .background(theme.transcriptBackground ?? theme.panelBackground)
+    .keyBindings(session.commandPicker == nil ? KeyBindings() : ScribeCommandPickerCommand.keyBindings)
     .id(session.sessionId)
   }
 
@@ -123,19 +143,25 @@ struct TranscriptView: Block {
   @MainActor private func transcriptRow(
     _ item: SessionController.TranscriptItem, selection: TranscriptSelection
   ) -> ScrollView.Row {
-    ScrollView.Row(
-      id: item.layoutID,
+    let id = item.layoutID
+    if let cached = session.cachedTranscriptRows[id] { return cached }
+    let content = NavigableTranscriptItem(
       content: TranscriptItemBlock(
         item: item, theme: theme, selection: selection,
-        toggleText: { session.toggleTextDisclosure(id: item.id) }
-      )
+        toggleText: { session.toggleTextDisclosure(id: item.id) }))
       .padding(
         EdgeInsets(
           top: theme.spacing / 2, leading: theme.margin,
           bottom: theme.spacing / 2, trailing: theme.margin)
       )
       .sizing(x: .grow)
+    let row = ScrollView.Row(
+      id: id,
+      content: item.id == session.transcript.last?.id
+        ? content.focusTarget(session.lastTranscriptFocus) : content
     )
+    session.cachedTranscriptRows[id] = row
+    return row
   }
 
   private func selection(
@@ -178,6 +204,22 @@ struct TranscriptView: Block {
   }
 }
 
+struct NavigableTranscriptItem<Content: Block>: PrimitiveBlock {
+  var focusRule: FocusRule { .container }
+  let content: Content
+
+  @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
+
+  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
+    BlockEngine.measure(content, proposal: proposal, context: context)
+  }
+
+  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
+    context.focusable(in: rect, into: &drawList)
+    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
+  }
+}
+
 enum TranscriptSelection {
   case none
   case collapsed
@@ -185,7 +227,7 @@ enum TranscriptSelection {
 }
 
 private struct CommandBoundaryMarker: PrimitiveBlock {
-  var focusRule: FocusRule { .standard }
+  var focusRule: FocusRule { .container }
   let label: String
   let active: Bool
   let color: Color
@@ -214,7 +256,7 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
 }
 
 private struct CommandRevealTranscript: PrimitiveBlock {
-  var focusRule: FocusRule { .standard }
+  var focusRule: FocusRule { .container }
   let session: SessionController
   let controller: ScrollViewController
   let rows: [ScrollView.Row]
@@ -238,7 +280,7 @@ private struct CommandRevealTranscript: PrimitiveBlock {
       }
       controller.scroll(to: offset)
     }
-    let stack = ScrollView(sticksToBottom: true, controller: controller, rows: rows)
+    let stack = ScrollView("Transcript", sticksToBottom: true, controller: controller, rows: rows)
     TranscriptViewportRegistry.current = rect
     TranscriptViewportRegistry.lastDrawn = rect
     TranscriptViewportRegistry.scrollController = controller
@@ -263,31 +305,30 @@ struct TranscriptItemBlock: Block {
           markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
           scale: theme.smallScale, itemID: item.headerSelectionID)
         Spacer()
-      },
-      content: VStack(spacing: 7) {
-        if item.isCollapsible {
-          HStack {
-            Button(
-              item.isTextCollapsed ? "Show full text" : "Hide text",
-              fontScale: theme.smallScale
-            ) { toggleText() }
-            Spacer()
-          }
+      }, content: VStack(spacing: 7) {
+      if item.isCollapsible {
+        HStack {
+          Button(
+            item.isTextCollapsed ? "Show full text" : "Hide text",
+            fontScale: theme.smallScale
+          ) { toggleText() }
+          Spacer()
         }
-        if item.text.isEmpty {
-          MarkdownText(
-            markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
-            scale: theme.smallScale, itemID: item.selectionID)
-        } else if item.kind == .answer || item.kind == .reasoning {
-          MarkdownText(
-            markdown: item.text, theme: theme, baseColor: bodyColor,
-            scale: theme.textScale, itemID: item.selectionID)
-        } else {
-          WrappedText(
-            text: item.displayText, theme: theme, color: bodyColor,
-            scale: theme.textScale, itemID: item.selectionID)
-        }
-      })
+      }
+      if item.text.isEmpty {
+        MarkdownText(
+          markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
+          scale: theme.smallScale, itemID: item.selectionID)
+      } else if item.kind == .answer || item.kind == .reasoning {
+        MarkdownText(
+          markdown: item.text, theme: theme, baseColor: bodyColor,
+          scale: theme.textScale, itemID: item.selectionID)
+      } else {
+        WrappedText(
+          text: item.displayText, theme: theme, color: bodyColor,
+          scale: theme.textScale, itemID: item.selectionID)
+      }
+    })
   }
 
   private var label: String {

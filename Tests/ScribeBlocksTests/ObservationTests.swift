@@ -1,6 +1,6 @@
 import Chroma
-import ChromaTesting
 import Dispatch
+import ChromaTesting
 import Testing
 
 @testable import ScribeBlocks
@@ -14,7 +14,7 @@ struct ObservationTests {
   }
 
   @Test func storeChangesRequestRedrawAndRearmAfterRendering() async {
-    let store = ScribeMacStore(startProfiling: false)
+    let store = ScribeMacStore.shared
     let previousError = store.lastError
     defer { store.lastError = previousError }
     store.lastError = "Before"

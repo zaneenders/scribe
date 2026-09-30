@@ -47,12 +47,16 @@ struct ScribeMacRoot: Block {
           case .ready:
             HStack(spacing: 0) {
               if store.isSessionSidebarVisible {
-                SessionSidebar(store: store, theme: theme)
+                Group("Sessions") {
+                  SessionSidebar(store: store, theme: theme)
+                }
               }
               if store.requiresDirectoryBeforeStart && store.showDirectoryPicker {
                 DirectoryPalette(store: store, theme: theme, required: true)
               } else if let active = store.active {
-                ReadyLayout(store: store, session: active, theme: theme)
+                Group("Conversation") {
+                  ReadyLayout(store: store, session: active, theme: theme)
+                }
               } else if let selected = store.selectedSavedSession {
                 sessionLoadingState(selected)
               } else {
@@ -71,6 +75,7 @@ struct ScribeMacRoot: Block {
         }
       },
       workspace: ScribeWorkspace(store: store))
+      .keyBindings(store.active?.commandPicker == nil ? KeyBindings() : ScribeCommandPickerCommand.keyBindings)
   }
 
   @MainActor private func sessionLoadingState(_ saved: ScribeMacStore.SavedSession) -> some Block {
@@ -149,13 +154,6 @@ struct ScribeMacRoot: Block {
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
-      if ScribeSceneCapture.shared.isEnabled {
-        Button(
-          ScribeSceneCapture.shared.status,
-          fontScale: theme.smallScale,
-          padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
-        ) { ScribeSceneCapture.shared.request() }
-      }
       Button(
         "☰", fontScale: theme.smallScale,
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)

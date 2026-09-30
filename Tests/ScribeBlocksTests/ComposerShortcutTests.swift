@@ -27,12 +27,39 @@ struct ComposerShortcutTests {
   }
 
   @MainActor
+  @Test func returnInsertsNewlineAtCaretWithoutSubmitting() {
+    let focus = FocusTarget()
+    var text = "firstlast"
+    var submitted = false
+    let renderer = HeadlessHost(size: Size(width: 400, height: 100))
+    defer { renderer.close() }
+    renderer.content = TextEditor(
+      text: { text }, onChange: { text = $0 }
+    )
+    .focusTarget(focus)
+    .onCommand(ScribeComposerCommand.submit) {
+      submitted = true
+      return .handled
+    }
+    renderer.render()
+    focus.focus(editing: true)
+    renderer.render()
+    for _ in 0..<4 {
+      renderer.render(input: InputState(textEvents: [.moveCaretLeft]))
+    }
+    renderer.render(input: InputState(textEvents: [.submit]))
+    #expect(text == "first\nlast")
+    #expect(focus.isEditing)
+    #expect(!submitted)
+  }
+
+  @MainActor
   @Test func submitRequiresComposerEditing() {
     let composer = FocusTarget()
     let directory = FocusTarget()
     let renderer = HeadlessHost(size: Size(width: 400, height: 100))
     renderer.content = VStack {
-      ScribeChatInput("", fontScale: 1, text: { "" }, onChange: { _ in }, onNewline: {})
+      TextEditor("", fontScale: 1, text: { "" }, onChange: { _ in })
         .focusTarget(composer)
       TextEditor(singleLine: true, text: { "" }, onChange: { _ in })
         .focusTarget(directory)

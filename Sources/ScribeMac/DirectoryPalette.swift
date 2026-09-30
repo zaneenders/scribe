@@ -23,12 +23,12 @@ struct DirectoryPalette: Block {
         Text("$ cd").fontScale(theme.textScale).foregroundColor(theme.green)
         TextEditor(
           required ? "/path/to/project" : "path",
-          fontScale: theme.textScale,
-          singleLine: true, text: { store.directoryDraft },
+          fontScale: theme.textScale, singleLine: true,
+          text: { store.directoryDraft },
           onChange: { store.updateDirectoryDraft($0) },
           onSubmit: { _ in store.submitDirectory() }
         )
-        .focusTarget(store.directoryPaletteFocus)
+        .focusTarget(ScribeMacStore.directoryPaletteFocus)
       }
       if !store.directoryError.isEmpty {
         Text(sanitizeASCII(store.directoryError))
@@ -70,5 +70,8 @@ struct DirectoryPalette: Block {
     )
     .background(theme.headerBackground)
     .border(theme.border)
+    .keyBindings {
+      bind(.tab, in: .shared, to: ScribeCommandPickerCommand.toggle)
+    }
   }
 }

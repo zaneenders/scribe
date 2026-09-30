@@ -53,7 +53,7 @@ struct SessionSidebar: Block {
       .border(theme.chromeBorder ?? theme.border)
 
       ScrollView(
-        showsIndicator: true,
+        "Saved sessions", showsIndicator: true,
         controller: store.sidebarScroll
       ) {
         VStack(spacing: 1) {
@@ -122,14 +122,13 @@ struct SessionGroupHeader: Block {
     ScribeSessionGroup(
       id: "group-name:\(group.cwd)", title: sanitizeASCII(group.title),
       count: group.open.count + group.totalSavedCount, isCollapsed: isCollapsed,
-      style: theme.sessionGroupStyle
-        ?? ScribeSessionGroupStyle(
-          foreground: group.open.contains(where: \.isRunning)
-            ? theme.purple : theme.textPrimary,
-          hoveredForeground: theme.accent,
-          count: theme.textSecondary,
-          newSession: theme.textSecondary,
-          hoverBackground: theme.sidebarHover, fontScale: theme.smallScale),
+      style: theme.sessionGroupStyle ?? ScribeSessionGroupStyle(
+        foreground: group.open.contains(where: \.isRunning)
+          ? theme.purple : theme.textPrimary,
+        hoveredForeground: theme.accent,
+        count: theme.textSecondary,
+        newSession: theme.textSecondary,
+        hoverBackground: theme.sidebarHover, fontScale: theme.smallScale),
       onToggle: { store.toggleGroup(group.cwd) },
       onNewSession: { store.newSession(in: group.cwd) })
   }
@@ -147,20 +146,19 @@ struct SessionRow: Block {
         id: "session-name:\(session.sessionId)", title: sanitizeASCII(session.displayName),
         subtitle: sanitizeASCII(session.modelName), isSelected: isActive,
         isRunning: session.isRunning, isUnread: session.hasUnreadActivity,
-        style: sessionRowStyle(theme), onSelect: { store.switchTo(session.sessionId) })
+        style: sessionRowStyle(theme), onSelect: { store.switchTo(session.sessionId, editComposer: false) })
       sessionActions(store: store, id: session.sessionId, pinned: session.isPinned, theme: theme)
     }.sizing(x: .grow)
   }
 }
 
 private func sessionRowStyle(_ theme: MacTheme) -> ScribeSessionRowStyle {
-  theme.sessionRowStyle
-    ?? ScribeSessionRowStyle(
-      foreground: theme.textSecondary,
-      secondaryForeground: theme.textSecondary,
-      selectedForeground: theme.textPrimary, activity: theme.purple,
-      selection: theme.sidebarSelection, hover: theme.sidebarHover, border: theme.accent,
-      fontScale: theme.smallScale)
+  theme.sessionRowStyle ?? ScribeSessionRowStyle(
+    foreground: theme.textSecondary,
+    secondaryForeground: theme.textSecondary,
+    selectedForeground: theme.textPrimary, activity: theme.purple,
+    selection: theme.sidebarSelection, hover: theme.sidebarHover, border: theme.accent,
+    fontScale: theme.smallScale)
 }
 
 struct SavedSessionRow: Block {
@@ -177,82 +175,6 @@ struct SavedSessionRow: Block {
         style: sessionRowStyle(theme), onSelect: { store.openSavedSession(saved) })
       sessionActions(store: store, id: saved.id, pinned: saved.metadata.isPinned, theme: theme)
     }.sizing(x: .grow)
-  }
-}
-
-@MainActor
-private final class MarqueeAnimationState {
-  static let shared = MarqueeAnimationState()
-  private var startTimes: [String: TimeInterval] = [:]
-
-  func elapsed(for id: String, scrolling: Bool, now: TimeInterval) -> TimeInterval {
-    guard scrolling else {
-      startTimes[id] = nil
-      return 0
-    }
-    let start = startTimes[id] ?? now
-    startTimes[id] = start
-    return now - start
-  }
-}
-
-struct MarqueeText: PrimitiveBlock {
-  var focusRule: FocusRule { .decorative }
-  let text: String
-  let id: String
-  let color: Color
-  let scale: Float
-  let isScrolling: Bool
-
-  private let pointsPerSecond: Float = 28
-  private let endPause: TimeInterval = 0.8
-
-  init(_ text: String, id: String, color: Color, scale: Float, isScrolling: Bool) {
-    self.text = text
-    self.id = id
-    self.color = color
-    self.scale = scale
-    self.isScrolling = isScrolling
-  }
-
-  @MainActor var expandsHorizontally: Bool { true }
-
-  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
-    let measured = context.fontMetrics.measure(text, scale: scale * context.textScale)
-    return Size(width: proposal.width, height: measured.height)
-  }
-
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    let effectiveScale = scale * context.textScale
-    let textWidth = context.fontMetrics.measure(text, scale: effectiveScale).width
-    let shouldScroll = isScrolling && textWidth > rect.size.width
-    let animationElapsed = MarqueeAnimationState.shared.elapsed(
-      for: id, scrolling: shouldScroll, now: Date().timeIntervalSinceReferenceDate)
-    var offset: Float = 0
-
-    if shouldScroll {
-      let distance = textWidth - rect.size.width
-      let travelDuration = TimeInterval(distance / pointsPerSecond)
-      let cycleDuration = endPause * 2 + travelDuration * 2
-      let elapsed = animationElapsed.truncatingRemainder(dividingBy: cycleDuration)
-
-      switch elapsed {
-      case ..<endPause:
-        offset = 0
-      case ..<(endPause + travelDuration):
-        offset = Float(elapsed - endPause) * pointsPerSecond
-      case ..<(endPause * 2 + travelDuration):
-        offset = distance
-      default:
-        offset = distance - Float(elapsed - endPause * 2 - travelDuration) * pointsPerSecond
-      }
-      context.requestRedraw()
-    }
-
-    drawList.pushClip(rect)
-    drawList.text(
-      text, at: Point(x: rect.minX - offset, y: rect.minY), color: color, scale: effectiveScale)
-    drawList.popClip()
   }
 }
 

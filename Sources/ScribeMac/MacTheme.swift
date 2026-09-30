@@ -1,6 +1,6 @@
 import Chroma
 
-public struct ScribeStyle: Sendable {
+public struct ScribeStyle: Equatable, Sendable {
   public init() {}
 
   public init(chromaTheme: ChromaTheme) {
@@ -11,11 +11,11 @@ public struct ScribeStyle: Sendable {
     composerBackground = chromaTheme.background
     border = chromaTheme.border
     buttonIdle = chromaTheme.button.idleBackground
-    buttonHover = chromaTheme.focus.highlight
+    buttonHover = chromaTheme.button.pressedBackground
     buttonPressed = chromaTheme.button.pressedBackground
     sidebarBackground = chromaTheme.elevatedSurface
     sidebarSelection = chromaTheme.button.pressedBackground
-    sidebarHover = chromaTheme.focus.highlight
+    sidebarHover = chromaTheme.button.pressedBackground
     accent = chromaTheme.accent
     green = chromaTheme.positive
     red = chromaTheme.negative

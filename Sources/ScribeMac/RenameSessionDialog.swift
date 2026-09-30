@@ -38,12 +38,12 @@ struct RenameSessionDialog: Block {
               theme: theme, color: theme.textSecondary, scale: theme.smallScale)
             TextEditor(
               String(sessionID.uuidString.prefix(8)).uppercased(),
-              fontScale: theme.textScale,
-              singleLine: true, text: { store.renameSessionDraft },
+              fontScale: theme.textScale, singleLine: true,
+              text: { store.renameSessionDraft },
               onChange: { store.updateRenameSessionDraft($0) },
               onSubmit: { _ in store.submitSessionRename() }
             )
-            .focusTarget(store.renameSessionFieldFocus)
+            .focusTarget(ScribeMacStore.renameSessionFieldFocus)
             HStack(spacing: 8) {
               Spacer()
               Button(
@@ -70,7 +70,7 @@ struct RenameSessionDialog: Block {
 }
 
 private struct RenameSessionInput<Content: Block>: PrimitiveBlock {
-  var focusRule: FocusRule { .standard }
+  var focusRule: FocusRule { .container }
   let store: ScribeMacStore
   let content: Content
 

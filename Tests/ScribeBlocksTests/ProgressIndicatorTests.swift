@@ -5,11 +5,11 @@ import Testing
 @testable import ScribeBlocks
 
 @MainActor
-struct ActivitySpinnerTests {
+struct ProgressIndicatorTests {
   @Test func requestsAnimationOnlyWhilePresent() {
     let renderer = HeadlessHost()
     defer { renderer.close() }
-    renderer.content = ActivitySpinner(color: .white)
+    renderer.content = ProgressIndicator(color: .white)
     renderer.render()
     #expect(renderer.needsAnimationFrame)
     renderer.render()

@@ -11,14 +11,14 @@ private final class PaletteEscapeState {
 }
 
 private struct PaletteEscapeSurface: PrimitiveBlock {
-  var focusRule: FocusRule { .standard }
+  var focusRule: FocusRule { .container }
   let store: ScribeMacStore
   let state: PaletteEscapeState
 
   @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
 
   @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
-    let bridge = RenderContextBridge(
+    let bridge = BlockContextBridge(
       content: PaletteEscapeContent(store: store, state: state),
       prepare: { state.context = $0 },
       finish: { store.finishDirectoryPaletteInput($0) })
@@ -27,7 +27,7 @@ private struct PaletteEscapeSurface: PrimitiveBlock {
 }
 
 private struct PaletteEscapeContent: PrimitiveBlock {
-  var focusRule: FocusRule { .standard }
+  var focusRule: FocusRule { .container }
   let store: ScribeMacStore
   let state: PaletteEscapeState
 
@@ -52,7 +52,19 @@ private struct PaletteEscapeContent: PrimitiveBlock {
 struct DirectoryPaletteEscapeTests {
   @Test(arguments: [false, true])
   func escapeStaysWithinDirectoryPalette(required: Bool) throws {
-    let store = ScribeMacStore(startProfiling: false)
+    let store = ScribeMacStore.shared
+    let oldVisible = store.showDirectoryPicker
+    let oldRequired = store.requiresDirectoryBeforeStart
+    let oldDraft = store.directoryDraft
+    let oldError = store.directoryError
+    let oldMatches = store.directoryMatches
+    defer {
+      store.showDirectoryPicker = oldVisible
+      store.requiresDirectoryBeforeStart = oldRequired
+      store.directoryDraft = oldDraft
+      store.directoryError = oldError
+      store.directoryMatches = oldMatches
+    }
     store.showDirectoryPicker = true
     store.requiresDirectoryBeforeStart = required
     let state = PaletteEscapeState()
@@ -61,7 +73,7 @@ struct DirectoryPaletteEscapeTests {
     renderer.content = PaletteEscapeSurface(store: store, state: state)
     renderer.render()
     _ = try #require(state.context)
-    store.directoryPaletteFocus.focus(editing: true)
+    ScribeMacStore.directoryPaletteFocus.focus(editing: true)
     renderer.render()
     renderer.render(input: InputState(textEvents: [.endEditing]))
     #expect(store.showDirectoryPicker == required)

@@ -25,8 +25,8 @@ struct TranscriptClipboardTests {
       MarkdownLayoutRegistry.clear()
       TranscriptSelectionDocumentRegistry.setEntries(ownerID: UUID(), [])
     }
-    let renderer = try MacOSHost(size: Size(width: 400, height: 200))
-    renderer.content = RenderContextBridge(
+    let renderer = try MetalRenderer(size: Size(width: 400, height: 200))
+    renderer.content = BlockContextBridge(
       content: MarkdownText(
         markdown: "Two details will narrow this down:", theme: MacTheme(),
         baseColor: .white, scale: 1, itemID: "clipboard-test"),
@@ -34,8 +34,7 @@ struct TranscriptClipboardTests {
         context.setCopyTextProvider {
           SelectionManager.shared.copyText(isTranscriptVisible: true)
         }
-      }
-    ).keyBindings(ScribeBlock.keyBindings)
+      }).keyBindings(ScribeBlock.keyBindings)
     let view = MTKView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
     renderer.draw(in: view)
     TranscriptSelectionDocumentRegistry.setEntries(
@@ -52,7 +51,7 @@ struct TranscriptClipboardTests {
     pasteboard.setString("previous clipboard", forType: .string)
 
     let inputView = ChromaInputView(frame: view.frame, device: MTLCreateSystemDefaultDevice())
-    inputView.onKey = { input in renderer.handleKey(input) }
+    inputView.onKey = { renderer.handleKey($0) }
     let event = try #require(
       NSEvent.keyEvent(
         with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,

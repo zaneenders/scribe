@@ -1,11 +1,11 @@
 import Chroma
 
 @MainActor
-enum ScribeRenderContext {
+enum ScribeBlockContext {
   static var current: BlockContext?
 }
 
-struct RenderContextBridge<Content: Block>: PrimitiveBlock {
+struct BlockContextBridge<Content: Block>: PrimitiveBlock {
   var focusRule: FocusRule { .container }
   let content: Content
   let prepare: @MainActor (BlockContext) -> Void
@@ -20,12 +20,12 @@ struct RenderContextBridge<Content: Block>: PrimitiveBlock {
   }
 
   @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
-    ScribeRenderContext.current = context
+    ScribeBlockContext.current = context
     return BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
   @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    ScribeRenderContext.current = context
+    ScribeBlockContext.current = context
     prepare(context)
     BlockEngine.draw(content, into: &drawList, in: rect, context: context)
     finish(context)

@@ -42,9 +42,9 @@ struct ThemeTests {
       caret: theme.accent, border: theme.border, editingBorder: theme.accent)
     let renderer = HeadlessHost(size: Size(width: 400, height: 100))
     defer { renderer.close() }
-    renderer.content = ScribeChatInput(
+    renderer.content = TextEditor(
       "Message Scribe", fontScale: 0.85, text: { "" },
-      onChange: { _ in }, onNewline: {}
+      onChange: { _ in }
     ).chromaTheme(theme)
 
     let frame = renderer.render()
