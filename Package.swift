@@ -5,7 +5,6 @@ var products: [Product] = [
   .library(name: "ScribeCodexAuth", targets: ["ScribeCodexAuth"]),
   .library(name: "ScribeCore", targets: ["ScribeCore"]),
   .library(name: "ScribeKit", targets: ["ScribeKit"]),
-  .library(name: "ScribeBlocks", targets: ["ScribeBlocks"]),
 ]
 
 var targets: [Target] = [
