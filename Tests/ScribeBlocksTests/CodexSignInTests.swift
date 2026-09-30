@@ -1,6 +1,7 @@
 import Chroma
 import Foundation
 import HeadlessBackend
+import ScribeCodexAuth
 import ScribeKit
 import Testing
 
@@ -8,16 +9,20 @@ import Testing
 
 @MainActor
 struct CodexSignInTests {
-  @Test func headerOffersSignInAndUpdatesProfilesOnSuccess() async throws {
+  @Test func menuOffersSignInAndHidesItOnSuccess() async throws {
     let completion = AsyncStream<Void>.makeStream()
     let profile = ProfileSummary(name: "codex", model: "test-model", baseURL: "https://chatgpt.com/backend-api")
-    let store = ScribeMacStore(startProfiling: false, codexSignIn: {
-      for await _ in completion.stream { break }
-      return [profile]
-    })
+    let store = ScribeMacStore(
+      startProfiling: false, codexIsSignedIn: false, loadCodexUsage: { throw SignInFailure() },
+      codexSignIn: {
+        for await _ in completion.stream { break }
+        return [profile]
+      })
     let renderer = HeadlessRenderer(size: Size(width: 1100, height: 760))
     defer { renderer.close() }
     renderer.content = ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: .dark))
+    #expect(!hasText("Sign in to Codex", in: renderer))
+    store.toggleCodexMenu()
     #expect(hasText("Sign in to Codex", in: renderer))
     store.signInToCodex()
     store.signInToCodex()
@@ -28,13 +33,72 @@ struct CodexSignInTests {
     try await waitForSignIn(store)
     #expect(store.codexSignInStatus == "Codex signed in")
     #expect(store.profileCatalog == [profile])
-    #expect(hasText("Sign in to Codex", in: renderer))
+    #expect(store.isSignedInToCodex)
+    #expect(!hasText("Sign in to Codex", in: renderer))
+  }
+
+  @Test func signedInMenuShowsUsageAndRefreshesOnReopen() async throws {
+    let usage = try JSONDecoder().decode(
+      CodexUsage.self,
+      from: Data(
+        """
+        {"rate_limit": {
+          "primary_window": {"used_percent": 25, "reset_at": 1800000000, "limit_window_seconds": 18000},
+          "secondary_window": {"used_percent": 60, "reset_at": 1800600000, "limit_window_seconds": 604800}
+        }}
+        """.utf8))
+    let store = ScribeMacStore(startProfiling: false, codexIsSignedIn: true, loadCodexUsage: { usage })
+    let renderer = HeadlessRenderer(size: Size(width: 1100, height: 760))
+    defer { renderer.close() }
+    renderer.content = ScribeMacRoot(store: store, theme: MacTheme(chromaTheme: .dark))
+    store.toggleCodexMenu()
+    try await waitForUsage(store)
+    #expect(!hasText("Sign in to Codex", in: renderer))
+    #expect(hasText("75% left", in: renderer))
+    #expect(hasText("40% left", in: renderer))
+    store.toggleCodexMenu()
+    #expect(!hasText("75% left", in: renderer))
+    store.toggleCodexMenu()
+    #expect(store.isLoadingCodexUsage)
+    try await waitForUsage(store)
+  }
+
+  @Test func usageFailureDoesNotOfferSignInUnlessCredentialsAreRejected() async throws {
+    let store = ScribeMacStore(
+      startProfiling: false, codexIsSignedIn: true,
+      loadCodexUsage: {
+        throw SignInFailure()
+      })
+    store.toggleCodexMenu()
+    try await waitForUsage(store)
+    #expect(store.isSignedInToCodex)
+    #expect(store.codexUsageStatus == "Usage unavailable")
+
+    let rejected = ScribeMacStore(
+      startProfiling: false, codexIsSignedIn: true,
+      loadCodexUsage: {
+        throw CodexOAuthError.loginRequired
+      })
+    rejected.toggleCodexMenu()
+    try await waitForUsage(rejected)
+    #expect(!rejected.isSignedInToCodex)
+    #expect(rejected.codexSignInStatus == "Please sign in again")
+  }
+
+  private func waitForUsage(_ store: ScribeMacStore) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while store.isLoadingCodexUsage {
+      try #require(ContinuousClock.now < deadline, "Usage did not load")
+      await Task.yield()
+    }
   }
 
   @Test func failedSignInShowsUsefulErrorAndCanBeRetried() async throws {
-    let store = ScribeMacStore(startProfiling: false, codexSignIn: {
-      throw SignInFailure()
-    })
+    let store = ScribeMacStore(
+      startProfiling: false, codexIsSignedIn: false, loadCodexUsage: { throw SignInFailure() },
+      codexSignIn: {
+        throw SignInFailure()
+      })
     store.signInToCodex()
     try await waitForSignIn(store)
     #expect(store.lastError == "Could not open callback server")
@@ -46,10 +110,12 @@ struct CodexSignInTests {
   }
 
   @Test func signInCanBeCancelled() async throws {
-    let store = ScribeMacStore(startProfiling: false, codexSignIn: {
-      try await Task.sleep(for: .seconds(300))
-      return []
-    })
+    let store = ScribeMacStore(
+      startProfiling: false, codexIsSignedIn: false, loadCodexUsage: { throw SignInFailure() },
+      codexSignIn: {
+        try await Task.sleep(for: .seconds(300))
+        return []
+      })
     store.signInToCodex()
     store.cancelCodexSignIn()
     try await waitForSignIn(store)

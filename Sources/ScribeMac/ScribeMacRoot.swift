@@ -63,6 +63,9 @@ struct ScribeMacRoot: Block {
           }
         }
         .background(theme.background)
+        if store.showCodexMenu {
+          CodexAccountMenu(store: store, theme: theme)
+        }
         if let sessionID = store.renamingSessionID {
           RenameSessionDialog(store: store, sessionID: sessionID, theme: theme)
         }
@@ -146,20 +149,6 @@ struct ScribeMacRoot: Block {
         padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
       ) { store.toggleSessionSidebar() }
       Spacer()
-      if let status = store.codexSignInStatus {
-        Text(status).fontScale(theme.smallScale).foregroundColor(theme.textSecondary)
-      }
-      Button(
-        store.isSigningInToCodex ? "Cancel sign-in" : "Sign in to Codex",
-        fontScale: theme.smallScale,
-        padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
-      ) {
-        if store.isSigningInToCodex {
-          store.cancelCodexSignIn()
-        } else {
-          store.signInToCodex()
-        }
-      }
       if ScribeSceneCapture.shared.isEnabled {
         Button(
           ScribeSceneCapture.shared.status,
@@ -167,6 +156,10 @@ struct ScribeMacRoot: Block {
           padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
         ) { ScribeSceneCapture.shared.request() }
       }
+      Button(
+        "☰", fontScale: theme.smallScale,
+        padding: EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+      ) { store.toggleCodexMenu() }
     }
     .padding(EdgeInsets(top: 2, leading: theme.margin, bottom: 2, trailing: theme.margin))
     .sizing(y: .fixed(theme.headerHeight))
