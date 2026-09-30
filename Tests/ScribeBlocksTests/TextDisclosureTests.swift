@@ -1,9 +1,44 @@
+import ChromaTesting
 import Testing
 
 @testable import Chroma
 @testable import ScribeBlocks
 
 struct TextDisclosureTests {
+  @Test @MainActor func focusedLongPromptCanExpandAndCollapse() throws {
+    let target = FocusTarget()
+    let controller = ScrollViewController()
+    var item = SessionController.TranscriptItem(
+      kind: .user, title: "You", text: String(repeating: "implementation step\n", count: 100))
+    let renderer = HeadlessHost(size: Size(width: 800, height: 4_000))
+    defer { renderer.close() }
+
+    for label in ["Show full text", "Hide text", "Show full text"] {
+      renderer.content = ScrollView(controller: controller, rows: [
+        .init(id: item.layoutID, content: NavigableTranscriptItem(
+          content: TranscriptItemBlock(item: item, theme: MacTheme(), toggleText: {
+            item.toggleTextDisclosure()
+          }))
+          .focusTarget(target)
+          .sizing(x: .grow))
+      ])
+      renderer.render()
+      target.focus()
+      let frame = renderer.render()
+      #expect(target.isFocused)
+      let position = try #require(frame.commands.compactMap { command -> Point? in
+        guard case .text(let position, let text, _, _) = command, text == label else { return nil }
+        return position
+      }.first)
+      let expanded = item.isTextExpanded
+      let point = Point(x: position.x + 4, y: position.y + 4)
+      renderer.render(input: InputState(pointerPosition: point, pointerPressed: true))
+      renderer.render(input: InputState(pointerPosition: point, pointerReleased: true))
+      #expect(item.isTextExpanded != expanded)
+    }
+    #expect(item.layoutRevision == 3)
+  }
+
   @Test @MainActor func disclosureButtonStaysInsideCard() {
     for width: Float in [320, 800] {
       var item = SessionController.TranscriptItem(
