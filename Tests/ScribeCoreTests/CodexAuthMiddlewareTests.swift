@@ -4,7 +4,7 @@ import OpenAPIRuntime
 import ScribeCodexAuth
 import Testing
 
-@testable import ScribeLLMCodex
+@testable import ScribeLLMResponses
 
 @Suite
 struct CodexAuthMiddlewareTests {
@@ -20,10 +20,11 @@ struct CodexAuthMiddlewareTests {
       serverURL: URL(string: "https://codex.example.com")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
 
-    _ = try await client.createCodexResponse(body: .json(.init(model: "test-model")))
+    _ = try await client.createResponse(body: .json(.init(model: "test-model")))
 
     let requests = transport.capturedRequests
     #expect(requests.count == 2)
+    #expect(requests.allSatisfy { $0.path == "/codex/responses" })
     #expect(requests[0].headers[.authorization] == "Bearer original")
     #expect(requests[1].headers[.authorization] == "Bearer refreshed")
     #expect(requests[1].headers[.init("chatgpt-account-id")!] == "refreshed-account")
@@ -40,7 +41,7 @@ struct CodexAuthMiddlewareTests {
       serverURL: URL(string: "https://codex.example.com")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
     do {
-      _ = try await client.createCodexResponse(body: .json(.init(model: "test-model")))
+      _ = try await client.createResponse(body: .json(.init(model: "test-model")))
       Issue.record("Expected sign-in to be required")
     } catch let error as ClientError {
       let authError = try #require(error.underlyingError as? CodexOAuthError)
@@ -61,9 +62,9 @@ struct CodexAuthMiddlewareTests {
     let client = Client(
       serverURL: URL(string: "https://codex.example.com")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
-    _ = try await client.createCodexResponse(body: .json(.init(model: "test-model")))
+    _ = try await client.createResponse(body: .json(.init(model: "test-model")))
     await credentials.replaceAccess("browser-login")
-    _ = try await client.createCodexResponse(body: .json(.init(model: "test-model")))
+    _ = try await client.createResponse(body: .json(.init(model: "test-model")))
     #expect(transport.capturedRequests.map { $0.headers[.authorization] } == [
       "Bearer original", "Bearer browser-login",
     ])
@@ -77,7 +78,7 @@ struct CodexAuthMiddlewareTests {
     let client = Client(
       serverURL: URL(string: "https://codex.example.com")!, transport: transport,
       middlewares: [CodexAuthMiddleware { try await credentials.load(rejecting: $0) }])
-    let response = try await client.createCodexResponse(body: .json(.init(model: "test-model")))
+    let response = try await client.createResponse(body: .json(.init(model: "test-model")))
     guard case .undocumented(statusCode: 429, _) = response else {
       Issue.record("Expected the original HTTP 429")
       return

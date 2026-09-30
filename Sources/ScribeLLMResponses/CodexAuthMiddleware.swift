@@ -51,6 +51,9 @@ struct CodexAuthMiddleware: ClientMiddleware {
 
   private func authenticated(_ request: HTTPRequest, token: String?, accountID: String?) -> HTTPRequest {
     var req = request
+    if let path = req.path {
+      req.path = path.replacingOccurrences(of: "/responses", with: "/codex/responses")
+    }
     if let token, !token.isEmpty {
       req.headerFields[.authorization] = "Bearer \(token)"
     }

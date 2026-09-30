@@ -7,10 +7,10 @@ import SystemPackage
 import Testing
 
 @testable import ScribeCore
-@testable import ScribeLLMCodex
+@testable import ScribeLLMResponses
 
 @Suite
-struct CodexProviderTests {
+struct ResponsesProviderTests {
 
   @Test("Responses 401 identifies the endpoint and is not retried")
   func responsesUnauthorizedIsReportedAccurately() async throws {
@@ -18,19 +18,19 @@ struct CodexProviderTests {
       status: 401,
       chunks: [Array(#"{"error":{"message":"Invalid credential"}}"#.utf8)[...]]
     )
-    let client = ScribeLLMCodex.Client(
+    let client = ScribeLLMResponses.Client(
       serverURL: URL(string: "https://opencode.ai/zen/v1")!,
       transport: transport,
       middlewares: [ResponsesAPIMiddleware(apiKey: "test-key")]
     )
-    let provider = CodexProvider(
+    let provider = ResponsesProvider(
       source: .configured(client),
       model: "gpt-6-luna",
       reasoningEnabled: false,
       reasoningEffort: nil,
       serviceTier: "priority",
       contextWindow: 128_000,
-      responsesAPI: true,
+      usesCodexBackend: false,
       retryPolicy: .fastTestPolicy
     )
     let stream = provider.run(
@@ -69,19 +69,19 @@ struct CodexProviderTests {
         #"{"type":"response.completed","response":{"id":"resp_test"}}"#
       )
     )
-    let client = ScribeLLMCodex.Client(
+    let client = ScribeLLMResponses.Client(
       serverURL: URL(string: "https://opencode.ai/zen/v1")!,
       transport: transport,
       middlewares: [ResponsesAPIMiddleware(apiKey: "test-key")]
     )
-    let provider = CodexProvider(
+    let provider = ResponsesProvider(
       source: .configured(client),
       model: "gpt-6-luna",
       reasoningEnabled: false,
       reasoningEffort: nil,
       serviceTier: "priority",
       contextWindow: 128_000,
-      responsesAPI: true
+      usesCodexBackend: false
     )
     let stream = provider.run(
       promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hi"))],
@@ -98,6 +98,7 @@ struct CodexProviderTests {
     #expect(result.outcome == .completed)
     #expect(result.newMessages.contains { $0.content == "Hello" })
 
+    #expect(transport.capturedRequests.first?.path == "/responses")
     let body = try #require(transport.capturedRequests.first?.body)
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(json["service_tier"] == nil)
@@ -120,10 +121,10 @@ struct CodexProviderTests {
           #"{"type":"error","sequence_number":2}"#
         )),
     ])
-    let client = ScribeLLMCodex.Client(
+    let client = ScribeLLMResponses.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport)
-    let provider = CodexProvider(
+    let provider = ResponsesProvider(
       source: .configured(client),
       model: "codex-test-model",
       reasoningEnabled: false,
@@ -146,7 +147,7 @@ struct CodexProviderTests {
       Issue.record("Expected the stream error to be returned")
       return
     }
-    #expect(description.contains("Codex stream error (sequence_number: 2)"))
+    #expect(description.contains("Responses stream error (sequence_number: 2)"))
     #expect(result.newMessages.map(\.role) == [.user, .assistant, .tool, .assistant])
     #expect(result.newMessages.last?.content == "Partial answer")
   }
@@ -161,10 +162,10 @@ struct CodexProviderTests {
         ),
         streamError: URLError(.networkConnectionLost))
     ])
-    let client = ScribeLLMCodex.Client(
+    let client = ScribeLLMResponses.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport)
-    let provider = CodexProvider(
+    let provider = ResponsesProvider(
       source: .configured(client),
       model: "codex-test-model",
       reasoningEnabled: false,
@@ -197,12 +198,12 @@ struct CodexProviderTests {
       status: 200,
       chunks: sseChunks(#"{"type":"response.completed","response":{"id":"resp_test"}}"#)
     )
-    let client = ScribeLLMCodex.Client(
+    let client = ScribeLLMResponses.Client(
       serverURL: URL(string: "https://opencode.ai/zen/v1")!,
       transport: transport,
       middlewares: [ResponsesAPIMiddleware(apiKey: "test-key")]
     )
-    _ = try await client.createCodexResponse(body: .json(.init(model: "gpt-6-sol")))
+    _ = try await client.createResponse(body: .json(.init(model: "gpt-6-sol")))
 
     let request = try #require(transport.capturedRequests.first)
     #expect(request.baseURL.path == "/zen/v1")
@@ -224,13 +225,13 @@ struct CodexProviderTests {
       )
     )
     let serverURL = URL(string: "https://codex.example.com")!
-    let client = ScribeLLMCodex.Client(
+    let client = ScribeLLMResponses.Client(
       serverURL: serverURL,
       transport: transport,
       middlewares: []
     )
 
-    let provider = CodexProvider(
+    let provider = ResponsesProvider(
       source: .configured(client),
       model: "codex-test-model",
       reasoningEnabled: false,
@@ -296,8 +297,8 @@ struct CodexProviderTests {
       "Expected assistant content to match streamed deltas")
   }
 
-  @Test("retries a Codex server_error event before visible output")
-  func retriesCodexServerErrorEvent() async throws {
+  @Test("retries a Responses server_error event before visible output")
+  func retriesResponsesServerErrorEvent() async throws {
     let transport = ScriptedTransport(responses: [
       .init(
         status: 200,
@@ -311,12 +312,12 @@ struct CodexProviderTests {
           #"{"type":"response.completed","response":{"id":"resp_retry"}}"#
         )),
     ])
-    let client = ScribeLLMCodex.Client(
+    let client = ScribeLLMResponses.Client(
       serverURL: URL(string: "https://codex.example.com")!,
       transport: transport,
       middlewares: []
     )
-    let provider = CodexProvider(
+    let provider = ResponsesProvider(
       source: .configured(client),
       model: "codex-test-model",
       reasoningEnabled: false,

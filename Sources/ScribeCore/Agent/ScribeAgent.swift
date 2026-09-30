@@ -1,6 +1,6 @@
 import Logging
 import ScribeLLM
-import ScribeLLMCodex
+import ScribeLLMResponses
 import SystemPackage
 
 public struct ScribeAgent: Sendable {
@@ -34,7 +34,7 @@ public struct ScribeAgent: Sendable {
   }
 
   public init(
-    codexClient: ScribeLLMCodex.Client,
+    responsesClient: ScribeLLMResponses.Client,
     model: String,
     tools: [any ScribeTool] = [],
     toolExecutor: (any ToolExecutor)? = nil,
@@ -46,8 +46,8 @@ public struct ScribeAgent: Sendable {
     let prepared = Self.prepareTools(tools, executor: toolExecutor, logger: logger)
     self.toolExecutor = prepared.executor
     self.chatTools = prepared.chatTools
-    self.provider = CodexProvider(
-      source: .configured(codexClient),
+    self.provider = ResponsesProvider(
+      source: .configured(responsesClient),
       model: model,
       reasoningEnabled: reasoningEnabled,
       reasoningEffort: nil,

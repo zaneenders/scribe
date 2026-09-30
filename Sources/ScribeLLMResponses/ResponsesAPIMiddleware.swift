@@ -13,9 +13,6 @@ struct ResponsesAPIMiddleware: ClientMiddleware {
     next: (HTTPRequest, HTTPBody?, URL) async throws -> (HTTPResponse, HTTPBody?)
   ) async throws -> (HTTPResponse, HTTPBody?) {
     var request = request
-    if let path = request.path {
-      request.path = path.replacingOccurrences(of: "/codex/responses", with: "/responses")
-    }
     if let apiKey, !apiKey.isEmpty {
       request.headerFields[.authorization] = "Bearer \(apiKey)"
     }

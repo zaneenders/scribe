@@ -3,10 +3,10 @@ import Logging
 import OpenAPIRuntime
 import ScribeCodexAuth
 import ScribeLLM
-import ScribeLLMCodex
+import ScribeLLMResponses
 import SystemPackage
 
-struct CodexToolCallIdentifiers: Equatable {
+struct ResponsesToolCallIdentifiers: Equatable {
   private static let separator: Character = "|"
 
   let callID: String
@@ -46,9 +46,9 @@ struct CodexToolCallIdentifiers: Equatable {
   }
 }
 
-struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
+struct ResponsesAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let model: String
-  let client: ScribeLLMCodex.Client
+  let client: ScribeLLMResponses.Client
   let toolExecutor: any ToolExecutor
   let chatTools: [ScribeLLM.Components.Schemas.ChatTool]
   let maxToolRounds: Int
@@ -56,7 +56,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   let reasoningEnabled: Bool?
   let reasoningEffort: String?
   let serviceTier: String?
-  let responsesAPI: Bool
+  let usesCodexBackend: Bool
   let temperature: Double?
   let hooks: AgentLoopHooks
   let contextWindow: Int
@@ -64,7 +64,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
 
   init(
     model: String,
-    client: ScribeLLMCodex.Client,
+    client: ScribeLLMResponses.Client,
     toolExecutor: any ToolExecutor,
     chatTools: [ScribeLLM.Components.Schemas.ChatTool],
     maxToolRounds: Int,
@@ -72,7 +72,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     reasoningEnabled: Bool?,
     reasoningEffort: String? = nil,
     serviceTier: String? = nil,
-    responsesAPI: Bool = false,
+    usesCodexBackend: Bool = true,
     temperature: Double? = nil,
     hooks: AgentLoopHooks,
     contextWindow: Int = 0,
@@ -87,7 +87,7 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
     self.reasoningEnabled = reasoningEnabled
     self.reasoningEffort = reasoningEffort
     self.serviceTier = serviceTier
-    self.responsesAPI = responsesAPI
+    self.usesCodexBackend = usesCodexBackend
     self.temperature = temperature
     self.hooks = hooks
     self.contextWindow = contextWindow
@@ -95,10 +95,10 @@ struct CodexAgentLoopConfig: Sendable, AgentLoopConfigFields {
   }
 }
 
-func runCodexAgentLoop(
+func runResponsesAgentLoop(
   promptMessages: [ScribeLLM.Components.Schemas.ChatMessage],
   context: AgentContext,
-  config: CodexAgentLoopConfig,
+  config: ResponsesAgentLoopConfig,
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   abortObserver: some AbortObserver
@@ -107,12 +107,12 @@ func runCodexAgentLoop(
     promptMessages: promptMessages,
     context: context,
     config: config,
-    logTag: ".codex",
+    logTag: ".responses",
     emit: emit,
     logger: logger,
     abortObserver: abortObserver
   ) { contextMessages, round, roundEmit in
-    try await runSingleCodexRound(
+    try await runSingleResponsesRound(
       contextMessages: contextMessages,
       config: config,
       emit: roundEmit,
@@ -123,9 +123,9 @@ func runCodexAgentLoop(
   }
 }
 
-private func runSingleCodexRound(
+private func runSingleResponsesRound(
   contextMessages: [ScribeLLM.Components.Schemas.ChatMessage],
-  config: CodexAgentLoopConfig,
+  config: ResponsesAgentLoopConfig,
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   round: Int,
@@ -135,50 +135,50 @@ private func runSingleCodexRound(
 
   emit(.boundary(.messageStart(role: .assistant, round: round)))
 
-  let input = convertChatMessagesToCodexInput(contextMessages)
-  let codexTools = convertToCodexTools(config.chatTools)
+  let input = convertChatMessagesToResponsesInput(contextMessages)
+  let responsesTools = convertToResponsesTools(config.chatTools)
 
-  let requestBody = ScribeLLMCodex.Components.Schemas.CreateCodexResponseRequest(
+  let requestBody = ScribeLLMResponses.Components.Schemas.CreateResponseRequest(
     model: config.model,
     store: false,
     stream: true,
     instructions: nil,
     previousResponseId: nil,
     input: input,
-    tools: codexTools,
+    tools: responsesTools,
     toolChoice: .auto,
     parallelToolCalls: true,
     temperature: config.temperature.map(Float.init),
     reasoning: config.reasoningEnabled == true
       ? {
-        var r = ScribeLLMCodex.Components.Schemas.CodexReasoning()
+        var r = ScribeLLMResponses.Components.Schemas.ResponsesReasoning()
         r.effort =
           config.reasoningEffort
-          .flatMap { ScribeLLMCodex.Components.Schemas.CodexReasoning.EffortPayload(rawValue: $0) }
+          .flatMap { ScribeLLMResponses.Components.Schemas.ResponsesReasoning.EffortPayload(rawValue: $0) }
           ?? .medium
         r.summary = .auto
         return r
       }()
       : nil,
-    serviceTier: config.responsesAPI
-      ? nil
-      : config.serviceTier.flatMap(
-        ScribeLLMCodex.Components.Schemas.CreateCodexResponseRequest.ServiceTierPayload.init(rawValue:)),
+    serviceTier: config.usesCodexBackend
+      ? config.serviceTier.flatMap(
+        ScribeLLMResponses.Components.Schemas.CreateResponseRequest.ServiceTierPayload.init(rawValue:))
+      : nil,
     text: nil,
-    include: config.responsesAPI ? nil : ["reasoning.encrypted_content"],
+    include: config.usesCodexBackend ? ["reasoning.encrypted_content"] : nil,
     promptCacheKey: nil
   )
 
-  let requestMetrics = codexRequestMetrics(contextMessages)
+  let requestMetrics = responsesRequestMetrics(contextMessages)
   let httpStart = clock.now
   logger.info(
-    "agent.http.request.codex",
+    "agent.http.request.responses",
     metadata: [
       "model": "\(config.model)",
       "round": "\(round)",
       "messages": "\(contextMessages.count)",
       "input_items": "\(input?.count ?? 0)",
-      "tools": "\(codexTools?.count ?? 0)",
+      "tools": "\(responsesTools?.count ?? 0)",
       "text_chars": "\(requestMetrics.textChars)",
       "image_count": "\(requestMetrics.imageCount)",
       "image_uri_chars": "\(requestMetrics.imageURIChars)",
@@ -186,9 +186,9 @@ private func runSingleCodexRound(
       "tool_output_chars": "\(requestMetrics.toolOutputChars)",
     ])
 
-  let response: ScribeLLMCodex.Operations.CreateCodexResponse.Output
+  let response: ScribeLLMResponses.Operations.CreateResponse.Output
   do {
-    response = try await config.client.createCodexResponse(body: .json(requestBody))
+    response = try await config.client.createResponse(body: .json(requestBody))
   } catch let error as ClientError where error.underlyingError is CodexOAuthError {
     throw ScribeError.generic(String(describing: error.underlyingError))
   }
@@ -197,7 +197,7 @@ private func runSingleCodexRound(
   switch response {
   case .ok(let ok):
     logger.debug(
-      "agent.http.response.codex",
+      "agent.http.response.responses",
       metadata: [
         "status": "200",
         "round": "\(round)",
@@ -214,12 +214,12 @@ private func runSingleCodexRound(
         detail = "(unable to read error body)"
       }
     }
-    logger.warning("agent.http.response.codex", metadata: ["status": "\(code)"])
+    logger.warning("agent.http.response.responses", metadata: ["status": "\(code)"])
     throw ScribeError.responsesHTTPError(statusCode: code, detail: detail)
   }
 
-  var turn = CodexAssistantTurn()
-  var processor = CodexStreamProcessor(
+  var turn = ResponsesAssistantTurn()
+  var processor = ResponsesStreamProcessor(
     onEvent: emit,
     logger: logger,
     abortObserver: abortObserver,
@@ -280,7 +280,7 @@ private func runSingleCodexRound(
       return Double(c) / max(0.001, genSec)
     }()
     logger.debug(
-      "agent.stream.end.codex",
+      "agent.stream.end.responses",
       metadata: [
         "chunks": "\(processor.decodedChunkCount)",
         "prompt_tokens": "\(u.inputTokens.map(String.init(describing:)) ?? "nil")",
@@ -300,7 +300,7 @@ private func runSingleCodexRound(
   if toolInvocations.isEmpty {
     if processor.isIncomplete {
       logger.warning(
-        "agent.assistant.incomplete.codex",
+        "agent.assistant.incomplete.responses",
         metadata: [
           "reason": "\(processor.incompleteReason ?? "unknown")",
           "answer_chars": "\(turn.text.count)",
@@ -309,13 +309,13 @@ private func runSingleCodexRound(
         assistantMessage: assistantMessage,
         kind: .incomplete(reason: processor.incompleteReason))
     }
-    logger.info("agent.assistant.final.codex", metadata: ["answer_chars": "\(turn.text.count)"])
+    logger.info("agent.assistant.final.responses", metadata: ["answer_chars": "\(turn.text.count)"])
     return RoundResult(assistantMessage: assistantMessage, kind: .completed)
   }
 
   if processor.isIncomplete {
     logger.warning(
-      "agent.assistant.incomplete.codex",
+      "agent.assistant.incomplete.responses",
       metadata: [
         "reason": "\(processor.incompleteReason ?? "unknown")",
         "tool_count": "\(toolInvocations.count)",
@@ -325,7 +325,7 @@ private func runSingleCodexRound(
   return RoundResult(assistantMessage: assistantMessage, kind: .toolCalls(toolInvocations))
 }
 
-private struct CodexRequestMetrics {
+private struct ResponsesRequestMetrics {
   var textChars = 0
   var imageCount = 0
   var imageURIChars = 0
@@ -333,10 +333,10 @@ private struct CodexRequestMetrics {
   var toolOutputChars = 0
 }
 
-private func codexRequestMetrics(
+private func responsesRequestMetrics(
   _ messages: [ScribeLLM.Components.Schemas.ChatMessage]
-) -> CodexRequestMetrics {
-  var metrics = CodexRequestMetrics()
+) -> ResponsesRequestMetrics {
+  var metrics = ResponsesRequestMetrics()
   for message in messages {
     if let content = message.content {
       switch content {
@@ -360,17 +360,17 @@ private func codexRequestMetrics(
   return metrics
 }
 
-func convertChatMessagesToCodexInput(
+func convertChatMessagesToResponsesInput(
   _ messages: [ScribeLLM.Components.Schemas.ChatMessage]
-) -> [ScribeLLMCodex.Components.Schemas.CodexInputItem]? {
-  var items: [ScribeLLMCodex.Components.Schemas.CodexInputItem] = []
+) -> [ScribeLLMResponses.Components.Schemas.ResponsesInputItem]? {
+  var items: [ScribeLLMResponses.Components.Schemas.ResponsesInputItem] = []
   for msg in messages {
     switch msg.role {
     case .system:
       let content = msgContentString(msg) ?? ""
       items.append(
         .system(
-          ScribeLLMCodex.Components.Schemas.CodexSystemMessage(
+          ScribeLLMResponses.Components.Schemas.ResponsesSystemMessage(
             role: .system, content: content
           )))
 
@@ -380,17 +380,17 @@ func convertChatMessagesToCodexInput(
         case .case1(let text):
           items.append(
             .user(
-              ScribeLLMCodex.Components.Schemas.CodexUserMessage(
+              ScribeLLMResponses.Components.Schemas.ResponsesUserMessage(
                 role: .user,
                 content: .case1(text)
               )))
         case .case2(let parts):
-          let codexParts = parts.map(convertChatContentPartToCodexInputContent)
+          let responsesParts = parts.map(convertChatContentPartToResponsesInputContent)
           items.append(
             .user(
-              ScribeLLMCodex.Components.Schemas.CodexUserMessage(
+              ScribeLLMResponses.Components.Schemas.ResponsesUserMessage(
                 role: .user,
-                content: .case2(codexParts)
+                content: .case2(responsesParts)
               )))
         }
       }
@@ -399,7 +399,7 @@ func convertChatMessagesToCodexInput(
       if let text = msgContentString(msg), !text.isEmpty {
         items.append(
           .assistant(
-            ScribeLLMCodex.Components.Schemas.CodexAssistantMessage(
+            ScribeLLMResponses.Components.Schemas.ResponsesAssistantMessage(
               role: .assistant,
               content: .case1(text),
               id: nil,
@@ -409,10 +409,10 @@ func convertChatMessagesToCodexInput(
       }
       if let toolCalls = msg.toolCalls {
         for tc in toolCalls {
-          let identifiers = CodexToolCallIdentifiers(encoded: tc.id ?? "")
+          let identifiers = ResponsesToolCallIdentifiers(encoded: tc.id ?? "")
           items.append(
             .functionCall(
-              ScribeLLMCodex.Components.Schemas.CodexFunctionCall(
+              ScribeLLMResponses.Components.Schemas.ResponsesFunctionCall(
                 _type: .functionCall,
                 id: identifiers.itemID,
                 callId: identifiers.callID,
@@ -424,10 +424,10 @@ func convertChatMessagesToCodexInput(
 
     case .tool:
       if let resultText = msgContentString(msg), let callId = msg.toolCallId {
-        let shortCallId = CodexToolCallIdentifiers(encoded: callId).callID
+        let shortCallId = ResponsesToolCallIdentifiers(encoded: callId).callID
         items.append(
           .functionCallOutput(
-            ScribeLLMCodex.Components.Schemas.CodexFunctionCallOutput(
+            ScribeLLMResponses.Components.Schemas.ResponsesFunctionCallOutput(
               _type: .functionCallOutput,
               callId: shortCallId,
               output: .case1(resultText)
@@ -446,19 +446,19 @@ private func msgContentString(_ msg: ScribeLLM.Components.Schemas.ChatMessage) -
   }
 }
 
-func convertChatContentPartToCodexInputContent(
+func convertChatContentPartToResponsesInputContent(
   _ part: ScribeLLM.Components.Schemas.ChatContentPart
-) -> ScribeLLMCodex.Components.Schemas.CodexInputContent {
+) -> ScribeLLMResponses.Components.Schemas.ResponsesInputContent {
   switch part {
   case .text(let textPart):
     return .inputText(
-      ScribeLLMCodex.Components.Schemas.CodexInputText(
+      ScribeLLMResponses.Components.Schemas.ResponsesInputText(
         _type: .inputText,
         text: textPart.text
       ))
   case .imageUrl(let imagePart):
     return .inputImage(
-      ScribeLLMCodex.Components.Schemas.CodexInputImage(
+      ScribeLLMResponses.Components.Schemas.ResponsesInputImage(
         _type: .inputImage,
         imageUrl: imagePart.imageUrl.url,
         detail: imagePart.imageUrl.detail.map { detail in
@@ -472,18 +472,18 @@ func convertChatContentPartToCodexInputContent(
   }
 }
 
-private func convertToCodexTools(
+private func convertToResponsesTools(
   _ chatTools: [ScribeLLM.Components.Schemas.ChatTool]
-) -> [ScribeLLMCodex.Components.Schemas.CodexTool]? {
+) -> [ScribeLLMResponses.Components.Schemas.ResponsesTool]? {
   guard !chatTools.isEmpty else { return nil }
   return chatTools.map { ct in
-    var codexParams = ScribeLLMCodex.Components.Schemas.CodexTool.ParametersPayload()
-    codexParams.additionalProperties = ct.function.parameters.additionalProperties
-    return ScribeLLMCodex.Components.Schemas.CodexTool(
+    var responsesParams = ScribeLLMResponses.Components.Schemas.ResponsesTool.ParametersPayload()
+    responsesParams.additionalProperties = ct.function.parameters.additionalProperties
+    return ScribeLLMResponses.Components.Schemas.ResponsesTool(
       _type: .function,
       name: ct.function.name,
       description: ct.function.description,
-      parameters: codexParams,
+      parameters: responsesParams,
       strict: false,
       deferLoading: nil
     )

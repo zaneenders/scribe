@@ -1,36 +1,35 @@
 openapi: 3.1.0
 info:
-  title: OpenAI Codex Responses API (ChatGPT subscription)
+  title: OpenAI Responses API
   version: 1.0.0
   description: >
-    Streaming chat via the Codex /responses endpoint used by ChatGPT
-    Plus/Pro subscriptions.  Authenticate with an OAuth Bearer token +
-    `chatgpt-account-id` header (extracted from the JWT).  The API speaks
-    SSE (text/event-stream) and WebSocket; this spec only models SSE.
+    Streaming Responses API authenticated with a bearer API key.
+    The ChatGPT Codex backend uses the same schemas with OAuth authentication
+    and a chatgpt-account-id header. This spec models SSE only.
 servers:
-  - url: https://chatgpt.com/backend-api
+  - url: https://api.openai.com/v1
 paths:
-  /codex/responses:
+  /responses:
     post:
-      operationId: createCodexResponse
-      summary: Create a streaming Codex response
+      operationId: createResponse
+      summary: Create a streaming response
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateCodexResponseRequest"
+              $ref: "#/components/schemas/CreateResponseRequest"
       responses:
         "200":
           description: Server-Sent Events stream of response events
           content:
             text/event-stream:
               schema:
-                $ref: "#/components/schemas/CodexResponseStreamEvent"
+                $ref: "#/components/schemas/ResponsesResponseStreamEvent"
 
 components:
   schemas:
-    CreateCodexResponseRequest:
+    CreateResponseRequest:
       type: object
       required: [model]
       properties:
@@ -53,11 +52,11 @@ components:
           type: array
           description: Conversation items (messages, tool calls, tool results)
           items:
-            $ref: "#/components/schemas/CodexInputItem"
+            $ref: "#/components/schemas/ResponsesInputItem"
         tools:
           type: array
           items:
-            $ref: "#/components/schemas/CodexTool"
+            $ref: "#/components/schemas/ResponsesTool"
         tool_choice:
           type: string
           enum: [auto, none, required]
@@ -69,7 +68,7 @@ components:
           type: number
           format: float
         reasoning:
-          $ref: "#/components/schemas/CodexReasoning"
+          $ref: "#/components/schemas/ResponsesReasoning"
         service_tier:
           type: string
           enum: [auto, default, flex, priority]
@@ -95,7 +94,7 @@ components:
           description: Token for prompt caching
       additionalProperties: true
 
-    CodexReasoning:
+    ResponsesReasoning:
       type: object
       properties:
         effort:
@@ -108,25 +107,25 @@ components:
           description: Reasoning summary style
       additionalProperties: true
 
-    CodexInputItem:
+    ResponsesInputItem:
       oneOf:
-        - $ref: "#/components/schemas/CodexSystemMessage"
-        - $ref: "#/components/schemas/CodexDeveloperMessage"
-        - $ref: "#/components/schemas/CodexUserMessage"
-        - $ref: "#/components/schemas/CodexAssistantMessage"
-        - $ref: "#/components/schemas/CodexFunctionCall"
-        - $ref: "#/components/schemas/CodexFunctionCallOutput"
+        - $ref: "#/components/schemas/ResponsesSystemMessage"
+        - $ref: "#/components/schemas/ResponsesDeveloperMessage"
+        - $ref: "#/components/schemas/ResponsesUserMessage"
+        - $ref: "#/components/schemas/ResponsesAssistantMessage"
+        - $ref: "#/components/schemas/ResponsesFunctionCall"
+        - $ref: "#/components/schemas/ResponsesFunctionCallOutput"
       discriminator:
         propertyName: type
         mapping:
-          system: "#/components/schemas/CodexSystemMessage"
-          developer: "#/components/schemas/CodexDeveloperMessage"
-          user: "#/components/schemas/CodexUserMessage"
-          assistant: "#/components/schemas/CodexAssistantMessage"
-          function_call: "#/components/schemas/CodexFunctionCall"
-          function_call_output: "#/components/schemas/CodexFunctionCallOutput"
+          system: "#/components/schemas/ResponsesSystemMessage"
+          developer: "#/components/schemas/ResponsesDeveloperMessage"
+          user: "#/components/schemas/ResponsesUserMessage"
+          assistant: "#/components/schemas/ResponsesAssistantMessage"
+          function_call: "#/components/schemas/ResponsesFunctionCall"
+          function_call_output: "#/components/schemas/ResponsesFunctionCallOutput"
 
-    CodexSystemMessage:
+    ResponsesSystemMessage:
       type: object
       required: [role, content]
       properties:
@@ -136,7 +135,7 @@ components:
         content:
           type: string
 
-    CodexDeveloperMessage:
+    ResponsesDeveloperMessage:
       type: object
       required: [role, content]
       properties:
@@ -146,7 +145,7 @@ components:
         content:
           type: string
 
-    CodexUserMessage:
+    ResponsesUserMessage:
       type: object
       required: [role, content]
       properties:
@@ -158,19 +157,19 @@ components:
             - type: string
             - type: array
               items:
-                $ref: "#/components/schemas/CodexInputContent"
+                $ref: "#/components/schemas/ResponsesInputContent"
 
-    CodexInputContent:
+    ResponsesInputContent:
       oneOf:
-        - $ref: "#/components/schemas/CodexInputText"
-        - $ref: "#/components/schemas/CodexInputImage"
+        - $ref: "#/components/schemas/ResponsesInputText"
+        - $ref: "#/components/schemas/ResponsesInputImage"
       discriminator:
         propertyName: type
         mapping:
-          input_text: "#/components/schemas/CodexInputText"
-          input_image: "#/components/schemas/CodexInputImage"
+          input_text: "#/components/schemas/ResponsesInputText"
+          input_image: "#/components/schemas/ResponsesInputImage"
 
-    CodexInputText:
+    ResponsesInputText:
       type: object
       required: [type, text]
       properties:
@@ -180,7 +179,7 @@ components:
         text:
           type: string
 
-    CodexInputImage:
+    ResponsesInputImage:
       type: object
       required: [type, image_url]
       properties:
@@ -195,7 +194,7 @@ components:
           enum: [auto, low, high]
           default: auto
 
-    CodexAssistantMessage:
+    ResponsesAssistantMessage:
       type: object
       required: [role]
       properties:
@@ -207,7 +206,7 @@ components:
             - type: string
             - type: array
               items:
-                $ref: "#/components/schemas/CodexOutputContent"
+                $ref: "#/components/schemas/ResponsesOutputContent"
         id:
           type: string
           description: Assistant message ID (msg_xxx)
@@ -221,15 +220,15 @@ components:
             Distinguishes plan/commentary text from final answer text.
             Used by reasoning models.
 
-    CodexOutputContent:
+    ResponsesOutputContent:
       oneOf:
-        - $ref: "#/components/schemas/CodexOutputText"
+        - $ref: "#/components/schemas/ResponsesOutputText"
       discriminator:
         propertyName: type
         mapping:
-          output_text: "#/components/schemas/CodexOutputText"
+          output_text: "#/components/schemas/ResponsesOutputText"
 
-    CodexOutputText:
+    ResponsesOutputText:
       type: object
       required: [type, text]
       properties:
@@ -245,7 +244,7 @@ components:
             additionalProperties: true
           description: Annotations (citations, file references, etc.)
 
-    CodexFunctionCall:
+    ResponsesFunctionCall:
       type: object
       required: [type, call_id, name, arguments]
       properties:
@@ -265,7 +264,7 @@ components:
           type: string
           description: JSON-encoded arguments
 
-    CodexFunctionCallOutput:
+    ResponsesFunctionCallOutput:
       type: object
       required: [type, call_id, output]
       properties:
@@ -280,10 +279,10 @@ components:
             - type: string
             - type: array
               items:
-                $ref: "#/components/schemas/CodexInputContent"
+                $ref: "#/components/schemas/ResponsesInputContent"
           description: Tool result text or content array (for images)
 
-    CodexTool:
+    ResponsesTool:
       type: object
       required: [type, name]
       properties:
@@ -308,10 +307,10 @@ components:
             Only included in tool_search_output items, not as a top-level tool.
       additionalProperties: true
 
-    CodexResponseStreamEvent:
+    ResponsesResponseStreamEvent:
       type: object
       description: >
-        A single SSE event from the Codex /responses stream.  The `type`
+        A single SSE event from the Responses API stream.  The `type`
         field discriminates the event kind.  Only the most important event
         shapes are modelled; unknown events should be parsed leniently.
       required: [type]
@@ -334,11 +333,11 @@ components:
             - response.failed
             - error
         response:
-          $ref: "#/components/schemas/CodexCreatedResponse"
+          $ref: "#/components/schemas/ResponsesCreatedResponse"
         output_index:
           type: integer
         item:
-          $ref: "#/components/schemas/CodexOutputItem"
+          $ref: "#/components/schemas/ResponsesOutputItem"
         delta:
           type: string
         arguments:
@@ -349,7 +348,7 @@ components:
           type: string
       additionalProperties: true
 
-    CodexCreatedResponse:
+    ResponsesCreatedResponse:
       type: object
       properties:
         id:
@@ -359,19 +358,19 @@ components:
           type: string
       additionalProperties: true
 
-    CodexOutputItem:
+    ResponsesOutputItem:
       oneOf:
-        - $ref: "#/components/schemas/CodexReasoningItem"
-        - $ref: "#/components/schemas/CodexMessageItem"
-        - $ref: "#/components/schemas/CodexFunctionCallItem"
+        - $ref: "#/components/schemas/ResponsesReasoningItem"
+        - $ref: "#/components/schemas/ResponsesMessageItem"
+        - $ref: "#/components/schemas/ResponsesFunctionCallItem"
       discriminator:
         propertyName: type
         mapping:
-          reasoning: "#/components/schemas/CodexReasoningItem"
-          message: "#/components/schemas/CodexMessageItem"
-          function_call: "#/components/schemas/CodexFunctionCallItem"
+          reasoning: "#/components/schemas/ResponsesReasoningItem"
+          message: "#/components/schemas/ResponsesMessageItem"
+          function_call: "#/components/schemas/ResponsesFunctionCallItem"
 
-    CodexReasoningItem:
+    ResponsesReasoningItem:
       type: object
       required: [type, id]
       properties:
@@ -405,7 +404,7 @@ components:
             additionalProperties: true
       additionalProperties: true
 
-    CodexMessageItem:
+    ResponsesMessageItem:
       type: object
       required: [type, id, role]
       properties:
@@ -420,14 +419,14 @@ components:
         content:
           type: array
           items:
-            $ref: "#/components/schemas/CodexOutputContent"
+            $ref: "#/components/schemas/ResponsesOutputContent"
         status:
           type: string
         phase:
           type: string
       additionalProperties: true
 
-    CodexFunctionCallItem:
+    ResponsesFunctionCallItem:
       type: object
       required: [type, call_id, name]
       properties:
@@ -444,7 +443,7 @@ components:
           type: string
       additionalProperties: true
 
-    CodexTerminalResponse:
+    ResponsesTerminalResponse:
       type: object
       properties:
         id:
@@ -455,19 +454,19 @@ components:
         service_tier:
           type: string
         usage:
-          $ref: "#/components/schemas/CodexUsage"
+          $ref: "#/components/schemas/ResponsesUsage"
         output:
           type: array
           items:
-            $ref: "#/components/schemas/CodexOutputItem"
+            $ref: "#/components/schemas/ResponsesOutputItem"
         error:
-          $ref: "#/components/schemas/CodexResponseError"
+          $ref: "#/components/schemas/ResponsesResponseError"
         incomplete_details:
           type: object
           additionalProperties: true
       additionalProperties: true
 
-    CodexResponseError:
+    ResponsesResponseError:
       type: object
       properties:
         code:
@@ -476,7 +475,7 @@ components:
           type: string
       additionalProperties: true
 
-    CodexUsage:
+    ResponsesUsage:
       type: object
       properties:
         input_tokens:
