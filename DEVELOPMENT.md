@@ -185,7 +185,6 @@ func submitExample(service: any ScribeSessionService) async throws {
   let events = try await service.submit(
     .init(sessionID: session.summary.id, prompt: "Explain this project"))
   for try await event in events {
-    // Map events to the host UI; turnCompleted / turnFailed end the turn.
     print(event)
   }
 }

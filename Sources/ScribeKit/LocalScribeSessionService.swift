@@ -4,7 +4,6 @@ import Logging
 import ScribeCore
 import SystemPackage
 
-/// Recommended embedding entry point: owns session execution and persistence, without UI or broker networking.
 public actor LocalScribeSessionService: ScribeSessionService {
 
   private struct LoadedSession {
