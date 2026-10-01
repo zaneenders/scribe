@@ -20,7 +20,7 @@ by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 ## Chroma observation integration
 
-The desktop package pins Chroma in `apps/scribe-desktop/Package.swift`.
+The desktop package pins Chroma in `scribe-desktop/Package.swift`.
 The root runtime package has no Chroma dependency.
 A sibling `../chroma` checkout is not required to build Scribe.
 
@@ -30,14 +30,14 @@ This is whole-frame invalidation, not per-block caching; animations still rely
 on backend refresh scheduling.
 
 ```bash
-swift build --package-path apps/scribe-desktop --product scribe-mac
-swift test --package-path apps/scribe-desktop
-swift run --package-path apps/scribe-desktop scribe-mac
+swift build --package-path scribe-desktop --product scribe-mac
+swift test --package-path scribe-desktop
+swift run --package-path scribe-desktop scribe-mac
 ```
 
 ## Testing
 
-Run `swift test` for runtime tests and `swift test --package-path apps/scribe-desktop`
+Run `swift test` for runtime tests and `swift test --package-path scribe-desktop`
 for desktop tests. Run `Scripts/test-package-boundary.sh` to verify the runtime
 dependency graph excludes desktop dependencies. The following commands report runtime coverage.
 
@@ -73,8 +73,8 @@ For the mac executable, launch the built binary from a terminal so it inherits
 the environment variable:
 
 ```bash
-swift build --package-path apps/scribe-desktop --product scribe-mac
-apps/scribe-desktop/.build/debug/scribe-mac
+swift build --package-path scribe-desktop --product scribe-mac
+scribe-desktop/.build/debug/scribe-mac
 ```
 
 Set `PROFILE_RECORDER_SERVER_URL_PATTERN` only when you want to override the
@@ -154,7 +154,7 @@ release-mode profiling works out of the box.
 ## Rendering diagnostics (macOS)
 
 ```bash
-swift build --package-path apps/scribe-desktop -c release --product scribe-mac && PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' apps/scribe-desktop/.build/release/scribe-mac
+swift build --package-path scribe-desktop -c release --product scribe-mac && PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' scribe-desktop/.build/release/scribe-mac
 ```
 
 ## Embedding

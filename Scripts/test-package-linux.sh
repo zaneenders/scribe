@@ -7,9 +7,9 @@ if [ "$(uname -s)" != Linux ]; then
 fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/bin" "$tmp/build output" "$tmp/repo with spaces/apps/scribe-desktop"
+mkdir -p "$tmp/bin" "$tmp/build output" "$tmp/repo with spaces/scribe-desktop"
 cp -R "$root/Scripts" "$root/LICENSE" "$tmp/repo with spaces/"
-cp -R "$root/apps/scribe-desktop/Packaging" "$tmp/repo with spaces/apps/scribe-desktop/"
+cp -R "$root/scribe-desktop/Packaging" "$tmp/repo with spaces/scribe-desktop/"
 export TEST_BIN_PATH="$tmp/build output" TEST_TRACE="$tmp/trace"
 cp /bin/true "$TEST_BIN_PATH/scribe-wayland"
 cat > "$tmp/bin/swift" <<'SH'
@@ -18,7 +18,7 @@ set -eu
 printf '%s\n' "$*" >> "$TEST_TRACE"
 test "$1" = build
 test "$2" = --package-path
-test "$3" = "$PWD/apps/scribe-desktop"
+test "$3" = "$PWD/scribe-desktop"
 test "$4" = --build-system
 test "$5" = "${SWIFT_BUILD_SYSTEM:-native}"
 case "$*" in

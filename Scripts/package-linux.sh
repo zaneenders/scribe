@@ -65,9 +65,9 @@ fi
 
 build_system=${SWIFT_BUILD_SYSTEM:-native}
 if [ -z "$wayland_binary" ]; then
-  bin_path=$(swift build --package-path "$root/apps/scribe-desktop" --build-system "$build_system" -c "$configuration" --show-bin-path)
+  bin_path=$(swift build --package-path "$root/scribe-desktop" --build-system "$build_system" -c "$configuration" --show-bin-path)
   printf '[install] Building Wayland app (%s)...\n' "$configuration"
-  swift build --package-path "$root/apps/scribe-desktop" --build-system "$build_system" -c "$configuration" --product scribe-wayland --static-swift-stdlib
+  swift build --package-path "$root/scribe-desktop" --build-system "$build_system" -c "$configuration" --product scribe-wayland --static-swift-stdlib
   wayland_binary="$bin_path/scribe-wayland"
 fi
 
@@ -118,9 +118,9 @@ mkdir -p \
 install -m 755 "$wayland_binary" "$staging/bin/scribe-wayland"
 install -m 755 Scripts/Linux/install.sh "$staging/install.sh"
 install -m 755 Scripts/Linux/uninstall.sh "$staging/uninstall.sh"
-install -m 644 apps/scribe-desktop/Packaging/Linux/com.zaneenders.scribe.desktop \
+install -m 644 scribe-desktop/Packaging/Linux/com.zaneenders.scribe.desktop \
   "$staging/share/applications/com.zaneenders.scribe.desktop"
-install -m 644 apps/scribe-desktop/Packaging/Linux/com.zaneenders.scribe.png \
+install -m 644 scribe-desktop/Packaging/Linux/com.zaneenders.scribe.png \
   "$staging/share/icons/hicolor/512x512/apps/com.zaneenders.scribe.png"
 install -m 644 LICENSE "$staging/LICENSE"
 
