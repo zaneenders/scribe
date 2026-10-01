@@ -95,7 +95,6 @@ final class ScribeMacStore {
   private(set) var isSessionSidebarVisible = true
   var lastError: String?
 
-  let codexConnection: CodexConnectionSettings
   var showStatsMenu = false
   private(set) var isSignedInToCodex: Bool
   private(set) var codexUsage: CodexUsage?
@@ -134,7 +133,6 @@ final class ScribeMacStore {
 
   init(
     startProfiling: Bool = true,
-    codexConnection: CodexConnectionSettings? = nil,
     codexIsSignedIn: Bool? = nil,
     loadCodexUsage: @escaping @Sendable () async throws -> CodexUsage = { try await CodexUsage.fetch() },
     codexSignIn: @escaping @Sendable () async throws -> [ProfileSummary] = {
@@ -144,7 +142,6 @@ final class ScribeMacStore {
       return try await ConfigLoader.load().profiles
     }
   ) {
-    self.codexConnection = codexConnection ?? CodexConnectionSettings()
     self.readsLiveCodexState = codexIsSignedIn == nil
     self.isSignedInToCodex = codexIsSignedIn ?? CodexAuthority.hasLogin
     self.loadCodexUsage = loadCodexUsage

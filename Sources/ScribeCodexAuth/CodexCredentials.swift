@@ -56,7 +56,7 @@ public enum CodexCredentialStore {
     return try readRaw(baseDirectory: directory)
   }
 
-  static func readRaw(baseDirectory: URL) throws -> CodexCredential? {
+  public static func readRaw(baseDirectory: URL) throws -> CodexCredential? {
     let path = credentialsPath(baseDirectory: baseDirectory)
     guard FileManager.default.fileExists(atPath: path.path) else { return nil }
 
@@ -104,7 +104,7 @@ public enum CodexCredentialStore {
     try CodexSecureFile.sync(directory)
   }
 
-  static func deleteRaw(baseDirectory: URL) throws {
+  public static func deleteRaw(baseDirectory: URL) throws {
     let path = credentialsPath(baseDirectory: baseDirectory)
     if FileManager.default.fileExists(atPath: path.path) { try FileManager.default.removeItem(at: path) }
   }

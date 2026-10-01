@@ -30,6 +30,23 @@ struct CodexProviderPropagationTests {
     }
   }
 
+@Test func bootstrapRetainsInjectedProviderAfterReconfiguration() async throws {
+  try await withLocalServiceFixture { fixture in
+    try ConfigLoader.upsertCodexProfile(at: fixture.context.paths.profileManifestPath)
+    let provider = DeniedProvider()
+    let opened = try await ScribeSessionBootstrap.open(
+      context: fixture.context, profileOverride: "codex", codexCredentials: provider)
+    _ = try await opened.harness.submit("hello", onEvent: { _ in })
+    #expect(await provider.calls > 0)
+    let before = await provider.calls
+    let loaded = try await ConfigLoader.load(paths: fixture.context.paths,
+      configurationFile: fixture.context.configurationFile, profileOverride: "codex")
+    try await opened.harness.reconfigure(configuration: loaded.scribeConfig, profileName: "codex")
+    _ = try await opened.harness.submit("again", onEvent: { _ in })
+    #expect(await provider.calls > before)
+  }
+}
+
   @Test func injectedAccessOnlyProviderReachesAgentsAfterReconfiguration() async throws {
     try await withLocalServiceFixture { fixture in
       try ConfigLoader.upsertCodexProfile(at: fixture.context.paths.profileManifestPath)

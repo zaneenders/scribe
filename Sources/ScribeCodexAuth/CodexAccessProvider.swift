@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 public struct CodexAccessCredential: Codable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
   public let access: String
@@ -33,40 +32,13 @@ public struct CodexDefaultAccessProvider: CodexAccessCredentialProvider {
     case .local:
       return CodexAccessCredential(try await CodexOAuth.getValidCredentials(
         baseDirectory: baseDirectory, rejectingAccessToken: rejectingAccessToken))
-    case .serverOwned(let authority):
+    case .serverOwned:
       try CodexAuthority.finishCommittedCleanup(baseDirectory: baseDirectory)
-      return try await CodexServerProviders.credential(authority, rejecting: rejectingAccessToken)
+      throw CodexAuthorityError.frozen
     case .handoffPending: throw CodexAuthorityError.frozen
     case .recoveryRequired: throw CodexAuthorityError.recoveryRequired
     }
   }
-}
-
-public enum CodexServerProviders {
-  private static let providers = Mutex<[CodexServerAuthorityKey: any CodexAccessCredentialProvider]>([:])
-  public static func register(_ provider: any CodexAccessCredentialProvider, authority: CodexServerAuthority) {
-    providers.withLock { $0[CodexServerAuthorityKey(authority)] = provider }
-  }
-  static func credential(_ authority: CodexServerAuthority, rejecting: String?) async throws -> CodexAccessCredential {
-    let key = CodexServerAuthorityKey(authority)
-    let provider = providers.withLock { $0[key] }
-    if let provider { return try await provider.credential(rejectingAccessToken: rejecting) }
-    let client = try CodexBrokerClient(origin: authority.origin, sshTunnel: authority.sshTunnel,
-      bearer: { try CodexDeviceIdentity.bearer() })
-    let created = CodexBrokerAccessProvider(client: client, authority: authority)
-    let selected = providers.withLock { entries -> any CodexAccessCredentialProvider in
-      if let existing = entries[key] { return existing }
-      entries[key] = created
-      return created
-    }
-    return try await selected.credential(rejectingAccessToken: rejecting)
-  }
-}
-
-private struct CodexServerAuthorityKey: Hashable {
-  let origin: String
-  let connectionID: UUID
-  init(_ authority: CodexServerAuthority) { origin = authority.origin; connectionID = authority.connectionID }
 }
 
 public actor CodexAccountBoundProvider: CodexAccessCredentialProvider {

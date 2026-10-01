@@ -52,6 +52,7 @@ var targets: [Target] = [
   .target(
     name: "ScribeKit",
     dependencies: [
+      "ScribeCodexAuth",
       "ScribeCore",
       "ScribeLLM",
       .product(name: "Logging", package: "swift-log"),

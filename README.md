@@ -111,3 +111,12 @@ swift run scribe-mac
 
 On Linux, use `swift run scribe-wayland` instead.
 See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, profiling, logging, and embedding.
+
+## Codex credential ownership
+
+Standalone Scribe handles local Codex OAuth and refresh. Server broker networking,
+transfer orchestration, device enrollment, and connection UI belong to ShapeTree.
+Embedders supply a `CodexAccessCredentialProvider` through `ScribeConfig`,
+`LocalScribeSessionService`, or `ScribeSessionBootstrap.open(codexCredentials:)`.
+The persisted ownership fence is retained: pending/server-owned credentials never
+fall back to local refresh. Use ShapeTree to resolve a transferred login.

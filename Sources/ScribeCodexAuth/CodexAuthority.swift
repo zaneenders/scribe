@@ -110,6 +110,10 @@ public struct CodexPendingHandoff: Codable, Equatable, Sendable {
   public let sshTunnel: Bool
   public let accountID: String
   public let expectedGeneration: Int
+  public init(id: UUID, origin: String, sshTunnel: Bool, accountID: String, expectedGeneration: Int) {
+    self.id = id; self.origin = origin; self.sshTunnel = sshTunnel
+    self.accountID = accountID; self.expectedGeneration = expectedGeneration
+  }
 }
 
 public enum CodexAuthorityState: Codable, Equatable, Sendable {
@@ -129,7 +133,7 @@ public enum CodexAuthority {
     }
   }
 
-  static func path(_ directory: URL) -> URL { directory.appendingPathComponent("codex-authority.json") }
+  public static func path(_ directory: URL) -> URL { directory.appendingPathComponent("codex-authority.json") }
 
   public static func state(baseDirectory: URL? = nil) throws -> CodexAuthorityState {
     let path = path(baseDirectory ?? CodexCredentialStore.resolveBaseDirectory())
@@ -138,7 +142,7 @@ public enum CodexAuthority {
     catch { throw CodexAuthorityError.unavailable }
   }
 
-  static func requireLocal(_ directory: URL) throws {
+  public static func requireLocal(_ directory: URL) throws {
     guard try state(baseDirectory: directory) == .local else { throw CodexAuthorityError.frozen }
   }
 
@@ -151,69 +155,6 @@ public enum CodexAuthority {
     try CodexSecureFile.sync(directory)
   }
 
-  public static func freeze(origin: String, sshTunnel: Bool = false, accountID: String,
-    expectedGeneration: Int, baseDirectory: URL? = nil
-  ) async throws -> CodexPendingHandoff {
-    let origin = try CodexServerTransport.origin(origin, sshTunnel: sshTunnel)
-    let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
-    let lock = try await CodexStoreLock.acquire(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    if case .handoffPending(let pending) = try state(baseDirectory: directory) {
-      guard pending.origin == origin, pending.sshTunnel == sshTunnel, pending.accountID == accountID,
-        pending.expectedGeneration == expectedGeneration else { throw CodexAuthorityError.conflict }
-      return pending
-    }
-    try requireLocal(directory)
-    guard let credential = try CodexCredentialStore.readRaw(baseDirectory: directory),
-      credential.accountId == accountID else { throw CodexAuthorityError.conflict }
-    let pending = CodexPendingHandoff(id: UUID(), origin: origin, sshTunnel: sshTunnel,
-      accountID: accountID, expectedGeneration: expectedGeneration)
-    try CodexSecureFile.write(CodexAuthorityState.handoffPending(pending), to: path(directory))
-    return pending
-  }
-
-  public static func export(_ pending: CodexPendingHandoff, baseDirectory: URL? = nil) throws -> CodexCredential {
-    let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    guard try state(baseDirectory: directory) == .handoffPending(pending),
-      let credential = try CodexCredentialStore.readRaw(baseDirectory: directory),
-      credential.accountId == pending.accountID else { throw CodexAuthorityError.conflict }
-    return credential
-  }
-
-  public static func commit(_ pending: CodexPendingHandoff, receipt: CodexConnectionReceipt,
-    baseDirectory: URL? = nil
-  ) throws {
-    let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    let authority = CodexServerAuthority(origin: pending.origin, sshTunnel: pending.sshTunnel,
-      connectionID: receipt.connectionID, accountID: receipt.accountID, generation: receipt.generation)
-    let current = try state(baseDirectory: directory)
-    guard receipt.handoffID == pending.id, receipt.accountID == pending.accountID,
-      receipt.generation == pending.expectedGeneration + 1,
-      current == .handoffPending(pending) || current == .serverOwned(authority)
-    else { throw CodexAuthorityError.conflict }
-    // Persist the fence before deletion: a crash can leave a credential, never refresh permission.
-    try CodexSecureFile.write(CodexAuthorityState.serverOwned(authority), to: path(directory))
-    try CodexCredentialStore.deleteRaw(baseDirectory: directory)
-    try CodexSecureFile.sync(directory)
-  }
-
-  public static func prepareNewLogin(afterRemovalOf authority: CodexServerAuthority, status: CodexConnectionStatus,
-    baseDirectory: URL? = nil
-  ) throws {
-    let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    guard try state(baseDirectory: directory) == .serverOwned(authority), status.connection == nil,
-      status.generation > authority.generation else { throw CodexAuthorityError.conflict }
-    try CodexCredentialStore.deleteRaw(baseDirectory: directory)
-    try CodexSecureFile.sync(directory)
-    try CodexSecureFile.write(CodexAuthorityState.local, to: path(directory))
-  }
-
   public static func discardFailedLocalRefresh(baseDirectory: URL? = nil) throws {
     let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
     let lock = try CodexStoreLock(directory: directory)
@@ -224,15 +165,7 @@ public enum CodexAuthority {
     try CodexSecureFile.write(CodexAuthorityState.local, to: path(directory))
   }
 
-  public static func connect(_ authority: CodexServerAuthority, baseDirectory: URL? = nil) throws {
-    _ = try CodexServerTransport.origin(authority.origin, sshTunnel: authority.sshTunnel)
-    let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    guard try state(baseDirectory: directory) == .local,
-      try CodexCredentialStore.readRaw(baseDirectory: directory) == nil else { throw CodexAuthorityError.conflict }
-    try CodexSecureFile.write(CodexAuthorityState.serverOwned(authority), to: path(directory))
-  }
+
 }
 
 private func systemWrite(_ fd: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {
