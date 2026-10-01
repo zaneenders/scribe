@@ -5,6 +5,7 @@ import ScribeLLMResponses
 
 struct ResponsesStreamProcessor<AO: AbortObserver> {
   private let onEvent: (AgentEvent) -> Void
+  private let redactErrors: Bool
   private let logger: Logger
   private let abortObserver: AO
   private let clock = ContinuousClock()
@@ -23,8 +24,10 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
     onEvent: @escaping (AgentEvent) -> Void,
     logger: Logger,
     abortObserver: AO,
-    streamWallStart: ContinuousClock.Instant
+    streamWallStart: ContinuousClock.Instant,
+    redactErrors: Bool = false
   ) {
+    self.redactErrors = redactErrors
     self.onEvent = onEvent
     self.logger = logger
     self.abortObserver = abortObserver
@@ -59,7 +62,7 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let eventType = json["type"] as? String
         else {
-          logger.warning("agent.stream.unreadable-responses-chunk", metadata: ["raw_prefix": "\(raw.prefix(120))"])
+          logger.warning("agent.stream.unreadable-responses-chunk")
           continue
         }
 
@@ -94,7 +97,7 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
               lastUsage = parseResponsesUsage(usage)
             }
             if let incompleteDetails = response["incomplete_details"] as? [String: Any] {
-              incompleteReason = incompleteDetails["reason"] as? String
+              incompleteReason = redactErrors ? "Codex response incomplete" : incompleteDetails["reason"] as? String
             }
           }
           isIncomplete = true
@@ -194,6 +197,10 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
     } catch is AgentTurnInterruptedError {
       throw AgentTurnInterruptedError()
     } catch {
+      if redactErrors {
+        if let safe = error as? ScribeError, case .providerStreamError = safe { throw safe }
+        throw ScribeError.generic("Codex response stream unavailable.")
+      }
       logger.error("agent.stream.error.responses", metadata: ["err": "\(String(describing: error))"])
       throw error
     }
@@ -233,6 +240,14 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
       event["error_type"],
       response?["error_type"]
     )
+    if redactErrors {
+      let allowed: Set<String> = ["context_length_exceeded", "server_error", "internal_server_error",
+        "service_unavailable", "overloaded", "rate_limit_error", "rate_limit_exceeded", "timeout", "request_timeout"]
+      let safeCode = code.flatMap { allowed.contains($0) ? $0 : nil }
+      let safeType = errorType.flatMap { allowed.contains($0) ? $0 : nil }
+      let detail = safeCode == "context_length_exceeded" ? "context_length_exceeded" : "Codex response failed."
+      return .providerStreamError(detail: detail, code: safeCode, type: safeType)
+    }
     let responseID = firstNonEmptyString(response?["id"], event["response_id"])
     let sequenceNumber = (event["sequence_number"] as? Int).map(String.init)
 

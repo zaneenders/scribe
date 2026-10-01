@@ -1,4 +1,5 @@
 import Foundation
+import ScribeCodexAuth
 import ScribeLLM
 import ScribeLLMResponses
 
@@ -26,7 +27,7 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
 }
 
 enum AgentProviderFactory {
-  static func make(configuration: ScribeConfig) throws -> any AgentProvider {
+  static func make(configuration: ScribeConfig, codexCredentials: (any CodexAccessCredentialProvider)? = nil) throws -> any AgentProvider {
     guard let serverURL = URL(string: configuration.serverURL) else {
       throw ScribeError.configuration(
         key: "serverURL",
@@ -52,7 +53,7 @@ enum AgentProviderFactory {
         retryPolicy: retryPolicy)
     case "codex":
       return ResponsesProvider(
-        source: .credentials(serverURL: serverURL),
+        source: .configured(ResponsesClient.makeAuthenticated(serverURL: serverURL, credentials: codexCredentials)),
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEffort: configuration.reasoningEffort,

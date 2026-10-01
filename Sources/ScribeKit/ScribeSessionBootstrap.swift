@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import ScribeCore
+import ScribeCodexAuth
 import SystemPackage
 
 public struct BootstrappedSession: Sendable {
@@ -47,7 +48,8 @@ public enum ScribeSessionBootstrap {
     resumeDirectory: FilePath? = nil,
     profileOverride: String? = nil,
     workingDirectory: String = FilePath.currentDirectory.string,
-    version: String
+    version: String,
+    codexCredentials: (any CodexAccessCredentialProvider)? = nil
   ) async throws -> BootstrappedSession {
     let resolved = try ConfigLoader.resolvePaths()
     let context = ScribeRuntimeContext(
@@ -59,20 +61,23 @@ public enum ScribeSessionBootstrap {
       context: context,
       resumeLatest: resumeLatest,
       resumeDirectory: resumeDirectory,
-      profileOverride: profileOverride)
+      profileOverride: profileOverride,
+      codexCredentials: codexCredentials)
   }
 
   public static func open(
     context: ScribeRuntimeContext,
     resumeLatest: Bool = false,
     resumeDirectory: FilePath? = nil,
-    profileOverride: String? = nil
+    profileOverride: String? = nil,
+    codexCredentials: (any CodexAccessCredentialProvider)? = nil
   ) async throws -> BootstrappedSession {
     try await open(
       context: context,
       resumeLatest: resumeLatest,
       resumeDirectory: resumeDirectory,
       profileOverride: profileOverride,
+      codexCredentials: codexCredentials,
       agentFactory: { configuration, logger in
         try ScribeAgent(configuration: configuration, logger: logger)
       })
@@ -83,6 +88,7 @@ public enum ScribeSessionBootstrap {
     resumeLatest: Bool = false,
     resumeDirectory: FilePath? = nil,
     profileOverride: String? = nil,
+    codexCredentials: (any CodexAccessCredentialProvider)? = nil,
     agentFactory: @Sendable (ScribeConfig, Logger) throws -> ScribeAgent
   ) async throws -> BootstrappedSession {
     let workingDirectory = context.defaultWorkingDirectory
@@ -168,7 +174,8 @@ public enum ScribeSessionBootstrap {
       maxTokens: base.maxTokens,
       sendsOpenCodeHeader: base.sendsOpenCodeHeader,
       temperature: base.temperature,
-      maxRetries: base.maxRetries
+      maxRetries: base.maxRetries,
+      codexCredentials: codexCredentials
     )
 
     let isResuming = resumeLatest || resumeDirectory != nil

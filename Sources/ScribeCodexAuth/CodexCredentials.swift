@@ -1,7 +1,9 @@
 import Foundation
 import Synchronization
 
-public struct CodexCredential: Sendable, Codable, Equatable {
+public struct CodexCredential: Sendable, Codable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
+  public var description: String { "CodexCredential(<redacted>)" }
+  public var debugDescription: String { description }
   public let type: String
   public let access: String
   public let refresh: String

@@ -275,7 +275,7 @@ enum CodexOAuthCallbackServer {
   }
 }
 
-public enum CodexOAuthError: Error, CustomStringConvertible, LocalizedError {
+public enum CodexOAuthError: Error, CustomStringConvertible, CustomDebugStringConvertible, LocalizedError {
   case stateMismatch
   case missingAuthorizationCode
   case tokenExchangeFailed(status: Int, body: String)
@@ -289,6 +289,7 @@ public enum CodexOAuthError: Error, CustomStringConvertible, LocalizedError {
   case serverError(String)
 
   public var errorDescription: String? { description }
+  public var debugDescription: String { description }
 
   public var description: String {
     switch self {
@@ -296,8 +297,8 @@ public enum CodexOAuthError: Error, CustomStringConvertible, LocalizedError {
       return "OAuth state mismatch — possible CSRF attack."
     case .missingAuthorizationCode:
       return "No authorization code received in callback."
-    case .tokenExchangeFailed(let status, let body):
-      return "Token exchange failed (HTTP \(status)): \(body)"
+    case .tokenExchangeFailed(let status, _):
+      return "Token exchange failed (HTTP \(status))."
     case .missingToken(let field):
       return "Token response missing required field: \(field)"
     case .invalidJWT:
@@ -312,8 +313,8 @@ public enum CodexOAuthError: Error, CustomStringConvertible, LocalizedError {
       return "Login timed out. Please try again."
     case .loginCancelled:
       return "Login was cancelled."
-    case .serverError(let msg):
-      return "Callback server error: \(msg)"
+    case .serverError:
+      return "Callback server error."
     }
   }
 }

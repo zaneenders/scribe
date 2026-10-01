@@ -147,7 +147,8 @@ struct ResponsesProviderTests {
       Issue.record("Expected the stream error to be returned")
       return
     }
-    #expect(description.contains("Responses stream error (sequence_number: 2)"))
+    #expect(description.contains("Codex response failed."))
+    #expect(!description.contains("sequence_number"))
     #expect(result.newMessages.map(\.role) == [.user, .assistant, .tool, .assistant])
     #expect(result.newMessages.last?.content == "Partial answer")
   }

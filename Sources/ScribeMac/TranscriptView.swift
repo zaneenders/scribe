@@ -215,8 +215,10 @@ struct NavigableTranscriptItem<Content: Block>: PrimitiveBlock {
   }
 
   @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    context.focusable(in: rect, into: &drawList)
-    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
+    BlockEngine.draw(
+      Interactive(action: {}) { phase in
+        content.border(phase == .idle ? .clear : context.theme.focus.ring, width: 2)
+      }, into: &drawList, in: rect, context: context)
   }
 }
 

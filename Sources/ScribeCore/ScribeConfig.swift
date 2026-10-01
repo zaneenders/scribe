@@ -1,4 +1,7 @@
+import ScribeCodexAuth
+
 public struct ScribeConfig: Sendable {
+  public var codexCredentials: (any CodexAccessCredentialProvider)?
   public var agentModel: String
   public var contextWindow: Int
   public var contextWindowThreshold: Double
@@ -31,8 +34,10 @@ public struct ScribeConfig: Sendable {
     maxTokens: Int? = nil,
     sendsOpenCodeHeader: Bool = false,
     temperature: Double? = nil,
-    maxRetries: Int? = nil
+    maxRetries: Int? = nil,
+    codexCredentials: (any CodexAccessCredentialProvider)? = nil
   ) {
+    self.codexCredentials = codexCredentials
     self.agentModel = agentModel
     self.contextWindow = contextWindow
     self.contextWindowThreshold = contextWindowThreshold
@@ -74,7 +79,8 @@ public struct ScribeConfig: Sendable {
       maxTokens: maxTokens,
       sendsOpenCodeHeader: sendsOpenCodeHeader,
       temperature: temperature,
-      maxRetries: maxRetries
+      maxRetries: maxRetries,
+      codexCredentials: codexCredentials
     )
   }
 }

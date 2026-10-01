@@ -6,7 +6,7 @@ import ScribeCodexAuth
 struct CodexAuthMiddleware: ClientMiddleware {
   let token: String?
   let accountID: String?
-  let credentials: (@Sendable (String?) async throws -> CodexCredential)?
+  let credentials: (@Sendable (String?) async throws -> CodexAccessCredential)?
 
   init(token: String?, accountID: String?) {
     self.token = token
@@ -14,7 +14,7 @@ struct CodexAuthMiddleware: ClientMiddleware {
     self.credentials = nil
   }
 
-  init(credentials: @escaping @Sendable (String?) async throws -> CodexCredential) {
+  init(credentials: @escaping @Sendable (String?) async throws -> CodexAccessCredential) {
     self.token = nil
     self.accountID = nil
     self.credentials = credentials
@@ -27,6 +27,9 @@ struct CodexAuthMiddleware: ClientMiddleware {
     operationID: String,
     next: (HTTPRequest, HTTPBody?, URL) async throws -> (HTTPResponse, HTTPBody?)
   ) async throws -> (HTTPResponse, HTTPBody?) {
+    guard baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) == "https://chatgpt.com/backend-api",
+      request.path == "/responses", request.scheme == nil || request.scheme == "https",
+      request.authority == nil || request.authority == "chatgpt.com" else { throw URLError(.badURL) }
     guard let credentials else {
       return try await next(authenticated(request, token: token, accountID: accountID), body, baseURL)
     }
@@ -43,6 +46,7 @@ struct CodexAuthMiddleware: ClientMiddleware {
       _ = try? await HTTPBody.ByteChunk(collecting: errorBody, upTo: 4096)
     }
     let refreshed = try await credentials(credential.access)
+    guard refreshed.accountId == credential.accountId else { throw CodexOAuthError.loginRequired }
     let retried = try await next(
       authenticated(request, token: refreshed.access, accountID: refreshed.accountId), body, baseURL)
     guard retried.0.status.code != 401 else { throw CodexOAuthError.loginRequired }

@@ -38,8 +38,8 @@ public struct CodexUsage: Decodable, Sendable {
     return HTTPClient(eventLoopGroupProvider: .singleton, configuration: configuration)
   }()
 
-  public static func fetch() async throws -> CodexUsage {
-    var credential = try await CodexOAuth.getValidCredentials()
+  public static func fetch(provider: any CodexAccessCredentialProvider = CodexDefaultAccessProvider()) async throws -> CodexUsage {
+    var credential = try await provider.credential(rejectingAccessToken: nil)
     for attempt in 0..<2 {
       var request = HTTPClientRequest(url: "https://chatgpt.com/backend-api/wham/usage")
       request.headers.add(name: "Authorization", value: "Bearer \(credential.access)")
@@ -48,7 +48,7 @@ public struct CodexUsage: Decodable, Sendable {
       let body = try await response.body.collect(upTo: 1_048_576)
       if response.status == .unauthorized {
         guard attempt == 0 else { throw CodexOAuthError.loginRequired }
-        credential = try await CodexOAuth.getValidCredentials(rejectingAccessToken: credential.access)
+        credential = try await provider.credential(rejectingAccessToken: credential.access)
         continue
       }
       guard response.status == .ok else { throw UsageError.unavailable }

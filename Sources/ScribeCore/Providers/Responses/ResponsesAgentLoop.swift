@@ -189,8 +189,9 @@ private func runSingleResponsesRound(
   let response: ScribeLLMResponses.Operations.CreateResponse.Output
   do {
     response = try await config.client.createResponse(body: .json(requestBody))
-  } catch let error as ClientError where error.underlyingError is CodexOAuthError {
-    throw ScribeError.generic(String(describing: error.underlyingError))
+  } catch {
+    if config.usesCodexBackend { throw ScribeError.generic("Codex request unavailable. Check credential authority.") }
+    throw error
   }
 
   let httpBody: HTTPBody
@@ -205,6 +206,7 @@ private func runSingleResponsesRound(
       ])
     httpBody = try ok.body.textEventStream
   case .undocumented(statusCode: let code, let payload):
+    if config.usesCodexBackend { throw ScribeError.responsesHTTPError(statusCode: code, detail: "Codex request rejected.") }
     var detail = ""
     if let body = payload.body {
       do {
@@ -223,7 +225,8 @@ private func runSingleResponsesRound(
     onEvent: emit,
     logger: logger,
     abortObserver: abortObserver,
-    streamWallStart: clock.now
+    streamWallStart: clock.now,
+    redactErrors: config.usesCodexBackend
   )
   do {
     try await processor.process(httpBody: httpBody, httpStart: httpStart, turn: &turn)

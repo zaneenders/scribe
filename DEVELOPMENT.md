@@ -153,3 +153,61 @@ release-mode profiling works out of the box.
 ```bash
 swift build -c release --product scribe-mac && PROFILE_RECORDER_SERVER_URL_PATTERN='unix:///tmp/scribe-{PID}.sock' .build/release/scribe-mac
 ```
+
+## Embedding
+
+Use `LocalScribeSessionService` as the host application's entry point. It implements
+`ScribeSessionService` for listing, creating, opening, submitting, interrupting,
+reconfiguring, forking, and summarizing sessions. Consume `ScribeSessionEvent` to
+update your own UI; do not duplicate agent execution or session persistence.
+
+Add the `ScribeKit` product to your SwiftPM target, plus `ScribeCodexAuth` when
+supplying Codex credentials. This example also imports `SystemPackage` for paths:
+
+```swift
+import ScribeKit
+import ScribeCodexAuth
+import SystemPackage
+
+func makeSessionService(
+  credentials: any CodexAccessCredentialProvider
+) -> any ScribeSessionService {
+  let context = ScribeRuntimeContext(
+    paths: ScribePaths(dataHome: FilePath("/path/to/shapetree/scribe")),
+    defaultWorkingDirectory: "/path/to/project",
+    version: "ShapeTree")
+  return LocalScribeSessionService(context: context, codexCredentials: credentials)
+}
+
+func submitExample(service: any ScribeSessionService) async throws {
+  let session = try await service.createSession(
+    .init(workingDirectory: "/path/to/project", profileName: "codex"))
+  let events = try await service.submit(
+    .init(sessionID: session.summary.id, prompt: "Explain this project"))
+  for try await event in events {
+    print(event)
+  }
+}
+```
+
+The `codex` profile must exist in the context's configuration file (by default,
+`scribe.config.json` in `dataHome`). Use `ConfigLoader.upsertCodexProfile(at:)`
+to add it. Other providers do not need a Codex credential provider.
+
+### Codex provider boundary
+
+ShapeTree implements `CodexAccessCredentialProvider` using its own broker client:
+
+- `credential(rejectingAccessToken: nil)` returns a valid access credential.
+- A non-nil rejected token requests a replacement after HTTP 401. Scribe retries
+  once and checks account consistency; the provider must replace the token or throw.
+- Return `CodexAccessCredential(access:accountId:expires:)`; `expires` is Unix
+  epoch milliseconds. Never pass refresh tokens to the session service.
+- Keep broker leases, connection state, origin/SSH validation, enrollment, and
+  transfer orchestration in ShapeTree. Broker failures must not trigger local
+  OAuth fallback.
+
+`ScribeSessionBootstrap`, `ScribeConfig`, and the custom `agentFactory` initializer
+remain lower-level escape hatches, not required integration steps. For direct
+agent/message APIs, add `ScribeCore` explicitly. `ScribeBlocks` is internal to the
+standalone application; embedders own their rendering.
