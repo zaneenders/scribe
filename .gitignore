@@ -8,3 +8,6 @@ scribe-edit
 *.perf
 *.profraw
 /dist
+
+**/.build/
+**/dist/

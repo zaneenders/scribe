@@ -2,7 +2,7 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-app="$repo_root/dist/Scribe.app"
+app="$repo_root/apps/scribe-desktop/dist/Scribe.app"
 destination="${SCRIBE_INSTALL_PATH:-/Applications/Scribe.app}"
 identity="${SCRIBE_CODESIGN_IDENTITY:-}"
 
@@ -24,7 +24,7 @@ EOF
   exit 1
 fi
 
-cd "$repo_root"
+cd "$repo_root/apps/scribe-desktop"
 printf '[install] Building macOS products (release)...\n'
 swift build -c release
 printf '[install] Assembling Scribe.app...\n'
