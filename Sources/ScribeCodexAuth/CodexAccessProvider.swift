@@ -3,23 +3,25 @@ import Foundation
 public struct CodexAccessCredential: Codable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
   public let access: String
   public let accountId: String
+  /// Access-token expiration in milliseconds since the Unix epoch.
   public let expires: Int64
-  public let lease: String
   public var description: String { "CodexAccessCredential(<redacted>)" }
   public var debugDescription: String { description }
 
-  public init(access: String, accountId: String, expires: Int64, lease: String) {
+  public init(access: String, accountId: String, expires: Int64) {
     self.access = access
     self.accountId = accountId
     self.expires = expires
-    self.lease = lease
   }
   public init(_ credential: CodexCredential) {
-    self.init(access: credential.access, accountId: credential.accountId, expires: credential.expires, lease: "local")
+    self.init(access: credential.access, accountId: credential.accountId, expires: credential.expires)
   }
 }
 
+/// Supplies access-only credentials; storage, refresh, and broker networking belong to the provider.
 public protocol CodexAccessCredentialProvider: Sendable {
+  /// Return a valid credential. When a token is rejected (HTTP 401), replace it or throw.
+  /// Do not fall back to a different account or local OAuth after broker failure.
   func credential(rejectingAccessToken: String?) async throws -> CodexAccessCredential
 }
 

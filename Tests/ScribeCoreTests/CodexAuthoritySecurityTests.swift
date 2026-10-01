@@ -11,6 +11,14 @@ import Glibc
 #endif
 
 struct CodexAuthoritySecurityTests {
+  @Test func accessCredentialContainsOnlyAccessFields() throws {
+    let credential = CodexAccessCredential(access: "access", accountId: "account", expires: 123)
+    let data = try JSONEncoder().encode(credential)
+    let fields = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(Set(fields.keys) == ["access", "accountId", "expires"])
+    #expect(try JSONDecoder().decode(CodexAccessCredential.self, from: data) == credential)
+  }
+
   @Test func providerRejectsArbitraryBackendBeforeLoadingCredentials() async throws {
     let middleware = CodexAuthMiddleware { _ in
       Issue.record("Must not load secret for arbitrary origin")

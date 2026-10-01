@@ -176,7 +176,7 @@ private actor CredentialSource {
   func load(rejecting: String?) throws -> CodexAccessCredential {
     rejections.append(rejecting)
     if rejecting != nil { access = "refreshed" }
-    return CodexAccessCredential(access: access, accountId: "account", expires: 9_999_999_999_999, lease: access)
+    return CodexAccessCredential(access: access, accountId: "account", expires: 9_999_999_999_999)
   }
 }
 
