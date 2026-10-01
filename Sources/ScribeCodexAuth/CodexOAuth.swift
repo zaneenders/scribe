@@ -50,7 +50,7 @@ public enum CodexOAuth {
     timeout: TimeInterval = CodexOAuthCallbackServer.loginTimeout,
     baseDirectory: URL? = nil
   ) async throws -> CodexCredential {
-    try CodexAuthority.requireLocal(baseDirectory ?? CodexCredentialStore.resolveBaseDirectory())
+    try CodexCredentialFence.requireLocal(baseDirectory ?? CodexCredentialStore.resolveBaseDirectory())
     let pkce = PKCE.generate()
     let state = generateState()
 

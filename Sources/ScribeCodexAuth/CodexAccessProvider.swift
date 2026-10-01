@@ -30,14 +30,11 @@ public struct CodexDefaultAccessProvider: CodexAccessCredentialProvider {
   public init(baseDirectory: URL? = nil) { self.baseDirectory = baseDirectory }
 
   public func credential(rejectingAccessToken: String? = nil) async throws -> CodexAccessCredential {
-    switch try CodexAuthority.state(baseDirectory: baseDirectory) {
+    switch try CodexCredentialFence.state(baseDirectory: baseDirectory) {
     case .local:
       return CodexAccessCredential(try await CodexOAuth.getValidCredentials(
         baseDirectory: baseDirectory, rejectingAccessToken: rejectingAccessToken))
-    case .serverOwned:
-      try CodexAuthority.finishCommittedCleanup(baseDirectory: baseDirectory)
-      throw CodexAuthorityError.frozen
-    case .handoffPending: throw CodexAuthorityError.frozen
+    case .frozen: throw CodexAuthorityError.frozen
     case .recoveryRequired: throw CodexAuthorityError.recoveryRequired
     }
   }

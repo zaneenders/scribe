@@ -14,18 +14,18 @@ actor CodexCredentialManager {
     let directory = baseDirectory.standardizedFileURL
     let lock = try await CodexStoreLock.acquire(directory: directory)
     defer { withExtendedLifetime(lock) {} }
-    try CodexAuthority.requireLocal(directory)
+    try CodexCredentialFence.requireLocal(directory)
     guard let credential = try CodexCredentialStore.readRaw(baseDirectory: directory) else {
       throw CodexOAuthError.noCredentials
     }
     guard credential.isExpired || credential.access == rejectingAccessToken else { return credential }
     // A crash or ambiguous network failure must not replay a rotating refresh token.
-    try CodexSecureFile.write(CodexAuthorityState.recoveryRequired, to: CodexAuthority.path(directory))
+    try CodexSecureFile.write(CodexCredentialFence.recoveryRequired, to: CodexCredentialFence.path(directory))
     do {
       let updated = try await refresh(credential, directory)
       guard updated.accountId == credential.accountId else { throw CodexAuthorityError.conflict }
       try CodexCredentialStore.writeUnlocked(updated, baseDirectory: directory)
-      try CodexSecureFile.write(CodexAuthorityState.local, to: CodexAuthority.path(directory))
+      try CodexSecureFile.write(CodexCredentialFence.local, to: CodexCredentialFence.path(directory))
       return updated
     } catch {
       throw CodexAuthorityError.recoveryRequired

@@ -35,7 +35,7 @@ struct CodexCredentialManagerTests {
     try CodexCredentialStore.write(credential("old", expired: true), baseDirectory: directory)
     let manager = CodexCredentialManager { _, _ in throw CodexAuthorityError.unavailable }
     await #expect(throws: CodexAuthorityError.self) { _ = try await manager.credentials(baseDirectory: directory) }
-    #expect(try CodexAuthority.state(baseDirectory: directory) == .recoveryRequired)
+    #expect(try CodexCredentialFence.state(baseDirectory: directory) == .recoveryRequired)
     let restarted = CodexCredentialManager { _, _ in Issue.record("Must not replay refresh"); return credential("bad") }
     await #expect(throws: CodexAuthorityError.self) { _ = try await restarted.credentials(baseDirectory: directory) }
   }

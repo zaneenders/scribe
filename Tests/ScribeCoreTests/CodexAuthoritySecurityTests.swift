@@ -54,5 +54,17 @@ struct CodexAuthoritySecurityTests {
     #expect(child.terminationStatus == 1)
   }
 
-
+  @Test func localProviderRejectsExternalAuthorityWithoutDecodingBrokerMetadata() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    for state in ["handoffPending", "serverOwned", "futureAuthority"] {
+      try Data("{\"\(state)\":{\"unknownBrokerMetadata\":true}}".utf8)
+        .write(to: CodexCredentialFence.path(directory))
+      #expect(try CodexCredentialFence.state(baseDirectory: directory) == .frozen)
+      await #expect(throws: CodexAuthorityError.frozen) {
+        _ = try await CodexDefaultAccessProvider(baseDirectory: directory).credential()
+      }
+    }
+  }
 }

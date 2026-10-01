@@ -88,84 +88,31 @@ public enum CodexSecureFile {
   }
 }
 
-public struct CodexServerAuthority: Codable, Equatable, Sendable {
-  public let origin: String
-  public let sshTunnel: Bool
-  public let connectionID: UUID
-  public let accountID: String
-  public let generation: Int
-
-  public init(origin: String, sshTunnel: Bool, connectionID: UUID, accountID: String, generation: Int) {
-    self.origin = origin
-    self.sshTunnel = sshTunnel
-    self.connectionID = connectionID
-    self.accountID = accountID
-    self.generation = generation
-  }
-}
-
-public struct CodexPendingHandoff: Codable, Equatable, Sendable {
-  public let id: UUID
-  public let origin: String
-  public let sshTunnel: Bool
-  public let accountID: String
-  public let expectedGeneration: Int
-  public init(id: UUID, origin: String, sshTunnel: Bool, accountID: String, expectedGeneration: Int) {
-    self.id = id; self.origin = origin; self.sshTunnel = sshTunnel
-    self.accountID = accountID; self.expectedGeneration = expectedGeneration
-  }
-}
-
-public enum CodexAuthorityState: Codable, Equatable, Sendable {
+public enum CodexCredentialFence: Codable, Sendable {
   case local
-  case handoffPending(CodexPendingHandoff)
-  case serverOwned(CodexServerAuthority)
+  case frozen
   case recoveryRequired
-}
 
-public enum CodexAuthority {
-  public static var hasLogin: Bool {
-    guard let state = try? state() else { return false }
-    switch state {
-    case .serverOwned: return true
-    case .local: return (try? CodexCredentialStore.read()) != nil
-    default: return false
-    }
-  }
+  public static var hasLogin: Bool { (try? CodexCredentialStore.read()) != nil }
 
   public static func path(_ directory: URL) -> URL { directory.appendingPathComponent("codex-authority.json") }
 
-  public static func state(baseDirectory: URL? = nil) throws -> CodexAuthorityState {
+  public static func state(baseDirectory: URL? = nil) throws -> Self {
     let path = path(baseDirectory ?? CodexCredentialStore.resolveBaseDirectory())
     guard FileManager.default.fileExists(atPath: path.path) else { return .local }
-    do { return try JSONDecoder().decode(CodexAuthorityState.self, from: Data(contentsOf: path)) }
-    catch { throw CodexAuthorityError.unavailable }
+    let keys = try JSONDecoder().decode([String: IgnoredValue].self, from: Data(contentsOf: path)).keys
+    if keys.count == 1, keys.contains("local") { return .local }
+    if keys.count == 1, keys.contains("recoveryRequired") { return .recoveryRequired }
+    return .frozen
   }
 
   public static func requireLocal(_ directory: URL) throws {
     guard try state(baseDirectory: directory) == .local else { throw CodexAuthorityError.frozen }
   }
+}
 
-  public static func finishCommittedCleanup(baseDirectory: URL? = nil) throws {
-    let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    guard case .serverOwned = try state(baseDirectory: directory) else { return }
-    try CodexCredentialStore.deleteRaw(baseDirectory: directory)
-    try CodexSecureFile.sync(directory)
-  }
-
-  public static func discardFailedLocalRefresh(baseDirectory: URL? = nil) throws {
-    let directory = baseDirectory ?? CodexCredentialStore.resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    guard try state(baseDirectory: directory) == .recoveryRequired else { throw CodexAuthorityError.conflict }
-    try CodexCredentialStore.deleteRaw(baseDirectory: directory)
-    try CodexSecureFile.sync(directory)
-    try CodexSecureFile.write(CodexAuthorityState.local, to: path(directory))
-  }
-
-
+private struct IgnoredValue: Decodable {
+  init(from decoder: any Decoder) {}
 }
 
 private func systemWrite(_ fd: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {

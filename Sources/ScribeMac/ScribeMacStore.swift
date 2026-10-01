@@ -143,14 +143,14 @@ final class ScribeMacStore {
     }
   ) {
     self.readsLiveCodexState = codexIsSignedIn == nil
-    self.isSignedInToCodex = codexIsSignedIn ?? CodexAuthority.hasLogin
+    self.isSignedInToCodex = codexIsSignedIn ?? CodexCredentialFence.hasLogin
     self.loadCodexUsage = loadCodexUsage
     self.startProfiling = startProfiling
     self.codexSignIn = codexSignIn
   }
 
   func toggleStatsMenu() {
-    if readsLiveCodexState { isSignedInToCodex = CodexAuthority.hasLogin }
+    if readsLiveCodexState { isSignedInToCodex = CodexCredentialFence.hasLogin }
     showStatsMenu.toggle()
     if showStatsMenu && isSignedInToCodex { refreshCodexUsage() }
   }

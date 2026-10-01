@@ -52,7 +52,7 @@ public enum CodexCredentialStore {
     let directory = baseDirectory ?? resolveBaseDirectory()
     let lock = try CodexStoreLock(directory: directory)
     defer { withExtendedLifetime(lock) {} }
-    try CodexAuthority.requireLocal(directory)
+    try CodexCredentialFence.requireLocal(directory)
     return try readRaw(baseDirectory: directory)
   }
 
@@ -72,7 +72,7 @@ public enum CodexCredentialStore {
     let directory = baseDirectory ?? resolveBaseDirectory()
     let lock = try CodexStoreLock(directory: directory)
     defer { withExtendedLifetime(lock) {} }
-    try CodexAuthority.requireLocal(directory)
+    try CodexCredentialFence.requireLocal(directory)
     try writeUnlocked(credential, baseDirectory: directory)
   }
 
@@ -84,7 +84,7 @@ public enum CodexCredentialStore {
     let directory = baseDirectory ?? resolveBaseDirectory()
     let lock = try CodexStoreLock(directory: directory)
     defer { withExtendedLifetime(lock) {} }
-    try CodexAuthority.requireLocal(directory)
+    try CodexCredentialFence.requireLocal(directory)
     guard let current = try readRaw(baseDirectory: directory) else { throw CodexOAuthError.noCredentials }
     guard current == original else { return current }
     try writeUnlocked(refreshed, baseDirectory: directory)
@@ -99,7 +99,7 @@ public enum CodexCredentialStore {
     let directory = baseDirectory ?? resolveBaseDirectory()
     let lock = try CodexStoreLock(directory: directory)
     defer { withExtendedLifetime(lock) {} }
-    try CodexAuthority.requireLocal(directory)
+    try CodexCredentialFence.requireLocal(directory)
     try deleteRaw(baseDirectory: directory)
     try CodexSecureFile.sync(directory)
   }
