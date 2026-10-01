@@ -21,7 +21,7 @@ let data = readiness.fileHandleForReading.readDataToEndOfFile()
 child.waitUntilExit()
 precondition(String(data: data, encoding: .utf8) == "12345\n")
 SWIFT
-swiftc "$root/Sources/ScribeMacApp/AppConsoleLog.swift" "$tmp/main.swift" -o "$tmp/check"
+swiftc "$root/scribe-desktop/Sources/ScribeMacApp/AppConsoleLog.swift" "$tmp/main.swift" -o "$tmp/check"
 SCRIBE_HOME="$tmp/home" "$tmp/check"
 SCRIBE_HOME="$tmp/home" "$tmp/check"
 log="$tmp/home/logs/remote-$(date +%y-%m-%d).log"

@@ -106,10 +106,13 @@ Built-in tools: `shell`, `read_file`, `write_file`, and `edit_file`.
 ```sh
 swift build
 swift test
-swift run scribe-mac
+swift test --package-path scribe-desktop
+swift run --package-path scribe-desktop scribe-mac
 ```
 
-On Linux, use `swift run scribe-wayland` instead.
+The root package contains only runtime libraries; `scribe-desktop` owns Chroma and the desktop app.
+
+On Linux, use `swift run --package-path scribe-desktop scribe-wayland` instead.
 See [DEVELOPMENT.md](DEVELOPMENT.md) for testing, profiling, logging, and embedding.
 
 ## Codex credential ownership

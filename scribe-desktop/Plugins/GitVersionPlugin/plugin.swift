@@ -5,7 +5,7 @@ import PackagePlugin
   func createBuildCommands(context: PluginContext, target: Target) throws -> [Command] {
     let outputFile = context.pluginWorkDirectoryURL.appendingPathComponent("GitVersion.swift")
 
-    let gitDir = context.package.directoryURL.appendingPathComponent(".git")
+    let gitDir = context.package.directoryURL.appendingPathComponent("../.git")
     var inputFiles: [URL] = []
 
     if FileManager.default.fileExists(atPath: gitDir.path) {
