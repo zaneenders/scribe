@@ -6,6 +6,40 @@ import Testing
 
 @Suite("Mac transcript selection")
 struct MacSelectionTests {
+  @MainActor
+  @Test("pressing a large message does not scroll it beneath the selection drag")
+  func pressingLargeMessagePreservesScrollOffset() {
+    let interaction = Interaction()
+    let context = BlockContext(interaction: interaction)
+    let controller = ScrollViewController()
+    let viewport = Rect(x: 0, y: 0, width: 400, height: 200)
+    let item = SessionController.TranscriptItem(
+      kind: .answer, title: "Scribe", text: String(repeating: "message line\n\n", count: 100))
+    let block = ScrollView(
+      "Transcript", controller: controller,
+      rows: [ScrollView.Row(id: "message", content: TranscriptItemBlock(item: item, theme: MacTheme()))])
+    defer {
+      MarkdownLayoutRegistry.clear()
+      TranscriptViewportRegistry.current = nil
+    }
+    func draw(_ input: InputState = InputState()) {
+      interaction.beginFrame(input: input)
+      TranscriptViewportRegistry.current = viewport
+      var list = DrawList()
+      BlockEngine.draw(block, into: &list, in: viewport, context: context)
+      interaction.endFrame()
+    }
+    draw()
+    controller.scroll(to: 500)
+    draw()
+    let offset = controller.offset
+    let point = Point(x: 100, y: 100)
+    draw(InputState(
+      pointerPosition: point, pointerPressPosition: point,
+      pointerDown: true, pointerPressed: true))
+    #expect(controller.offset == offset)
+  }
+
   @Test("only an active drag or its release frame updates selection")
   func selectionDragStateTruthTable() {
     #expect(
