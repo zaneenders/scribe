@@ -4,13 +4,7 @@ import OpenAPIRuntime
 import Testing
 @testable import ScribeCodexAuth
 @testable import ScribeLLMResponses
-#if canImport(Darwin)
-import Darwin
-#else
-import Glibc
-#endif
-
-struct CodexAuthoritySecurityTests {
+struct CodexAccessProviderTests {
   @Test func accessCredentialContainsOnlyAccessFields() throws {
     let credential = CodexAccessCredential(access: "access", accountId: "account", expires: 123)
     let data = try JSONEncoder().encode(credential)
@@ -22,9 +16,9 @@ struct CodexAuthoritySecurityTests {
   @Test func providerRejectsArbitraryBackendBeforeLoadingCredentials() async throws {
     let middleware = CodexAuthMiddleware { _ in
       Issue.record("Must not load secret for arbitrary origin")
-      throw CodexAuthorityError.unavailable
+      throw CodexOAuthError.noCredentials
     }
-    await #expect(throws: CodexAuthorityError.self) {
+    await #expect(throws: URLError.self) {
       _ = try await middleware.intercept(HTTPRequest(method: .post, scheme: nil, authority: nil, path: "/responses"), body: nil,
         baseURL: URL(string: "https://evil.example")!, operationID: "test") { _, _, _ in
           Issue.record("Must not send request"); return (HTTPResponse(status: .ok), nil)
@@ -41,30 +35,4 @@ struct CodexAuthoritySecurityTests {
     }
   }
 
-  @Test func storeLockCoordinatesASeparateProcess() throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    // exec avoids inheriting Swift runtime state into the child.
-    let child = Process()
-    child.executableURL = URL(fileURLWithPath: "/usr/bin/flock")
-    child.arguments = ["-n", directory.appendingPathComponent("codex-authority.lock").path, "true"]
-    try child.run(); child.waitUntilExit()
-    #expect(child.terminationStatus == 1)
-  }
-
-  @Test func localProviderRejectsExternalAuthorityWithoutDecodingBrokerMetadata() async throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    for state in ["handoffPending", "serverOwned", "futureAuthority"] {
-      try Data("{\"\(state)\":{\"unknownBrokerMetadata\":true}}".utf8)
-        .write(to: CodexCredentialFence.path(directory))
-      #expect(try CodexCredentialFence.state(baseDirectory: directory) == .frozen)
-      await #expect(throws: CodexAuthorityError.frozen) {
-        _ = try await CodexDefaultAccessProvider(baseDirectory: directory).credential()
-      }
-    }
-  }
 }

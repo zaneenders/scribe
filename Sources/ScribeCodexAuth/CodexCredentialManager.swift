@@ -1,34 +1,48 @@
 import Foundation
 
+/// Shares refreshes across sessions because OAuth refresh tokens can rotate after use.
 actor CodexCredentialManager {
   static let shared = CodexCredentialManager()
+
+  private var refreshes: [URL: Task<CodexCredential, Error>] = [:]
   private let refresh: @Sendable (CodexCredential, URL) async throws -> CodexCredential
 
-  init(refresh: @escaping @Sendable (CodexCredential, URL) async throws -> CodexCredential = { credential, _ in
-    try await CodexOAuth.rotateOwnedCredential(credential)
-  }) {
+  init(
+    refresh: @escaping @Sendable (CodexCredential, URL) async throws -> CodexCredential = {
+      try await CodexOAuth.refresh($0, baseDirectory: $1)
+    }
+  ) {
     self.refresh = refresh
   }
 
-  func credentials(baseDirectory: URL, rejectingAccessToken: String? = nil) async throws -> CodexCredential {
+  func credentials(
+    baseDirectory: URL,
+    rejectingAccessToken: String? = nil
+  ) async throws -> CodexCredential {
     let directory = baseDirectory.standardizedFileURL
-    let lock = try await CodexStoreLock.acquire(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    try CodexCredentialFence.requireLocal(directory)
-    guard let credential = try CodexCredentialStore.readRaw(baseDirectory: directory) else {
+    if let pending = refreshes[directory] {
+      return try await pending.value
+    }
+    guard let credential = try CodexCredentialStore.read(baseDirectory: directory) else {
       throw CodexOAuthError.noCredentials
     }
-    guard credential.isExpired || credential.access == rejectingAccessToken else { return credential }
-    // A crash or ambiguous network failure must not replay a rotating refresh token.
-    try CodexSecureFile.write(CodexCredentialFence.recoveryRequired, to: CodexCredentialFence.path(directory))
-    do {
-      let updated = try await refresh(credential, directory)
-      guard updated.accountId == credential.accountId else { throw CodexAuthorityError.conflict }
-      try CodexCredentialStore.writeUnlocked(updated, baseDirectory: directory)
-      try CodexSecureFile.write(CodexCredentialFence.local, to: CodexCredentialFence.path(directory))
-      return updated
-    } catch {
-      throw CodexAuthorityError.recoveryRequired
+    // Another session or a browser login may already have replaced the rejected token.
+    guard credential.isExpired || credential.access == rejectingAccessToken else {
+      return credential
     }
+
+    let task = Task { [refresh] in
+      do {
+        return try await refresh(credential, directory)
+      } catch let CodexOAuthError.tokenExchangeFailed(status, body) {
+        if status == 401 || status == 403 || (status == 400 && body.contains("invalid_grant")) {
+          throw CodexOAuthError.loginRequired
+        }
+        throw CodexOAuthError.tokenExchangeFailed(status: status, body: body)
+      }
+    }
+    refreshes[directory] = task
+    defer { refreshes[directory] = nil }
+    return try await task.value
   }
 }

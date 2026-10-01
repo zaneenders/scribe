@@ -30,24 +30,7 @@ public struct CodexDefaultAccessProvider: CodexAccessCredentialProvider {
   public init(baseDirectory: URL? = nil) { self.baseDirectory = baseDirectory }
 
   public func credential(rejectingAccessToken: String? = nil) async throws -> CodexAccessCredential {
-    switch try CodexCredentialFence.state(baseDirectory: baseDirectory) {
-    case .local:
-      return CodexAccessCredential(try await CodexOAuth.getValidCredentials(
-        baseDirectory: baseDirectory, rejectingAccessToken: rejectingAccessToken))
-    case .frozen: throw CodexAuthorityError.frozen
-    case .recoveryRequired: throw CodexAuthorityError.recoveryRequired
-    }
-  }
-}
-
-public actor CodexAccountBoundProvider: CodexAccessCredentialProvider {
-  private let provider: any CodexAccessCredentialProvider
-  private var accountID: String?
-  public init(_ provider: any CodexAccessCredentialProvider) { self.provider = provider }
-  public func credential(rejectingAccessToken: String?) async throws -> CodexAccessCredential {
-    let value = try await provider.credential(rejectingAccessToken: rejectingAccessToken)
-    guard accountID == nil || accountID == value.accountId else { throw CodexAuthorityError.conflict }
-    accountID = value.accountId
-    return value
+    CodexAccessCredential(try await CodexOAuth.getValidCredentials(
+      baseDirectory: baseDirectory, rejectingAccessToken: rejectingAccessToken))
   }
 }

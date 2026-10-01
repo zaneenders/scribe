@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 public struct CodexCredential: Sendable, Codable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
   public var description: String { "CodexCredential(<redacted>)" }
@@ -24,6 +25,7 @@ public struct CodexCredential: Sendable, Codable, Equatable, CustomStringConvert
 }
 
 public enum CodexCredentialStore {
+  private static let persistenceLock = Mutex(())
   private static let credentialsFileName = "codex-credentials.json"
 
   public static func resolveBaseDirectory() -> URL {
@@ -49,31 +51,19 @@ public enum CodexCredentialStore {
   }
 
   public static func read(baseDirectory: URL? = nil) throws -> CodexCredential? {
-    let directory = baseDirectory ?? resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    try CodexCredentialFence.requireLocal(directory)
-    return try readRaw(baseDirectory: directory)
-  }
-
-  public static func readRaw(baseDirectory: URL) throws -> CodexCredential? {
     let path = credentialsPath(baseDirectory: baseDirectory)
     guard FileManager.default.fileExists(atPath: path.path) else { return nil }
 
     tightenFilePermissions(at: path)
 
-    do {
-      let data = try Data(contentsOf: path)
-      return try JSONDecoder().decode(CodexCredential.self, from: data)
-    } catch { throw CodexAuthorityError.unavailable }
+    let data = try Data(contentsOf: path)
+    return try JSONDecoder().decode(CodexCredential.self, from: data)
   }
 
   public static func write(_ credential: CodexCredential, baseDirectory: URL? = nil) throws {
-    let directory = baseDirectory ?? resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    try CodexCredentialFence.requireLocal(directory)
-    try writeUnlocked(credential, baseDirectory: directory)
+    try persistenceLock.withLock { _ in
+      try writeUnlocked(credential, baseDirectory: baseDirectory)
+    }
   }
 
   static func replace(
@@ -81,32 +71,32 @@ public enum CodexCredentialStore {
     with refreshed: CodexCredential,
     baseDirectory: URL? = nil
   ) throws -> CodexCredential {
-    let directory = baseDirectory ?? resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    try CodexCredentialFence.requireLocal(directory)
-    guard let current = try readRaw(baseDirectory: directory) else { throw CodexOAuthError.noCredentials }
-    guard current == original else { return current }
-    try writeUnlocked(refreshed, baseDirectory: directory)
-    return refreshed
+    try persistenceLock.withLock { _ in
+      guard let current = try read(baseDirectory: baseDirectory) else {
+        throw CodexOAuthError.noCredentials
+      }
+      guard current == original else { return current }
+      try writeUnlocked(refreshed, baseDirectory: baseDirectory)
+      return refreshed
+    }
   }
 
-  static func writeUnlocked(_ credential: CodexCredential, baseDirectory: URL) throws {
-    try CodexSecureFile.write(credential, to: credentialsPath(baseDirectory: baseDirectory))
+  private static func writeUnlocked(_ credential: CodexCredential, baseDirectory: URL?) throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let data = try encoder.encode(credential)
+    let path = credentialsPath(baseDirectory: baseDirectory)
+    try data.write(to: path, options: .atomic)
+    try setSecureFilePermissions(at: path)
   }
 
   public static func delete(baseDirectory: URL? = nil) throws {
-    let directory = baseDirectory ?? resolveBaseDirectory()
-    let lock = try CodexStoreLock(directory: directory)
-    defer { withExtendedLifetime(lock) {} }
-    try CodexCredentialFence.requireLocal(directory)
-    try deleteRaw(baseDirectory: directory)
-    try CodexSecureFile.sync(directory)
-  }
-
-  public static func deleteRaw(baseDirectory: URL) throws {
-    let path = credentialsPath(baseDirectory: baseDirectory)
-    if FileManager.default.fileExists(atPath: path.path) { try FileManager.default.removeItem(at: path) }
+    try persistenceLock.withLock { _ in
+      let path = credentialsPath(baseDirectory: baseDirectory)
+      if FileManager.default.fileExists(atPath: path.path) {
+        try FileManager.default.removeItem(at: path)
+      }
+    }
   }
 
   static func ensureSecureDirectory(at url: URL) {

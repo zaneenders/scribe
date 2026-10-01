@@ -67,6 +67,6 @@ private actor DeniedProvider: CodexAccessCredentialProvider {
   private(set) var calls = 0
   func credential(rejectingAccessToken: String?) async throws -> CodexAccessCredential {
     calls += 1
-    throw CodexAuthorityError.denied
+    throw CodexOAuthError.noCredentials
   }
 }

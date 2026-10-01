@@ -118,5 +118,3 @@ Standalone Scribe handles local Codex OAuth and refresh. Server broker networkin
 transfer orchestration, device enrollment, and connection UI belong to ShapeTree.
 Embedders use `LocalScribeSessionService` with a `CodexAccessCredentialProvider`.
 See the [embedding recipe](DEVELOPMENT.md#embedding) for the recommended boundary.
-The persisted ownership fence is retained: pending/server-owned credentials never
-fall back to local refresh. Use ShapeTree to resolve a transferred login.

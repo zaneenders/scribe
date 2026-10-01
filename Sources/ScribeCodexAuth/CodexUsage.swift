@@ -39,7 +39,6 @@ public struct CodexUsage: Decodable, Sendable {
   }()
 
   public static func fetch(provider: any CodexAccessCredentialProvider = CodexDefaultAccessProvider()) async throws -> CodexUsage {
-    let provider = CodexAccountBoundProvider(provider)
     var credential = try await provider.credential(rejectingAccessToken: nil)
     for attempt in 0..<2 {
       var request = HTTPClientRequest(url: "https://chatgpt.com/backend-api/wham/usage")
@@ -56,23 +55,6 @@ public struct CodexUsage: Decodable, Sendable {
       return try JSONDecoder().decode(CodexUsage.self, from: Data(body.readableBytesView))
     }
     throw UsageError.unavailable
-  }
-
-  public static func validate(_ credential: CodexCredential) async throws {
-    guard try CodexOAuth.extractAccountID(from: credential.access) == credential.accountId else {
-      throw CodexAuthorityError.conflict
-    }
-    guard credential.expires <= (try CodexOAuth.accessExpiry(credential.access)) + 60_000 else {
-      throw CodexAuthorityError.conflict
-    }
-    var request = HTTPClientRequest(url: "https://chatgpt.com/backend-api/wham/usage")
-    request.headers.add(name: "Authorization", value: "Bearer \(credential.access)")
-    request.headers.add(name: "ChatGPT-Account-Id", value: credential.accountId)
-    do {
-      let response = try await client.execute(request, timeout: .seconds(20))
-      guard response.status == .ok else { throw CodexAuthorityError.unavailable }
-      _ = try await response.body.collect(upTo: 1_048_576)
-    } catch { throw CodexAuthorityError.unavailable }
   }
 
   private enum UsageError: Error { case unavailable }

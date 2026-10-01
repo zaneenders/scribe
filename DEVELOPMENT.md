@@ -208,16 +208,7 @@ ShapeTree implements `CodexAccessCredentialProvider` using its own broker client
   transfer orchestration in ShapeTree. Broker failures must not trigger local
   OAuth fallback.
 
-Scribe retains only `CodexCredentialFence`: local refresh is denied for any
-external authority state, without decoding broker metadata. ShapeTree owns
-`CodexAuthority`, its persisted broker models, and committed credential cleanup.
-No broker client or connection UI is provided by Scribe.
-
 `ScribeSessionBootstrap`, `ScribeConfig`, and the custom `agentFactory` initializer
 remain lower-level escape hatches, not required integration steps. For direct
 agent/message APIs, add `ScribeCore` explicitly. `ScribeBlocks` is internal to the
 standalone application; embedders own their rendering.
-
-Migration from the earlier broker API: remove `lease:` from access-credential
-construction and keep that value in the broker client. Move any calls to the
-removed `CodexServerTransport.origin` into the host's transport validation.
