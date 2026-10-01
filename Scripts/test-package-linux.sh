@@ -7,8 +7,9 @@ if [ "$(uname -s)" != Linux ]; then
 fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/bin" "$tmp/build output" "$tmp/repo with spaces"
-cp -R "$root/Scripts" "$root/Packaging" "$root/LICENSE" "$tmp/repo with spaces/"
+mkdir -p "$tmp/bin" "$tmp/build output" "$tmp/repo with spaces/apps/scribe-desktop"
+cp -R "$root/Scripts" "$root/LICENSE" "$tmp/repo with spaces/"
+cp -R "$root/apps/scribe-desktop/Packaging" "$tmp/repo with spaces/apps/scribe-desktop/"
 export TEST_BIN_PATH="$tmp/build output" TEST_TRACE="$tmp/trace"
 cp /bin/true "$TEST_BIN_PATH/scribe-wayland"
 cat > "$tmp/bin/swift" <<'SH'
@@ -16,11 +17,13 @@ cat > "$tmp/bin/swift" <<'SH'
 set -eu
 printf '%s\n' "$*" >> "$TEST_TRACE"
 test "$1" = build
-test "$2" = --build-system
-test "$3" = "${SWIFT_BUILD_SYSTEM:-native}"
+test "$2" = --package-path
+test "$3" = "$PWD/apps/scribe-desktop"
+test "$4" = --build-system
+test "$5" = "${SWIFT_BUILD_SYSTEM:-native}"
 case "$*" in
   *--show-bin-path*) printf '%s\n' "$TEST_BIN_PATH" ;;
-  *) test "${8:-}" = --static-swift-stdlib ;;
+  *) test "${10:-}" = --static-swift-stdlib ;;
 esac
 SH
 for command in update-desktop-database gtk-update-icon-cache; do
