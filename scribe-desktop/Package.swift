@@ -98,7 +98,7 @@ let package = Package(
   products: products,
   dependencies: [
     .package(path: ".."),
-    .package(url: "https://github.com/zaneenders/chroma", revision: "22e85af08e2913f2b9653b99dda1d6832bf4cdcb"),
+    .package(url: "https://github.com/zaneenders/chroma", revision: "e46e475"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     .package(url: "https://github.com/apple/swift-system.git", from: "1.4.0"),
     .package(url: "https://github.com/apple/swift-profile-recorder.git", .upToNextMinor(from: "0.3.13")),
