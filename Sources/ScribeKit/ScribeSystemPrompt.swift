@@ -3,9 +3,9 @@ import ScribeCore
 
 public enum ScribeSystemPrompt {
 
-  public static func make(tools: [any ScribeTool], cwd: String, additionalInstructions: String = "") -> String {
+  public static func make(tools: [any ScribeTool], cwd: String, instructions: String? = nil) -> String {
     let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
-    let base = """
+    let base = instructions ?? """
       You are Scribe, a digital assistant working with the user in a shared workspace.
 
       Be concise and precise. Prefer the smallest correct solution; avoid unrelated changes.
@@ -30,7 +30,8 @@ public enum ScribeSystemPrompt {
 
       For completed work, report the result, validation performed, and any remaining blockers.
       Never imply that checks passed unless they were run successfully.
-
+      """
+    return base + "\n\n" + """
       Relative paths resolve from the working directory below; `..` can reach sibling projects.
 
       \(toolHints)
@@ -40,8 +41,6 @@ public enum ScribeSystemPrompt {
 
       Your current working directory is (relative paths resolve here): \(cwd)
       """
-    guard !additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return base }
-    return base + "\n\n# Additional user-configured instructions\n\n" + additionalInstructions
   }
 
   public static func load(tools: [any ScribeTool], cwd: String, paths: ScribePaths) throws -> String {
@@ -60,7 +59,7 @@ public enum ScribeSystemPrompt {
       let file = directory.appendingPathComponent("AGENTS.md")
       return try readInstructions(at: file).map { "# \(file.path)\n\n\($0)" }
     }
-    let base = make(tools: tools, cwd: cwd, additionalInstructions: instructions ?? "")
+    let base = make(tools: tools, cwd: cwd, instructions: instructions)
     guard !projectInstructions.isEmpty else { return base }
     return base + "\n\n# Project instructions\n\n" + projectInstructions.joined(separator: "\n\n")
   }
@@ -78,7 +77,7 @@ public enum ScribeSystemPrompt {
   private struct PromptFileError: LocalizedError, CustomStringConvertible {
     let path: String
     let reason: String
-    var description: String { "Could not read system prompt appendix at \(path): \(reason)" }
+    var description: String { "Could not read instructions file at \(path): \(reason)" }
     var errorDescription: String? { description }
   }
 

@@ -75,7 +75,9 @@ Set `logging.level` to control verbosity (default `trace`).
 Set `api.opencodeHeader` to `true` for OpenCode Go to send `x-opencode-session`
 with the stable session ID on every request (default `false`).
 
-Personal instructions go in `~/.scribe/system.md` and apply to new sessions only.
+An optional `~/.scribe/system.md` replaces the built-in behavioral prompt for new sessions.
+If the file is missing, Scribe uses its built-in prompt; an existing blank file also overrides it.
+Tool hints, workspace context, and project instructions are appended in either case.
 Sessions, metadata, and logs live in `~/.scribe/sessions/{uuid}/`.
 Built-in tools: `shell`, `read_file`, `write_file`, and `edit_file`.
 
