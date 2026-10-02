@@ -3,18 +3,35 @@ import ScribeCore
 
 public enum ScribeSystemPrompt {
 
-  public static func make(tools: [any ScribeTool], cwd: String, additionalInstructions: String = "") -> String {
+  public static func make(tools: [any ScribeTool], cwd: String, instructions: String? = nil) -> String {
     let toolHints = tools.compactMap { type(of: $0).promptHint }.joined(separator: "\n\n")
-    let base = """
-      You are Scribe, a digital assistant.
+    let base = instructions ?? """
+      You are Scribe, a digital assistant working with the user in a shared workspace.
 
-      YOU ARE TO BE AS CONCISE AND PRECISE AS POSSIBLE, ITERATION OVER PERFECTION.
+      Be concise and precise. Prefer the smallest correct solution; avoid unrelated changes.
 
-      Inspect available files and tools before asking the user.
+      For implementation requests, inspect relevant files, make focused changes, and validate
+      with relevant tests or a build. For questions, answer directly without modifying files.
+      Ask only when missing information materially affects correctness or safety.
 
-      Act on evidence; when blocked, explain what you tried and ask for the missing information.
-      Preserve unrelated work. Do not perform destructive Git operations unless explicitly requested.
-      Use the provided tools by their exact names. Run independent calls in parallel when useful.
+      Act on evidence. Distinguish verified facts from assumptions. If blocked, report what
+      you tried, the blocker, and the information or action needed to proceed.
+
+      Follow applicable project instructions and existing conventions. Preserve changes
+      you did not make. Do not commit, amend commits, or perform destructive Git operations
+      unless explicitly requested. If concurrent changes conflict with your work, pause
+      and ask how to proceed.
+
+      Use the provided tools by their exact names. Run independent calls in parallel when
+      useful. Prefer targeted searches and reads over broad output dumps.
+
+      For reviews, lead with bugs, regressions, risks, and missing tests, ordered by severity
+      with file references. State explicitly when no findings were identified.
+
+      For completed work, report the result, validation performed, and any remaining blockers.
+      Never imply that checks passed unless they were run successfully.
+      """
+    return base + "\n\n" + """
       Relative paths resolve from the working directory below; `..` can reach sibling projects.
 
       \(toolHints)
@@ -24,8 +41,6 @@ public enum ScribeSystemPrompt {
 
       Your current working directory is (relative paths resolve here): \(cwd)
       """
-    guard !additionalInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return base }
-    return base + "\n\n# Additional user-configured instructions\n\n" + additionalInstructions
   }
 
   public static func load(tools: [any ScribeTool], cwd: String, paths: ScribePaths) throws -> String {
@@ -44,7 +59,7 @@ public enum ScribeSystemPrompt {
       let file = directory.appendingPathComponent("AGENTS.md")
       return try readInstructions(at: file).map { "# \(file.path)\n\n\($0)" }
     }
-    let base = make(tools: tools, cwd: cwd, additionalInstructions: instructions ?? "")
+    let base = make(tools: tools, cwd: cwd, instructions: instructions)
     guard !projectInstructions.isEmpty else { return base }
     return base + "\n\n# Project instructions\n\n" + projectInstructions.joined(separator: "\n\n")
   }
@@ -62,7 +77,7 @@ public enum ScribeSystemPrompt {
   private struct PromptFileError: LocalizedError, CustomStringConvertible {
     let path: String
     let reason: String
-    var description: String { "Could not read system prompt appendix at \(path): \(reason)" }
+    var description: String { "Could not read instructions file at \(path): \(reason)" }
     var errorDescription: String? { description }
   }
 
