@@ -69,8 +69,7 @@ struct RenameSessionDialog: Block {
   }
 }
 
-private struct RenameSessionInput<Content: Block>: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+private struct RenameSessionInput<Content: Block>: LayoutPreparingBlock {
   let store: ScribeMacStore
   let content: Content
 
@@ -86,10 +85,21 @@ private struct RenameSessionInput<Content: Block>: PrimitiveBlock {
     BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    if context.input.textEvents.contains(.endEditing) {
-      store.cancelSessionRename()
-    }
-    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
+  @MainActor func prepareLayout(context: BlockContext) -> BlockEngine.Resolved {
+    var child: BlockEngine.Resolved?
+    return BlockEngine.Resolved(
+      expandsHorizontally: { expandsHorizontally },
+      expandsVertically: { expandsVertically },
+      measure: { sizeThatFits($0, context: context) },
+      register: { rect in
+        if context.input.textEvents.contains(.endEditing) {
+          store.cancelSessionRename()
+        }
+        child = BlockEngine.prepare(content, context: context)
+        child?.register(in: rect)
+      },
+      paint: { list, rect in
+        child?.paint(into: &list, in: rect)
+      })
   }
 }

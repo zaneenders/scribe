@@ -32,7 +32,7 @@ struct ScribeMacApp {
   }
 }
 
-private struct ScribeMetalApp: MetalApp {
+private struct ScribeMetalApp: MacOSApp {
   var title: String { "Scribe" }
   var windowSize: Size { Size(width: 1100, height: 760) }
   var keyBindings: KeyBindings { ScribeBlock.keyBindings }

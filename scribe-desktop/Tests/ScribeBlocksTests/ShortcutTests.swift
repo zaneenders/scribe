@@ -14,22 +14,24 @@ private final class ShortcutState {
   var commands: [Command] = []
 }
 
-private struct ShortcutSurface: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+private struct ShortcutSurface: Block {
   let state: ShortcutState
-  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
-    state.context = context
-    state.commands += context.input.commands
-    let field = TextEditor(
-      "", fontScale: 1,
-      text: { state.text }, onChange: { state.text = $0 },
-      onEndEditing: {
-        state.stopped += 1
-        return .handled
-      },
-      onTextEvent: { event, text in event == .moveCaretUp && text.isEmpty ? "previous prompt" : nil })
-    BlockEngine.draw(field.focusTarget(state.focus), into: &list, in: rect, context: context)
+
+  @MainActor var body: some Block {
+    BlockContextBridge(
+      content: TextEditor(
+        "", fontScale: 1,
+        text: { state.text }, onChange: { state.text = $0 },
+        onEndEditing: {
+          state.stopped += 1
+          return .handled
+        },
+        onTextEvent: { event, text in event == .moveCaretUp && text.isEmpty ? "previous prompt" : nil }
+      ).focusTarget(state.focus),
+      prepare: {
+        state.context = $0
+        state.commands += $0.input.commands
+      })
   }
 }
 
@@ -43,7 +45,8 @@ struct ShortcutTests {
         state.submitted += 1
         return .handled
       }
-    let ui = NavigationTestHost(content: content, size: Size(width: 400, height: 100), keyBindings: ScribeBlock.keyBindings)
+    let ui = NavigationTestHost(
+      content: content, size: Size(width: 400, height: 100), keyBindings: ScribeBlock.keyBindings)
     defer { ui.host.close() }
     let context = try #require(state.context)
     state.focus.focus(editing: true)
@@ -86,24 +89,27 @@ struct ShortcutTests {
       ("d", NavigationCommand.sectionLeft), ("f", .sectionUp),
       ("j", .sectionDown), ("k", .sectionRight),
     ] {
-      #expect(ScribeBlock.keyBindings.command(for: KeyChord(Character(key), modifiers: .control), isTextEditing: false) == .some(.navigation(command)))
-      #expect(ScribeBlock.keyBindings.command(for: KeyChord(Character(key), modifiers: .control), isTextEditing: true) == .some(.navigation(command)))
+      #expect(
+        ScribeBlock.keyBindings.command(for: KeyChord(Character(key), modifiers: .control), isTextEditing: false)
+          == .some(.navigation(command)))
+      #expect(
+        ScribeBlock.keyBindings.command(for: KeyChord(Character(key), modifiers: .control), isTextEditing: true)
+          == .some(.navigation(command)))
     }
     #expect(
-      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord("f"), isTextEditing: false) ==
-        .some(ScribeCommandPickerCommand.previous))
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord("f"), isTextEditing: false)
+        == .some(ScribeCommandPickerCommand.previous))
     #expect(
-      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord("j"), isTextEditing: false) ==
-        .some(ScribeCommandPickerCommand.next))
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord("j"), isTextEditing: false)
+        == .some(ScribeCommandPickerCommand.next))
     #expect(
-      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: false) ==
-        .some(ScribeCommandPickerCommand.toggle))
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: false)
+        == .some(ScribeCommandPickerCommand.toggle))
     #expect(
-      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: true) ==
-        .some(ScribeCommandPickerCommand.toggle))
+      ScribeCommandPickerCommand.keyBindings.command(for: KeyChord(.tab), isTextEditing: true)
+        == .some(ScribeCommandPickerCommand.toggle))
     #expect(
-      ScribeBlock.keyBindings.command(for: KeyChord(.escape), isTextEditing: false) ==
-        .some(.action(.cancel)))
+      ScribeBlock.keyBindings.command(for: KeyChord(.escape), isTextEditing: false) == .some(.action(.cancel)))
     key(.enter, modifiers: modifier)
     #expect(state.submitted == 1)
     key(.space, text: " ")

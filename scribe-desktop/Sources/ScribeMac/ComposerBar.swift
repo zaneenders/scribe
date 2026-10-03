@@ -154,13 +154,15 @@ struct ComposerBar: Block {
           }
           Button(
             "TLDR", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.purple,
+            style: theme.buttonStyle(
+              pressedColor: theme.purple,
               tint: theme.yellow),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.tldr) }
           Button(
             "Fork", fontScale: theme.smallScale,
-            style: theme.buttonStyle(pressedColor: theme.orange,
+            style: theme.buttonStyle(
+              pressedColor: theme.orange,
               tint: theme.peach),
             padding: EdgeInsets(top: 3, leading: 10, bottom: 3, trailing: 10)
           ) { session.openCommandPicker(.fork) }
@@ -293,8 +295,7 @@ struct BottomModelPicker: Block {
   }
 }
 
-private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+private struct CommandPickerInput<Content: Block>: LayoutPreparingBlock {
   let store: ScribeMacStore
   let session: SessionController
   let content: Content
@@ -312,30 +313,41 @@ private struct CommandPickerInput<Content: Block>: PrimitiveBlock {
     BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    if !store.showDirectoryPicker, store.renamingSessionID == nil {
-      for command in context.input.commands {
-        switch command {
-        case .action(.activate):
-          session.confirmCommandPicker()
-        case .action(.cancel):
-          session.cancelCommandPicker()
-        default:
-          break
+  @MainActor func prepareLayout(context: BlockContext) -> BlockEngine.Resolved {
+    var child: BlockEngine.Resolved?
+    return BlockEngine.Resolved(
+      expandsHorizontally: { expandsHorizontally },
+      expandsVertically: { expandsVertically },
+      measure: { sizeThatFits($0, context: context) },
+      register: { rect in
+        if !store.showDirectoryPicker, store.renamingSessionID == nil {
+          for command in context.input.commands {
+            switch command {
+            case .action(.activate):
+              session.confirmCommandPicker()
+            case .action(.cancel):
+              session.cancelCommandPicker()
+            default:
+              break
+            }
+          }
+          for event in context.input.textEvents {
+            switch event {
+            case .submit:
+              session.confirmCommandPicker()
+            case .endEditing:
+              session.cancelCommandPicker()
+            default:
+              break
+            }
+          }
         }
-      }
-      for event in context.input.textEvents {
-        switch event {
-        case .submit:
-          session.confirmCommandPicker()
-        case .endEditing:
-          session.cancelCommandPicker()
-        default:
-          break
-        }
-      }
-    }
-    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
+        child = BlockEngine.prepare(content, context: context)
+        child?.register(in: rect)
+      },
+      paint: { list, rect in
+        child?.paint(into: &list, in: rect)
+      })
   }
 }
 

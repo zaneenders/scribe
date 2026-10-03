@@ -6,17 +6,17 @@ import Testing
 
 @MainActor
 struct ProgressIndicatorTests {
-  @Test func requestsAnimationOnlyWhilePresent() {
+  @Test func staticIndicatorDoesNotScheduleAnimation() {
     let renderer = HeadlessHost()
     defer { renderer.close() }
     renderer.content = ProgressIndicator(color: .white)
     renderer.render()
-    #expect(renderer.needsAnimationFrame)
+    #expect(renderer.renderIfNeeded() == nil)
     renderer.render()
-    #expect(renderer.needsAnimationFrame)
+    #expect(renderer.renderIfNeeded() == nil)
 
     renderer.content = Text("Ready")
     renderer.render()
-    #expect(!renderer.needsAnimationFrame)
+    #expect(renderer.renderIfNeeded() == nil)
   }
 }
