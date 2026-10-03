@@ -71,10 +71,10 @@ components:
           $ref: "#/components/schemas/ResponsesReasoning"
         service_tier:
           type: string
-          enum: [auto, default, flex, priority]
+          enum: [auto, default, flex, priority, ultrafast]
           description: >
             flex = half price (slower), priority = 2x price (faster).
-            default / auto use standard pricing.
+            default / auto use standard pricing. Ultrafast is the fastest tier at higher cost.
         text:
           type: object
           properties:
