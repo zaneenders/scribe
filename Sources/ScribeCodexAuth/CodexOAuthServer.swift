@@ -308,7 +308,8 @@ public enum CodexOAuthError: Error, CustomStringConvertible, CustomDebugStringCo
     case .noCredentials:
       return "No stored Codex credentials. Click Sign in to Codex in Scribe."
     case .loginRequired:
-      return "Codex authentication expired or was revoked. Click Sign in to Codex in Scribe, then send your message again."
+      return
+        "Codex authentication expired or was revoked. Click Sign in to Codex in Scribe, then send your message again."
     case .loginTimeout:
       return "Login timed out. Please try again."
     case .loginCancelled:

@@ -20,10 +20,11 @@ struct WorkspaceComponentsTests {
     }
     #expect(texts.contains("Tool output"))
     #expect(texts.contains("Result"))
-    #expect(frame.commands.contains {
-      if case .fillRoundedRect(_, _, let color) = $0 { return color == background }
-      return false
-    })
+    #expect(
+      frame.commands.contains {
+        if case .fillRoundedRect(_, _, let color) = $0 { return color == background }
+        return false
+      })
   }
 
   @Test func workspaceExposesStartupAndSidebarStateWithoutRootLayout() {

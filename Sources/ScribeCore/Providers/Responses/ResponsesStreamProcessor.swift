@@ -70,7 +70,8 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
         if !loggedFirstChunk {
           loggedFirstChunk = true
           logger.debug(
-            "agent.stream.first-chunk-responses", metadata: ["ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"])
+            "agent.stream.first-chunk-responses", metadata: ["ttfb_ms": "\((clock.now - httpStart) / .milliseconds(1))"]
+          )
         }
 
         switch eventType {
@@ -241,8 +242,10 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
       response?["error_type"]
     )
     if redactErrors {
-      let allowed: Set<String> = ["context_length_exceeded", "server_error", "internal_server_error",
-        "service_unavailable", "overloaded", "rate_limit_error", "rate_limit_exceeded", "timeout", "request_timeout"]
+      let allowed: Set<String> = [
+        "context_length_exceeded", "server_error", "internal_server_error",
+        "service_unavailable", "overloaded", "rate_limit_error", "rate_limit_exceeded", "timeout", "request_timeout",
+      ]
       let safeCode = code.flatMap { allowed.contains($0) ? $0 : nil }
       let safeType = errorType.flatMap { allowed.contains($0) ? $0 : nil }
       let detail = safeCode == "context_length_exceeded" ? "context_length_exceeded" : "Codex response failed."

@@ -17,7 +17,8 @@ struct SessionNavigationTests {
           style: ScribeSessionRowStyle(
             foreground: .white, secondaryForeground: .white, selectedForeground: .white,
             activity: .white, selection: .clear, hover: .clear, border: .white, fontScale: 1),
-          onSelect: { selections += 1 })
+          onSelect: { selections += 1 }
+        )
         .focusTarget(session)
       }
       .sizing(x: .fixed(250), y: .grow)
@@ -28,7 +29,8 @@ struct SessionNavigationTests {
       }
       .sizing(x: .grow, y: .grow)
     }
-    let ui = NavigationTestHost(content: content, size: Size(width: 600, height: 200), keyBindings: ScribeBlock.keyBindings)
+    let ui = NavigationTestHost(
+      content: content, size: Size(width: 600, height: 200), keyBindings: ScribeBlock.keyBindings)
     defer { ui.host.close() }
     composer.focus()
     ui.host.render()
@@ -57,7 +59,8 @@ struct SessionNavigationTests {
               TextEditor(singleLine: true, text: { "" }, onChange: { _ in }).focusTarget(composer)
             }
           }
-        }, prepare: { _ in
+        },
+        prepare: { _ in
           if pendingFocus {
             composer.focus(editing: false)
             pendingFocus = false
@@ -140,35 +143,40 @@ struct SessionNavigationTests {
     let content = DeferredBlock {
       BlockContextBridge(
         content: Group("Conversation") {
-        VStack {
-          ScrollView(
-            "Transcript", sticksToBottom: true, controller: controller,
-            rows: (0..<12).map { index in
-              if let row = cachedRows[index] { return row }
-              let row = ScrollView.Row(
-                id: index,
-                content: NavigableTranscriptItem(
-                  content: TranscriptItemBlock(
-                    item: SessionController.TranscriptItem(
-                      kind: .answer, title: "Message \(index)",
-                      text: String(repeating: "long message line\n", count: 20)),
-                    theme: MacTheme()))
+          VStack {
+            ScrollView(
+              "Transcript", sticksToBottom: true, controller: controller,
+              rows: (0..<12).map { index in
+                if let row = cachedRows[index] { return row }
+                let row = ScrollView.Row(
+                  id: index,
+                  content: NavigableTranscriptItem(
+                    content: TranscriptItemBlock(
+                      item: SessionController.TranscriptItem(
+                        kind: .answer, title: "Message \(index)",
+                        text: String(repeating: "long message line\n", count: 20)),
+                      theme: MacTheme())
+                  )
                   .focusTarget(messages[index])
                   .padding(EdgeInsets(top: 5, leading: 10, bottom: 5, trailing: 10))
                   .sizing(x: .grow))
-              cachedRows[index] = row
-              return row
-            })
-          Group("Composer") {
-            TextEditor(singleLine: true, text: { "" }, onChange: { _ in }).focusTarget(composer)
+                cachedRows[index] = row
+                return row
+              })
+            Group("Composer") {
+              TextEditor(singleLine: true, text: { "" }, onChange: { _ in }).focusTarget(composer)
+            }
+          }
+        }, prepare: { context = $0 },
+        finish: { context in
+          if context.input.commands.contains(where: {
+            if case .navigation = $0 { return true }
+            return false
+          }) {
+            context.requestRedraw()
           }
         }
-      }, prepare: { context = $0 }, finish: { context in
-        if context.input.commands.contains(where: {
-          if case .navigation = $0 { return true }
-          return false
-        }) { context.requestRedraw() }
-      })
+      )
       .onCommand(.navigation(.sectionUp)) {
         if composer.isEditing { context?.endEditing() }
         return .ignored
@@ -183,7 +191,8 @@ struct SessionNavigationTests {
         return .ignored
       }
     }
-    let ui = NavigationTestHost(content: content, size: Size(width: 600, height: 300), keyBindings: ScribeBlock.keyBindings)
+    let ui = NavigationTestHost(
+      content: content, size: Size(width: 600, height: 300), keyBindings: ScribeBlock.keyBindings)
     defer { ui.host.close() }
     #expect(controller.offset > 0)
     composer.focus(editing: true)
@@ -236,20 +245,23 @@ struct SessionNavigationTests {
         activity: .white, selection: .clear, hover: .clear, border: color, fontScale: 1),
       onSelect: { selections += 1 })
     let frame = renderer.render()
-    #expect(frame.commands.contains {
-      if case .text(_, "Planning", let foreground, _) = $0 { return foreground == color }
-      return false
-    })
+    #expect(
+      frame.commands.contains {
+        if case .text(_, "Planning", let foreground, _) = $0 { return foreground == color }
+        return false
+      })
     click("Planning", in: renderer)
     #expect(selections == 1)
   }
 
   private func click(_ text: String, in renderer: HeadlessHost) {
     let frame = renderer.render()
-    guard let position = frame.commands.compactMap({ command -> Point? in
-      if case .text(let position, let value, _, _) = command, value == text { return position }
-      return nil
-    }).first else {
+    guard
+      let position = frame.commands.compactMap({ command -> Point? in
+        if case .text(let position, let value, _, _) = command, value == text { return position }
+        return nil
+      }).first
+    else {
       Issue.record("Missing control: \(text)")
       return
     }

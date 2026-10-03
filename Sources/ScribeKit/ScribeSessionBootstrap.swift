@@ -1,7 +1,7 @@
 import Foundation
 import Logging
-import ScribeCore
 import ScribeCodexAuth
+import ScribeCore
 import SystemPackage
 
 public struct BootstrappedSession: Sendable {

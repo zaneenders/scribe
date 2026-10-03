@@ -1,5 +1,5 @@
-import Foundation
 import AsyncHTTPClient
+import Foundation
 import OpenAPIAsyncHTTPClient
 import OpenAPIRuntime
 import ScribeCodexAuth
@@ -11,7 +11,9 @@ public enum ResponsesClient {
     return HTTPClient(eventLoopGroupProvider: .singleton, configuration: configuration)
   }()
   /// Reads the current login for every request and refreshes once if the server rejects it.
-  public static func makeAuthenticated(serverURL: URL, baseDirectory: URL? = nil, credentials: (any CodexAccessCredentialProvider)? = nil) -> Client {
+  public static func makeAuthenticated(
+    serverURL: URL, baseDirectory: URL? = nil, credentials: (any CodexAccessCredentialProvider)? = nil
+  ) -> Client {
     let provider = credentials ?? CodexDefaultAccessProvider(baseDirectory: baseDirectory)
     return Client(
       serverURL: serverURL,

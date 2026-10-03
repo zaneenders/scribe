@@ -1,6 +1,6 @@
 import Foundation
-import ScribeCodexAuth
 import Logging
+import ScribeCodexAuth
 import ScribeCore
 
 public enum SessionSummarizer {

@@ -59,7 +59,8 @@ public struct ScribeSessionRow: Block {
         if isRunning { ProgressIndicator(color: style.activity) }
         MarqueeText(
           title,
-          color: isRunning ? style.activity
+          color: isRunning
+            ? style.activity
             : isSelected ? style.selectedForeground : style.foreground,
           fontScale: style.fontScale, isActive: phase == .hovered)
         if phase != .hovered {
@@ -73,7 +74,8 @@ public struct ScribeSessionRow: Block {
       .sizing(x: .grow, y: .fixed(30))
       .roundedBackground(
         isSelected ? style.selection : phase == .hovered ? style.hover : .clear,
-        radius: style.cornerRadius)
+        radius: style.cornerRadius
+      )
       .roundedBorder(
         isSelected ? style.border : .clear, radius: style.cornerRadius,
         width: isSelected ? 1 : 0)

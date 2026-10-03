@@ -58,11 +58,14 @@ public struct ScribeAgent: Sendable {
     self.logger = logger
   }
 
-  public init(configuration: ScribeConfig, logger: Logger, codexCredentials: (any CodexAccessCredentialProvider)? = nil) throws {
+  public init(configuration: ScribeConfig, logger: Logger, codexCredentials: (any CodexAccessCredentialProvider)? = nil)
+    throws
+  {
     let registry = ToolRegistry(tools: configuration.tools, logger: logger)
     self.toolExecutor = registry
     self.chatTools = registry.chatTools
-    self.provider = try AgentProviderFactory.make(configuration: configuration, codexCredentials: codexCredentials ?? configuration.codexCredentials)
+    self.provider = try AgentProviderFactory.make(
+      configuration: configuration, codexCredentials: codexCredentials ?? configuration.codexCredentials)
     self.workingDirectory = FilePath(configuration.workingDirectory)
     self.logger = logger
   }

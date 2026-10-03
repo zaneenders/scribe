@@ -32,9 +32,11 @@ struct CodexOAuthTests {
     #expect(tokens.expiresIn == 3600)
   }
 
-  @Test("empty or malformed token responses retain HTTP 200 without exposing token contents", arguments: [
-    "", "[]", #"{"access_token":"private-test-token","refresh_token":"unfinished"#,
-  ])
+  @Test(
+    "empty or malformed token responses retain HTTP 200 without exposing token contents",
+    arguments: [
+      "", "[]", #"{"access_token":"private-test-token","refresh_token":"unfinished"#,
+    ])
   func invalidTokenResponseReportsActualStatus(body: String) throws {
     do {
       _ = try CodexOAuth.parseTokenResponse(ByteBuffer(string: body))

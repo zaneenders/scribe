@@ -1,6 +1,7 @@
 import Foundation
 
-public struct CodexAccessCredential: Codable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+public struct CodexAccessCredential: Codable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible
+{
   public let access: String
   public let accountId: String
   public let expires: Int64
@@ -26,7 +27,8 @@ public struct CodexDefaultAccessProvider: CodexAccessCredentialProvider {
   public init(baseDirectory: URL? = nil) { self.baseDirectory = baseDirectory }
 
   public func credential(rejectingAccessToken: String? = nil) async throws -> CodexAccessCredential {
-    CodexAccessCredential(try await CodexOAuth.getValidCredentials(
-      baseDirectory: baseDirectory, rejectingAccessToken: rejectingAccessToken))
+    CodexAccessCredential(
+      try await CodexOAuth.getValidCredentials(
+        baseDirectory: baseDirectory, rejectingAccessToken: rejectingAccessToken))
   }
 }

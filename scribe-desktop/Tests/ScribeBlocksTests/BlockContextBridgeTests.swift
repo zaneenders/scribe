@@ -1,6 +1,6 @@
-@testable import Chroma
 import Testing
 
+@testable import Chroma
 @testable import ScribeBlocks
 
 @MainActor
