@@ -7,7 +7,8 @@ import Testing
 
 @Suite(.serialized)
 struct ConfigLoaderTests {
-  @Test func loadsNamedProfileFromExplicitOverride() async throws {
+  @Test(arguments: ["priority", "ultrafast"])
+  func loadsNamedProfileFromExplicitOverride(serviceTier: String) async throws {
     try await withTemporaryDirectory { root in
       setenv("SCRIBE_HOME", root.path, 1)
       defer { unsetenv("SCRIBE_HOME") }
@@ -35,8 +36,8 @@ struct ConfigLoaderTests {
                 "model": "big-model",
                 "contextWindow": 256000,
                 "contextWindowThreshold": 0.9,
-                "serviceTier": "priority",
-                "serviceTiers": ["default", "priority"]
+                "serviceTier": "\(serviceTier)",
+                "serviceTiers": ["default", "priority", "ultrafast"]
               },
               "logging": { "level": "trace" }
             }
@@ -49,10 +50,10 @@ struct ConfigLoaderTests {
       #expect(loaded.activeProfileName == "cloud")
       #expect(loaded.scribeConfig.agentModel == "big-model")
       #expect(loaded.scribeConfig.serverURL == "https://api.example.com")
-      #expect(loaded.scribeConfig.serviceTier == "priority")
+      #expect(loaded.scribeConfig.serviceTier == serviceTier)
       #expect(loaded.profiles.map(\.name) == ["local", "cloud"])
-      #expect(loaded.profiles[1].serviceTiers == ["default", "priority"])
-      #expect(loaded.profiles[1].serviceTier == "priority")
+      #expect(loaded.profiles[1].serviceTiers == ["default", "priority", "ultrafast"])
+      #expect(loaded.profiles[1].serviceTier == serviceTier)
       #expect(loaded.resolvedConfigurationPath == paths.profileManifestPath.string)
     }
   }

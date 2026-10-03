@@ -215,8 +215,8 @@ struct ResponsesProviderTests {
   /// Integration test: a `.configured` provider issues an HTTP request through the
   /// supplied transport, streams SSE text deltas as `AgentEvent` values, and
   /// produces a `TurnResult` containing the assistant message.
-  @Test("run with configured client produces expected SSE response")
-  func runWithConfiguredClientProducesExpectedResponse() async throws {
+  @Test("run with configured client produces expected SSE response", arguments: ["priority", "ultrafast"])
+  func runWithConfiguredClientProducesExpectedResponse(serviceTier: String) async throws {
     let transport = ScriptedTransport(
       status: 200,
       chunks: sseChunks(
@@ -237,7 +237,7 @@ struct ResponsesProviderTests {
       model: "codex-test-model",
       reasoningEnabled: false,
       reasoningEffort: nil,
-      serviceTier: "priority",
+      serviceTier: serviceTier,
       contextWindow: 128_000
     )
 
@@ -273,7 +273,7 @@ struct ResponsesProviderTests {
       JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
     #expect(json["model"] as? String == "codex-test-model")
     #expect(json["stream"] as? Bool == true)
-    #expect(json["service_tier"] as? String == "priority")
+    #expect(json["service_tier"] as? String == serviceTier)
 
     let input = try #require(json["input"] as? [[String: Any]])
     #expect(!input.isEmpty, "Expected non-empty input items")

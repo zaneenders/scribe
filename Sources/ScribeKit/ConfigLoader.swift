@@ -389,7 +389,7 @@ public enum ConfigLoader {
       profile.agent.reasoningEffort
       ?? (reasoningEfforts.contains("medium") ? "medium" : reasoningEfforts.first)
     let serviceTiers = profile.agent.serviceTiers ?? []
-    let supportedServiceTiers: Set<String> = ["auto", "default", "flex", "priority"]
+    let supportedServiceTiers: Set<String> = ["auto", "default", "flex", "priority", "ultrafast"]
     guard serviceTiers.allSatisfy({ supportedServiceTiers.contains($0) }),
       Set(serviceTiers).count == serviceTiers.count
     else {
