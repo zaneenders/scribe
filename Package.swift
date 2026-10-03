@@ -15,7 +15,7 @@ let targets: [Target] = [
       .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
     ],
     swiftSettings: [
-      .swiftLanguageMode(.v6),
+      .swiftLanguageMode(.v6)
     ],
     plugins: [
       .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")
@@ -30,7 +30,7 @@ let targets: [Target] = [
       .product(name: "OpenAPIAsyncHTTPClient", package: "swift-openapi-async-http-client"),
     ],
     swiftSettings: [
-      .swiftLanguageMode(.v6),
+      .swiftLanguageMode(.v6)
     ],
     plugins: [
       .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")

@@ -23,7 +23,8 @@ struct CodexCredentialManagerTests {
       for _ in 0..<20 {
         group.addTask {
           try await manager.credentials(
-            baseDirectory: directory, rejectingAccessToken: rejected ? "original" : nil).access
+            baseDirectory: directory, rejectingAccessToken: rejected ? "original" : nil
+          ).access
         }
       }
       var results: [String] = []

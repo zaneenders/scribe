@@ -7,7 +7,9 @@ import Testing
 
 private func driveProcessor(
   sse: String
-) async throws -> (events: [AgentEvent], turn: ResponsesAssistantTurn, processor: ResponsesStreamProcessor<NoOpAbortObserver>) {
+) async throws -> (
+  events: [AgentEvent], turn: ResponsesAssistantTurn, processor: ResponsesStreamProcessor<NoOpAbortObserver>
+) {
   let body = HTTPBody(sse)
   var events: [AgentEvent] = []
   let logger = Logger(label: "test")
@@ -194,12 +196,15 @@ func responsesStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent
 }
 
 @Test func codexStreamErrorsNeverExposeProviderBodies() async throws {
-  var processor = ResponsesStreamProcessor(onEvent: { _ in }, logger: Logger(label: "test.redaction"),
+  var processor = ResponsesStreamProcessor(
+    onEvent: { _ in }, logger: Logger(label: "test.redaction"),
     abortObserver: NoOpAbortObserver(), streamWallStart: .now, redactErrors: true)
   var turn = ResponsesAssistantTurn()
   do {
-    try await processor.process(httpBody: HTTPBody(makeSSE(
-      #"{"type":"error","message":"access-secret","error":{"message":"refresh-secret"}}"#)),
+    try await processor.process(
+      httpBody: HTTPBody(
+        makeSSE(
+          #"{"type":"error","message":"access-secret","error":{"message":"refresh-secret"}}"#)),
       httpStart: .now, turn: &turn)
     Issue.record("Expected a safe failure")
   } catch {

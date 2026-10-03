@@ -27,9 +27,12 @@ struct CodexAuthMiddleware: ClientMiddleware {
     operationID: String,
     next: (HTTPRequest, HTTPBody?, URL) async throws -> (HTTPResponse, HTTPBody?)
   ) async throws -> (HTTPResponse, HTTPBody?) {
-    guard baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) == "https://chatgpt.com/backend-api",
+    guard
+      baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        == "https://chatgpt.com/backend-api",
       request.path == "/responses", request.scheme == nil || request.scheme == "https",
-      request.authority == nil || request.authority == "chatgpt.com" else { throw URLError(.badURL) }
+      request.authority == nil || request.authority == "chatgpt.com"
+    else { throw URLError(.badURL) }
     guard let credentials else {
       return try await next(authenticated(request, token: token, accountID: accountID), body, baseURL)
     }

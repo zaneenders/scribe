@@ -10,39 +10,31 @@ private final class PaletteEscapeState {
   var underlyingPickerCancelled = false
 }
 
-private struct PaletteEscapeSurface: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+private struct PaletteEscapeSurface: Block {
   let store: ScribeMacStore
   let state: PaletteEscapeState
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
-
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
-    let bridge = BlockContextBridge(
-      content: PaletteEscapeContent(store: store, state: state),
+  @MainActor var body: some Block {
+    BlockContextBridge(
+      content: PaletteEscapeContent(store: store),
       prepare: { state.context = $0 },
-      finish: { store.finishDirectoryPaletteInput($0) })
-    bridge.draw(into: &list, in: rect, context: context)
+      finish: { context in
+        if !store.showDirectoryPicker, store.renamingSessionID == nil,
+          context.input.textEvents.contains(.endEditing)
+        {
+          state.underlyingPickerCancelled = true
+        }
+        store.finishDirectoryPaletteInput(context)
+      })
   }
 }
 
-private struct PaletteEscapeContent: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+private struct PaletteEscapeContent: Block {
   let store: ScribeMacStore
-  let state: PaletteEscapeState
 
-  @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
-
-  @MainActor func draw(into list: inout DrawList, in rect: Rect, context: BlockContext) {
+  @MainActor @BlockBuilder var body: some Block {
     if store.showDirectoryPicker {
-      BlockEngine.draw(
-        DirectoryPalette(store: store, theme: MacTheme(), required: store.requiresDirectoryBeforeStart),
-        into: &list, in: rect, context: context)
-    }
-    if !store.showDirectoryPicker, store.renamingSessionID == nil,
-      context.input.textEvents.contains(.endEditing)
-    {
-      state.underlyingPickerCancelled = true
+      DirectoryPalette(store: store, theme: MacTheme(), required: store.requiresDirectoryBeforeStart)
     }
   }
 }

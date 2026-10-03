@@ -27,7 +27,9 @@ extension AgentProvider where Self == OpenAICompletionsProvider {
 }
 
 enum AgentProviderFactory {
-  static func make(configuration: ScribeConfig, codexCredentials: (any CodexAccessCredentialProvider)? = nil) throws -> any AgentProvider {
+  static func make(configuration: ScribeConfig, codexCredentials: (any CodexAccessCredentialProvider)? = nil) throws
+    -> any AgentProvider
+  {
     guard let serverURL = URL(string: configuration.serverURL) else {
       throw ScribeError.configuration(
         key: "serverURL",

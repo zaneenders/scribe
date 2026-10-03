@@ -74,8 +74,9 @@ struct ScribeMacRoot: Block {
           RenameSessionDialog(store: store, sessionID: sessionID, theme: theme)
         }
       },
-      workspace: ScribeWorkspace(store: store))
-      .keyBindings(store.active?.commandPicker == nil ? KeyBindings() : ScribeCommandPickerCommand.keyBindings)
+      workspace: ScribeWorkspace(store: store)
+    )
+    .keyBindings(store.active?.commandPicker == nil ? KeyBindings() : ScribeCommandPickerCommand.keyBindings)
   }
 
   @MainActor private func sessionLoadingState(_ saved: ScribeMacStore.SavedSession) -> some Block {

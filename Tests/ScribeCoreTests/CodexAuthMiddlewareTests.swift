@@ -65,9 +65,10 @@ struct CodexAuthMiddlewareTests {
     _ = try await client.createResponse(body: .json(.init(model: "test-model")))
     await credentials.replaceAccess("browser-login")
     _ = try await client.createResponse(body: .json(.init(model: "test-model")))
-    #expect(transport.capturedRequests.map { $0.headers[.authorization] } == [
-      "Bearer original", "Bearer browser-login",
-    ])
+    #expect(
+      transport.capturedRequests.map { $0.headers[.authorization] } == [
+        "Bearer original", "Bearer browser-login",
+      ])
     #expect(await credentials.rejections == [nil, nil])
   }
 
@@ -180,11 +181,14 @@ private actor CredentialSource {
   }
 }
 
-private func codexInterceptedRequest(through middleware: CodexAuthMiddleware,
+private func codexInterceptedRequest(
+  through middleware: CodexAuthMiddleware,
   request: HTTPRequest = HTTPRequest(method: .post, scheme: "https", authority: "chatgpt.com", path: "/responses")
 ) async throws -> HTTPRequest {
   var captured = request
-  _ = try await middleware.intercept(request, body: nil, baseURL: URL(string: "https://chatgpt.com/backend-api")!, operationID: "test") { request, _, _ in
+  _ = try await middleware.intercept(
+    request, body: nil, baseURL: URL(string: "https://chatgpt.com/backend-api")!, operationID: "test"
+  ) { request, _, _ in
     captured = request
     return (HTTPResponse(status: .ok), nil)
   }

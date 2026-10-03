@@ -14,22 +14,30 @@ struct TextDisclosureTests {
     defer { renderer.close() }
 
     for label in ["Show full text", "Hide text", "Show full text"] {
-      renderer.content = ScrollView(controller: controller, rows: [
-        .init(id: item.layoutID, content: NavigableTranscriptItem(
-          content: TranscriptItemBlock(item: item, theme: MacTheme(), toggleText: {
-            item.toggleTextDisclosure()
-          }))
-          .focusTarget(target)
-          .sizing(x: .grow))
-      ])
+      renderer.content = ScrollView(
+        controller: controller,
+        rows: [
+          .init(
+            id: item.layoutID,
+            content: NavigableTranscriptItem(
+              content: TranscriptItemBlock(
+                item: item, theme: MacTheme(),
+                toggleText: {
+                  item.toggleTextDisclosure()
+                })
+            )
+            .focusTarget(target)
+            .sizing(x: .grow))
+        ])
       renderer.render()
       target.focus()
       let frame = renderer.render()
       #expect(target.isFocused)
-      let position = try #require(frame.commands.compactMap { command -> Point? in
-        guard case .text(let position, let text, _, _) = command, text == label else { return nil }
-        return position
-      }.first)
+      let position = try #require(
+        frame.commands.compactMap { command -> Point? in
+          guard case .text(let position, let text, _, _) = command, text == label else { return nil }
+          return position
+        }.first)
       let expanded = item.isTextExpanded
       let point = Point(x: position.x + 4, y: position.y + 4)
       renderer.render(input: InputState(pointerPosition: point, pointerPressed: true))
@@ -52,9 +60,10 @@ struct TextDisclosureTests {
         let size = BlockEngine.measure(
           block, proposal: Size(width: width, height: 10_000), context: context)
         var list = DrawList()
-        BlockEngine.draw(
-          block, into: &list,
-          in: Rect(x: 0, y: 0, width: width, height: size.height), context: context)
+        let prepared = BlockEngine.prepare(
+          block, context: context)
+        prepared.register(in: Rect(x: 0, y: 0, width: width, height: size.height))
+        prepared.paint(into: &list, in: Rect(x: 0, y: 0, width: width, height: size.height))
         let label = expanded ? "Hide text" : "Show full text"
         var buttons = 0
         for command in list.commands {

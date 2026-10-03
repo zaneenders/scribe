@@ -206,7 +206,9 @@ private func runSingleResponsesRound(
       ])
     httpBody = try ok.body.textEventStream
   case .undocumented(statusCode: let code, let payload):
-    if config.usesCodexBackend { throw ScribeError.responsesHTTPError(statusCode: code, detail: "Codex request rejected.") }
+    if config.usesCodexBackend {
+      throw ScribeError.responsesHTTPError(statusCode: code, detail: "Codex request rejected.")
+    }
     var detail = ""
     if let body = payload.body {
       do {

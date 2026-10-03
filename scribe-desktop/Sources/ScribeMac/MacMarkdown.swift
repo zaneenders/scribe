@@ -613,7 +613,7 @@ enum MarkdownLayoutRegistry {
   }
 }
 
-struct MarkdownText: PrimitiveBlock {
+struct MarkdownText: PaintableBlock {
   var focusRule: FocusRule { .standard }
   var markdown: String
   var theme: MacTheme
@@ -642,7 +642,7 @@ struct MarkdownText: PrimitiveBlock {
     return Size(width: proposal.width, height: max(1, Float(laidOut.count)) * lineHeight)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
+  @MainActor func register(in rect: Rect, context: BlockContext) {
     let metrics = context.fontMetrics
     let cellWidth = metrics.cellAdvance * scale
     let lineHeight = metrics.lineAdvance * scale + lineSpacing
@@ -653,6 +653,16 @@ struct MarkdownText: PrimitiveBlock {
     if let id = itemID {
       MarkdownLayoutRegistry.register(id, layout: layout)
     }
+  }
+
+  @MainActor func paint(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
+    let metrics = context.fontMetrics
+    let cellWidth = metrics.cellAdvance * scale
+    let lineHeight = metrics.lineAdvance * scale + lineSpacing
+    let laidOut = lines(forWidth: rect.size.width, metrics: metrics)
+    let layout = MarkdownLayout(
+      lines: laidOut, lineHeight: lineHeight, cellWidth: cellWidth,
+      scale: scale, rect: rect)
     let visibleRect = TranscriptViewportRegistry.current
     let selection = itemID.flatMap { SelectionManager.shared.selection(for: $0, layout: layout) }
     layout.draw(

@@ -5,8 +5,7 @@ enum ScribeBlockContext {
   static var current: BlockContext?
 }
 
-struct BlockContextBridge<Content: Block>: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+struct BlockContextBridge<Content: Block>: LayoutPreparingBlock {
   let content: Content
   let prepare: @MainActor (BlockContext) -> Void
   var finish: @MainActor (BlockContext) -> Void = { _ in }
@@ -20,14 +19,32 @@ struct BlockContextBridge<Content: Block>: PrimitiveBlock {
   }
 
   @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size {
+    let previous = ScribeBlockContext.current
     ScribeBlockContext.current = context
+    defer { ScribeBlockContext.current = previous }
     return BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    ScribeBlockContext.current = context
-    prepare(context)
-    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
-    finish(context)
+  @MainActor func prepareLayout(context: BlockContext) -> BlockEngine.Resolved {
+    var child: BlockEngine.Resolved?
+    return BlockEngine.Resolved(
+      expandsHorizontally: { expandsHorizontally },
+      expandsVertically: { expandsVertically },
+      measure: { sizeThatFits($0, context: context) },
+      register: { rect in
+        let previous = ScribeBlockContext.current
+        ScribeBlockContext.current = context
+        defer { ScribeBlockContext.current = previous }
+        prepare(context)
+        child = BlockEngine.prepare(content, context: context)
+        child?.register(in: rect)
+        finish(context)
+      },
+      paint: { list, rect in
+        let previous = ScribeBlockContext.current
+        ScribeBlockContext.current = context
+        defer { ScribeBlockContext.current = previous }
+        child?.paint(into: &list, in: rect)
+      })
   }
 }

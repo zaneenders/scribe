@@ -38,7 +38,9 @@ public struct CodexUsage: Decodable, Sendable {
     return HTTPClient(eventLoopGroupProvider: .singleton, configuration: configuration)
   }()
 
-  public static func fetch(provider: any CodexAccessCredentialProvider = CodexDefaultAccessProvider()) async throws -> CodexUsage {
+  public static func fetch(provider: any CodexAccessCredentialProvider = CodexDefaultAccessProvider()) async throws
+    -> CodexUsage
+  {
     var credential = try await provider.credential(rejectingAccessToken: nil)
     for attempt in 0..<2 {
       var request = HTTPClientRequest(url: "https://chatgpt.com/backend-api/wham/usage")

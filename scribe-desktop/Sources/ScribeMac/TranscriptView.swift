@@ -148,13 +148,14 @@ struct TranscriptView: Block {
     let content = NavigableTranscriptItem(
       content: TranscriptItemBlock(
         item: item, theme: theme, selection: selection,
-        toggleText: { session.toggleTextDisclosure(id: item.id) }))
-      .padding(
-        EdgeInsets(
-          top: theme.spacing / 2, leading: theme.margin,
-          bottom: theme.spacing / 2, trailing: theme.margin)
-      )
-      .sizing(x: .grow)
+        toggleText: { session.toggleTextDisclosure(id: item.id) })
+    )
+    .padding(
+      EdgeInsets(
+        top: theme.spacing / 2, leading: theme.margin,
+        bottom: theme.spacing / 2, trailing: theme.margin)
+    )
+    .sizing(x: .grow)
     let row = ScrollView.Row(
       id: id,
       content: item.id == session.transcript.last?.id
@@ -204,8 +205,7 @@ struct TranscriptView: Block {
   }
 }
 
-struct NavigableTranscriptItem<Content: Block>: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+struct NavigableTranscriptItem<Content: Block>: LayoutPreparingBlock {
   let content: Content
 
   @MainActor var expandsHorizontally: Bool { BlockEngine.expandsHorizontally(content) }
@@ -214,11 +214,24 @@ struct NavigableTranscriptItem<Content: Block>: PrimitiveBlock {
     BlockEngine.measure(content, proposal: proposal, context: context)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    BlockEngine.draw(
-      Interactive(action: {}) { phase in
-        content.border(phase == .idle ? .clear : context.theme.focus.ring, width: 2)
-      }, into: &drawList, in: rect, context: context)
+  @MainActor var expandsVertically: Bool { false }
+
+  @MainActor func prepareLayout(context: BlockContext) -> BlockEngine.Resolved {
+    var child: BlockEngine.Resolved?
+    return BlockEngine.Resolved(
+      expandsHorizontally: { expandsHorizontally },
+      expandsVertically: { expandsVertically },
+      measure: { sizeThatFits($0, context: context) },
+      register: { rect in
+        child = BlockEngine.prepare(
+          Interactive(action: {}) { phase in
+            content.border(phase == .idle ? .clear : context.theme.focus.ring, width: 2)
+          }, context: context)
+        child?.register(in: rect)
+      },
+      paint: { list, rect in
+        child?.paint(into: &list, in: rect)
+      })
   }
 }
 
@@ -228,8 +241,7 @@ enum TranscriptSelection {
   case discarded
 }
 
-private struct CommandBoundaryMarker: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+private struct CommandBoundaryMarker: LayoutPreparingBlock {
   let label: String
   let active: Bool
   let color: Color
@@ -241,24 +253,36 @@ private struct CommandBoundaryMarker: PrimitiveBlock {
     Size(width: proposal.width, height: 30)
   }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    let content = HStack(spacing: 8) {
-      Text("────").fontScale(theme.smallScale).foregroundColor(active ? color : theme.textSecondary)
-      Text(label)
-        .fontScale(theme.smallScale)
-        .foregroundColor(active ? color : theme.textSecondary)
-      Spacer()
-      Text("────").fontScale(theme.smallScale).foregroundColor(active ? color : theme.textSecondary)
-    }
-    .padding(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8))
-    .sizing(x: .grow)
-    .background(active ? theme.statusBackground : theme.panelBackground)
-    BlockEngine.draw(content, into: &drawList, in: rect, context: context)
+  @MainActor var expandsVertically: Bool { false }
+
+  @MainActor func prepareLayout(context: BlockContext) -> BlockEngine.Resolved {
+    var child: BlockEngine.Resolved?
+    return BlockEngine.Resolved(
+      expandsHorizontally: { expandsHorizontally },
+      expandsVertically: { expandsVertically },
+      measure: { sizeThatFits($0, context: context) },
+      register: { rect in
+        let content = HStack(spacing: 8) {
+          Text("────").fontScale(theme.smallScale).foregroundColor(active ? color : theme.textSecondary)
+          Text(label)
+            .fontScale(theme.smallScale)
+            .foregroundColor(active ? color : theme.textSecondary)
+          Spacer()
+          Text("────").fontScale(theme.smallScale).foregroundColor(active ? color : theme.textSecondary)
+        }
+        .padding(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 8))
+        .sizing(x: .grow)
+        .background(active ? theme.statusBackground : theme.panelBackground)
+        child = BlockEngine.prepare(content, context: context)
+        child?.register(in: rect)
+      },
+      paint: { list, rect in
+        child?.paint(into: &list, in: rect)
+      })
   }
 }
 
-private struct CommandRevealTranscript: PrimitiveBlock {
-  var focusRule: FocusRule { .container }
+private struct CommandRevealTranscript: LayoutPreparingBlock {
   let session: SessionController
   let controller: ScrollViewController
   let rows: [ScrollView.Row]
@@ -269,25 +293,40 @@ private struct CommandRevealTranscript: PrimitiveBlock {
 
   @MainActor func sizeThatFits(_ proposal: Size, context: BlockContext) -> Size { proposal }
 
-  @MainActor func draw(into drawList: inout DrawList, in rect: Rect, context: BlockContext) {
-    if let revealRow, session.consumeCommandReveal() {
-      var offset: Float = 0
-      for index in 0..<revealRow {
-        offset +=
-          BlockEngine.measure(
-            rows[index].content,
-            proposal: Size(width: rect.size.width, height: Float.greatestFiniteMagnitude),
-            context: context
-          ).height
-      }
-      controller.scroll(to: offset)
-    }
-    let stack = ScrollView("Transcript", sticksToBottom: true, controller: controller, rows: rows)
-    TranscriptViewportRegistry.current = rect
-    TranscriptViewportRegistry.lastDrawn = rect
-    TranscriptViewportRegistry.scrollController = controller
-    defer { TranscriptViewportRegistry.current = nil }
-    BlockEngine.draw(stack, into: &drawList, in: rect, context: context)
+  @MainActor func prepareLayout(context: BlockContext) -> BlockEngine.Resolved {
+    var child: BlockEngine.Resolved?
+    return BlockEngine.Resolved(
+      expandsHorizontally: { expandsHorizontally },
+      expandsVertically: { expandsVertically },
+      measure: { sizeThatFits($0, context: context) },
+      register: { rect in
+        if let revealRow, session.consumeCommandReveal() {
+          var offset: Float = 0
+          for index in 0..<revealRow {
+            offset +=
+              BlockEngine.measure(
+                rows[index].content,
+                proposal: Size(width: rect.size.width, height: Float.greatestFiniteMagnitude),
+                context: context
+              ).height
+          }
+          controller.scroll(to: offset)
+        }
+        let stack = ScrollView("Transcript", sticksToBottom: true, controller: controller, rows: rows)
+        let previous = TranscriptViewportRegistry.current
+        TranscriptViewportRegistry.current = rect
+        TranscriptViewportRegistry.lastDrawn = rect
+        TranscriptViewportRegistry.scrollController = controller
+        defer { TranscriptViewportRegistry.current = previous }
+        child = BlockEngine.prepare(stack, context: context)
+        child?.register(in: rect)
+      },
+      paint: { list, rect in
+        let previous = TranscriptViewportRegistry.current
+        TranscriptViewportRegistry.current = rect
+        defer { TranscriptViewportRegistry.current = previous }
+        child?.paint(into: &list, in: rect)
+      })
   }
 }
 
@@ -307,30 +346,31 @@ struct TranscriptItemBlock: Block {
           markdown: item.selectionHeader, theme: theme, baseColor: labelColor,
           scale: theme.smallScale, itemID: item.headerSelectionID)
         Spacer()
-      }, content: VStack(spacing: 7) {
-      if item.isCollapsible {
-        HStack {
-          Button(
-            item.isTextCollapsed ? "Show full text" : "Hide text",
-            fontScale: theme.smallScale
-          ) { toggleText() }
-          Spacer()
+      },
+      content: VStack(spacing: 7) {
+        if item.isCollapsible {
+          HStack {
+            Button(
+              item.isTextCollapsed ? "Show full text" : "Hide text",
+              fontScale: theme.smallScale
+            ) { toggleText() }
+            Spacer()
+          }
         }
-      }
-      if item.text.isEmpty {
-        MarkdownText(
-          markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
-          scale: theme.smallScale, itemID: item.selectionID)
-      } else if item.kind == .answer || item.kind == .reasoning {
-        MarkdownText(
-          markdown: item.text, theme: theme, baseColor: bodyColor,
-          scale: theme.textScale, itemID: item.selectionID)
-      } else {
-        WrappedText(
-          text: item.displayText, theme: theme, color: bodyColor,
-          scale: theme.textScale, itemID: item.selectionID)
-      }
-    })
+        if item.text.isEmpty {
+          MarkdownText(
+            markdown: item.selectionBody, theme: theme, baseColor: theme.textSecondary,
+            scale: theme.smallScale, itemID: item.selectionID)
+        } else if item.kind == .answer || item.kind == .reasoning {
+          MarkdownText(
+            markdown: item.text, theme: theme, baseColor: bodyColor,
+            scale: theme.textScale, itemID: item.selectionID)
+        } else {
+          WrappedText(
+            text: item.displayText, theme: theme, color: bodyColor,
+            scale: theme.textScale, itemID: item.selectionID)
+        }
+      })
   }
 
   private var label: String {

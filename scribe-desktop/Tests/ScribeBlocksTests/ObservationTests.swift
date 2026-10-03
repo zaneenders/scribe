@@ -1,6 +1,6 @@
 import Chroma
-import Dispatch
 import ChromaTesting
+import Dispatch
 import Testing
 
 @testable import ScribeBlocks

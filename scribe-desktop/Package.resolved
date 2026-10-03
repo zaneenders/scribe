@@ -1,5 +1,5 @@
 {
-  "originHash" : "c48c933bd604bfa08adc3b878baad58f51e4761a1a4edab591a46486538141b5",
+  "originHash" : "e687cf8ccdb4b36d872f5649d21afc51c8f5c0126ca52cd00b0dbd4f24b33cdd",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/zaneenders/chroma",
       "state" : {
-        "branch" : "e46e475",
-        "revision" : "e46e475ded8be5d4df569d534b94a32102e48d23"
+        "branch" : "1f240b9",
+        "revision" : "1f240b964ce394f5ca7705ce8dad13978e8163bf"
       }
     },
     {
@@ -87,8 +87,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections",
       "state" : {
-        "revision" : "6675bc0ff86e61436e615df6fc5174e043e57924",
-        "version" : "1.4.1"
+        "revision" : "98ef3c98609a1e31b7e157b5b619579001a789d6",
+        "version" : "1.7.1"
       }
     },
     {

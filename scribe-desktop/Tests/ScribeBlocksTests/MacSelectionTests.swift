@@ -26,7 +26,9 @@ struct MacSelectionTests {
       interaction.beginFrame(input: input)
       TranscriptViewportRegistry.current = viewport
       var list = DrawList()
-      BlockEngine.draw(block, into: &list, in: viewport, context: context)
+      let prepared = BlockEngine.prepare(block, context: context)
+      prepared.register(in: viewport)
+      prepared.paint(into: &list, in: viewport)
       interaction.endFrame()
     }
     draw()
@@ -34,9 +36,10 @@ struct MacSelectionTests {
     draw()
     let offset = controller.offset
     let point = Point(x: 100, y: 100)
-    draw(InputState(
-      pointerPosition: point, pointerPressPosition: point,
-      pointerDown: true, pointerPressed: true))
+    draw(
+      InputState(
+        pointerPosition: point, pointerPressPosition: point,
+        pointerDown: true, pointerPressed: true))
     #expect(controller.offset == offset)
   }
 
@@ -100,9 +103,10 @@ struct MacSelectionTests {
     var drawList = DrawList()
     let focus = FocusTarget()
     focus.focus(editing: true)
-    BlockEngine.draw(
-      TextEditor(singleLine: true, text: { "draft" }, onChange: { _ in }).focusTarget(focus),
-      into: &drawList, in: Rect(x: 0, y: 100, width: 300, height: 40), context: context)
+    let prepared = BlockEngine.prepare(
+      TextEditor(singleLine: true, text: { "draft" }, onChange: { _ in }).focusTarget(focus), context: context)
+    prepared.register(in: Rect(x: 0, y: 100, width: 300, height: 40))
+    prepared.paint(into: &drawList, in: Rect(x: 0, y: 100, width: 300, height: 40))
     interaction.endFrame()
     interaction.caretOffset = 5
     interaction.editingText = "draft"
