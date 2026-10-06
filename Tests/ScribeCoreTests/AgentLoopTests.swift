@@ -41,7 +41,7 @@ private func makeConfig(
   tools: [any ScribeTool] = [],
   temperature: Double = 0,
   maxToolRounds: Int = .max,
-  hooks: AgentLoopHooks = .default,
+  hooks: AgentLoopHooks = AgentLoopHooks(),
   retryPolicy: RetryPolicy = .fastTestPolicy
 ) -> AgentLoopConfig {
   let transport = ScriptedTransport(status: statusCode, chunks: chunks)
@@ -210,7 +210,7 @@ struct AgentLoopTests {
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
       reasoningEffort: "xhigh",
-      hooks: .default)
+      hooks: AgentLoopHooks())
 
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let body = try #require(transport.requestBodies.first)
@@ -238,7 +238,7 @@ struct AgentLoopTests {
       reasoningEnabled: true,
       reasoningEncoding: .deepSeek,
       reasoningEffort: "none",
-      hooks: .default)
+      hooks: AgentLoopHooks())
 
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let body = try #require(transport.requestBodies.first)
@@ -265,7 +265,7 @@ struct AgentLoopTests {
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
       serviceTier: "priority",
-      hooks: .default)
+      hooks: AgentLoopHooks())
 
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let body = try #require(transport.requestBodies.first)
@@ -289,7 +289,7 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default,
+      hooks: AgentLoopHooks(),
       sessionId: sessionId,
       sendsOpenCodeHeader: true
     )
@@ -314,7 +314,7 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let header = transport.capturedRequests.first?
@@ -401,7 +401,7 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -498,7 +498,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     let notifier = AbortNotifier()
 
@@ -543,7 +543,7 @@ struct AgentLoopTests {
         temperature: 0,
         maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
         reasoningEnabled: true,
-        hooks: .default
+        hooks: AgentLoopHooks()
       )
       let (messages, termination) = try await runLoop(
         prompt: "test",
@@ -739,7 +739,7 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -781,7 +781,7 @@ struct AgentLoopTests {
       temperature: 0,
       maxToolRounds: .max, workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     let (messages, termination) = try await runLoop(
       prompt: "test", config: config, abortNotifier: AbortNotifier())
@@ -836,7 +836,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
 
     let (messages, termination) = try await runLoop(
@@ -887,7 +887,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
@@ -952,7 +952,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
@@ -1015,7 +1015,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil,
-      hooks: .default
+      hooks: AgentLoopHooks()
     )
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
     do {
@@ -1204,7 +1204,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default,
+      hooks: AgentLoopHooks(),
       retryPolicy: .fastTestPolicy
     )
     let events = Mutex<[AgentEvent]>([])
@@ -1244,7 +1244,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default,
+      hooks: AgentLoopHooks(),
       retryPolicy: RetryPolicy(
         maxRetries: 2, initialDelay: .milliseconds(1), maxDelay: .milliseconds(4))
     )
@@ -1281,7 +1281,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default,
+      hooks: AgentLoopHooks(),
       retryPolicy: .fastTestPolicy
     )
     let (messages, termination) = try await runLoop(
@@ -1304,7 +1304,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default,
+      hooks: AgentLoopHooks(),
       retryPolicy: .fastTestPolicy
     )
     do {
@@ -1345,7 +1345,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      hooks: .default,
+      hooks: AgentLoopHooks(),
       retryPolicy: .fastTestPolicy
     )
     let events = Mutex<[AgentEvent]>([])

@@ -41,6 +41,4 @@ struct AgentLoopHooks: Sendable {
     self.beforeToolCall = beforeToolCall
     self.afterToolCall = afterToolCall
   }
-
-  static let `default` = AgentLoopHooks()
 }

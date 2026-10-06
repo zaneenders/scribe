@@ -93,7 +93,7 @@ private func responsesOverflowConfig(transport: ResponsesOverflowTransport) -> R
     maxToolRounds: .max,
     workingDirectory: FilePath("/tmp"),
     reasoningEnabled: nil,
-    hooks: .default)
+    hooks: AgentLoopHooks())
 }
 
 @Test
