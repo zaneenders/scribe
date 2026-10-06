@@ -38,6 +38,62 @@ struct SessionHarnessTests {
     return (harness, queue)
   }
 
+  @Test func promptIsPersistedBeforeRequestAndMessagesAreNotDuplicated() async throws {
+    let tracking = TrackingPersister()
+    let transport = CountingTransport(
+      chunks: [sseChunk(#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#), doneChunk()],
+      onSend: {
+        #expect(tracking.appendedMessages.map(\.content) == ["hello"])
+      })
+    let harness = makeStreamingHarness(transport: transport, persister: tracking)
+
+    _ = try await harness.submit("hello") { _ in }
+
+    #expect(tracking.appendedMessages.map(\.content) == ["hello", "ok"])
+    #expect(await harness.snapshot().messages.map(\.content) == ["hello", "ok"])
+  }
+
+  @Test func failedPromptPersistenceDoesNotStartRequest() async throws {
+    let tracking = TrackingPersister(failsAppend: true)
+    let transport = CountingTransport(chunks: [])
+    let harness = makeStreamingHarness(transport: transport, persister: tracking)
+
+    await #expect(throws: ScribeError.self) {
+      try await harness.submit("hello") { _ in }
+    }
+
+    #expect(transport.callCount == 0)
+    #expect(await harness.messageCount == 0)
+  }
+
+  @Test func failedAssistantPersistenceKeepsSavedPrompt() async throws {
+    let tracking = TrackingPersister(failsAppendAfter: 1)
+    let transport = CountingTransport(chunks: [
+      sseChunk(#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#), doneChunk(),
+    ])
+    let harness = makeStreamingHarness(transport: transport, persister: tracking)
+
+    await #expect(throws: ScribeError.self) {
+      try await harness.submit("hello") { _ in }
+    }
+
+    #expect(tracking.appendedMessages.map(\.content) == ["hello"])
+    #expect(await harness.snapshot().messages.map(\.content) == ["hello"])
+  }
+
+  private func makeStreamingHarness(
+    transport: CountingTransport, persister: any SessionPersister
+  ) -> SessionHarness {
+    let agent = ScribeAgent(
+      client: Client(serverURL: URL(string: "http://test")!, transport: transport),
+      model: "test-model", workingDirectory: FilePath("/tmp"),
+      reasoningEnabled: nil, logger: logger)
+    return SessionHarness(
+      configuration: .testValue,
+      document: SessionDocument(sessionId: UUID(), directory: FilePath("/in-memory"), logger: logger),
+      persister: persister, agent: agent, logger: logger)
+  }
+
   @Test func snapshotReflectsDocument() async throws {
     let (harness, _) = try makeHarness(seed: [
       ScribeMessage(role: .system, content: "sys"),
@@ -363,7 +419,10 @@ private final class CountingTransport: ClientTransport, Sendable {
 
   var callCount: Int { state.withLock { $0 } }
 
-  init(chunks: [HTTPBody.ByteChunk]) {
+  private let onSend: @Sendable () -> Void
+
+  init(chunks: [HTTPBody.ByteChunk], onSend: @escaping @Sendable () -> Void = {}) {
+    self.onSend = onSend
     self.chunks = chunks
   }
 
@@ -371,6 +430,7 @@ private final class CountingTransport: ClientTransport, Sendable {
     _ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String
   ) async throws -> (HTTPResponse, HTTPBody?) {
     state.withLock { $0 += 1 }
+    onSend()
     let response = HTTPResponse(status: .init(code: 200))
     let streamBody = HTTPBody(
       AsyncStream { continuation in
@@ -391,9 +451,11 @@ private final class TrackingPersister: SessionPersister, Sendable {
     var configuration: (model: String, profileName: String?, baseURL: String?)?
   }
 
+  private let failsAppendAfter: Int?
   private let failsReconfiguration: Bool
 
-  init(failsReconfiguration: Bool = false) {
+  init(failsReconfiguration: Bool = false, failsAppend: Bool = false, failsAppendAfter: Int? = nil) {
+    self.failsAppendAfter = failsAppend ? 0 : failsAppendAfter
     self.failsReconfiguration = failsReconfiguration
   }
 
@@ -410,7 +472,12 @@ private final class TrackingPersister: SessionPersister, Sendable {
   }
 
   func append(_ messages: [ScribeMessage]) async throws {
-    lock.withLock { $0.appended.append(contentsOf: messages) }
+    try lock.withLock { state in
+      if let failsAppendAfter, state.appended.count >= failsAppendAfter {
+        throw ScribeError.generic("persistence failed")
+      }
+      state.appended.append(contentsOf: messages)
+    }
   }
 
   func reconfigure(model: String, profileName: String?, baseURL: String?) async throws {

@@ -198,21 +198,21 @@ func runAgentLoopCore(
     switch roundResult.kind {
     case .completed:
       emit(.boundary(.turnEnd(round: round, outcome: .completed)))
-      commit(&currentContext.messages, &newMessages, roundBuffer)
+      try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
       outcome = .completed
       return (newMessages, outcome)
 
     case .error(let description, let hasPartialMessage):
       emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
       if hasPartialMessage {
-        commit(&currentContext.messages, &newMessages, roundBuffer)
+        try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
       }
       outcome = .error(description)
       return (newMessages, outcome)
 
     case .incomplete(let reason):
       emit(.boundary(.turnEnd(round: round, outcome: .incomplete(reason: reason))))
-      commit(&currentContext.messages, &newMessages, roundBuffer)
+      try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
       outcome = .incomplete(reason: reason)
       return (newMessages, outcome)
 
@@ -310,7 +310,7 @@ func runAgentLoopCore(
           contentsOf: finalResult.attachments.map { (attachment: $0, toolName: resolvedInv.name) })
 
         if afterDecision.terminate {
-          commit(&currentContext.messages, &newMessages, roundBuffer)
+          try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
           outcome = .completed
           return (newMessages, outcome)
         }
@@ -332,7 +332,7 @@ func runAgentLoopCore(
         emit(.boundary(.messageEnd(role: .user, round: round)))
       }
 
-      commit(&currentContext.messages, &newMessages, roundBuffer)
+      try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
     }
   }
 }
@@ -340,8 +340,11 @@ func runAgentLoopCore(
 private func commit(
   _ context: inout [Components.Schemas.ChatMessage],
   _ newMessages: inout [Components.Schemas.ChatMessage],
-  _ buffer: [Components.Schemas.ChatMessage]
-) {
+  _ buffer: [Components.Schemas.ChatMessage],
+  hooks: AgentLoopHooks
+) async throws {
+  // Checkpoint whole rounds so tool calls and their results stay together.
+  try await hooks.onMessagesCommitted(buffer.toScribeMessages())
   context.append(contentsOf: buffer)
   newMessages.append(contentsOf: buffer)
 }

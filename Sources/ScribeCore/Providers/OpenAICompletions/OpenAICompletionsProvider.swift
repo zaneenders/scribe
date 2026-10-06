@@ -39,7 +39,7 @@ struct OpenAICompletionsProvider: AgentProvider {
       reasoningEncoding: reasoningEncoding,
       reasoningEffort: reasoningEffort,
       serviceTier: serviceTier,
-      hooks: .default,
+      hooks: AgentLoopHooks(onMessagesCommitted: options.onMessagesCommitted),
       contextWindow: contextWindow,
       retryPolicy: retryPolicy,
       sessionId: options.sessionId ?? fallbackSessionId,

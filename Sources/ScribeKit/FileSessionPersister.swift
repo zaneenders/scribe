@@ -91,6 +91,7 @@ public final class FileSessionPersister: SessionPersister {
       logger.error(
         "session.persister.append.fail",
         metadata: ["err": "\(String(describing: error))"])
+      throw error
     }
   }
 

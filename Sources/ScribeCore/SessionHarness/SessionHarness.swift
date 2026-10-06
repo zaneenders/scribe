@@ -206,6 +206,10 @@ public actor SessionHarness {
   ) async throws -> TurnOutcome {
     guard !promptMessages.isEmpty else { return .completed }
 
+    // Capture pre-prompt history to avoid sending the newly persisted prompt twice.
+    let history = document.agentHistory()
+    try await applyEdit(.append(promptMessages))
+
     for msg in promptMessages where msg.role == .user {
       onUserPrompt(msg.content)
     }
@@ -217,9 +221,11 @@ public actor SessionHarness {
     }
     logger.debug("session.harness.submit", metadata: metadata)
 
-    let history = document.agentHistory()
     var options = options
     options.sessionId = document.sessionId
+    options.onMessagesCommitted = { messages in
+      try await self.applyEdit(.append(messages))
+    }
     let turnStream = agent.run(promptMessages, history: history, options: options)
 
     for await event in turnStream.events {
@@ -230,9 +236,6 @@ public actor SessionHarness {
     }
 
     let result = try await turnStream.result.value
-    if !result.newMessages.isEmpty {
-      try await applyEdit(.append(result.newMessages))
-    }
 
     switch result.outcome {
     case .completed:
