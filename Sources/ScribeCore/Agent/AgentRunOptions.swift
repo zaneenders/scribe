@@ -5,6 +5,8 @@ public struct AgentRunOptions: Sendable {
   public var maxToolRounds: Int
   public var sessionId: UUID?
 
+  var onMessagesCommitted: @Sendable ([ScribeMessage]) async throws -> Void = { _ in }
+
   public init(
     temperature: Double? = nil,
     maxToolRounds: Int = .max,

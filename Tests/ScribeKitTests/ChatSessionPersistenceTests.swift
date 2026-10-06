@@ -8,6 +8,23 @@ import Testing
 
 @Suite
 struct ChatSessionPersistenceTests {
+  @Test func filePersisterPropagatesAppendFailure() async throws {
+    try await withTemporaryDirectory { directory in
+      let persister = try await FileSessionPersister.open(
+        sessionId: UUID(), directory: FilePath(directory.path), sessionCreatedAt: Date(),
+        isNewSession: true, model: "test", profileName: nil, cwd: "/tmp",
+        baseURL: nil, scribeVersion: nil, logger: Logger(label: "test"))
+      // A directory at the metadata path makes the post-append metadata write fail.
+      let metadataURL = directory.appendingPathComponent("metadata.json")
+      try FileManager.default.removeItem(at: metadataURL)
+      try FileManager.default.createDirectory(at: metadataURL, withIntermediateDirectories: false)
+
+      await #expect(throws: (any Error).self) {
+        try await persister.append([ScribeMessage(role: .user, content: "hello")])
+      }
+    }
+  }
+
   @Test func roundTripsThroughSaveAndLoad() async throws {
     let id = UUID()
     let stamp = Date(timeIntervalSince1970: 1_700_000_000)

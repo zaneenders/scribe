@@ -22,11 +22,14 @@ struct AfterToolCallDecision: Sendable {
 
 struct AgentLoopHooks: Sendable {
 
+  var onMessagesCommitted: @Sendable ([ScribeMessage]) async throws -> Void
+
   var beforeToolCall: @Sendable (ToolInvocation) async -> BeforeToolCallDecision
 
   var afterToolCall: @Sendable (ToolInvocation, ToolResult) async -> AfterToolCallDecision
 
   init(
+    onMessagesCommitted: @escaping @Sendable ([ScribeMessage]) async throws -> Void = { _ in },
     beforeToolCall: @escaping @Sendable (ToolInvocation) async -> BeforeToolCallDecision = {
       .proceed($0)
     },
@@ -34,6 +37,7 @@ struct AgentLoopHooks: Sendable {
       _, result in .passThrough(result)
     }
   ) {
+    self.onMessagesCommitted = onMessagesCommitted
     self.beforeToolCall = beforeToolCall
     self.afterToolCall = afterToolCall
   }

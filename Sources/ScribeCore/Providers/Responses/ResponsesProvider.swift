@@ -55,7 +55,7 @@ struct ResponsesProvider: AgentProvider {
         serviceTier: serviceTier,
         usesCodexBackend: usesCodexBackend,
         temperature: options.temperature ?? defaultTemperature,
-        hooks: .default,
+        hooks: AgentLoopHooks(onMessagesCommitted: options.onMessagesCommitted),
         contextWindow: contextWindow,
         retryPolicy: retryPolicy
       )

@@ -124,6 +124,60 @@ private func expectTermination(_ actual: TurnOutcome, _ expected: TurnOutcome) {
 @Suite
 struct AgentLoopTests {
 
+  @Test func commitsToolRoundBeforeNextRequestFails() async throws {
+    let committed = Mutex<[[ScribeMessage]]>([])
+    let hooks = AgentLoopHooks(onMessagesCommitted: { messages in
+      committed.withLock { $0.append(messages) }
+    })
+    let config = makeConfig(chunks: [], hooks: hooks)
+    let invocation = ToolInvocation(id: "call-1", name: "fake_tool", arguments: "{}")
+
+    let result = try await runAgentLoopCore(
+      promptMessages: [Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))],
+      context: AgentContext(messages: []), config: config, logTag: "",
+      emit: { _ in }, logger: testLogger, abortObserver: NoOpAbortObserver()
+    ) { _, round, _ in
+      if round == 1 {
+        return RoundResult(
+          assistantMessage: Components.Schemas.ChatMessage(
+            role: .assistant,
+            toolCalls: [.init(id: invocation.id, _type: "function",
+              function: .init(name: invocation.name, arguments: invocation.arguments))]),
+          kind: .toolCalls([invocation]))
+      }
+      let batches = committed.withLock { $0 }
+      #expect(batches.count == 1)
+      #expect(batches.first?.map(\.role) == [.assistant, .tool])
+      throw URLError(.badServerResponse)
+    }
+
+    #expect(committed.withLock { $0.count } == 1)
+    #expect(result.messages.count == 3)
+    if case .error = result.termination {} else { Issue.record("Expected request failure") }
+  }
+
+  @Test func failedCommitStopsBeforeNextRound() async throws {
+    let rounds = Mutex<[Int]>([])
+    let hooks = AgentLoopHooks(onMessagesCommitted: { _ in
+      throw ScribeError.generic("persistence failed")
+    })
+    let config = makeConfig(chunks: [], hooks: hooks)
+    let invocation = ToolInvocation(id: "call-1", name: "fake_tool", arguments: "{}")
+
+    await #expect(throws: ScribeError.self) {
+      try await runAgentLoopCore(
+        promptMessages: [], context: AgentContext(messages: []), config: config, logTag: "",
+        emit: { _ in }, logger: testLogger, abortObserver: NoOpAbortObserver()
+      ) { _, round, _ in
+        rounds.withLock { $0.append(round) }
+        return RoundResult(
+          assistantMessage: Components.Schemas.ChatMessage(role: .assistant),
+          kind: .toolCalls([invocation]))
+      }
+    }
+    #expect(rounds.withLock { $0 } == [1])
+  }
+
   @Test func completesWithAssistantReply() async throws {
     let chunks = [
       sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"reply"}}]}"#),
