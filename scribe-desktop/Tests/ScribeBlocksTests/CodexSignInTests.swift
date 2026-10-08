@@ -134,7 +134,7 @@ struct CodexSignInTests {
   }
 
   private func hasText(_ text: String, in renderer: HeadlessHost) -> Bool {
-    renderer.render().commands.contains {
+    renderer.render().paintSnapshot.contains {
       if case .text(_, let value, _, _) = $0 { return value == text }
       return false
     }

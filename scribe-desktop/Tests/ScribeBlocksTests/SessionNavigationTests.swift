@@ -246,7 +246,7 @@ struct SessionNavigationTests {
       onSelect: { selections += 1 })
     let frame = renderer.render()
     #expect(
-      frame.commands.contains {
+      frame.paintSnapshot.contains {
         if case .text(_, "Planning", let foreground, _) = $0 { return foreground == color }
         return false
       })
@@ -257,7 +257,7 @@ struct SessionNavigationTests {
   private func click(_ text: String, in renderer: HeadlessHost) {
     let frame = renderer.render()
     guard
-      let position = frame.commands.compactMap({ command -> Point? in
+      let position = frame.paintSnapshot.compactMap({ command -> Point? in
         if case .text(let position, let value, _, _) = command, value == text { return position }
         return nil
       }).first

@@ -14,14 +14,14 @@ struct WorkspaceComponentsTests {
       style: ScribeTranscriptPanelStyle(background: background, border: .clear, cornerRadius: 7),
       header: Text("Tool output"), content: Text("Result"))
     let frame = renderer.render()
-    let texts = frame.commands.compactMap { command -> String? in
+    let texts = frame.paintSnapshot.compactMap { command -> String? in
       if case .text(_, let text, _, _) = command { return text }
       return nil
     }
     #expect(texts.contains("Tool output"))
     #expect(texts.contains("Result"))
     #expect(
-      frame.commands.contains {
+      frame.paintSnapshot.contains {
         if case .fillRoundedRect(_, _, let color) = $0 { return color == background }
         return false
       })
@@ -45,7 +45,7 @@ struct WorkspaceComponentsTests {
     let renderer = HeadlessHost(size: Size(width: 400, height: 200))
     defer { renderer.close() }
     renderer.content = ScribeWorkspaceScope(content: Text("Host layout"), workspace: ScribeWorkspace())
-    let texts = renderer.render().commands.compactMap { command -> String? in
+    let texts = renderer.render().paintSnapshot.compactMap { command -> String? in
       if case .text(_, let text, _, _) = command { return text }
       return nil
     }

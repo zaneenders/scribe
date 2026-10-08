@@ -20,9 +20,10 @@ by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 ## Chroma observation integration
 
-The desktop package pins Chroma in `scribe-desktop/Package.swift`.
-The root runtime package has no Chroma dependency.
-A sibling `../chroma` checkout is not required to build Scribe.
+The desktop package pins Chroma to a published commit in `scribe-desktop/Package.swift`.
+The root runtime package has no Chroma dependency; a sibling checkout is not required.
+Use the platform-specific [install command](README.md#install) from the repository
+root to install a release build with profiling symbols.
 
 `ScribeMacStore` and `SessionController` use Swift Observation so model changes
 read during a Chroma frame request a redraw, including asynchronous updates.
@@ -38,8 +39,24 @@ swift run --package-path scribe-desktop scribe-mac
 ## Testing
 
 Run `swift test` for runtime tests and `swift test --package-path scribe-desktop`
-for desktop tests. Run `Scripts/test-package-boundary.sh` to verify the runtime
-dependency graph excludes desktop dependencies. The following commands report runtime coverage.
+for desktop tests. To verify the runtime dependency graph excludes desktop dependencies:
+
+```sh
+swift package show-dependencies --format json | python3 -c '
+import json, sys
+
+def identities(package):
+    yield package["identity"]
+    for dependency in package["dependencies"]:
+        yield from identities(dependency)
+
+packages = set(identities(json.load(sys.stdin)))
+assert "chroma" not in packages, packages
+assert "swift-profile-recorder" not in packages, packages
+'
+```
+
+The following commands report runtime coverage.
 
 **macOS**
 ```bash

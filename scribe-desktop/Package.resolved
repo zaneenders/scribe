@@ -1,5 +1,5 @@
 {
-  "originHash" : "e687cf8ccdb4b36d872f5649d21afc51c8f5c0126ca52cd00b0dbd4f24b33cdd",
+  "originHash" : "7f4b8fbaf08e896562ed3a07ef9e4c050da66ba03c9fd5737f0adca9d51764eb",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/zaneenders/chroma",
       "state" : {
-        "branch" : "1f240b9",
-        "revision" : "1f240b964ce394f5ca7705ce8dad13978e8163bf"
+        "branch" : "d689f58",
+        "revision" : "d689f5885a9d4adc04ebd08e15906c23c9809cd4"
       }
     },
     {
@@ -83,6 +83,15 @@
       }
     },
     {
+      "identity" : "swift-cmark",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-cmark.git",
+      "state" : {
+        "revision" : "08ddb528923cc1a6527e02b7a1aee9e516ca749a",
+        "version" : "0.9.0"
+      }
+    },
+    {
       "identity" : "swift-collections",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections",
@@ -143,6 +152,15 @@
       "state" : {
         "revision" : "5073617dac96330a486245e4c0179cb0a6fd2256",
         "version" : "1.12.0"
+      }
+    },
+    {
+      "identity" : "swift-markdown",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-markdown.git",
+      "state" : {
+        "revision" : "25cb61d3482054b09ae76ca4f281b1bfe7fe5a43",
+        "version" : "0.9.0"
       }
     },
     {

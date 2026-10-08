@@ -34,7 +34,7 @@ struct TextDisclosureTests {
       let frame = renderer.render()
       #expect(target.isFocused)
       let position = try #require(
-        frame.commands.compactMap { command -> Point? in
+        frame.paintSnapshot.compactMap { command -> Point? in
           guard case .text(let position, let text, _, _) = command, text == label else { return nil }
           return position
         }.first)
@@ -66,7 +66,7 @@ struct TextDisclosureTests {
         prepared.paint(into: &list, in: Rect(x: 0, y: 0, width: width, height: size.height))
         let label = expanded ? "Hide text" : "Show full text"
         var buttons = 0
-        for command in list.commands {
+        for command in list.paintSnapshot {
           if case .text(let position, let text, _, let scale) = command, text == label {
             buttons += 1
             #expect(position.x >= 0)
