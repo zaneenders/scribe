@@ -32,14 +32,16 @@ swift package --package-path scribe-desktop chroma-install
 
 **macOS**
 ```sh
-swift package --package-path scribe-desktop \
+swift package --package-path scribe-desktop --disable-sandbox \
   --allow-writing-to-directory "$HOME/Applications" chroma-install
 ```
 
 Release builds include profiling symbols; pass `--without-profiling` to omit them.
 Linux installs under `~/.local`; macOS installs `~/Applications/Scribe.app` and
-requires an Apple Development signing identity. Quit Scribe before reinstalling.
-Recognized legacy Linux installs are migrated with backups. No privileges are elevated.
+requires an Apple Development signing identity. The macOS command disables SwiftPM's
+plugin sandbox so signing can access the Keychain; only run it with packages you trust.
+Quit Scribe before reinstalling. Recognized legacy Linux installs are migrated with
+backups. No privileges are elevated.
 
 ## Configuration
 
