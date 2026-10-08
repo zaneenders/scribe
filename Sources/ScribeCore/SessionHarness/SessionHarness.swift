@@ -237,6 +237,7 @@ public actor SessionHarness {
 
     let result = try await turnStream.result.value
 
+    // Providers already emitted the terminal lifecycle event through turnStream.events.
     switch result.outcome {
     case .completed:
       logger.info("session.harness.turn.end", metadata: ["status": "completed"])
@@ -245,7 +246,6 @@ public actor SessionHarness {
       logger.warning(
         "session.harness.turn.end",
         metadata: ["status": "incomplete", "reason": "\(reason ?? "unknown")"])
-      onEvent(.lifecycle(.error(.generic("Response incomplete\(reason.map { ": \($0)" } ?? "")"))))
     case .interrupted:
       logger.notice("session.harness.turn.end", metadata: ["status": "interrupted"])
     case .toolRoundLimit(let max):
@@ -257,7 +257,6 @@ public actor SessionHarness {
       logger.error(
         "session.harness.turn.end",
         metadata: ["status": "error", "err": "\(desc)"])
-      onEvent(.lifecycle(.error(.generic(desc))))
     }
 
     return result.outcome
