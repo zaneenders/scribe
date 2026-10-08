@@ -212,3 +212,86 @@ func responsesStreamEmitsOnlyOneFinalizedWhenBothResponseCompletedAndDonePresent
     #expect(!error.localizedDescription.contains("secret"))
   }
 }
+
+@Test func codexTransportFailureLogsSafeDiagnosticsAndFinalizesPartialOutput() async throws {
+  let logs = LogRecorder()
+  var events: [AgentEvent] = []
+  var processor = ResponsesStreamProcessor(
+    onEvent: { events.append($0) }, logger: logs.logger(),
+    abortObserver: NoOpAbortObserver(), streamWallStart: .now, redactErrors: true)
+  let body = HTTPBody(
+    AsyncThrowingStream<HTTPBody.ByteChunk, any Error> { continuation in
+      continuation.yield(
+        Array(
+          makeSSE(
+            #"{"type":"response.created","response":{"id":"secret-response-id"}}"#,
+            #"{"type":"response.reasoning_summary_text.delta","delta":"secret-content","sequence_number":7}"#
+          ).utf8)[...])
+      continuation.finish(
+        throwing: URLError(.networkConnectionLost, userInfo: [NSLocalizedDescriptionKey: "secret-token"]))
+    }, length: .unknown)
+  var turn = ResponsesAssistantTurn()
+  do {
+    try await processor.process(httpBody: body, httpStart: .now, turn: &turn)
+    Issue.record("Expected stream failure")
+  } catch {
+    #expect(error.localizedDescription == "Codex response stream unavailable.")
+    #expect(!String(describing: error).contains("secret"))
+  }
+  let entries = logs.entries.withLock { $0 }
+  let failure = try #require(entries.first { $0.message == "agent.stream.error.responses" })
+  #expect(failure.metadata["underlying_error_type"]?.description.contains("URLError") == true)
+  #expect(failure.metadata["error_code"] == "-1005")
+  #expect(failure.metadata["retryable"] == "true")
+  #expect(failure.metadata["decoded_chunks"] == "2")
+  #expect(failure.metadata["last_event_type"] == "response.reasoning_summary_text.delta")
+  #expect(failure.metadata["last_sequence_number"] == "7")
+  #expect(failure.metadata["stream_started"] == "true")
+  #expect(failure.metadata["terminal_event_received"] == "false")
+  #expect(failure.metadata["stream_elapsed_ms"] != nil)
+  #expect(failure.metadata["last_chunk_age_ms"] != nil)
+  #expect(!String(describing: entries).contains("secret"))
+  #expect(finalizedEvents(in: events).count == 1)
+  #expect(turn.reasoningText == "secret-content")
+}
+
+@Test func codexProviderFailureLogsOnlyAllowlistedCodes() async throws {
+  let logs = LogRecorder()
+  var processor = ResponsesStreamProcessor(
+    onEvent: { _ in }, logger: logs.logger(),
+    abortObserver: NoOpAbortObserver(), streamWallStart: .now, redactErrors: true)
+  var turn = ResponsesAssistantTurn()
+  await #expect(throws: ScribeError.self) {
+    try await processor.process(
+      httpBody: HTTPBody(
+        makeSSE(
+          #"{"type":"response.failed","sequence_number":9,"response":{"id":"secret-id","error":{"code":"server_error","type":"secret-type","message":"secret-message"}}}"#
+        )), httpStart: .now, turn: &turn)
+  }
+  let entries = logs.entries.withLock { $0 }
+  let failure = try #require(entries.first { $0.message == "agent.stream.provider-error.responses" })
+  #expect(failure.metadata["code"] == "server_error")
+  #expect(failure.metadata["provider_error_type"] == "redacted")
+  #expect(failure.metadata["terminal_event_received"] == "true")
+  #expect(failure.metadata["last_event_type"] == "response.failed")
+  #expect(failure.metadata["last_sequence_number"] == "9")
+  #expect(!String(describing: entries).contains("secret"))
+}
+
+@Test func codexPrematureEndLogsStreamStateWithoutUnknownEventContent() async throws {
+  let logs = LogRecorder()
+  var processor = ResponsesStreamProcessor(
+    onEvent: { _ in }, logger: logs.logger(),
+    abortObserver: NoOpAbortObserver(), streamWallStart: .now, redactErrors: true)
+  var turn = ResponsesAssistantTurn()
+  try await processor.process(
+    httpBody: HTTPBody(makeSSE("secret-malformed-json", #"{"type":"secret-event"}"#)),
+    httpStart: .now, turn: &turn)
+  let entries = logs.entries.withLock { $0 }
+  let failure = try #require(entries.first { $0.message == "agent.stream.incomplete.responses" })
+  #expect(processor.isIncomplete)
+  #expect(failure.metadata["last_event_type"] == "other")
+  #expect(failure.metadata["decoded_chunks"] == "1")
+  #expect(failure.metadata["unreadable_chunks"] == "1")
+  #expect(!String(describing: entries).contains("secret"))
+}

@@ -1,3 +1,4 @@
+import AsyncHTTPClient
 import Foundation
 import HTTPTypes
 import Logging
@@ -11,6 +12,52 @@ import Testing
 
 @Suite
 struct ResponsesProviderTests {
+
+  @Test("Codex diagnostics correlate failures without exposing transport details", arguments: [false, true])
+  func codexRequestFailureDiagnostics(streamFailure: Bool) async throws {
+    let transport = ScriptedTransport(responses: [
+      .init(
+        status: 200,
+        chunks: streamFailure
+          ? sseChunks(#"{"type":"response.reasoning_summary_text.delta","delta":"Partial reasoning"}"#) : [],
+        error: streamFailure ? nil : HTTPClientError.invalidHeaderFieldValues(["secret-token"]),
+        streamError: streamFailure ? HTTPClientError.readTimeout : nil)
+    ])
+    let logs = LogRecorder()
+    let provider = ResponsesProvider(
+      source: .configured(ScribeLLMResponses.Client(serverURL: URL(string: "https://test")!, transport: transport)),
+      model: "test-model", reasoningEnabled: true, reasoningEffort: nil, contextWindow: 128_000)
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))],
+      history: [], options: AgentRunOptions(), toolExecutor: NoOpToolExecutor(), chatTools: [],
+      workingDirectory: FilePath("/tmp"), logger: logs.logger(), abortNotifier: AbortNotifier())
+    var events: [AgentEvent] = []
+    for await event in stream.events { events.append(event) }
+    let result = try await stream.result.value
+    guard case .error(let description) = result.outcome else {
+      Issue.record("Expected failed turn")
+      return
+    }
+    #expect(!description.contains("secret"))
+    #expect(transport.capturedRequests.count == 1)
+    let entries = logs.entries.withLock { $0 }
+    let request = try #require(entries.first { $0.message == "agent.http.request.responses" })
+    let failure = try #require(
+      entries.first {
+        $0.message == (streamFailure ? "agent.stream.error.responses" : "agent.http.error.responses")
+      })
+    let attemptID = try #require(request.metadata["request_attempt_id"])
+    #expect(failure.metadata["request_attempt_id"] == attemptID)
+    #expect(failure.metadata["round"] == "1")
+    #expect(failure.metadata["model"] == "test-model")
+    #expect(failure.metadata["provider"] == "codex")
+    #expect(failure.metadata["error_code"] == (streamFailure ? "Read timeout" : "Invalid header field values"))
+    #expect(!String(describing: entries).contains("secret"))
+    if streamFailure {
+      #expect(result.newMessages.last?.reasoning == "Partial reasoning")
+      #expect(finalizedEvents(in: events).count == 1)
+    }
+  }
 
   @Test("Responses 401 identifies the endpoint and is not retried")
   func responsesUnauthorizedIsReportedAccurately() async throws {

@@ -132,6 +132,12 @@ private func runSingleResponsesRound(
   abortObserver: some AbortObserver
 ) async throws -> RoundResult {
   let clock = ContinuousClock()
+  var logger = logger
+  // Correlate request and stream records without logging server headers or IDs.
+  logger[metadataKey: "request_attempt_id"] = "\(UUID().uuidString)"
+  logger[metadataKey: "round"] = "\(round)"
+  logger[metadataKey: "model"] = "\(config.model)"
+  logger[metadataKey: "provider"] = config.usesCodexBackend ? "codex" : "responses"
 
   emit(.boundary(.messageStart(role: .assistant, round: round)))
 
@@ -190,6 +196,9 @@ private func runSingleResponsesRound(
   do {
     response = try await config.client.createResponse(body: .json(requestBody))
   } catch {
+    var metadata = responsesErrorMetadata(error)
+    metadata["request_elapsed_ms"] = "\((clock.now - httpStart) / .milliseconds(1))"
+    logger.error("agent.http.error.responses", metadata: metadata)
     if config.usesCodexBackend { throw ScribeError.generic("Codex request unavailable. Check credential authority.") }
     throw error
   }
@@ -206,6 +215,12 @@ private func runSingleResponsesRound(
       ])
     httpBody = try ok.body.textEventStream
   case .undocumented(statusCode: let code, let payload):
+    logger.warning(
+      "agent.http.response.responses",
+      metadata: [
+        "status": "\(code)",
+        "request_elapsed_ms": "\((clock.now - httpStart) / .milliseconds(1))",
+      ])
     if config.usesCodexBackend {
       throw ScribeError.responsesHTTPError(statusCode: code, detail: "Codex request rejected.")
     }
@@ -218,7 +233,6 @@ private func runSingleResponsesRound(
         detail = "(unable to read error body)"
       }
     }
-    logger.warning("agent.http.response.responses", metadata: ["status": "\(code)"])
     throw ScribeError.responsesHTTPError(statusCode: code, detail: detail)
   }
 

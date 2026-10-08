@@ -3,6 +3,19 @@ import Logging
 import OpenAPIRuntime
 import ScribeLLMResponses
 
+private let responsesDiagnosticEventTypes: Set<String> = [
+  "error", "response.created", "response.queued", "response.in_progress",
+  "response.completed", "response.incomplete", "response.failed",
+  "response.output_item.added", "response.output_item.done",
+  "response.content_part.added", "response.content_part.done",
+  "response.output_text.delta", "response.output_text.done",
+  "response.refusal.delta", "response.refusal.done",
+  "response.reasoning_text.delta", "response.reasoning_text.done",
+  "response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+  "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done",
+  "response.function_call_arguments.delta", "response.function_call_arguments.done",
+]
+
 struct ResponsesStreamProcessor<AO: AbortObserver> {
   private let onEvent: (AgentEvent) -> Void
   private let redactErrors: Bool
@@ -18,6 +31,10 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
   private(set) var incompleteReason: String?
   private var receivedTerminalEvent = false
   private var lastReasoningSummaryPart: String?
+  private var lastEventType = "none"
+  private var lastSequenceNumber: Int?
+  private var lastChunkAt: ContinuousClock.Instant?
+  private var unreadableChunkCount = 0
   let streamWallStart: ContinuousClock.Instant
 
   init(
@@ -47,6 +64,7 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
 
     do {
       for try await sse in sseStream {
+        lastChunkAt = clock.now
         if abortObserver.isAborted() {
           logger.notice("agent.stream.abort", metadata: ["where": "mid-stream-responses"])
           if streamStarted {
@@ -62,11 +80,17 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let eventType = json["type"] as? String
         else {
-          logger.warning("agent.stream.unreadable-responses-chunk")
+          unreadableChunkCount += 1
+          logger.warning(
+            "agent.stream.unreadable-responses-chunk",
+            metadata: ["unreadable_chunks": "\(unreadableChunkCount)"])
           continue
         }
 
         decodedChunkCount += 1
+        // Only known protocol event names are safe to log, not arbitrary server strings.
+        lastEventType = responsesDiagnosticEventTypes.contains(eventType) ? eventType : "other"
+        lastSequenceNumber = json["sequence_number"] as? Int
         if !loggedFirstChunk {
           loggedFirstChunk = true
           logger.debug(
@@ -198,23 +222,42 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
     } catch is AgentTurnInterruptedError {
       throw AgentTurnInterruptedError()
     } catch {
+      var metadata = responsesErrorMetadata(error)
+      metadata.merge(streamDiagnosticMetadata) { _, streamValue in streamValue }
+      if !redactErrors { metadata["err"] = "\(String(describing: error))" }
+      logger.error("agent.stream.error.responses", metadata: metadata)
+      if streamStarted { onEvent(.output(.finalized)) }
       if redactErrors {
         if let safe = error as? ScribeError, case .providerStreamError = safe { throw safe }
         throw ScribeError.generic("Codex response stream unavailable.")
       }
-      logger.error("agent.stream.error.responses", metadata: ["err": "\(String(describing: error))"])
       throw error
     }
 
     if !receivedTerminalEvent {
       isIncomplete = true
       incompleteReason = "Stream ended without terminal event"
+      logger.warning("agent.stream.incomplete.responses", metadata: streamDiagnosticMetadata)
     }
     if streamStarted {
       onEvent(.output(.finalized))
     } else {
       onEvent(.output(.empty))
     }
+  }
+
+  private var streamDiagnosticMetadata: Logger.Metadata {
+    [
+      "decoded_chunks": "\(decodedChunkCount)",
+      "unreadable_chunks": "\(unreadableChunkCount)",
+      "stream_started": "\(streamStarted)",
+      "terminal_event_received": "\(receivedTerminalEvent)",
+      "last_event_type": "\(lastEventType)",
+      "last_sequence_number": "\(lastSequenceNumber.map(String.init) ?? "none")",
+      "stream_elapsed_ms": "\((clock.now - streamWallStart) / .milliseconds(1))",
+      "last_chunk_age_ms": "\(lastChunkAt.map { String((clock.now - $0) / .milliseconds(1)) } ?? "none")",
+      "abort_requested": "\(abortObserver.isAborted())",
+    ]
   }
 
   private func responsesStreamError(
@@ -248,6 +291,10 @@ struct ResponsesStreamProcessor<AO: AbortObserver> {
       ]
       let safeCode = code.flatMap { allowed.contains($0) ? $0 : nil }
       let safeType = errorType.flatMap { allowed.contains($0) ? $0 : nil }
+      var metadata = streamDiagnosticMetadata
+      metadata["code"] = "\(safeCode ?? (code == nil ? "missing" : "redacted"))"
+      metadata["provider_error_type"] = "\(safeType ?? (errorType == nil ? "missing" : "redacted"))"
+      logger.error("agent.stream.provider-error.responses", metadata: metadata)
       let detail = safeCode == "context_length_exceeded" ? "context_length_exceeded" : "Codex response failed."
       return .providerStreamError(detail: detail, code: safeCode, type: safeType)
     }

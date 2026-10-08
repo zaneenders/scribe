@@ -161,6 +161,28 @@ release-mode profiling works out of the box.
 - **Convention:** message = `domain.action` (e.g. `agent.tool.start`); dimensions in swift-log `metadata`.
 - **Degraded mode:** if the session log file cannot be opened or a write fails, lines go to stderr (one warning on first write failure).
 
+### Responses / Codex failures
+
+Look in the affected session's `scribe.log` for `agent.http.error.responses`,
+`agent.stream.error.responses`, `agent.stream.provider-error.responses`, or
+`agent.stream.incomplete.responses`. HTTP rejections use
+`agent.http.response.responses` with the status code.
+
+Request and stream records include a locally generated `request_attempt_id`,
+`round`, `model`, and `provider`; each retry gets a new attempt ID. Stream failures
+record the underlying error type and safe code, elapsed time, time since the last
+SSE chunk, decoded/unreadable chunk counts, last known event type and sequence
+number, whether output started or a terminal event arrived, and cancellation state.
+`retryable` describes the original error's classification, not a promise that the
+request was retried: visible partial output prevents automatic replay. Actual
+retries produce `agent.retry.responses` records.
+
+Codex diagnostics omit credentials, headers, URLs, request/response bodies, and
+arbitrary error descriptions. Provider codes and event names are allowlisted;
+unknown values are redacted. The user-facing error remains generic. These records
+are emitted at warning/error level, so trace logging is not required for failure
+diagnostics.
+
 ### Embedder API (breaking vs pre–logging-clean-up)
 
 - Pass a host `Logger` into ``ScribeAgent`` at init (both `init(client:…)` and `init(configuration:…)`); the same instance flows through ``runAgentLoop``, ``ToolRegistry``, and built-in tools.

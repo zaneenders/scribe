@@ -3,6 +3,7 @@ import HTTPTypes
 import Logging
 import OpenAPIRuntime
 import ScribeLLM
+import ScribeLLMResponses
 import Synchronization
 import SystemPackage
 import Testing
@@ -85,13 +86,47 @@ struct SessionHarnessTests {
     transport: CountingTransport, persister: any SessionPersister
   ) -> SessionHarness {
     let agent = ScribeAgent(
-      client: Client(serverURL: URL(string: "http://test")!, transport: transport),
+      client: ScribeLLM.Client(serverURL: URL(string: "http://test")!, transport: transport),
       model: "test-model", workingDirectory: FilePath("/tmp"),
       reasoningEnabled: nil, logger: logger)
     return SessionHarness(
       configuration: .testValue,
       document: SessionDocument(sessionId: UUID(), directory: FilePath("/in-memory"), logger: logger),
       persister: persister, agent: agent, logger: logger)
+  }
+
+  @Test(arguments: [false, true])
+  func failedOrIncompleteTurnEmitsOneErrorAndRetainsQueuedMessages(incomplete: Bool) async throws {
+    let transport = ScriptedTransport(
+      chunks: sseChunks(
+        #"{"type":"response.reasoning_summary_text.delta","delta":"Partial reasoning"}"#,
+        incomplete
+          ? #"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}"#
+          : #"{"type":"response.failed","response":{"error":{"code":"server_error"}}}"#))
+    let agent = ScribeAgent(
+      responsesClient: ScribeLLMResponses.Client(serverURL: URL(string: "http://test")!, transport: transport),
+      model: "test-model", workingDirectory: FilePath("/tmp"), reasoningEnabled: true, logger: logger)
+    let queue = SessionMessageQueue()
+    queue.enqueue(text: "next prompt")
+    let harness = SessionHarness(
+      configuration: .testValue,
+      document: SessionDocument(sessionId: UUID(), directory: FilePath("/in-memory"), logger: logger),
+      persister: InMemorySessionPersister(), agent: agent, logger: logger, messageQueue: queue)
+    let events = Mutex<[AgentEvent]>([])
+
+    let outcome = try await harness.submit("hello") { event in events.withLock { $0.append(event) } }
+
+    #expect(outcome != .completed)
+    let errors = events.withLock { events in
+      events.filter {
+        if case .lifecycle(.error) = $0 { return true }
+        return false
+      }
+    }
+    #expect(errors.count == 1)
+    #expect(transport.capturedRequests.count == 1)
+    #expect(queue.previewTexts() == ["next prompt"])
+    #expect(await harness.snapshot().messages.last?.reasoning == "Partial reasoning")
   }
 
   @Test func snapshotReflectsDocument() async throws {
@@ -236,7 +271,7 @@ struct SessionHarnessTests {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]
     let transport = CountingTransport(chunks: chunks)
-    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let client = ScribeLLM.Client(serverURL: URL(string: "http://test")!, transport: transport)
     let agent = ScribeAgent(
       client: client,
       model: "test-model",
@@ -279,7 +314,7 @@ struct SessionHarnessTests {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]
     let transport = CountingTransport(chunks: chunks)
-    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let client = ScribeLLM.Client(serverURL: URL(string: "http://test")!, transport: transport)
     let agent = ScribeAgent(
       client: client,
       model: "test-model",
@@ -329,7 +364,7 @@ struct SessionHarnessTests {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]
     let transport = CountingTransport(chunks: chunks)
-    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let client = ScribeLLM.Client(serverURL: URL(string: "http://test")!, transport: transport)
     let agent = ScribeAgent(
       client: client,
       model: "test-model",
@@ -376,7 +411,7 @@ struct SessionHarnessTests {
     let reply = #"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#
     let chunks = [sseChunk(reply), doneChunk()]
     let transport = CountingTransport(chunks: chunks)
-    let client = Client(serverURL: URL(string: "http://test")!, transport: transport)
+    let client = ScribeLLM.Client(serverURL: URL(string: "http://test")!, transport: transport)
     let agent = ScribeAgent(
       client: client,
       model: "test-model",
