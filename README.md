@@ -23,17 +23,23 @@ sudo apt-get install binutils file libcurl4-openssl-dev libegl1-mesa-dev libgles
 
 ## Install
 
+Run from the repository root:
+
+**Linux**
 ```sh
-./Scripts/install.sh
+swift package --package-path scribe-desktop chroma-install
 ```
 
-This forwards to `swift package --package-path scribe-desktop chroma-install`.
+**macOS**
+```sh
+swift package --package-path scribe-desktop \
+  --allow-writing-to-directory "$HOME/Applications" chroma-install
+```
+
 Release builds include profiling symbols; pass `--without-profiling` to omit them.
 Linux installs under `~/.local`; macOS installs `~/Applications/Scribe.app` and
 requires an Apple Development signing identity. Quit Scribe before reinstalling.
 Recognized legacy Linux installs are migrated with backups. No privileges are elevated.
-
-`Scripts/package-linux.sh` remains available for redistributable Linux archives.
 
 ## Configuration
 
