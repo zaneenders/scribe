@@ -32,8 +32,8 @@ done
 chmod +x "$tmp/bin/"*
 export PATH="$tmp/bin:$PATH" VERSION=test OUTPUT_DIRECTORY="$tmp/dist" PREFIX="$tmp/install prefix"
 unset SCRIBE_WAYLAND_BINARY SWIFT_BUILD_SYSTEM
-installer="$tmp/repo with spaces/Scripts/install.sh"
-"$installer"
+installer="$tmp/repo with spaces/Scripts/package-linux.sh"
+"$installer" --install
 test "$(wc -l < "$TEST_TRACE")" -eq 2
 test ! -e "$PREFIX/bin/scribe"
 test -x "$PREFIX/bin/scribe-wayland"
@@ -43,7 +43,7 @@ test -f "$archive.sha256"
 (cd "$OUTPUT_DIRECTORY" && sha256sum -c "$(basename "$archive").sha256")
 
 : > "$TEST_TRACE"
-SWIFT_BUILD_SYSTEM=swiftbuild PREFIX="$tmp/override prefix" "$installer"
+SWIFT_BUILD_SYSTEM=swiftbuild PREFIX="$tmp/override prefix" "$installer" --install
 test "$(wc -l < "$TEST_TRACE")" -eq 2
 test -x "$tmp/override prefix/bin/scribe-wayland"
 

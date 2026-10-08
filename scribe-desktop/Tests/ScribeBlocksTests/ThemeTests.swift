@@ -14,9 +14,9 @@ struct ThemeTests {
 
     let frame = renderer.render()
     #expect(
-      frame.commands.contains(.fillRect(rect: Rect(x: 0, y: 0, width: 800, height: 600), color: theme.background)))
-    #expect(hasText("SCRIBE", color: theme.accent, in: frame.commands))
-    #expect(hasFill(theme.surface, in: frame.commands))
+      frame.paintSnapshot.contains(.fillRect(rect: Rect(x: 0, y: 0, width: 800, height: 600), color: theme.background)))
+    #expect(hasText("SCRIBE", color: theme.accent, in: frame.paintSnapshot))
+    #expect(hasFill(theme.surface, in: frame.paintSnapshot))
   }
 
   @Test func localChromeUsesInheritedPalette() {
@@ -48,18 +48,18 @@ struct ThemeTests {
     ).chromaTheme(theme)
 
     let frame = renderer.render()
-    #expect(hasFill(theme.textEditor.idleBackground, in: frame.commands))
-    #expect(hasText("Message Scribe", color: theme.textEditor.placeholder, in: frame.commands))
+    #expect(hasFill(theme.textEditor.idleBackground, in: frame.paintSnapshot))
+    #expect(hasText("Message Scribe", color: theme.textEditor.placeholder, in: frame.paintSnapshot))
   }
 
-  private func hasText(_ text: String, color: Color, in commands: [DrawCommand]) -> Bool {
+  private func hasText(_ text: String, color: Color, in commands: [PaintSnapshotEntry]) -> Bool {
     commands.contains { command in
       guard case .text(_, let value, let foreground, _) = command else { return false }
       return value == text && foreground == color
     }
   }
 
-  private func hasFill(_ color: Color, in commands: [DrawCommand]) -> Bool {
+  private func hasFill(_ color: Color, in commands: [PaintSnapshotEntry]) -> Bool {
     commands.contains { command in
       switch command {
       case .fillRect(_, let fill), .fillRoundedRect(_, _, let fill): fill == color

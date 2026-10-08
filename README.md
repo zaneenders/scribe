@@ -27,15 +27,13 @@ sudo apt-get install binutils file libcurl4-openssl-dev libegl1-mesa-dev libgles
 ./Scripts/install.sh
 ```
 
-- **macOS:** installs `/Applications/Scribe.app`; requires an Apple Development
-  signing certificate. Override with `SCRIBE_CODESIGN_IDENTITY` and
-  `SCRIBE_INSTALL_PATH`. Quit development instances and launch the installed
-  copy with `open /Applications/Scribe.app` to keep permissions consistent.
-- **Linux:** packages and installs to `~/.local`; override with `PREFIX`.
-  Run `./Scripts/package-linux.sh` to create an archive only. Packaging uses
-  SwiftPM's `native` engine to avoid a pinned-toolchain static-linking bug.
+This forwards to `swift package --package-path scribe-desktop chroma-install`.
+Release builds include profiling symbols; pass `--without-profiling` to omit them.
+Linux installs under `~/.local`; macOS installs `~/Applications/Scribe.app` and
+requires an Apple Development signing identity. Quit Scribe before reinstalling.
+Recognized legacy Linux installs are migrated with backups. No privileges are elevated.
 
-Use `./Scripts/install.sh --help` for overrides. No privileges are elevated automatically.
+`Scripts/package-linux.sh` remains available for redistributable Linux archives.
 
 ## Configuration
 

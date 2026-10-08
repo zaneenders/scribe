@@ -20,9 +20,10 @@ by [Swift DocC][docc], `README.md`, etc.) and the `.dev/` file is removed.
 
 ## Chroma observation integration
 
-The desktop package pins Chroma in `scribe-desktop/Package.swift`.
-The root runtime package has no Chroma dependency.
-A sibling `../chroma` checkout is not required to build Scribe.
+The desktop package pins Chroma to a published commit in `scribe-desktop/Package.swift`.
+The root runtime package has no Chroma dependency; a sibling checkout is not required.
+Run `swift package --package-path scribe-desktop chroma-install` from the repository
+root to install a release build with profiling symbols.
 
 `ScribeMacStore` and `SessionController` use Swift Observation so model changes
 read during a Chroma frame request a redraw, including asynchronous updates.
