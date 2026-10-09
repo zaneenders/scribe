@@ -102,7 +102,7 @@ func runResponsesAgentLoop(
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   abortObserver: some AbortObserver
-) async throws -> (messages: [ScribeLLM.Components.Schemas.ChatMessage], termination: TurnOutcome) {
+) async throws -> AgentLoopResult {
   try await runAgentLoopCore(
     promptMessages: promptMessages,
     context: context,

@@ -76,7 +76,7 @@ func runAgentLoop(
   emit: @escaping @Sendable (AgentEvent) -> Void,
   logger: Logger,
   abortObserver: some AbortObserver
-) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
+) async throws -> AgentLoopResult {
   try await runAgentLoopCore(
     promptMessages: promptMessages,
     context: context,

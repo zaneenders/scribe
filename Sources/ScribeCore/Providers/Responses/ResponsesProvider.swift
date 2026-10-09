@@ -70,7 +70,7 @@ struct ResponsesProvider: AgentProvider {
           abortObserver: abortNotifier
         )
         return turnResult(
-          messages: result.messages,
+          messages: result.transcriptMessages,
           outcome: result.termination,
           emit: { continuation.yield($0) })
       } catch is AgentTurnInterruptedError {

@@ -18,7 +18,9 @@ struct ScribeMessageTests {
       role: .assistant,
       content: "",
       toolCalls: [
-        ScribeToolCall(id: "c1", name: "shell", arguments: #"{"cmd":"ls"}"#),
+        ScribeToolCall(
+          id: "c1", name: "shell", arguments: #"{"cmd":"ls"}"#,
+          startedAt: Date(timeIntervalSince1970: 1_700_000_000)),
         ScribeToolCall(id: "c2", name: "read_file", arguments: #"{"path":"a.txt"}"#),
       ],
       reasoning: "step by step"
@@ -102,6 +104,7 @@ struct ScribeMessageTests {
     #expect(decoded.toolCalls?.first?.id == "c1")
     #expect(decoded.toolCalls?.first?.name == "shell")
     #expect(decoded.toolCalls?.first?.arguments == "{}")
+    #expect(decoded.toolCalls?.first?.startedAt == nil)
     #expect(decoded.reasoning == "let me think")
   }
 }

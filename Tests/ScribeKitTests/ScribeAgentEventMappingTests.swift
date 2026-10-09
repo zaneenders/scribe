@@ -25,14 +25,15 @@ struct ScribeAgentEventMappingTests {
   }
 
   @Test func toolAndLifecycleEventsMapToStructuredEvents() {
+    let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
     #expect(
       ScribeAgentEventMapper.map(
-        .boundary(.toolExecutionStart(name: "shell", arguments: #"{"command":"ls"}"#))
-      ) == .toolInvocationStarted(name: "shell", arguments: #"{"command":"ls"}"#))
+        .boundary(.toolExecutionStart(id: "call", name: "shell", arguments: #"{"command":"ls"}"#, startedAt: startedAt))
+      ) == .toolInvocationStarted(id: "call", name: "shell", arguments: #"{"command":"ls"}"#, startedAt: startedAt))
     #expect(
       ScribeAgentEventMapper.map(
-        .boundary(.toolExecutionEnd(name: "shell", output: #"{"ok":true}"#))
-      ) == .toolInvocationCompleted(name: "shell", output: #"{"ok":true}"#))
+        .boundary(.toolExecutionEnd(id: "call", name: "shell", output: #"{"ok":true}"#, startedAt: startedAt))
+      ) == .toolInvocationCompleted(id: "call", name: "shell", output: #"{"ok":true}"#, startedAt: startedAt))
     #expect(
       ScribeAgentEventMapper.map(.boundary(.turnStart(round: 2)))
         == .toolRoundStarted(round: 2))

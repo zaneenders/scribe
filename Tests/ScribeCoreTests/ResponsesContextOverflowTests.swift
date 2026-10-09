@@ -106,13 +106,22 @@ func responsesContextOverflowDropsToolAttachmentAndRetries() async throws {
   let events = Mutex<[AgentEvent]>([])
   let user = ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
 
-  let (messages, termination) = try await runResponsesAgentLoop(
+  let loopResult = try await runResponsesAgentLoop(
     promptMessages: [user],
     context: AgentContext(messages: []),
     config: responsesOverflowConfig(transport: transport),
     emit: { event in events.withLock { $0.append(event) } },
     logger: responsesOverflowLogger,
     abortObserver: AbortNotifier())
+  let messages = loopResult.messages
+  let termination = loopResult.termination
+  let startedAt = try #require(events.withLock { events in
+    events.compactMap { event -> Date? in
+      if case .boundary(.toolExecutionStart(_, _, _, let time)) = event { return time }
+      return nil
+    }.first
+  })
+  #expect(loopResult.transcriptMessages.flatMap { $0.toolCalls ?? [] }.first?.startedAt == startedAt)
 
   #expect(termination == .completed)
   #expect(transport.requests().count == 3)
@@ -156,13 +165,14 @@ func responsesContextOverflowRecoveryRunsOnlyOnce() async throws {
   ])
   let user = ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
 
-  let (_, termination) = try await runResponsesAgentLoop(
+  let loopResult = try await runResponsesAgentLoop(
     promptMessages: [user],
     context: AgentContext(messages: []),
     config: responsesOverflowConfig(transport: transport),
     emit: { _ in },
     logger: responsesOverflowLogger,
     abortObserver: AbortNotifier())
+  let termination = loopResult.termination
 
   #expect(transport.requests().count == 3)
   guard case .error(let description) = termination else {
