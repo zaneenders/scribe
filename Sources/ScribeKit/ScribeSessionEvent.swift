@@ -48,9 +48,9 @@ public enum ScribeSessionEvent: Sendable, Equatable {
 
   case toolRoundStarted(round: Int)
 
-  case toolInvocationStarted(name: String, arguments: String)
+  case toolInvocationStarted(id: String, name: String, arguments: String, startedAt: Date)
 
-  case toolInvocationCompleted(name: String, output: String)
+  case toolInvocationCompleted(id: String, name: String, output: String, startedAt: Date)
 
   case warning(String)
 

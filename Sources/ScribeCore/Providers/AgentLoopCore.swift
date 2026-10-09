@@ -31,6 +31,16 @@ enum RoundOutcome: Sendable, Equatable {
   case toolCalls([ToolInvocation])
 }
 
+struct AgentLoopResult: Sendable {
+  let messages: [Components.Schemas.ChatMessage]
+  let termination: TurnOutcome
+  let toolStartedAt: [String: Date]
+
+  var transcriptMessages: [ScribeMessage] {
+    messages.toScribeMessages(toolStartedAt: toolStartedAt)
+  }
+}
+
 func runAgentLoopCore(
   promptMessages: [Components.Schemas.ChatMessage],
   context: AgentContext,
@@ -43,10 +53,15 @@ func runAgentLoopCore(
     @escaping @Sendable (
       [Components.Schemas.ChatMessage], Int, @escaping @Sendable (AgentEvent) -> Void
     ) async throws -> RoundResult
-) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
+) async throws -> AgentLoopResult {
   var currentContext = context
   var newMessages: [Components.Schemas.ChatMessage] = []
   var outcome: TurnOutcome = .completed
+  var toolStartedAt: [String: Date] = [:]
+
+  func loopResult() -> AgentLoopResult {
+    AgentLoopResult(messages: newMessages, termination: outcome, toolStartedAt: toolStartedAt)
+  }
 
   emit(.boundary(.agentStart))
   defer { emit(.boundary(.agentEnd(outcome))) }
@@ -66,7 +81,7 @@ func runAgentLoopCore(
     if abortObserver.isAborted() {
       logger.debug("agent.abort\(logTag)", metadata: ["where": "before-http", "round": "\(round)"])
       outcome = .interrupted
-      return (newMessages, outcome)
+      return loopResult()
     }
 
     emit(.boundary(.turnStart(round: round)))
@@ -90,7 +105,7 @@ func runAgentLoopCore(
         metadata: ["round": "\(round)", "err": "\(description)"])
       emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
       outcome = .error(description)
-      return (newMessages, outcome)
+      return loopResult()
     }
 
     let roundResult: RoundResult
@@ -111,7 +126,7 @@ func runAgentLoopCore(
       logger.notice("agent.abort\(logTag)", metadata: ["where": "mid-stream", "round": "\(round)"])
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
       outcome = .interrupted
-      return (newMessages, outcome)
+      return loopResult()
     } catch let scribeError as ScribeError
       where !attemptedRecovery && isImageInputUnsupportedError(scribeError)
     {
@@ -159,7 +174,7 @@ func runAgentLoopCore(
         ])
       emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
       outcome = .error(description)
-      return (newMessages, outcome)
+      return loopResult()
     } catch let scribeError as ScribeError {
       let description = scribeError.errorDescription ?? String(describing: scribeError)
       guard scribeError.isInBandStreamError else {
@@ -171,7 +186,7 @@ func runAgentLoopCore(
         metadata: ["round": "\(round)", "partial_messages": "\(newMessages.count)", "err": "\(description)"])
       emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
       outcome = .error(description)
-      return (newMessages, outcome)
+      return loopResult()
     } catch {
       let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
       logger.error(
@@ -183,7 +198,7 @@ func runAgentLoopCore(
         ])
       emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
       outcome = .error(description)
-      return (newMessages, outcome)
+      return loopResult()
     }
 
     var roundBuffer: [Components.Schemas.ChatMessage] = [roundResult.assistantMessage]
@@ -192,36 +207,39 @@ func runAgentLoopCore(
       logger.debug("agent.abort\(logTag)", metadata: ["where": "post-stream-pre-tools", "round": "\(round)"])
       emit(.boundary(.turnEnd(round: round, outcome: .interrupted)))
       outcome = .interrupted
-      return (newMessages, outcome)
+      return loopResult()
     }
 
     switch roundResult.kind {
     case .completed:
       emit(.boundary(.turnEnd(round: round, outcome: .completed)))
-      try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
+      try await commit(
+        &currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks, toolStartedAt: toolStartedAt)
       outcome = .completed
-      return (newMessages, outcome)
+      return loopResult()
 
     case .error(let description, let hasPartialMessage):
       emit(.boundary(.turnEnd(round: round, outcome: .error(description))))
       if hasPartialMessage {
-        try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
+        try await commit(
+          &currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks, toolStartedAt: toolStartedAt)
       }
       outcome = .error(description)
-      return (newMessages, outcome)
+      return loopResult()
 
     case .incomplete(let reason):
       emit(.boundary(.turnEnd(round: round, outcome: .incomplete(reason: reason))))
-      try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
+      try await commit(
+        &currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks, toolStartedAt: toolStartedAt)
       outcome = .incomplete(reason: reason)
-      return (newMessages, outcome)
+      return loopResult()
 
     case .toolCalls(let invocations):
       emit(.boundary(.turnEnd(round: round, outcome: .toolCalls(count: invocations.count))))
       if round >= config.maxToolRounds {
         logger.notice("agent.turn.tool-round-limit\(logTag)", metadata: ["max": "\(config.maxToolRounds)"])
         outcome = .toolRoundLimit(rounds: config.maxToolRounds)
-        return (newMessages, outcome)
+        return loopResult()
       }
 
       logger.info(
@@ -239,7 +257,7 @@ func runAgentLoopCore(
             "agent.abort\(logTag)",
             metadata: ["where": "pre-tool", "tool": "\(inv.name)", "round": "\(round)"])
           outcome = .interrupted
-          return (newMessages, outcome)
+          return loopResult()
         }
 
         let beforeDecision = await config.hooks.beforeToolCall(inv)
@@ -258,7 +276,13 @@ func runAgentLoopCore(
             tool: inv.name, code: "blocked", description: reason)
         }
 
-        emit(.boundary(.toolExecutionStart(name: resolvedInv.name, arguments: resolvedInv.arguments)))
+        // Match the second precision used by session and API RFC 3339 encoders.
+        let startedAt = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+        toolStartedAt[resolvedInv.id] = startedAt
+        emit(
+          .boundary(
+            .toolExecutionStart(
+              id: resolvedInv.id, name: resolvedInv.name, arguments: resolvedInv.arguments, startedAt: startedAt)))
 
         let result: ToolResult
         if let preflightResult {
@@ -272,7 +296,7 @@ func runAgentLoopCore(
               abort: abortObserver)
           } catch is AgentTurnInterruptedError {
             outcome = .interrupted
-            return (newMessages, outcome)
+            return loopResult()
           } catch let ScribeError.toolUnknown(name) {
             logger.warning("agent.tool.unknown\(logTag)", metadata: ["tool": "\(name)", "round": "\(round)"])
             result = ToolRegistry.failureResult(
@@ -293,7 +317,10 @@ func runAgentLoopCore(
 
         let afterDecision = await config.hooks.afterToolCall(resolvedInv, result)
         let finalResult = afterDecision.result
-        emit(.boundary(.toolExecutionEnd(name: resolvedInv.name, output: finalResult.text)))
+        emit(
+          .boundary(
+            .toolExecutionEnd(
+              id: resolvedInv.id, name: resolvedInv.name, output: finalResult.text, startedAt: startedAt)))
         emit(.tool(.invocation(name: resolvedInv.name, arguments: resolvedInv.arguments, output: finalResult.text)))
         for warning in finalResult.warnings {
           emit(.tool(.warning(warning)))
@@ -310,9 +337,10 @@ func runAgentLoopCore(
           contentsOf: finalResult.attachments.map { (attachment: $0, toolName: resolvedInv.name) })
 
         if afterDecision.terminate {
-          try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
+          try await commit(
+            &currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks, toolStartedAt: toolStartedAt)
           outcome = .completed
-          return (newMessages, outcome)
+          return loopResult()
         }
       }
 
@@ -332,7 +360,8 @@ func runAgentLoopCore(
         emit(.boundary(.messageEnd(role: .user, round: round)))
       }
 
-      try await commit(&currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks)
+      try await commit(
+        &currentContext.messages, &newMessages, roundBuffer, hooks: config.hooks, toolStartedAt: toolStartedAt)
     }
   }
 }
@@ -341,10 +370,11 @@ private func commit(
   _ context: inout [Components.Schemas.ChatMessage],
   _ newMessages: inout [Components.Schemas.ChatMessage],
   _ buffer: [Components.Schemas.ChatMessage],
-  hooks: AgentLoopHooks
+  hooks: AgentLoopHooks,
+  toolStartedAt: [String: Date]
 ) async throws {
   // Checkpoint whole rounds so tool calls and their results stay together.
-  try await hooks.onMessagesCommitted(buffer.toScribeMessages())
+  try await hooks.onMessagesCommitted(buffer.toScribeMessages(toolStartedAt: toolStartedAt))
   context.append(contentsOf: buffer)
   newMessages.append(contentsOf: buffer)
 }

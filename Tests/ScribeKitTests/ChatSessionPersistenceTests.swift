@@ -8,6 +8,34 @@ import Testing
 
 @Suite
 struct ChatSessionPersistenceTests {
+  @Test func invocationTimestampsSurvivePersistenceAndForks() async throws {
+    try await withTemporaryDirectory { directory in
+      let root = FilePath(directory.path)
+      let id = UUID()
+      let sessionDirectory = try await ChatSessionStore.sessionDirectory(sessionId: id, sessionsRoot: root)
+      let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+      let calls = [
+        ScribeToolCall(id: "first", name: "shell", arguments: "pwd", startedAt: startedAt),
+        ScribeToolCall(id: "second", name: "shell", arguments: "ls", startedAt: startedAt.addingTimeInterval(2)),
+        ScribeToolCall(id: "legacy", name: "shell", arguments: "date"),
+      ]
+      let messages =
+        [
+          ScribeMessage(role: .system, content: "system"),
+          ScribeMessage(role: .assistant, toolCalls: calls),
+        ] + calls.map { ScribeMessage(role: .tool, content: "output-\($0.id)", toolCallId: $0.id) }
+      try await ChatSessionStore.saveMetadata(
+        ChatSessionMetadata(
+          id: id, createdAt: startedAt, model: "test", cwd: "/tmp",
+          baseURL: nil, scribeVersion: nil), to: sessionDirectory)
+      try ChatSessionStore.appendMessages(messages, to: sessionDirectory)
+      #expect(try ChatSessionStore.loadMessages(from: sessionDirectory) == messages)
+      let fork = try await ChatSessionStore.forkSession(
+        from: sessionDirectory, cutAt: messages.count, newSessionId: UUID(), scribeVersion: nil)
+      #expect(try ChatSessionStore.loadMessages(from: fork.sessionDirectory) == messages)
+    }
+  }
+
   @Test func filePersisterPropagatesAppendFailure() async throws {
     try await withTemporaryDirectory { directory in
       let persister = try await FileSessionPersister.open(

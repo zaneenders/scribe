@@ -16,11 +16,11 @@ protocol AgentProvider: Sendable {
 }
 
 func turnResult(
-  messages: [Components.Schemas.ChatMessage],
+  messages: [ScribeMessage],
   outcome: TurnOutcome,
   emit: @escaping @Sendable (AgentEvent) -> Void
 ) -> TurnResult {
-  let newMessages = messages.toScribeMessages()
+  let newMessages = messages
   switch outcome {
   case .completed:
     return TurnResult(newMessages: newMessages, outcome: .completed)

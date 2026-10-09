@@ -55,7 +55,7 @@ public enum AgentEvent: Sendable {
     case turnEnd(round: Int, outcome: TurnBoundaryOutcome)
     case messageStart(role: MessageBoundaryRole, round: Int)
     case messageEnd(role: MessageBoundaryRole, round: Int)
-    case toolExecutionStart(name: String, arguments: String)
-    case toolExecutionEnd(name: String, output: String)
+    case toolExecutionStart(id: String, name: String, arguments: String, startedAt: Date)
+    case toolExecutionEnd(id: String, name: String, output: String, startedAt: Date)
   }
 }

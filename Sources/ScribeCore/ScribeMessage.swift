@@ -136,11 +136,13 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
   public var id: String
   public var name: String
   public var arguments: String
+  public var startedAt: Date?
 
-  public init(id: String, name: String, arguments: String) {
+  public init(id: String, name: String, arguments: String, startedAt: Date? = nil) {
     self.id = id
     self.name = name
     self.arguments = arguments
+    self.startedAt = startedAt
   }
 
   private struct Function: Codable, Hashable {
@@ -150,6 +152,7 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
 
   private enum CodingKeys: String, CodingKey {
     case id, type, function
+    case startedAt = "started_at"
   }
 
   public init(from decoder: any Decoder) throws {
@@ -158,6 +161,7 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
     let fn = try c.decode(Function.self, forKey: .function)
     self.name = fn.name
     self.arguments = fn.arguments
+    self.startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -165,6 +169,7 @@ public struct ScribeToolCall: Sendable, Codable, Hashable {
     try c.encode(id, forKey: .id)
     try c.encode("function", forKey: .type)
     try c.encode(Function(name: name, arguments: arguments), forKey: .function)
+    try c.encodeIfPresent(startedAt, forKey: .startedAt)
   }
 }
 
@@ -277,7 +282,15 @@ extension Array where Element == ScribeMessage {
 }
 
 extension Array where Element == Components.Schemas.ChatMessage {
-  package func toScribeMessages() -> [ScribeMessage] {
-    map(ScribeMessage.init)
+  package func toScribeMessages(toolStartedAt: [String: Date] = [:]) -> [ScribeMessage] {
+    map { wire in
+      var message = ScribeMessage(wire)
+      message.toolCalls = message.toolCalls?.map { source in
+        var call = source
+        call.startedAt = toolStartedAt[call.id]
+        return call
+      }
+      return message
+    }
   }
 }

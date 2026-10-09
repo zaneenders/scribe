@@ -31,10 +31,10 @@ public enum ScribeAgentEventMapper {
         maxAttempts: maxRetries,
         delaySeconds: seconds(from: delay),
         reason: reason)
-    case .boundary(.toolExecutionStart(let name, let arguments)):
-      return .toolInvocationStarted(name: name, arguments: arguments)
-    case .boundary(.toolExecutionEnd(let name, let output)):
-      return .toolInvocationCompleted(name: name, output: output)
+    case .boundary(.toolExecutionStart(let id, let name, let arguments, let startedAt)):
+      return .toolInvocationStarted(id: id, name: name, arguments: arguments, startedAt: startedAt)
+    case .boundary(.toolExecutionEnd(let id, let name, let output, let startedAt)):
+      return .toolInvocationCompleted(id: id, name: name, output: output, startedAt: startedAt)
     case .boundary(.turnStart(let round)):
       return .toolRoundStarted(round: round)
     case .boundary(.agentStart), .boundary(.agentEnd), .boundary(.turnEnd),

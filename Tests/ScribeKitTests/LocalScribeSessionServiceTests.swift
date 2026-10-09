@@ -1,4 +1,5 @@
 import Foundation
+import Logging
 import HTTPTypes
 import OpenAPIRuntime
 import ScribeCore
@@ -11,6 +12,42 @@ import Testing
 
 @Suite
 struct LocalScribeSessionServiceTests {
+  @Test func toolExecutionTimestampsSurviveRuntimeDiscardAndServiceReload() async throws {
+    try await withTemporaryDirectory { root in
+      let fixture = try LocalServiceFixture(root: FilePath(root.path))
+      let client = Client(serverURL: URL(string: "http://test")!, transport: TimestampToolTransport())
+      let service = LocalScribeSessionService(
+        context: fixture.context,
+        agentFactory: { configuration, logger in
+          ScribeAgent(
+            client: client, model: configuration.agentModel, tools: [TimestampTestTool()],
+            workingDirectory: FilePath(configuration.workingDirectory), reasoningEnabled: nil, logger: logger)
+        })
+      let created = try await service.createSession(.init(workingDirectory: "/tmp"))
+      let id = created.summary.id
+      let events = try await ScribeServiceContractScenarios.collectEvents(
+        from: try await service.submit(.init(sessionID: id, prompt: "run tools")))
+      let starts = events.compactMap { event -> (String, Date)? in
+        if case .toolInvocationStarted(let id, _, _, let startedAt) = event { return (id, startedAt) }
+        return nil
+      }
+      let ends = events.compactMap { event -> (String, Date)? in
+        if case .toolInvocationCompleted(let id, _, _, let startedAt) = event { return (id, startedAt) }
+        return nil
+      }
+      #expect(starts.map { $0.0 } == ["first", "second"])
+      #expect(ends.map { $0.0 } == ["first", "second"])
+      #expect(starts.map { $0.1 } == ends.map { $0.1 })
+      let snapshot = try await service.openSession(id: id)
+      let calls = snapshot.messages.flatMap { $0.toolCalls ?? [] }
+      #expect(calls.map(\.id) == starts.map { $0.0 })
+      #expect(calls.map(\.startedAt) == starts.map { Optional($0.1) })
+      await service.discardRuntime(sessionID: id)
+      #expect(try await service.openSession(id: id).messages == snapshot.messages)
+      let reloaded = try await fixture.makeService()
+      #expect(try await reloaded.openSession(id: id).messages == snapshot.messages)
+    }
+  }
 
   @Test func unknownSessionsAreNotFound() async throws {
     try await withLocalServiceFixture { fixture in
@@ -394,5 +431,38 @@ private struct BadPayloadTransport: ClientTransport, Sendable {
       },
       length: .unknown)
     return (HTTPResponse(status: .init(code: 200)), httpBody)
+  }
+}
+
+private struct TimestampTestTool: ScribeTool {
+  static let name = "timestamp_test"
+  static let description = "A deterministic tool for timestamp tests."
+  static let parameters: [ScribeToolParameter] = []
+  static let promptHint: String? = nil
+
+  func run(arguments: String, workingDirectory: FilePath, logger: Logging.Logger) async throws -> Encodable {
+    ["output": arguments]
+  }
+}
+
+private final class TimestampToolTransport: ClientTransport, Sendable {
+  private let calls = Mutex(0)
+
+  func send(_ request: HTTPRequest, body: HTTPBody?, baseURL: URL, operationID: String) async throws
+    -> (HTTPResponse, HTTPBody?)
+  {
+    if let body { for try await _ in body {} }
+    let index = calls.withLock { count in
+      defer { count += 1 }
+      return count
+    }
+    let chunk: String
+    if index == 0 {
+      chunk =
+        #"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"first","type":"function","function":{"name":"timestamp_test","arguments":"{}"}},{"index":1,"id":"second","type":"function","function":{"name":"timestamp_test","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#
+    } else {
+      chunk = #"{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}"#
+    }
+    return (HTTPResponse(status: .ok), HTTPBody("data: \(chunk)\n\ndata: [DONE]\n\n"))
   }
 }

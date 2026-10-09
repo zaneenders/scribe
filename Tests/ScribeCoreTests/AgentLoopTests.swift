@@ -67,7 +67,7 @@ private func runLoop(
   abortNotifier: AbortNotifier = AbortNotifier()
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
-  return try await runAgentLoop(
+  let result = try await runAgentLoop(
     promptMessages: [userMsg],
     context: context,
     config: config,
@@ -75,6 +75,7 @@ private func runLoop(
     logger: testLogger,
     abortObserver: abortNotifier
   )
+  return (result.messages, result.termination)
 }
 
 private func runLoop(
@@ -84,7 +85,7 @@ private func runLoop(
   countingAbortObserver: CountingAbortObserver = CountingAbortObserver(triggerAt: 1)
 ) async throws -> (messages: [Components.Schemas.ChatMessage], termination: TurnOutcome) {
   let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1(prompt))
-  return try await runAgentLoop(
+  let result = try await runAgentLoop(
     promptMessages: [userMsg],
     context: context,
     config: config,
@@ -92,6 +93,7 @@ private func runLoop(
     logger: testLogger,
     abortObserver: countingAbortObserver
   )
+  return (result.messages, result.termination)
 }
 
 private func stringContent(_ msg: Components.Schemas.ChatMessage) -> String? {
@@ -123,6 +125,65 @@ private func expectTermination(_ actual: TurnOutcome, _ expected: TurnOutcome) {
 
 @Suite
 struct AgentLoopTests {
+  @Test func invocationStartTimesMatchEventsCheckpointsAndResults() async throws {
+    let events = Mutex<[AgentEvent]>([])
+    let committed = Mutex<[[ScribeMessage]]>([])
+    let calls = [
+      ToolInvocation(id: "first", name: "fake_tool", arguments: "first-arguments"),
+      ToolInvocation(id: "second", name: "fake_tool", arguments: "second-arguments"),
+    ]
+    let hooks = AgentLoopHooks(onMessagesCommitted: { messages in
+      committed.withLock { $0.append(messages) }
+    })
+    let before = Date()
+    let result = try await runAgentLoopCore(
+      promptMessages: [], context: AgentContext(messages: []),
+      config: makeConfig(chunks: [], tools: [FakeTool()], hooks: hooks), logTag: "",
+      emit: { event in events.withLock { $0.append(event) } },
+      logger: testLogger, abortObserver: NoOpAbortObserver()
+    ) { _, round, _ in
+      if round == 1 {
+        return RoundResult(
+          assistantMessage: Components.Schemas.ChatMessage(
+            role: .assistant,
+            toolCalls: calls.map {
+              .init(id: $0.id, _type: "function", function: .init(name: $0.name, arguments: $0.arguments))
+            }), kind: .toolCalls(calls))
+      }
+      return RoundResult(assistantMessage: .init(role: .assistant, content: .case1("done")), kind: .completed)
+    }
+    let after = Date()
+    let starts = events.withLock { events in
+      events.compactMap { event -> (String, Date)? in
+        if case .boundary(.toolExecutionStart(let id, _, _, let startedAt)) = event {
+          return (id, startedAt)
+        }
+        return nil
+      }
+    }
+    let ends = events.withLock { events in
+      events.compactMap { event -> (String, Date)? in
+        if case .boundary(.toolExecutionEnd(let id, _, _, let startedAt)) = event {
+          return (id, startedAt)
+        }
+        return nil
+      }
+    }
+    #expect(starts.map { $0.0 } == calls.map(\.id))
+    #expect(ends.map { $0.0 } == calls.map(\.id))
+    #expect(starts.map { $0.1 } == ends.map { $0.1 })
+    for (_, startedAt) in starts {
+      #expect(startedAt >= before.addingTimeInterval(-1) && startedAt <= after)
+    }
+    let saved = committed.withLock { $0.first?.first?.toolCalls ?? [] }
+    let returned = result.transcriptMessages.first?.toolCalls ?? []
+    #expect(saved == returned)
+    #expect(saved.map(\.startedAt) == starts.map { Optional($0.1) })
+    let modelMessages = result.transcriptMessages.toWireMessages()
+    let modelJSON = String(decoding: try JSONEncoder().encode(modelMessages), as: UTF8.self)
+    #expect(!modelJSON.contains("started_at"))
+    #expect(result.termination == .completed)
+  }
 
   @Test func commitsToolRoundBeforeNextRequestFails() async throws {
     let committed = Mutex<[[ScribeMessage]]>([])
@@ -637,7 +698,7 @@ struct AgentLoopTests {
     ]
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("test"))
-    let (_, termination) = try await runAgentLoop(
+    let loopResult = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
       config: makeConfig(chunks: chunks),
@@ -645,6 +706,7 @@ struct AgentLoopTests {
       logger: testLogger,
       abortObserver: AbortNotifier()
     )
+    let termination = loopResult.termination
     expectTermination(termination, .completed)
     let captured = events.withLock { $0 }
     let usageEvents = captured.compactMap { (e: AgentEvent) -> (ScribeUsage, Double?)? in
@@ -699,7 +761,7 @@ struct AgentLoopTests {
       .init(role: .assistant, content: .case1("previous answer")),
     ]
     let context = AgentContext(messages: initialMessages)
-    let (messages, termination) = try await runAgentLoop(
+    let loopResult = try await runAgentLoop(
       promptMessages: [],
       context: context,
       config: makeConfig(chunks: chunks),
@@ -707,6 +769,8 @@ struct AgentLoopTests {
       logger: testLogger,
       abortObserver: AbortNotifier()
     )
+    let messages = loopResult.messages
+    let termination = loopResult.termination
     expectTermination(termination, .completed)
 
     #expect(messages.count == 1)
@@ -891,7 +955,7 @@ struct AgentLoopTests {
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
-    let (messages, termination) = try await runAgentLoop(
+    let loopResult = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
       config: config,
@@ -899,6 +963,8 @@ struct AgentLoopTests {
       logger: testLogger,
       abortObserver: AbortNotifier()
     )
+    let messages = loopResult.messages
+    let termination = loopResult.termination
     expectTermination(termination, .completed)
 
     let recovered = events.withLock { $0 }.compactMap { e -> String? in
@@ -956,7 +1022,7 @@ struct AgentLoopTests {
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("read image"))
-    let (messages, termination) = try await runAgentLoop(
+    let loopResult = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
       config: config,
@@ -964,6 +1030,8 @@ struct AgentLoopTests {
       logger: testLogger,
       abortObserver: AbortNotifier()
     )
+    let messages = loopResult.messages
+    let termination = loopResult.termination
     expectTermination(termination, .completed)
 
     let recovered = events.withLock { $0 }.compactMap { e -> String? in
@@ -1209,7 +1277,7 @@ struct AgentLoopTests {
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
-    let (messages, termination) = try await runAgentLoop(
+    let loopResult = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
       config: config,
@@ -1217,6 +1285,8 @@ struct AgentLoopTests {
       logger: testLogger,
       abortObserver: AbortNotifier()
     )
+    let messages = loopResult.messages
+    let termination = loopResult.termination
     expectTermination(termination, .completed)
     #expect(messages.count == 2)
     #expect(stringContent(messages[1]) == "reply")
@@ -1350,7 +1420,7 @@ struct AgentLoopTests {
     )
     let events = Mutex<[AgentEvent]>([])
     let userMsg = Components.Schemas.ChatMessage(role: .user, content: .case1("hello"))
-    let (messages, termination) = try await runAgentLoop(
+    let loopResult = try await runAgentLoop(
       promptMessages: [userMsg],
       context: AgentContext(messages: []),
       config: config,
@@ -1358,6 +1428,8 @@ struct AgentLoopTests {
       logger: testLogger,
       abortObserver: AbortNotifier()
     )
+    let messages = loopResult.messages
+    let termination = loopResult.termination
     guard case .error = termination else {
       #expect(Bool(false), "Expected error termination, got \(termination)")
       return

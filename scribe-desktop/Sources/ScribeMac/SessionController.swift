@@ -671,9 +671,9 @@ final class SessionController {
       break
     case .lifecycle(.recovered(let reason)):
       transcript.append(TranscriptItem(kind: .warning, title: "Recovered", text: reason))
-    case .boundary(.toolExecutionStart(let name, let arguments)):
+    case .boundary(.toolExecutionStart(_, let name, let arguments, _)):
       upsertTool(name: name, arguments: arguments, output: "", running: true)
-    case .boundary(.toolExecutionEnd(let name, let output)):
+    case .boundary(.toolExecutionEnd(_, let name, let output, _)):
       upsertTool(name: name, arguments: "", output: output, running: false)
     case .boundary:
       break
