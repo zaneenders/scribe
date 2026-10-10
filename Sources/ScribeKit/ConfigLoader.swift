@@ -124,7 +124,7 @@ public struct LoadedConfig: Sendable {
           "Invalid `\(ScribeConfigBinding.apiBaseURL)` for profile `\(activeProfileName)`. Use host only, no `/v1` (e.g. http://127.0.0.1:11434 for Ollama)."
       )
     }
-    return OpenAICompatibleClient.make(serverURL: serverURL, apiKey: apiKey)
+    return OpenAICompatibleClient.make(serverURL: serverURL, apiKey: apiKey, serviceTier: scribeConfig.serviceTier)
   }
 
   public func makeSessionLogger(sessionId: UUID) -> Logger {

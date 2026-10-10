@@ -166,10 +166,8 @@ private func runSingleResponsesRound(
         return r
       }()
       : nil,
-    serviceTier: config.usesCodexBackend
-      ? config.serviceTier.flatMap(
-        ScribeLLMResponses.Components.Schemas.CreateResponseRequest.ServiceTierPayload.init(rawValue:))
-      : nil,
+    serviceTier: config.serviceTier.flatMap(
+      ScribeLLMResponses.Components.Schemas.CreateResponseRequest.ServiceTierPayload.init(rawValue:)),
     text: nil,
     include: config.usesCodexBackend ? ["reasoning.encrypted_content"] : nil,
     promptCacheKey: nil

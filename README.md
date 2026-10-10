@@ -109,6 +109,40 @@ Built-in tools: `shell`, `read_file`, `write_file`, and `edit_file`.
 > and `codex` (ChatGPT backend). For OpenCode Zen GPT models, use
 > `"type": "responses"` with `"baseUrl": "https://opencode.ai/zen/v1"`.
 
+### OpenAI Flex processing
+
+For an OpenAI API-key profile using a [Flex-supported model](https://developers.openai.com/api/docs/pricing?latest-pricing=flex),
+set `agent.serviceTier` to `"flex"`. Add `"flex"` to `agent.serviceTiers` to expose it
+in the app's tier picker:
+
+```json
+{
+  "name": "openai-flex",
+  "api": {
+    "type": "responses",
+    "baseUrl": "https://api.openai.com/v1",
+    "apiKey": "<your OpenAI API key>"
+  },
+  "agent": {
+    "model": "<a Flex-supported model>",
+    "contextWindow": 128000,
+    "serviceTier": "flex",
+    "serviceTiers": ["default", "flex", "priority"]
+  }
+}
+```
+
+Add this profile to your `profiles` array and set `contextWindow` to the model's
+actual limit. Flex also works with Chat Completions: omit `api.type` and use
+`https://api.openai.com` as the base URL.
+
+Flex trades slower responses and occasional capacity errors for lower API costs.
+Scribe allows up to 15 minutes for Flex requests and retries HTTP 408/429 and
+other transient failures with exponential backoff, respecting `agent.maxRetries`.
+Retries stay on Flex; Scribe never automatically switches to a higher-cost tier.
+Model/provider support is required; OpenAI API Flex pricing does not apply to
+ChatGPT/Codex subscription usage.
+
 ## Development
 
 ```sh
