@@ -75,8 +75,8 @@ struct AgentProviderFactoryTests {
     #expect(responsesProvider.contextWindow == 128_000)
   }
 
-  @Test("responses apiType uses a configured Responses client")
-  func responsesApiTypeReturnsConfiguredProvider() throws {
+  @Test("responses apiType preserves the service tier", arguments: ["default", "flex", "priority"])
+  func responsesApiTypeReturnsConfiguredProvider(serviceTier: String) throws {
     let provider = try AgentProviderFactory.make(
       configuration: configuration(
         model: "gpt-6-sol",
@@ -84,7 +84,7 @@ struct AgentProviderFactoryTests {
         apiType: "responses",
         reasoningEnabled: true,
         reasoningEffort: "medium"
-      ))
+      ).withServiceTier(serviceTier))
     let responsesProvider = try #require(provider as? ResponsesProvider)
     guard case .configured = responsesProvider.source else {
       Issue.record("Expected a bearer-key configured client")
@@ -92,6 +92,7 @@ struct AgentProviderFactoryTests {
     }
     #expect(responsesProvider.model == "gpt-6-sol")
     #expect(responsesProvider.reasoningEffort == "medium")
+    #expect(responsesProvider.serviceTier == serviceTier)
     #expect(!responsesProvider.usesCodexBackend)
   }
 

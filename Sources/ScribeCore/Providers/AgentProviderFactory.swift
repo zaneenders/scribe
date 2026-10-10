@@ -45,10 +45,12 @@ enum AgentProviderFactory {
         source: .configured(
           ResponsesClient.makeResponses(
             serverURL: serverURL,
-            apiKey: configuration.apiKey)),
+            apiKey: configuration.apiKey,
+            serviceTier: configuration.serviceTier)),
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEffort: configuration.reasoningEffort,
+        serviceTier: configuration.serviceTier,
         defaultTemperature: configuration.temperature,
         contextWindow: configuration.contextWindow,
         usesCodexBackend: false,
@@ -68,7 +70,8 @@ enum AgentProviderFactory {
       return OpenAICompletionsProvider(
         client: OpenAICompatibleClient.make(
           serverURL: serverURL,
-          apiKey: configuration.apiKey),
+          apiKey: configuration.apiKey,
+          serviceTier: configuration.serviceTier),
         model: configuration.agentModel,
         reasoningEnabled: configuration.reasoningEnabled,
         reasoningEncoding: configuration.apiType == "deepseek" ? .deepSeek : .openRouter,

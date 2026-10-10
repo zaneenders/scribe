@@ -309,7 +309,8 @@ struct AgentLoopTests {
     #expect(request?["reasoning_effort"] == nil)
   }
 
-  @Test func sendsOpenAIServiceTier() async throws {
+  @Test(arguments: [nil, "default", "flex", "priority"] as [String?])
+  func sendsOpenAIServiceTier(serviceTier: String?) async throws {
     let transport = ScriptedTransport(chunks: [
       sseChunk(#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"}}]}"#),
       doneChunk(),
@@ -325,13 +326,13 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
-      serviceTier: "priority",
+      serviceTier: serviceTier,
       hooks: AgentLoopHooks())
 
     _ = try await runLoop(prompt: "hello", config: config, abortNotifier: AbortNotifier())
     let body = try #require(transport.requestBodies.first)
     let request = try JSONSerialization.jsonObject(with: body) as? [String: Any]
-    #expect(request?["service_tier"] as? String == "priority")
+    #expect(request?["service_tier"] as? String == serviceTier)
   }
 
   @Test func sendsOpenCodeHeaderWhenEnabled() async throws {
@@ -1250,7 +1251,8 @@ struct AgentLoopTests {
     #expect(stringContent(messages[2])?.contains("stopped") == true)
   }
 
-  @Test func retriesTransientHTTPErrorWithBackoff() async throws {
+  @Test(arguments: [nil, "flex"] as [String?])
+  func retriesTransientHTTPErrorWithBackoff(serviceTier: String?) async throws {
     let transport = ScriptedTransport(responses: [
       ScriptedTransport.Response(status: 429, chunks: [errorBody("engine overloaded")]),
       ScriptedTransport.Response(status: 429, chunks: [errorBody("engine overloaded")]),
@@ -1272,6 +1274,7 @@ struct AgentLoopTests {
       maxToolRounds: .max,
       workingDirectory: FilePath("/tmp"),
       reasoningEnabled: true,
+      serviceTier: serviceTier,
       hooks: AgentLoopHooks(),
       retryPolicy: .fastTestPolicy
     )
@@ -1291,6 +1294,10 @@ struct AgentLoopTests {
     #expect(messages.count == 2)
     #expect(stringContent(messages[1]) == "reply")
     #expect(transport.capturedRequests.count == 3)
+    for body in transport.requestBodies {
+      let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+      #expect(json["service_tier"] as? String == serviceTier)
+    }
 
     let retries: [(attempt: Int, maxRetries: Int)] = events.withLock { $0 }.compactMap { event in
       guard case .lifecycle(.retrying(let attempt, let maxRetries, _, _)) = event else { return nil }

@@ -7,7 +7,7 @@ import Testing
 
 @Suite(.serialized)
 struct ConfigLoaderTests {
-  @Test(arguments: ["priority", "ultrafast"])
+  @Test(arguments: ["flex", "priority", "ultrafast"])
   func loadsNamedProfileFromExplicitOverride(serviceTier: String) async throws {
     try await withTemporaryDirectory { root in
       setenv("SCRIBE_HOME", root.path, 1)
@@ -37,7 +37,7 @@ struct ConfigLoaderTests {
                 "contextWindow": 256000,
                 "contextWindowThreshold": 0.9,
                 "serviceTier": "\(serviceTier)",
-                "serviceTiers": ["default", "priority", "ultrafast"]
+                "serviceTiers": ["default", "flex", "priority", "ultrafast"]
               },
               "logging": { "level": "trace" }
             }
@@ -52,7 +52,7 @@ struct ConfigLoaderTests {
       #expect(loaded.scribeConfig.serverURL == "https://api.example.com")
       #expect(loaded.scribeConfig.serviceTier == serviceTier)
       #expect(loaded.profiles.map(\.name) == ["local", "cloud"])
-      #expect(loaded.profiles[1].serviceTiers == ["default", "priority", "ultrafast"])
+      #expect(loaded.profiles[1].serviceTiers == ["default", "flex", "priority", "ultrafast"])
       #expect(loaded.profiles[1].serviceTier == serviceTier)
       #expect(loaded.resolvedConfigurationPath == paths.profileManifestPath.string)
     }

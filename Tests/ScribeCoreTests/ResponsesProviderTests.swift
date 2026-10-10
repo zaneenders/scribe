@@ -103,12 +103,14 @@ struct ResponsesProviderTests {
     #expect(transport.capturedRequests.count == 1)
     let requestBody = try #require(transport.capturedRequests.first?.body)
     let requestJSON = try #require(JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
-    #expect(requestJSON["service_tier"] == nil)
+    #expect(requestJSON["service_tier"] as? String == "priority")
     #expect(requestJSON["include"] == nil)
   }
 
-  @Test("Responses API uses standard request fields and handles standard SSE events")
-  func responsesAPIUsesStandardRequestAndStream() async throws {
+  @Test(
+    "Responses API sends the configured tier and handles standard SSE events",
+    arguments: [nil, "default", "flex", "priority"] as [String?])
+  func responsesAPIUsesStandardRequestAndStream(serviceTier: String?) async throws {
     let transport = ScriptedTransport(
       status: 200,
       chunks: sseChunks(
@@ -126,7 +128,7 @@ struct ResponsesProviderTests {
       model: "gpt-6-luna",
       reasoningEnabled: false,
       reasoningEffort: nil,
-      serviceTier: "priority",
+      serviceTier: serviceTier,
       contextWindow: 128_000,
       usesCodexBackend: false
     )
@@ -148,8 +150,70 @@ struct ResponsesProviderTests {
     #expect(transport.capturedRequests.first?.path == "/responses")
     let body = try #require(transport.capturedRequests.first?.body)
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
-    #expect(json["service_tier"] == nil)
+    #expect(json["service_tier"] as? String == serviceTier)
     #expect(json["include"] == nil)
+  }
+
+  @Test(
+    "Flex retries capacity errors and timeouts without switching tiers",
+    arguments: [408, 429], [0, 1])
+  func flexRetriesStayOnSelectedTier(statusCode: Int, maxRetries: Int) async throws {
+    let transport = ScriptedTransport(responses: [
+      .init(status: statusCode, chunks: [Array(#"{"error":{"message":"Resource unavailable"}}"#.utf8)[...]]),
+      .init(
+        status: 200,
+        chunks: sseChunks(
+          #"{"type":"response.output_text.delta","delta":"Recovered"}"#,
+          #"{"type":"response.completed","response":{"id":"resp_flex"}}"#
+        )),
+    ])
+    let client = ScribeLLMResponses.Client(
+      serverURL: URL(string: "https://api.openai.com/v1")!,
+      transport: transport)
+    let provider = ResponsesProvider(
+      source: .configured(client),
+      model: "test-model",
+      reasoningEnabled: false,
+      reasoningEffort: nil,
+      serviceTier: "flex",
+      contextWindow: 128_000,
+      usesCodexBackend: false,
+      retryPolicy: RetryPolicy(maxRetries: maxRetries, initialDelay: .zero, maxDelay: .zero))
+    let stream = provider.run(
+      promptMessages: [ScribeLLM.Components.Schemas.ChatMessage(role: .user, content: .case1("hi"))],
+      history: [],
+      options: AgentRunOptions(),
+      toolExecutor: NoOpToolExecutor(),
+      chatTools: [],
+      workingDirectory: FilePath("/tmp"),
+      logger: testLogger,
+      abortNotifier: AbortNotifier())
+
+    var retryAttempts: [Int] = []
+    for await event in stream.events {
+      if case .lifecycle(.retrying(let attempt, _, _, _)) = event {
+        retryAttempts.append(attempt)
+      }
+    }
+    if maxRetries == 0 {
+      do {
+        _ = try await stream.result.value
+        Issue.record("Expected the HTTP error when retries are disabled")
+      } catch let ScribeError.responsesHTTPError(code, _) {
+        #expect(code == statusCode)
+      }
+    } else {
+      let result = try await stream.result.value
+      #expect(result.outcome == .completed)
+      #expect(result.newMessages.last?.content == "Recovered")
+    }
+    #expect(retryAttempts == (maxRetries == 0 ? [] : [1]))
+    #expect(transport.capturedRequests.count == maxRetries + 1)
+    for request in transport.capturedRequests {
+      let body = try #require(request.body)
+      let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+      #expect(json["service_tier"] as? String == "flex")
+    }
   }
 
   @Test("A failed stream preserves its partial assistant response")
@@ -262,7 +326,7 @@ struct ResponsesProviderTests {
   /// Integration test: a `.configured` provider issues an HTTP request through the
   /// supplied transport, streams SSE text deltas as `AgentEvent` values, and
   /// produces a `TurnResult` containing the assistant message.
-  @Test("run with configured client produces expected SSE response", arguments: ["priority", "ultrafast"])
+  @Test("run with configured client produces expected SSE response", arguments: ["flex", "priority", "ultrafast"])
   func runWithConfiguredClientProducesExpectedResponse(serviceTier: String) async throws {
     let transport = ScriptedTransport(
       status: 200,
